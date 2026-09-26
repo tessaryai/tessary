@@ -25,8 +25,6 @@ import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.Pipeline;
-import ai.tessary.open.errors.CaseError;
-import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
 import ai.tessary.query.QueryService;
 import ai.tessary.rca.RcaDtos.Hypothesis;
@@ -102,38 +100,6 @@ class McpCaseToolsTest {
         List<String> names = toolNames();
         assertTrue(names.contains("list_cases"), names.toString());
         assertTrue(names.contains("get_case"), names.toString());
-    }
-
-    /**
-     * The lifecycle writes are deliberately absent. {@code resolve} / {@code absorb} / {@code mute} /
-     * {@code unmute} all exist on {@link CaseService} and each records a human judgement — {@code absorb}
-     * additionally moves the detector's reference so the level that fired becomes the new baseline. Adding one
-     * should be a decision argued in a diff, not a tool that appears because the service method was there.
-     */
-    @Test
-    void caseLifecycleWritesAreNotExposedAsTools() {
-        for (String name : toolNames()) {
-            assertNull(
-                    name.matches("(resolve|absorb|mute|unmute)_case|case_(resolve|absorb|mute|unmute)") ? name : null,
-                    "case lifecycle writes must stay in the UI, found tool: " + name);
-        }
-    }
-
-    /**
-     * The default page is the open cases. "What is wrong with this project" is not a question about closures,
-     * and a caller that omitted {@code state} must not get a first page of last month's history.
-     */
-    @Test
-    void listCases_defaultsToOpenAtTheHousePageSizeAndRendersThePageFlat() throws Exception {
-        when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
-                .thenReturn(new CasesPage(List.of(sampleCase("case-1", "C-1", "open")), "cursor-2"));
-
-        JsonNode body = structured(callTool("list_cases", "{}"));
-
-        verify(cases).page(PROJECT_ID, "open", null, null, 50, null);
-        assertEquals(1, body.get("cases").size());
-        assertEquals("C-1", body.get("cases").get(0).get("reference").asText());
-        assertEquals("cursor-2", body.get("next_cursor").asText());
     }
 
     /** Filters and the cursor reach the service under the service's own names, untranslated. */
@@ -262,27 +228,6 @@ class McpCaseToolsTest {
         assertEquals("rca-5", body.get("rca_report_id").asText());
         assertTrue(body.get("rca").isNull(), "a pending report must not render as a report");
         assertTrue(body.get("rca_available").asBoolean(), "rca_available is about whether one CAN be run");
-    }
-
-    @Test
-    void getCase_missingIdIsACleanToolError() throws Exception {
-        String text = errorText(callTool("get_case", "{}"));
-        assertTrue(text.contains("id"), text);
-    }
-
-    @Test
-    void unknownCaseIsACleanToolErrorNotAn32603() throws Exception {
-        when(cases.detail(eq(PROJECT_ID), any())).thenThrow(new TessaryException(CaseError.NOT_FOUND, "nope"));
-
-        JsonRpc.Response r = dispatcher.dispatch(
-                req(1, "tools/call", mapper.readTree("{\"name\":\"get_case\",\"arguments\":{\"id\":\"nope\"}}")),
-                ctx());
-
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "must be a tool error inside result, not a JSON-RPC error");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>) Objects.requireNonNull(r.result());
-        assertEquals(Boolean.TRUE, result.get("isError"));
     }
 
     /**

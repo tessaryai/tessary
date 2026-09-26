@@ -215,34 +215,6 @@ class TracesControllerTest {
     }
 
     @Test
-    @DisplayName("the legacy-ULID deep-link shim is retired: only a producer trace id resolves")
-    void detailResolvesOnlyAProducerTraceId() {
-        Tenant t = tenant("traces-api-shim");
-        Instant t0 = Instant.parse("2026-06-19T12:00:00Z");
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.llmSpan(t.pid(), traceId, t0);
-        rollUp(t.pid(), traceId, t0);
-
-        assertEquals(
-                traceId,
-                ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId))
-                        .trace()
-                        .id(),
-                "the producer id is the only path there is");
-
-        // A bookmark minted before the cutover carried a platform ULID and was translated through
-        // substrate_v2_id_map. The map was dropped with the rest of the backfill machinery in 0083, so the
-        // link 404s. That is the accepted end of the transition — it is what "until teardown" meant — and
-        // asserting it here keeps the retirement deliberate rather than a behaviour that quietly lapsed.
-        assertEquals(
-                HttpStatus.NOT_FOUND,
-                assertThrows(
-                                ResponseStatusException.class,
-                                () -> controller.detail(t.ctx(), t.org(), t.proj(), Ids.ulid()))
-                        .getStatusCode());
-    }
-
-    @Test
     @DisplayName("a cursor from before the cutover degrades to page one rather than stranding the reader")
     void aLegacyCursorDegradesToPageOne() {
         Tenant t = tenant("traces-api-cursor");

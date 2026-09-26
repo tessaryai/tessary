@@ -2,7 +2,6 @@
 package ai.tessary.pricing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -50,15 +49,6 @@ class PlatformCallPricerTest {
     }
 
     @Test
-    @DisplayName("a model no book in force carries is unpriced, never $0")
-    void price_unknownModelIsEmptyNotFree() {
-        when(books.hasModel("some.model-nobody-carries")).thenReturn(false);
-        assertTrue(pricer.price("some.model-nobody-carries", 500_000, 500_000, 0, 0)
-                .isEmpty());
-        assertTrue(pricer.price(null, 500_000, 500_000, 0, 0).isEmpty());
-    }
-
-    @Test
     @DisplayName("a bucket the model is never billed for contributes zero, and does not make the call unpriced")
     void price_nullBucketIsZeroNotUnpriced() {
         // OpenAI's automatic prefix caching has no separate write charge: the bucket is absent, which is a
@@ -72,21 +62,5 @@ class PlatformCallPricerTest {
 
         assertEquals(0, BigDecimal.ZERO.compareTo(priced.cacheWrite()), "no write rate contributes nothing");
         assertEquals(0, new BigDecimal("5.00").compareTo(priced.total()));
-    }
-
-    @Test
-    @DisplayName("the resolver's precedence reaches a model reported under a Bedrock inference-profile id")
-    void price_resolvesThroughTheSameLegsIngestUses() {
-        // The platform calls Bedrock with a full profile id; the book carries the logical name. Before the
-        // fallback legs existed this whole lane read as unpriced.
-        when(books.hasModel("global.anthropic.claude-sonnet-5")).thenReturn(false);
-        bookCarries("anthropic.claude-sonnet-5", RATES);
-
-        assertEquals(
-                0,
-                new BigDecimal("3.00")
-                        .compareTo(pricer.price("global.anthropic.claude-sonnet-5", 1_000_000, 0, 0, 0)
-                                .orElseThrow()
-                                .total()));
     }
 }

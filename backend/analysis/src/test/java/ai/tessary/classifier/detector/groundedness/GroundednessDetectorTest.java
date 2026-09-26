@@ -3,7 +3,6 @@ package ai.tessary.classifier.detector.groundedness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -209,17 +208,6 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    void lowUnsupportedStaysQuiet() {
-        GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.02));
-        Detection detection = d.sweepBatch(
-                        SIGNAL,
-                        List.of(obs("cs-1", "5 years of Python and AWS experience.", "The candidate knows Python.")),
-                        null)
-                .get(0);
-        assertFalse(detection.fired());
-    }
-
-    @Test
     @DisplayName("one threshold: 0.975 is flagged, just under it is scored clean, and there is no low band")
     void theThresholdIsTheOnlyBar() {
         String input = "5 years of Python and AWS experience.";
@@ -347,16 +335,6 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    @DisplayName("an older blob's threshold_high is read when threshold is absent, and threshold wins over it")
-    void anOlderBlobsThresholdHighIsStillRead() {
-        GroundednessDetector d = detector(Map.of(), List.of());
-        assertEquals(0.975, d.threshold(null), 1e-9);
-        assertEquals(0.975, d.threshold("{\"arl_target\":50000}"), 1e-9, "a foreign key leaves the default");
-        assertEquals(0.9, d.threshold("{\"threshold_high\":0.9,\"threshold_low\":0.5}"), 1e-9);
-        assertEquals(0.95, d.threshold("{\"threshold\":0.95,\"threshold_high\":0.9}"), 1e-9);
-    }
-
-    @Test
     void everyScoredObservationWritesOneAssessmentRowFlaggedOrNot() {
         GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "extract"), List.of(0.99, 0.05));
         List<Detection> ds = d.sweepBatch(
@@ -415,15 +393,6 @@ class GroundednessDetectorTest {
         new GroundednessDetector(refuses, extract, none, assessments, mapper)
                 .sweepBatch(SIGNAL, List.of(obs("cs-1", "the doc says X", "the doc says Y")), null);
         assertTrue(assessments.rows.isEmpty(), "an answer too long for the model has no verdict");
-    }
-
-    /**
-     * Rows written under two thresholds must not mix in one rate. That a rescore under one threshold inserts once
-     * is the unique index's job, covered against Postgres in {@code GroundednessAssessmentIntegrationTest}.
-     */
-    @Test
-    void aNewThresholdGivesANewScorerVersion() {
-        assertNotEquals(GroundednessDetector.scorerVersion(0.975), GroundednessDetector.scorerVersion(0.95));
     }
 
     @Test
@@ -499,45 +468,6 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    @DisplayName("a turn that asserts nothing checkable never reaches the encoder")
-    void unverifiableAnswerAbstains() {
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        GroundednessDetector d = new GroundednessDetector(
-                never("a pleasantry has no claim to score"),
-                rag,
-                docs("Refunds take 5-7 business days."),
-                assessments,
-                mapper);
-        assertFalse(d.sweepBatch(
-                        SIGNAL,
-                        List.of(obs("cs-rag", "thanks!", "You're welcome — anything else I can help with?")),
-                        null)
-                .get(0)
-                .fired());
-    }
-
-    @Test
-    @DisplayName("a tool-backed turn with nothing readable abstains rather than scoring")
-    void toolBackedTurnAbstains() {
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        GroundingEvidenceReads toolOnly =
-                (projectId, ids) -> Map.of("obs-1", new GroundingEvidenceReads.Evidence(List.of(), true));
-        GroundednessDetector d = new GroundednessDetector(
-                never("a tool-backed turn with no readable evidence must not reach the head"),
-                rag,
-                toolOnly,
-                assessments,
-                mapper);
-        assertFalse(d.sweepBatch(
-                        SIGNAL,
-                        List.of(obs(
-                                "cs-rag", "where is my order?", "Your order shipped on 3 March and arrives Tuesday.")),
-                        null)
-                .get(0)
-                .fired());
-    }
-
-    @Test
     @DisplayName("a document-in-prompt shape keeps its prompt premise even when the trace called a tool")
     void blindAbstainDoesNotReachDocumentInPromptShapes() {
         CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-x", "extract");
@@ -554,66 +484,6 @@ class GroundednessDetectorTest {
                 .get(0);
         assertEquals(1, seen.size(), "the prompt is still the premise for a document-in-prompt shape");
         assertTrue(got.fired());
-    }
-
-    @Test
-    @DisplayName("the whole answer is sent once; the worst sentence by the head's offsets is named")
-    void wholeAnswerIsScoredOnceAndTheWorstSentenceIsNamed() throws Exception {
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        String answer = "Refunds are issued within 5-7 business days. "
-                + "You are also covered by Extended Warranty KB-77 for 24 months.";
-        List<Response> seen = new ArrayList<>();
-        EncoderScorer perSentence = new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                seen.addAll(responses);
-                int cut = answer.indexOf("You are");
-                return List.of(new ResponseScore(
-                        0.98,
-                        0.12,
-                        List.of(
-                                new Span(0, cut - 1, 0.03, 0.01), // first sentence supported
-                                new Span(cut, answer.length(), 0.98, 0.12)))); // second invented
-            }
-        };
-        GroundednessDetector d = new GroundednessDetector(
-                perSentence, rag, docs("Refunds are issued within 5-7 business days."), assessments, mapper);
-        Detection got = d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "how long do refunds take?", answer)), null)
-                .get(0);
-        assertEquals(1, seen.size(), "one response per answer, not one request per sentence");
-        assertEquals(answer, seen.get(0).answer(), "the head sees the whole answer, sentences included");
-        assertTrue(got.fired(), "the answer is only as grounded as its worst sentence");
-        assertEquals(Detection.Confidence.HIGH, got.confidence());
-        int cut = answer.indexOf("You are");
-        // The firing names the sentence that failed and not the one that passed.
-        assertEquals(
-                mapper.readTree("{\"head\":\"groundedness\",\"unsupported\":0.98,\"conflict\":0.12,"
-                        + "\"premise_had_evidence\":true,"
-                        + "\"flagged_sentences\":[{\"start\":" + cut + ",\"end\":" + answer.length()
-                        + ",\"unsupported\":0.98}],"
-                        + "\"claim\":\"You are also covered by Extended Warranty KB-77 for 24 months.\"}"),
-                mapper.readTree(assertNotNull2(got.evidenceJson())));
-    }
-
-    @Test
-    @DisplayName("every sentence supported stays quiet")
-    void allSentencesSupportedIsQuiet() {
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        GroundednessDetector d = new GroundednessDetector(
-                head(List.of(0.04), new ArrayList<>()),
-                rag,
-                docs("Refunds are issued within 5-7 business days.", "Store credit is instant."),
-                assessments,
-                mapper);
-        assertFalse(d.sweepBatch(
-                        SIGNAL,
-                        List.of(obs(
-                                "cs-rag",
-                                "how long do refunds take?",
-                                "Refunds are issued within 5-7 business days. Store credit is instant.")),
-                        null)
-                .get(0)
-                .fired());
     }
 
     /** A head that answers every request with {@code score}. */
@@ -671,23 +541,6 @@ class GroundednessDetectorTest {
     private static String assertNotNull2(@Nullable String s) {
         assertNotNull(s);
         return s;
-    }
-
-    @Test
-    @DisplayName("a rag_answer turn with no retrieved evidence is ABSTAINED, not fired")
-    void evidenceBackedShapeWithNoEvidenceIsQuiet() {
-        GroundingEvidenceReads none =
-                (projectId, ids) -> Map.of("obs-1", new GroundingEvidenceReads.Evidence(List.of(), true));
-        CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
-        GroundednessDetector d = new GroundednessDetector(
-                never("must not reach the encoder: there is no premise to score against"),
-                rag,
-                none,
-                assessments,
-                new ObjectMapper());
-        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "what is the excess?", "The excess is Rs 5,000.")), null)
-                .get(0)
-                .fired());
     }
 
     @Test

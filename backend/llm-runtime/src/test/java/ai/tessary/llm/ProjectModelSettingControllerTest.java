@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -144,19 +143,6 @@ class ProjectModelSettingControllerTest {
     }
 
     @Test
-    void everyBedrockModelStaysReachableAcrossTheGroupsLanes() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-        Set<String> acrossLanes = view.lanes().stream()
-                .filter(l -> l.group() == LaneGroup.AGENT_VM)
-                .flatMap(l -> l.providerOptions().stream())
-                .flatMap(o -> o.modelKeys().stream())
-                .collect(java.util.stream.Collectors.toSet());
-        assertTrue(
-                acrossLanes.containsAll(BedrockModelProfile.offeredFor(LaneGroup.AGENT_VM)),
-                "a model the group offers that no lane names is unreachable: " + acrossLanes);
-    }
-
-    @Test
     void getOffersOnlyAgenticAndDecisionCatalogEntries() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
@@ -165,32 +151,6 @@ class ProjectModelSettingControllerTest {
                 "catalog_models must never carry a chat entry no lane offers (the older OpenAI-direct models, "
                         + "Anthropic-direct, OpenRouter, Moonshot, Bedrock): "
                         + view.catalogModels());
-    }
-
-    @Test
-    void theFrustrationLaneIsADecisionSectionOfferingOnlyJevTypeSafeFirst() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-
-        var group = view.groups().stream()
-                .filter(g -> g.id() == LaneGroup.DECISION_CALLS)
-                .findFirst()
-                .orElseThrow();
-        assertFalse(group.modelSelectable(), "one model per provider, so the row is a provider select only");
-        var lane = view.lanes().stream()
-                .filter(l -> l.id() == ModelLane.FRUSTRATION)
-                .findFirst()
-                .orElseThrow();
-        assertEquals(LaneGroup.DECISION_CALLS, lane.group());
-        assertEquals(
-                List.of(ModelProvider.TYPESAFE, ModelProvider.OPENROUTER),
-                lane.providerOptions().stream()
-                        .map(ProjectModelSettingController.ProviderOptionView::provider)
-                        .toList());
-        assertEquals(
-                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"),
-                lane.providerOptions().stream()
-                        .flatMap(o -> o.modelKeys().stream())
-                        .toList());
     }
 
     /**

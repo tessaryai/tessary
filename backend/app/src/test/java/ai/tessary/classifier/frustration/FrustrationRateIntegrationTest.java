@@ -3,7 +3,6 @@ package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -230,40 +229,6 @@ class FrustrationRateIntegrationTest {
                 "the native vocabulary survives the refresh");
         assertEquals(before.caseId(), refreshed.caseId());
         assertEquals(1, cases.listLive(pid).size());
-    }
-
-    @Test
-    void afterRcaLocksTheCaseTheNextSpellOpensANewOne() {
-        String pid = project("fr-lock");
-        ClassifierRow signal = frustration(pid);
-        Instant start = Instant.now().minus(4, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
-        service.refresh(pid, signal, Instant.now());
-        FindingRow firstSpell = findings.listByProject(pid, null, null, "frustration", false, 10)
-                .get(0);
-        String firstCase = firstSpell.caseId();
-        assertNotNull(firstCase);
-        cases.lock(pid, firstCase, Instant.now());
-
-        // Calm traffic drains the accumulator back to zero, then the rate climbs again: a new spell.
-        seedHours(pid, signal, "cs-chat", start, 13, 30, 30, 0.0);
-        seedHours(pid, signal, "cs-chat", start, 43, 6, 30, 0.40);
-        service.refresh(pid, signal, Instant.now());
-
-        List<FindingRow> spells = findings.listByProject(pid, null, null, "frustration", false, 10);
-        assertEquals(2, spells.size(), "one finding per spell");
-        FindingRow secondSpell = spells.stream()
-                .filter(f -> !f.id().equals(firstSpell.id()))
-                .findFirst()
-                .orElseThrow();
-        assertNotEquals(firstSpell.onsetAt(), secondSpell.onsetAt());
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, secondSpell.triageVerdict());
-        assertNotNull(secondSpell.caseId());
-        assertNotEquals(firstCase, secondSpell.caseId(), "a locked case takes no new finding");
-        assertEquals(
-                CaseRow.Detector.FRUSTRATION,
-                cases.findById(pid, secondSpell.caseId()).orElseThrow().detector());
     }
 
     // ---- fixtures

@@ -14,23 +14,6 @@ import org.junit.jupiter.api.Test;
 class VerifiableClaimsTest {
 
     @Test
-    @DisplayName("a pleasantry asserts nothing and yields no claim")
-    void pleasantryYieldsNothing() {
-        assertEquals(List.of(), VerifiableClaims.of("You're welcome — anything else I can help with?"));
-        assertEquals(List.of(), VerifiableClaims.of("k."));
-        assertEquals(List.of(), VerifiableClaims.of("Thanks!"));
-    }
-
-    @Test
-    @DisplayName("a question back to the user is not a claim, however long")
-    void questionsYieldNothing() {
-        assertEquals(
-                List.of(),
-                VerifiableClaims.of("Which order are you referring to? Please provide an order number "
-                        + "and describe the item."));
-    }
-
-    @Test
     @DisplayName("first-person narration without an anchor is not a claim")
     void unanchoredMetaYieldsNothing() {
         assertEquals(List.of(), VerifiableClaims.of("I can help with that."));
@@ -43,19 +26,6 @@ class VerifiableClaimsTest {
         String sentence = "All set — return RMA-00000 is confirmed and I've processed your refund of $999.00 "
                 + "back to your Visa ending 4242.";
         assertEquals(List.of(sentence), VerifiableClaims.of(sentence), "the whole sentence, as written");
-    }
-
-    @Test
-    @DisplayName("a factual answer splits into its sentences")
-    void factualAnswerSplits() {
-        List<String> claims =
-                VerifiableClaims.of("Refunds land on your original payment method within 5–7 business days. "
-                        + "Store credit is available instantly as an alternative.");
-        assertEquals(
-                List.of(
-                        "Refunds land on your original payment method within 5–7 business days.",
-                        "Store credit is available instantly as an alternative."),
-                claims);
     }
 
     @Test

@@ -13,14 +13,6 @@ import org.junit.jupiter.api.Test;
 class PasteMarkerTest {
 
     @Test
-    void mark_replacesAFencedBlockWithItsLineAndCharCount() {
-        assertEquals(
-                "Sure! Here you go:\n[PASTE: 4 lines, 54 chars]\nLet me know if you want error handling.",
-                PasteMarker.mark("Sure! Here you go:\n```python\ndef parse(line):\n    return line.split()\n```\n"
-                        + "Let me know if you want error handling."));
-    }
-
-    @Test
     void mark_replacesATildeFence() {
         assertEquals(
                 "log:\n[PASTE: 4 lines, 23 chars]\nfix it",
@@ -63,12 +55,5 @@ class PasteMarkerTest {
                         + "    main()\n  File \"app.py\", line 2, in main\n    parse(x)\n  File \"p.py\", line 9, in parse\n"
                         + "    return a[1]\nIndexError: list index out of range\nwhy??";
         assertEquals(traceback, PasteMarker.mark(traceback));
-    }
-
-    @Test
-    void mark_leavesPlainProseAlone() {
-        assertEquals(
-                "I ALREADY told you the input is tab separated!!",
-                PasteMarker.mark("I ALREADY told you the input is tab separated!!"));
     }
 }

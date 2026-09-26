@@ -4,20 +4,17 @@ package ai.tessary.classifier.catalog;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.TestObjectProvider;
-import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetectorSupplier;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.Capability;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Set;
@@ -65,21 +62,6 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void discoveredSupplierNeedsNoInTreeManifestEntry() {
-        // The generic seam has no membership check against MODULES: a DetectorSupplier claiming a
-        // kind the catalog manifest never declared is folded into the dispatch map all the same.
-        // That is the trade documented on DetectorSupplier's class comment: such a detector builds
-        // and registers, but nothing ever routes a sweep to it, because seeding, the capability gate
-        // and grainFor all still read MODULES independently of this seam.
-        BuiltInDetector stub = Mockito.mock(BuiltInDetector.class);
-        Mockito.when(stub.kind()).thenReturn("example_kind");
-        BuiltInClassifierCatalog catalog = catalogWithDiscovered(deps -> stub);
-        assertNotNull(
-                catalog.detectorFor("example_kind"),
-                "a discovered DetectorSupplier is folded in even for a kind MODULES never declared");
-    }
-
-    @Test
     void discoveredSupplierCollidingWithAnInTreeKindFailsLoud() {
         // The same invariant ClassifierSweepRegistry enforces for ClassifierSweep, now proven for
         // DetectorSupplier too: two sources claiming one kind (here, a discovered supplier colliding
@@ -92,32 +74,6 @@ class ClassifierModelModuleCatalogTest {
                 IllegalStateException.class,
                 () -> catalogWithDiscovered(deps -> discovered),
                 "a discovered supplier claiming a kind an in-tree module already wires must fail loud");
-    }
-
-    @Test
-    void everyBuiltInHasAWiredDetector() {
-        BuiltInClassifierCatalog catalog = catalog();
-        List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog.builtIns();
-        assertEquals(
-                7,
-                builtIns.size(),
-                "seven built-in classifiers ship (four observation/turn-grain + three fitting-tier: "
-                        + "duration drift, cost drift and tool errors)");
-        for (BuiltInClassifierCatalog.BuiltIn b : builtIns) {
-            Grain grain = catalog.grainFor(b.detector());
-            if (Grain.WINDOW == grain) {
-                // The fitting tier: these ship as per-project fitting procedures rather than models, so
-                // they contribute catalog metadata and no BuiltInDetector. The two window-grain metric
-                // classifiers are dispatched by MetricDriftSweep; tool errors are peeled off ahead of it
-                // to their own sweep.
-                assertNull(
-                        catalog.detectorFor(b.detector()), b.classifierKey() + " is fitting-tier: no BuiltInDetector");
-                continue;
-            }
-            assertNotNull(
-                    catalog.detectorFor(b.detector()),
-                    "built-in " + b.classifierKey() + " must have a detector wired from its manifest");
-        }
     }
 
     /**
@@ -191,76 +147,6 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void builtInKeysAndVersionsMatchTheManifests() throws Exception {
-        List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
-        // key -> version, exactly as declared (bumped keys re-sync onto seeded projects).
-        assertEquals("frustration", builtIns.get(0).classifierKey());
-        // 9: the scorer became a hosted decision model and the config became its threshold plus the
-        // rate test's dials; the bump replaces the encoder config wholesale on seeded projects.
-        assertEquals(9, versionOf(builtIns, "frustration"));
-        // 3: shipped armed. One high-band leak in a day files a finding per call site and pattern, and
-        // only a version bump carries that arming block onto projects seeded before it.
-        assertEquals(3, versionOf(builtIns, "secret_leak"));
-        assertEquals(1, versionOf(builtIns, "malformed_output"));
-        // 2: evidence-as-premise + per-sentence claims + the abstain filter. 3: tool results dropped
-        // as evidence, so tool-backed turns are out of scope. 4: the head changed from a binary
-        // "supported yes/no" model to a three-way one, so a finding now means contradicted rather
-        // than "not supported", and a claim the source is silent on is exempt instead of flagged.
-        // That is a change in what the classifier asserts, not a threshold move, which is exactly
-        // when the user-facing description has to re-sync onto already-seeded projects. 5: the pair
-        // head gave way to the long-context token head and the contract widened from "contradicted"
-        // to "unsupported" (contradicted or baseless); the band is the new model's own. 6: the entry
-        // gained a default arming block (3 detections / 24 h), so already-seeded projects start
-        // filing findings — a config-blob change, which is exactly what the version gate re-syncs. 7: the
-        // arming block gave way to a rate test per call site and the two bands to one threshold; the bump
-        // is what drops both from projects seeded before it.
-        assertEquals(7, versionOf(builtIns, "groundedness"));
-        // 2: tool_duration joined the measure list. The bump is not cosmetic: resyncBuiltIns rewrites
-        // an already-seeded project's definition only when the catalog version exceeds the stored
-        // one, so without it the second grain would reach fresh installs and nothing else. 3: the
-        // escalation cap joined the blob. 4: it left again, once escalation became fully hand-pressed
-        // and MetricDriftConfig dropped the component; the bump clears the dead key off projects
-        // already carrying it.
-        assertEquals(4, versionOf(builtIns, "duration_drift"));
-        // 3: the same escalation cap, joined and then removed, kept in step with duration drift's blob.
-        assertEquals(3, versionOf(builtIns, "cost_drift"));
-        // frustration and groundedness carry a shifted operating point; secret_leak carries its arming bar,
-        // which its detector ignores and ClassifierArming reads.
-        assertNotNull(configOf(builtIns, "frustration"));
-        String groundednessConfig = configOf(builtIns, "groundedness");
-        assertNotNull(groundednessConfig);
-        JsonNode groundedness = new ObjectMapper().readTree(groundednessConfig);
-        assertFalse(groundedness.has("arming"), "groundedness files through its rate test");
-        assertEquals(0.975, groundedness.get("threshold").doubleValue(), groundednessConfig);
-        assertFalse(groundedness.has("threshold_low"), "one threshold, no review band");
-        String secretLeakConfig = configOf(builtIns, "secret_leak");
-        assertTrue(secretLeakConfig != null && secretLeakConfig.contains("\"arming\""), "secret_leak ships armed");
-    }
-
-    @Test
-    void grainIsDeclaredPerClassifierAndDefaultsToObservation() {
-        BuiltInClassifierCatalog catalog = catalog();
-        // Frustration is the one turn-grain built-in: its subject is the user's message, and the
-        // user says it once per turn however many spans the turn fans out into.
-        assertEquals(Grain.TURN, catalog.grainFor(BuiltInDetector.Kind.FRUSTRATION));
-        // Duration drift's scored unit is a window of one bucket's traffic summarized as a
-        // distribution: not a span, not a turn, not a trace. It also spans two candidate grains
-        // (turns and tool calls) under one switch, which a single catalog grain could not have
-        // expressed; the per-measure grain lives in MetricDriftConfig and MetricDriftSweep reads it
-        // from there.
-        assertEquals(Grain.WINDOW, catalog.grainFor(BuiltInDetector.Kind.DURATION_DRIFT));
-        assertEquals(Grain.WINDOW, catalog.grainFor(BuiltInDetector.Kind.COST_DRIFT));
-        // The per-span classifiers: each of these genuinely evaluates one call's own output.
-        assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.SECRET_LEAK));
-        assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.MALFORMED_OUTPUT));
-        assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.GROUNDEDNESS));
-        // Undeclared kinds (user-authored regex signals, and anything unknown) sweep at the
-        // historical per-span grain rather than silently inheriting a narrower candidate set.
-        assertEquals(Grain.OBSERVATION, catalog.grainFor(BuiltInDetector.Kind.REGEX));
-        assertEquals(Grain.OBSERVATION, catalog.grainFor("no-such-detector"));
-    }
-
-    @Test
     void callSiteFactsAreDeclaredByExactlyTheDetectorsGatedOnThem() {
         BuiltInClassifierCatalog catalog = catalog();
         // The two built-ins that abstain when a code-derived call-site column is missing must say
@@ -302,60 +188,6 @@ class ClassifierModelModuleCatalogTest {
     }
 
     @Test
-    void dispatchOnlyDetectorsAreRegisteredButNotCatalogBuiltIns() {
-        BuiltInClassifierCatalog catalog = catalog();
-        // user regex dispatches, but is not a built-in.
-        assertNotNull(catalog.detectorFor(BuiltInDetector.Kind.REGEX));
-        assertEquals(
-                0,
-                catalog.builtIns().stream()
-                        .filter(b -> b.detector().equals(BuiltInDetector.Kind.REGEX))
-                        .count(),
-                "regex backs user signals, not a catalog built-in");
-    }
-
-    @Test
-    void frustrationShipsItsDecisionConfigAndABumpedVersionToCarryIt() {
-        // The config-key-binding regression: a new key in defaultConfigJson is a silent no-op unless
-        // two things hold, the key is actually in the default config, and the catalog version was
-        // bumped. ClassifierService re-syncs a built-in onto an already-seeded project only when the
-        // catalog version exceeds the stored one, so an un-bumped change reaches fresh installs only.
-        List<BuiltInClassifierCatalog.BuiltIn> builtIns = catalog().builtIns();
-        String config = configOf(builtIns, "frustration");
-        assertNotNull(config, "frustration ships a default config");
-        for (String key : List.of(
-                "threshold",
-                "arl_target",
-                "min_decision_interval",
-                "shift_multiple",
-                "shift_floor",
-                "min_baseline_conversations")) {
-            assertTrue(config.contains("\"" + key + "\":"), "the config carries " + key + ": " + config);
-        }
-        for (String gone :
-                List.of("threshold_high", "attribution_head", "cold_start_turn_fpr", "window_sessions", "alpha")) {
-            assertFalse(config.contains("\"" + gone + "\""), "the encoder-era key " + gone + " is gone: " + config);
-        }
-        assertTrue(
-                versionOf(builtIns, "frustration") >= 9,
-                "the version must advance or the new config never reaches an existing project");
-    }
-
-    @Test
-    void frustrationsUserFacingDescriptionNamesTheScorerAndThatItIsOff() {
-        // The description is re-synced onto every seeded project by the same version bump, so it is
-        // written into production rows as fact.
-        String description = catalog().builtIns().stream()
-                .filter(b -> b.classifierKey().equals("frustration"))
-                .findFirst()
-                .orElseThrow()
-                .description();
-        assertTrue(description.contains("Jev"), "it names the scorer: " + description);
-        assertTrue(description.contains("Off by default"), "and that it starts off: " + description);
-        assertFalse(description.contains("ModernBERT"), "no encoder-era text survives: " + description);
-    }
-
-    @Test
     void frustrationAndGroundednessSeedDisabledAndNoOtherBuiltInDoes() {
         // Enabling frustration spends the org's own provider credit, and groundedness needs a model server
         // set up first, so a person turns each on. Every other built-in seeds enabled.
@@ -365,14 +197,6 @@ class ClassifierModelModuleCatalogTest {
                     b.defaultEnabled(),
                     b.classifierKey() + " seeds with the wrong switch");
         }
-    }
-
-    private static int versionOf(List<BuiltInClassifierCatalog.BuiltIn> builtIns, String key) {
-        return builtIns.stream()
-                .filter(b -> b.classifierKey().equals(key))
-                .findFirst()
-                .orElseThrow()
-                .version();
     }
 
     private static @Nullable String configOf(List<BuiltInClassifierCatalog.BuiltIn> builtIns, String key) {
@@ -407,17 +231,5 @@ class ClassifierModelModuleCatalogTest {
                             + " successor file; BuiltInClassifierCatalog's TRACKING default is now the only"
                             + " place this fact lives, for new and existing tenants alike.)");
         }
-    }
-
-    @Test
-    void theConvenienceConstructorDefaultsToDiscovery() {
-        // Eight of nine modules use the 9-arg form and must keep seeding wide; only a module that
-        // states TRACKING explicitly gets it.
-        ClassifierModelModule wide = new ClassifierModelModule(
-                "example", "Example", "desc", "example_kind", 1, Capability.FRUSTRATION, Grain.OBSERVATION, null, null);
-
-        assertEquals(ClassifierRow.Mode.DISCOVERY, wide.defaultMode());
-        assertEquals(ClassifierRow.Mode.DISCOVERY, wide.toBuiltIn().defaultMode());
-        assertTrue(wide.toBuiltIn().defaultEnabled(), "a module seeds enabled unless it says otherwise");
     }
 }

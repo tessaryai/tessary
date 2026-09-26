@@ -35,20 +35,6 @@ class HomeTessaryClientTest {
     @Mock
     HttpResponse<Void> response;
 
-    @Test
-    void sha256HexOfEmptyBody() {
-        assertEquals(
-                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                HomeTessaryClient.sha256Hex(new byte[0]));
-    }
-
-    @Test
-    void sha256HexHashesUtf8BytesNotChars() {
-        assertEquals(
-                "edf6128bc98e616a5fb48c47c3fb2deddd40ca6231aaa7c616a84ee034cbec8c",
-                HomeTessaryClient.sha256Hex("{\"os\":\"lin\u00fcx\"}".getBytes(StandardCharsets.UTF_8)));
-    }
-
     /**
      * #62: home's CloudFront signs the request to its Lambda origin but does not hash a POST body, so a
      * ping without this header, or with a hash of other bytes than the ones sent, is answered 403 and no

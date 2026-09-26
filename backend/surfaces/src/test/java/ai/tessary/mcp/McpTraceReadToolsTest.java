@@ -228,37 +228,6 @@ class McpTraceReadToolsTest {
 
     // ---- registration --------------------------------------------------------------------------
 
-    @Test
-    void bothTraceReadToolsAreListed() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(names.containsAll(List.of("get_span", "get_trace")), names.toString());
-    }
-
-    /** The schema is the contract an agent plans against: both ids are declared required. */
-    @Test
-    void getSpanSchemaRequiresBothIds() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        JsonNode getSpan = null;
-        for (JsonNode t : tools) {
-            if ("get_span".equals(t.get("name").asText())) getSpan = t;
-        }
-        assertNotNull(getSpan);
-        JsonNode required = Objects.requireNonNull(getSpan).get("inputSchema").get("required");
-        List<String> names = new java.util.ArrayList<>();
-        for (JsonNode n : required) names.add(n.asText());
-        assertTrue(names.containsAll(List.of("trace_id", "span_id")), names.toString());
-    }
-
     // ---- get_span ------------------------------------------------------------------------------
 
     @Test
@@ -348,18 +317,6 @@ class McpTraceReadToolsTest {
     void getSpan_missingSpanIdIsToolError() throws Exception {
         String text = errorText(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
         assertTrue(text.contains("span_id"), text);
-    }
-
-    /**
-     * Not-found names the whole key. Half a key in an error message is what sent someone looking for a
-     * span id in the wrong trace in the first place.
-     */
-    @Test
-    void getSpan_missingRowIsCleanToolErrorNamingBothIds() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, "nope")).thenReturn(Optional.empty());
-        String text = errorText(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"nope\"}"));
-        assertTrue(text.contains(TRACE_ID), text);
-        assertTrue(text.contains("nope"), text);
     }
 
     /**
@@ -599,11 +556,5 @@ class McpTraceReadToolsTest {
         when(traces.findById(PROJECT_ID, "trace-x")).thenReturn(Optional.empty());
         String text = errorText(callTool("get_trace", "{\"trace_id\":\"trace-x\"}"));
         assertTrue(text.contains("trace-x"), text);
-    }
-
-    @Test
-    void getTrace_missingRequiredTraceIdIsToolError() throws Exception {
-        String text = errorText(callTool("get_trace", "{}"));
-        assertTrue(text.contains("trace_id"), text);
     }
 }

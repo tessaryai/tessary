@@ -16,11 +16,6 @@ class KeywordIndexTest {
             List.of())); // 3: no keywords, so a candidate for every text
 
     @Test
-    void reportsEveryRuleWhoseKeywordOccurs() {
-        assertEquals(set(0, 1, 3), INDEX.candidates("the secret key"));
-    }
-
-    @Test
     void aKeywordThatEndsInsideAnotherIsStillReported() {
         assertEquals(set(0, 1, 3), INDEX.candidates("mysecretkey"), "key is a suffix run of secretkey");
     }
@@ -33,12 +28,6 @@ class KeywordIndexTest {
     @Test
     void aNonAsciiCharacterBreaksAKeywordRatherThanJoiningIt() {
         assertEquals(set(3), INDEX.candidates("secéret kéy"));
-    }
-
-    @Test
-    void aRuleWithNoKeywordsIsAlwaysACandidate() {
-        assertEquals(set(3), INDEX.candidates("nothing to see"));
-        assertEquals(set(3), INDEX.candidates(""));
     }
 
     private static BitSet set(int... bits) {

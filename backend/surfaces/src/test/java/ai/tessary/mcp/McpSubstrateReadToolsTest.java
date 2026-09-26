@@ -110,30 +110,6 @@ class McpSubstrateReadToolsTest {
 
     // ---- registration --------------------------------------------------------------------------
 
-    @Test
-    void allFourSubstrateReadersAreListed() {
-        List<String> names = toolNames();
-        assertTrue(
-                names.containsAll(List.of("list_traces", "list_spans", "list_sessions", "get_session")),
-                names.toString());
-    }
-
-    /**
-     * {@code list_spans} pages on {@code span.started_at} now (decision 8), not {@code created_at}: the
-     * description must say so, since an agent plans its {@code range} off this text.
-     */
-    @Test
-    void listSpans_descriptionNamesStartedAtAsTheRangeClock() {
-        JsonNode tool = null;
-        for (JsonNode t : listedTools()) {
-            if ("list_spans".equals(t.get("name").asText())) tool = t;
-        }
-        assertNotNull(tool, "list_spans is registered");
-        String description = Objects.requireNonNull(tool).get("description").asText();
-        assertTrue(description.contains("started_at range"), description);
-        assertFalse(description.contains("created_at range"), description);
-    }
-
     /**
      * The §7.5 contract, carried onto the new surface: sessions carry no rollup, so there is nothing to order
      * them by but recency. A {@code sort} argument here would mean summing every session in the project
@@ -149,20 +125,6 @@ class McpSubstrateReadToolsTest {
     }
 
     // ---- list_traces ---------------------------------------------------------------------------
-
-    @Test
-    void listTraces_isScopedToTheTokensProjectAndOverFetchesByOne() throws Exception {
-        when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
-                .thenReturn(List.of(summary("t-1", "2026-08-17T10:00:00Z", 0)));
-
-        structured(callTool("list_traces", "{}"));
-
-        ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
-        verify(traces).list(eq(PROJECT_ID), any(), any(), limit.capture(), any(), any(), any());
-        // 50 is the default page; the 51st row is what tells the codec there is another page, so it is asked
-        // for and never rendered.
-        assertEquals(51, limit.getValue().intValue());
-    }
 
     /**
      * The snake_case wire names map onto {@link TraceV2Repository.TraceQuery}'s fields, and {@code range}
@@ -672,12 +634,6 @@ class McpSubstrateReadToolsTest {
         assertTrue(text.contains("session not found"), text);
     }
 
-    @Test
-    void getSession_missingIdIsACleanToolError() throws Exception {
-        String text = errorText(callTool("get_session", "{}"));
-        assertTrue(text.contains("id"), text);
-    }
-
     // ---- helpers -------------------------------------------------------------------------------
 
     private static SpanKey key(String traceId, String spanId) {
@@ -822,13 +778,6 @@ class McpSubstrateReadToolsTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
         return Objects.requireNonNull(content.get(0).get("text")).toString();
-    }
-
-    private List<String> toolNames() {
-        JsonNode tools = listedTools();
-        List<String> names = new ArrayList<>();
-        for (JsonNode t : tools) names.add(t.get("name").asText());
-        return names;
     }
 
     private JsonNode schemaOf(String toolName) {

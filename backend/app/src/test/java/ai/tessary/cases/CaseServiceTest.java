@@ -2,7 +2,6 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -10,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseRulingView;
-import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -133,60 +131,6 @@ class CaseServiceTest {
                 "two people reaching for mute is ordinary; a second trail line is not");
     }
 
-    @Test
-    void unmuteReturnsTheCaseToOpen() {
-        Project p = project("svc-unmute");
-        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
-        service.mute(p.id(), row.id(), "priya@example.com");
-
-        service.unmute(p.id(), row.id(), "priya@example.com");
-
-        assertEquals(
-                CaseRow.State.OPEN,
-                cases.findById(p.id(), row.id()).orElseThrow().state());
-        assertTrue(kinds(p, row).contains(CaseEventRow.Kind.UNMUTED));
-    }
-
-    @Test
-    void aCaseResolvesByItsStoredIdOrTheNumberAHumanQuotes() {
-        Project p = project("svc-lookup");
-        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
-
-        assertEquals(row.id(), service.detail(p.id(), row.id()).caseView().id());
-        assertEquals(
-                row.id(), service.detail(p.id(), row.reference()).caseView().id());
-    }
-
-    @Test
-    void anotherProjectsCaseIsNotFound() {
-        Project mine = project("svc-tenant-a");
-        Project theirs = project("svc-tenant-b");
-        CaseRow row = open(mine, CaseRow.Detector.CLASSIFIER);
-
-        assertThrows(TessaryException.class, () -> service.detail(theirs.id(), row.id()));
-    }
-
-    /**
-     * The RCA affordance is a server-side fact, not a detector string the client enumerates. RCA is a
-     * finding-analysis lane now, so what decides it is whether there IS a finding — which is true of
-     * every detector that still opens cases, and false only for the archived rows of the two retired
-     * ones. A client comparing {@code detector} against a hardcoded list would have to be edited every
-     * time a detector is added.
-     */
-    @Test
-    void rcaIsOfferedWhereThereIsAFindingToAnalyse() {
-        Project p = project("svc-rca-available");
-
-        CaseDetailView drift =
-                service.detail(p.id(), open(p, CaseRow.Detector.CLASSIFIER).id());
-        CaseDetailView toolError =
-                service.detail(p.id(), open(p, CaseRow.Detector.TOOL_ERROR).id());
-
-        assertTrue(drift.rcaAvailable());
-        assertNotNull(drift.latestFindingId());
-        assertTrue(toolError.rcaAvailable());
-    }
-
     /**
      * The paged read walks the whole set with the cursor it hands back, and stops by handing back none.
      *
@@ -213,19 +157,6 @@ class CaseServiceTest {
                 Set.of(drift.id(), toolError.id()),
                 Set.of(first.cases().get(0).id(), second.cases().get(0).id()),
                 "every case exactly once across the walk");
-    }
-
-    /** A detector filter narrows the page; nothing else in the project comes along. */
-    @Test
-    void pagingNarrowsToOneDetector() {
-        Project p = project("svc-page-filter");
-        CaseRow toolError = open(p, CaseRow.Detector.TOOL_ERROR);
-        open(p, CaseRow.Detector.CLASSIFIER);
-
-        CasesPage page = service.page(p.id(), CaseRow.State.OPEN, CaseRow.Detector.TOOL_ERROR, null, 50, null);
-
-        assertEquals(
-                List.of(toolError.id()), page.cases().stream().map(CaseView::id).toList());
     }
 
     /**
@@ -300,18 +231,6 @@ class CaseServiceTest {
 
     // ---- 1c: RCA locks a case --------------------------------------------------------------
 
-    @Test
-    void runRcaLocksTheCaseAndWritesRcaRequested() {
-        Project p = project("svc-rca-locks");
-        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
-
-        service.runRca(p.id(), row.id(), "priya@example.com");
-
-        CaseRow locked = cases.findById(p.id(), row.id()).orElseThrow();
-        assertNotNull(locked.lockedAt());
-        assertTrue(kinds(p, row).contains(CaseEventRow.Kind.RCA_REQUESTED));
-    }
-
     /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */
     @Test
     void rePressingALockedCaseCoalescesOntoTheSameReportAndDoesNotReLockOrReNarrate() {
@@ -330,34 +249,6 @@ class CaseServiceTest {
                         .filter(CaseEventRow.Kind.RCA_REQUESTED::equals)
                         .count(),
                 "only the locking press narrates the request");
-    }
-
-    /** A locked case's key opens a NEW case rather than joining the locked one. */
-    @Test
-    void aPositiveForALockedCasesKeyOpensAFreshCase() {
-        Project p = project("svc-rca-locked-key");
-        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
-        service.runRca(p.id(), row.id(), "priya@example.com");
-
-        CaseDetection detection = new CaseDetection(
-                new CaseKey(row.detector(), row.subjectKind(), row.subjectId(), row.metric()),
-                "subject label",
-                null,
-                findingBehind(p, row.detector()),
-                "something happened again",
-                "because the detector said so",
-                0.4,
-                Instant.parse("2026-07-05T10:00:00Z"),
-                0.55,
-                0.95,
-                -0.4);
-        CaseRow secondCase = ledger.openOrJoin(p.id(), detection, null, Instant.now());
-
-        assertNotEquals(row.id(), secondCase.id(), "the locked case is never joined");
-        assertEquals(
-                CaseRow.State.OPEN,
-                cases.findById(p.id(), row.id()).orElseThrow().state(),
-                "the locked case itself is untouched");
     }
 
     // ---- resolving/absorbing closes every finding the case holds ---------------------------

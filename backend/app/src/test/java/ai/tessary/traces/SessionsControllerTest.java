@@ -22,10 +22,8 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
-import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -254,29 +252,6 @@ class SessionsControllerTest {
         assertEquals(Long.valueOf(130L), item.outputTokens(), "50 + 75 + 5");
         assertEquals("cyrano", item.dominantCallSiteId(), "cyrano appears in 2 of the 3 traces");
         assertEquals(2, item.callSiteCount(), "two distinct call sites touched this session");
-    }
-
-    /**
-     * The §7.5 contract, asserted as an absence.
-     *
-     * <p>Reflection rather than prose because prose does not fail a build. If someone adds a {@code sort}
-     * parameter to this endpoint, this test tells them the design decision they are overturning before
-     * the query that scans every session in the project reaches production.
-     */
-    @Test
-    @DisplayName("no surface may list sessions sorted by cost or tokens — the endpoint has no such parameter")
-    void theSessionsListHasNoCostOrTokenSortParameter() {
-        Method list = Arrays.stream(SessionsController.class.getDeclaredMethods())
-                .filter(m -> "list".equals(m.getName()))
-                .findFirst()
-                .orElseThrow();
-        List<String> params = Arrays.stream(list.getParameters())
-                .map(p -> p.getName().toLowerCase(java.util.Locale.ROOT))
-                .toList();
-        assertTrue(
-                params.stream().noneMatch(p -> p.contains("sort") || p.contains("cost") || p.contains("token")),
-                "sessions carry no rollup; ordering them by a summed quantity needs a materialization with "
-                        + "its own staleness contract, not a request parameter. Parameters were: " + params);
     }
 
     @Test

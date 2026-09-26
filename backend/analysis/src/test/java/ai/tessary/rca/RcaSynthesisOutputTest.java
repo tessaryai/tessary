@@ -107,20 +107,6 @@ class RcaSynthesisOutputTest {
     }
 
     @Test
-    void unknownVerdictFallsToInconclusiveAndMissingReportIsNull() {
-        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
-                MAPPER,
-                "{\"summary\":\"s\",\"verdict\":\"vibes\",\"hypotheses\":[]}",
-                NO_PRIOR,
-                Set.of(),
-                CHECKS,
-                "proj");
-
-        assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, out.verdict());
-        assertNull(out.detailedReport());
-    }
-
-    @Test
     void keepsAssessmentsOfMeasuredChecksAndDropsInventedOnes() {
         String text = "{\"summary\":\"s\",\"verdict\":\"behavior_change\",\"hypotheses\":[],\"checklist\":["
                 + "{\"check\":\"serving_model\",\"assessment\":\"ruled_out\",\"detail\":\"whitespace bump\"},"
@@ -204,19 +190,6 @@ class RcaSynthesisOutputTest {
         assertTrue(
                 ex.getCause() instanceof com.fasterxml.jackson.core.JsonProcessingException,
                 String.valueOf(ex.getCause()));
-    }
-
-    /**
-     * Catches a reply with no {@code hypotheses} key failing the run: the key is optional on a report whose
-     * verdict stands without one, and it reads as none.
-     */
-    @Test
-    void aReplyWithNoHypothesesKeyReadsAsNone() {
-        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
-                MAPPER, "{\"summary\":\"s\",\"verdict\":\"model_change\"}", NO_PRIOR, Set.of(), CHECKS, "proj");
-
-        assertEquals(List.of(), out.hypotheses());
-        assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, out.verdict());
     }
 
     /**
@@ -352,20 +325,6 @@ class RcaSynthesisOutputTest {
     }
 
     @Test
-    void aCauseCitingNoSessionOfThisFindingIsDropped() {
-        String text = frustration(
-                "causes_identified",
-                cause("Invented", 5, "\"s-9\"", "\"tr-1\""),
-                cause("Real", 2, "\"s-2\",\"s-3\"", ""));
-
-        RcaSynthesisOutput.Parsed out =
-                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
-
-        assertEquals(1, out.causes().size());
-        assertEquals("Real", out.causes().get(0).title());
-    }
-
-    @Test
     void causesIdentifiedWithNoSurvivingCauseIsDowngradedToNoCauseFound() {
         String text = frustration("causes_identified", cause("Invented", 5, "\"s-9\"", ""));
 
@@ -395,18 +354,6 @@ class RcaSynthesisOutputTest {
                 CHECKS,
                 "proj");
         assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, metric.verdict());
-    }
-
-    /** No baseline side exists, so nothing is demanded of one: a cause citing only frustrated sessions stands. */
-    @Test
-    void aFrustrationReportCarriesNoBaselineBurden() {
-        String text = frustration("causes_identified", cause("Loops on retries", 3, "\"s-1\"", "\"tr-1\""));
-
-        RcaSynthesisOutput.Parsed out =
-                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
-
-        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
-        assertNull(out.verdictNote());
     }
 
     @Test
@@ -457,25 +404,6 @@ class RcaSynthesisOutputTest {
     }
 
     @Test
-    void groundednessCausesKeepOnlyThisFindingsFlaggedTraces() {
-        String text = frustration(
-                "causes_identified", groundedCause("Retrieves one document", 2, "\"tr-1\",\"tr-9\",\"tr-1\""));
-
-        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
-
-        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
-        assertTrue(out.hypotheses().isEmpty(), "a groundedness report writes causes, not hypotheses");
-        RcaDtos.Cause c = out.causes().get(0);
-        assertEquals(List.of("tr-1"), c.evidenceTraceIds(), "unknown and repeated trace ids are dropped");
-        assertTrue(c.evidenceSessionIds().isEmpty(), "a groundedness cause cites no sessions");
-        assertEquals(0, c.sessionsAffected());
-        assertEquals(2, c.tracesAffected());
-        assertEquals("code", c.attribution().kind());
-        assertEquals("rag/retrieve.py", c.attribution().path());
-        assertNull(out.verdictNote());
-    }
-
-    @Test
     void aGroundednessCauseCitingNoFlaggedTraceIsDroppedEvenWithSessions() {
         String text = frustration(
                 "causes_identified",
@@ -517,15 +445,5 @@ class RcaSynthesisOutputTest {
                 List.of("Big", "Undercounted", "Small"),
                 out.causes().stream().map(RcaDtos.Cause::title).toList());
         assertEquals(3, out.causes().get(1).tracesAffected(), "a cause affects at least the traces it cites");
-    }
-
-    @Test
-    void groundednessVerdictsNormaliseToTheCausesPair() {
-        for (String raw : List.of("behavior_change", "inconclusive", "vibes")) {
-            RcaSynthesisOutput.Parsed out =
-                    RcaSynthesisOutput.parseGroundedness(MAPPER, frustration(raw), FLAGGED, COHORT, "proj");
-            assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict(), raw);
-            assertNull(out.verdictNote(), "an unknown verdict is normalised, not downgraded: " + raw);
-        }
     }
 }

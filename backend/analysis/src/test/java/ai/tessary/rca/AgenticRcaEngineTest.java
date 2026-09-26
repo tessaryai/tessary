@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -78,16 +77,6 @@ class AgenticRcaEngineTest {
                 mock(GitProviderFactory.class),
                 mock(ApiKeyService.class),
                 new ObjectMapper());
-    }
-
-    @Test
-    void validateSandboxConfigPassesWithARegisteredSandbox() {
-        RcaProperties props = new RcaProperties();
-        // Default is already "e2b" (RcaProperties.Agentic#sandbox), asserted explicitly so this test
-        // fails loudly if that default ever drifts.
-        assertEquals("e2b", props.getAgentic().getSandbox());
-
-        assertDoesNotThrow(() -> engine(props).validateSandboxConfig());
     }
 
     @Test

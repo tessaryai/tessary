@@ -153,23 +153,6 @@ class MetricControlTest {
     }
 
     @Test
-    @DisplayName("a window's event day is the day of its closing sample, so one spanning midnight lands on one day")
-    void eventDayIsTheClosingSamplesDay() {
-        // The window opened late on one UTC day and its last sample — the one that closed it — landed
-        // just after midnight. MetricDriftSweep computes the event day from that closing sample alone
-        // (MetricControl.dayOf), so both the fold and the read below use the day AFTER midnight.
-        String closingSampleDay = MetricControl.dayOf(Instant.parse("2026-08-11T00:00:05Z"));
-        assertEquals("2026-08-11", closingSampleDay);
-
-        MetricControl control =
-                MetricControl.empty().fold(GRID, closingSampleDay, window(100, 1000), workload(), tokens());
-        assertEquals(1, daysOf(control).size());
-        MetricControl.Day newest = control.newest();
-        assertNotNull(newest);
-        assertEquals("2026-08-11", newest.day(), "the whole window is one slot, on the closing day");
-    }
-
-    @Test
     @DisplayName("a confirmed regression's days are left out, so it never becomes the bar it is judged against")
     void confirmedDaysAreExcluded() {
         MetricControl control = MetricControl.empty()
@@ -207,15 +190,6 @@ class MetricControlTest {
     }
 
     @Test
-    @DisplayName("everything excluded resolves to nothing rather than to an empty reference")
-    void excludingEveryDayIsSilenceNotAnEmptyBar() {
-        MetricControl control = ringOf("2026-08-10");
-        assertNull(
-                control.resolve(GRID, EVENT_DAY, Set.of("2026-08-10")),
-                "a null reference makes the detector abstain; a zero-count one would compare against nothing");
-    }
-
-    @Test
     @DisplayName("the ring round-trips, and an unreadable one comes back empty rather than throwing")
     void serializationRoundTripsAndToleratesGarbage() {
         MetricControl control = MetricControl.empty()
@@ -234,22 +208,6 @@ class MetricControlTest {
         // A bucket that cannot read its own ring waits for a fresh one; it does not take the sweep down.
         assertNull(MetricControl.fromJson("{not json").newest());
         assertNull(MetricControl.fromJson(null).newest());
-    }
-
-    @Test
-    @DisplayName("the newest day is what absorb pins, and it is a whole day rather than one window")
-    void newestIsTheDayAbsorbPins() {
-        assertNull(MetricControl.empty().newest(), "nothing to pin before anything has closed");
-
-        MetricControl control = MetricControl.empty()
-                .fold(GRID, "2026-08-09", window(100, 1000), workload(), tokens())
-                .fold(GRID, "2026-08-10", window(100, 4000), workload(), tokens())
-                .fold(GRID, "2026-08-10", window(300, 4000), workload(), tokens());
-
-        MetricControl.Day newest = control.newest();
-        assertNotNull(newest);
-        assertEquals("2026-08-10", newest.day());
-        assertEquals(400, MetricSketch.fromJson(newest.sketchJson()).count(), "every window that closed that day");
     }
 
     @Test

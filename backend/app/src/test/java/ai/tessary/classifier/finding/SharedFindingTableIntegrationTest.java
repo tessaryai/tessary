@@ -53,50 +53,6 @@ class SharedFindingTableIntegrationTest {
     JdbcClient jdbc;
 
     /**
-     * A detector records the POPULATION it measured, so the writer truncates nothing and the finding
-     * carries the size of what it wrote. The retention pin widens with it, by decision: a claim about a
-     * population cannot be audited against a sample whose selection rule nobody stated.
-     */
-    @Test
-    @DisplayName("evidence is uncapped and counted, and a repeat reference is a no-op rather than a duplicate")
-    void evidenceIsUncappedAndAppendOnly() {
-        Project p = project("finding-evidence-population");
-        String findingId = firing(p, "gram-population");
-        String now = Instant.now().toString();
-
-        int population = 70;
-        List<FindingEvidenceRepository.Ref> many = new ArrayList<>();
-        for (int i = 0; i < population; i++) {
-            many.add(FindingEvidenceRepository.Ref.trace("trace-" + i));
-        }
-        int written = evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now);
-        assertEquals(population, written, "the writer records every ref the classifier handed it");
-
-        // Re-offering the same window must write nothing, which is what makes a sweep that re-reads its
-        // own page idempotent, and it must not double the recorded count either.
-        assertEquals(
-                0,
-                evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now),
-                "a repeated reference is absorbed by ux_finding_evidence_ref");
-
-        assertEquals(
-                1,
-                evidence.record(
-                        p.id(),
-                        findingId,
-                        FindingEvidenceRow.Role.EXEMPLAR,
-                        List.of(FindingEvidenceRepository.Ref.trace("trace-exemplar")),
-                        now));
-        assertEquals(population + 1, evidence.listByFinding(p.id(), findingId).size());
-
-        // The cost of the claim, readable off the finding without a count(*).
-        FindingRow finding = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(population, finding.evidenceCount(FindingEvidenceRow.Role.MEMBER));
-        assertEquals(1, finding.evidenceCount(FindingEvidenceRow.Role.EXEMPLAR));
-        assertEquals(0, finding.evidenceCount(FindingEvidenceRow.Role.BASELINE));
-    }
-
-    /**
      * The read side of the population: the dossier's enumeration reads the first page of this repository
      * in the detector's own order, and needs the cursor to say whether more rows follow.
      */

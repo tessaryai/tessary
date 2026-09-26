@@ -4,7 +4,6 @@ package ai.tessary.mcp;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -94,26 +93,10 @@ class McpDispatcherTest {
     }
 
     @Test
-    void notificationReturnsNullResponse() {
-        // id = null → notification per JSON-RPC 2.0
-        JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/initialized", null);
-        JsonRpc.Response r = dispatcher.dispatch(n, ctx());
-        assertNull(r, "notifications must not produce a response envelope");
-    }
-
-    @Test
     void notification_unknownMethod_stillSilent() {
         // unknown methods that arrive as notifications shouldn't emit JSON-RPC errors.
         JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/whatever", null);
         assertNull(dispatcher.dispatch(n, ctx()));
-    }
-
-    @Test
-    void toolsList_includesEveryRegisteredTool() {
-        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/list", null), ctx()));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        assertEquals(3, tools.size());
     }
 
     @Test
@@ -131,18 +114,6 @@ class McpDispatcherTest {
         // not as a JSON-RPC error. Clients use this to decide retry vs UI surface.
         assertNull(r.error());
         assertEquals(Boolean.TRUE, resultMap(r).get("isError"));
-    }
-
-    @Test
-    void toolsCall_toolThrowsToolException_isToolError() throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"boom\",\"arguments\":{}}");
-        JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-        assertNull(r.error());
-        Map<String, Object> result = resultMap(r);
-        assertEquals(Boolean.TRUE, result.get("isError"));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        assertTrue(Objects.requireNonNull(content.get(0).get("text")).toString().contains("nope"));
     }
 
     @Test

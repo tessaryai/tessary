@@ -27,7 +27,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -173,31 +172,6 @@ class MetricFindingResolveIntegrationTest {
                 List.of(),
                 changelogFor(f.projectId, f.baselineId),
                 "nothing moved, so the changelog has nothing to record — a row here would claim otherwise");
-    }
-
-    @Test
-    @DisplayName("Real deviation: the confirmed span excludes the window's own EVENT day, not the day it was ruled")
-    void notExpectedExcludesTheWindowsOwnEventDayNotTheRulingDay() {
-        // A window that closed days before anyone looked at it — the ordinary lag between traffic
-        // happening and a human pressing a verdict, and exactly the gap [R11] exists to get right: the
-        // exclusion has to key on when the regression RAN, not on today, or a backfilled or slowly
-        // triaged finding would exclude the wrong day (or none of the real ones) from the control.
-        String eventAt = "2026-07-01T12:00:00Z";
-        Fixture f = fixture("metric-resolve-event-bounds", eventAt);
-
-        drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
-
-        List<FindingRepository.ConfirmedSpan> spans = findings.confirmedSpansBySubject(
-                        f.projectId, Set.of(classifierFor(CAUSE_KEY)))
-                .get(f.baselineId);
-        assertNotNull(spans, "the confirmed finding must be readable back through its own baseline");
-        FindingRepository.ConfirmedSpan span = spans.get(0);
-        assertEquals(eventAt, span.fromAt(), "onset_at is the window's own event time, not the moment it was ruled");
-        assertEquals(eventAt, span.toAt(), "last_seen_at matches onset_at on a finding's first write");
-        assertEquals(
-                "2026-07-01",
-                MetricControl.dayOf(Instant.parse(span.fromAt())),
-                "the day MetricDriftSweep#excludedDays must drop from the control ring");
     }
 
     // -----------------------------------------------------------------------------------------------

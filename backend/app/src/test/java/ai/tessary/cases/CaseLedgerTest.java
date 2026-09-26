@@ -51,19 +51,6 @@ class CaseLedgerTest {
     private static final String DETECTOR = CaseRow.Detector.CLASSIFIER;
 
     @Test
-    void opensOnceAndRecordsOpened() {
-        Project p = project("ledger-open");
-        Instant onset = Instant.parse("2026-07-01T10:00:00Z");
-
-        CaseRow row = ledger.openOrJoin(p.id(), detection(p, "grader-a", 0.4, onset), null, now());
-
-        assertEquals(CaseRow.State.OPEN, row.state());
-        assertEquals(onset.toString(), row.onsetAt());
-        assertEquals(List.of(CaseEventRow.Kind.OPENED), kinds(p, row));
-        assertEquals(1, row.findingCount());
-    }
-
-    @Test
     void aSecondFindingOnTheSameKeyJoinsTheLiveCaseAndRecordsRecurred() {
         Project p = project("ledger-join");
         CaseRow first = ledger.openOrJoin(

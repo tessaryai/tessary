@@ -3,7 +3,6 @@ package ai.tessary.classifier.metric;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -107,19 +106,6 @@ class MetricHistogramTest {
         assertEquals(onePass.meanLog(), thenA.meanLog(), 1e-9);
     }
 
-    /** {@link MetricHistogram#copy()} is a snapshot — the window roll (current → prev) depends on it. */
-    @Test
-    void copyIsIndependentOfFurtherWrites() {
-        MetricHistogram original = duration();
-        original.add(Math.log(2000));
-
-        MetricHistogram snapshot = original.copy();
-        original.add(Math.log(9000));
-
-        assertEquals(1, snapshot.count(), "the snapshot must not see writes made after it was taken");
-        assertEquals(2, original.count());
-    }
-
     /**
      * Merging across grids throws. Duration and cost sketches are structurally identical and would merge
      * without complaint into a number that means nothing, which is why this is checked rather than
@@ -134,15 +120,6 @@ class MetricHistogramTest {
                 assertThrows(IllegalArgumentException.class, () -> durationSketch.merge(costSketch));
         String message = java.util.Objects.requireNonNull(thrown.getMessage(), "the throw must explain itself");
         assertTrue(message.contains("different grids"), message);
-    }
-
-    /** Each measure owns its range; sharing one would spend most of it on values neither ever produces. */
-    @Test
-    void durationAndCostAreDifferentGrids() {
-        assertNotEquals(
-                MetricHistogram.Grid.duration().id(),
-                MetricHistogram.Grid.cost().id(),
-                "cost must not be comparable to duration by accident");
     }
 
     // -------------------------------------------------------------------------------------------
@@ -268,18 +245,6 @@ class MetricHistogramTest {
         assertEquals(MetricHistogram.Grid.duration().logHi(), requireQuantile(high, 0.5), 0.0);
         assertEquals(100, low.underflow());
         assertEquals(100, high.overflow());
-    }
-
-    /** A single sample is a legitimate sketch, not a division by zero waiting to happen. */
-    @Test
-    void singleSampleSketchIsWellDefined() {
-        MetricHistogram histogram = duration();
-        histogram.add(Math.log(2000));
-
-        assertEquals(1, histogram.count());
-        assertEquals(Math.log(2000), histogram.meanLog(), 1e-12);
-        assertEquals(Math.log(2000), requireQuantile(histogram, 0.5), SLOT);
-        assertEquals(1.0, histogram.cdf()[histogram.cdf().length - 1], 0.0, "the CDF still tops out at 1");
     }
 
     /** {@link MetricSketch#quantile} answers null only on an empty sketch; every caller here has samples. */

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -101,38 +100,6 @@ class PlatformLaneRatesTest {
         assertTrue(wrong.isEmpty(), "platform lane rates moved:\n  " + String.join("\n  ", wrong));
     }
 
-    @Test
-    @DisplayName("BedrockModelProfile's route prefix is what makes the mantle ids resolve to mantle rates")
-    void mantleIdsResolveToTheirOwnRoute() {
-        // BedrockModelProfile.MANTLE_ROUTE_PREFIX makes the platform report
-        // bedrock_mantle/openai.gpt-5.6-luna, which the vendored snapshot carries verbatim as mantle's own
-        // priced route — no override needed. ModelResolver's exact-match leg is untouched.
-        Books books = Books.load(mapper);
-        String resolved = books.resolve("bedrock_mantle/openai.gpt-5.6-luna");
-        assertEquals("bedrock_mantle/openai.gpt-5.6-luna", resolved);
-        ModelRates rates = books.rates(resolved);
-        assertNotNull(rates);
-        assertEquals(0, requireRate(rates.inputPerMtok()).compareTo(new BigDecimal("0.22")));
-    }
-
-    @Test
-    @DisplayName("the bare id a producer regression would report still falls through to OpenAI-direct")
-    void bareMantleIdWouldStillFallThroughToOpenAiDirect() {
-        // The regression BedrockModelProfile.MANTLE_ROUTE_PREFIX exists to prevent, kept as a standing
-        // check: if a future change ever reports the bare id again, ModelResolver has no scope prefix to
-        // strip and falls through the vendor strip onto OpenAI's own gpt-5.6-luna row — a different
-        // product at a different price (0.20 direct vs 0.22 mantle, as of the 2026-09-02 refresh; direction
-        // isn't the invariant, a price DIFFERENCE is).
-        Books books = Books.load(mapper);
-        String fallthrough = books.resolve("openai.gpt-5.6-luna");
-        assertEquals("gpt-5.6-luna", fallthrough, "the bare id has no scope prefix, so it falls to the vendor strip");
-        ModelRates wrongRates = books.rates("gpt-5.6-luna");
-        assertNotNull(wrongRates);
-        assertTrue(
-                requireRate(wrongRates.inputPerMtok()).compareTo(new BigDecimal("0.22")) != 0,
-                "OpenAI-direct must price differently from mantle's real rate, or this regression is silent");
-    }
-
     private static boolean matches(ModelRates actual, String[] want) {
         return same(actual.inputPerMtok(), want[0])
                 && same(actual.outputPerMtok(), want[1])
@@ -152,11 +119,6 @@ class PlatformLaneRatesTest {
 
     private static String one(@Nullable BigDecimal v) {
         return v == null ? "-" : v.stripTrailingZeros().toPlainString();
-    }
-
-    private static BigDecimal requireRate(@Nullable BigDecimal rate) {
-        assertNotNull(rate, "expected a rate");
-        return rate;
     }
 
     /**

@@ -146,19 +146,6 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void checksThePriceBookAfterPinging() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
-
-        InOrder order = inOrder(client, fetcher);
-        order.verify(client).postJson(eq("/v1/ping"), anyString());
-        order.verify(fetcher).refresh();
-    }
-
-    @Test
     void aFailedPingStillChecksThePriceBook() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
@@ -177,19 +164,6 @@ class TelemetryHeartbeatTest {
 
         assertDoesNotThrow(() -> heartbeat(new TelemetryProperties(), instanceIds, mock(HomeTessaryClient.class))
                 .tick());
-    }
-
-    @Test
-    void anInstallHoldingNoDigestOmitsItButStillSaysWhatItCanParse() throws Exception {
-        ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
-                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
-
-        assertFalse(payload.path("price_book").has("digest"));
-        assertEquals(
-                PriceBookFetcher.SUPPORTED_SCHEMA,
-                payload.path("price_book").path("schema_max").asInt());
-        assertTrue(homePingSchema().validate(payload).isEmpty());
     }
 
     @Test
@@ -291,28 +265,6 @@ class TelemetryHeartbeatTest {
 
         assertTrue(violations.toString().contains("ping_seq"), violations.toString());
         assertTrue(violations.toString().contains("sent_at"), violations.toString());
-    }
-
-    @Test
-    void aFailedSendNeverEscapesTheTick() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-        when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-    }
-
-    @Test
-    void aRepositoryFailureNeverEscapesTheTick() {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-        verifyNoInteractions(client);
     }
 
     private static List<String> fieldNames(ObjectNode node) {

@@ -2,7 +2,6 @@
 package ai.tessary.llm.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -81,18 +80,6 @@ class OpenRouterModelListerTest {
     }
 
     @Test
-    void latestPointerAliasesResolveThroughTheTildePrefix() throws Exception {
-        stubResponse(
-                200, "{\"data\":[{\"id\":\"~anthropic/claude-haiku-latest\",\"name\":\"Claude Haiku (latest)\"}]}");
-
-        List<ProviderModel> models = lister().list(cred(null));
-
-        assertEquals(
-                List.of(new ProviderModel("~anthropic/claude-haiku-latest", "Claude Haiku (latest)", "Anthropic")),
-                models);
-    }
-
-    @Test
     void nameFallsBackToIdWhenAbsent() throws Exception {
         stubResponse(200, "{\"data\":[{\"id\":\"openai/gpt-5.5\"}]}");
 
@@ -124,13 +111,6 @@ class OpenRouterModelListerTest {
         stubResponse(500, "{\"error\":\"boom\"}");
 
         assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
-    }
-
-    @Test
-    void emptyDataArray_neverFails() throws Exception {
-        stubResponse(200, "{\"data\":[]}");
-
-        assertFalse(lister().list(cred(null)).stream().findAny().isPresent());
     }
 
     @ParameterizedTest

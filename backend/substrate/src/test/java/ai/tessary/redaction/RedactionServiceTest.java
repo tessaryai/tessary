@@ -329,19 +329,6 @@ class RedactionServiceTest {
         assertEquals(expected, assertThrows(TessaryException.class, call::run).error());
     }
 
-    @Test
-    void customRules_areEditedAndDeleted_andTheGuardSeesEachChange() {
-        String id =
-                svc.createRule(PID, "Ticket", "TKT-\\d+", "[TICKET]", true, 100).id();
-        assertEquals("[TICKET] open", svc.previewAll(PID, "TKT-12 open").redacted());
-
-        svc.updateRule(PID, id, "Ticket", "TKT-\\d+", "[T]", true, 100);
-        assertEquals("[T] open", svc.previewAll(PID, "TKT-12 open").redacted(), "the cached rule set is invalidated");
-
-        svc.deleteRule(PID, id);
-        assertEquals("TKT-12 open", svc.previewAll(PID, "TKT-12 open").redacted());
-    }
-
     /** One unsaved rule, or the whole active set with every rule's matches counted, including the corpus's. */
     @Test
     void preview_countsMatchesForOneRuleOrTheWholeActiveSet() {

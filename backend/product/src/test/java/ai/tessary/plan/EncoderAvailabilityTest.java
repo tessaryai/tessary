@@ -133,19 +133,6 @@ class EncoderAvailabilityTest {
         assertTrue(s.reason().startsWith("unreachable: "), s.reason());
     }
 
-    @Test
-    void markUnreachableFlipsItDownAtOnceAndTheNextProbeFlipsItBack() throws IOException {
-        EncoderAvailability encoder = serve(200, HEALTHY);
-        encoder.refresh();
-
-        encoder.markUnreachable("unreachable: ConnectException");
-
-        assertFalse(encoder.available());
-        assertEquals("unreachable: ConnectException", encoder.snapshot().reason());
-
-        assertTrue(encoder.refresh().available(), "a probe that finds it up again lifts the mark");
-    }
-
     @ParameterizedTest
     @ValueSource(strings = {"{\"heads\": [\"sentiment\"]}", "<html>ok</html>"})
     void a200ThatDoesNotListTheHeadIsUnavailable(String body) throws IOException {

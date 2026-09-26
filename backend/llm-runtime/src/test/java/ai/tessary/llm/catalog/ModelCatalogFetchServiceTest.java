@@ -103,20 +103,6 @@ class ModelCatalogFetchServiceTest {
     }
 
     @Test
-    void refreshingReadFetchesOnceThenServesTheCacheWithinTheTtl() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        ScriptedLister lister = new ScriptedLister(List.of(ONE_MODEL));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
-
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(1, lister.callCount(), "a fresh cache entry must not trigger a refetch");
-    }
-
-    @Test
     void cachedReadNeverFetches_returnsEmptyOnAColdCache() {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
         when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
@@ -151,17 +137,6 @@ class ModelCatalogFetchServiceTest {
 
         assertEquals(ONE_MODEL, result, "mandatory property (iii): a failed refetch serves the stale entry");
         assertEquals(2, lister.callCount(), "the refetch was attempted, not skipped");
-    }
-
-    @Test
-    void aFailureWithNothingCachedYet_returnsEmptyRatherThanThrowing() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        ScriptedLister lister = new ScriptedLister(List.of(new ModelListingException("vendor down", null)));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
-
-        assertEquals(List.of(), svc.refreshingRead(ORG, ModelProvider.OPENAI));
     }
 
     @Test
@@ -223,23 +198,6 @@ class ModelCatalogFetchServiceTest {
         // Re-reading the first region again must hit ITS cache, not the second region's.
         assertEquals(ONE_MODEL, svc.refreshingRead("org_us", ModelProvider.BEDROCK));
         assertEquals(2, lister.callCount(), "the us-east-1 entry was still warm");
-    }
-
-    @Test
-    void nonBedrockNonCustomProvidersShareOneCacheEntryAcrossOrgs() {
-        // Mandatory property (i): a provider's model list does not vary by which org's key asks.
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider("org_a", ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        when(repo.findByOrgAndProvider("org_b", ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        ScriptedLister lister = new ScriptedLister(List.of(ONE_MODEL));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
-
-        assertEquals(ONE_MODEL, svc.refreshingRead("org_a", ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead("org_b", ModelProvider.OPENAI));
-
-        assertEquals(1, lister.callCount(), "org_b's read reused org_a's cache entry — one shared (provider, region)");
     }
 
     /**

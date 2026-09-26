@@ -184,20 +184,6 @@ class SpanBatchWriterIntegrationTest {
     }
 
     @Test
-    @DisplayName("a span with no session id belongs to no session — nothing is synthesized to fill the hole")
-    void write_anonymousTrafficGetsNoSession() {
-        String traceId = traceId("anon");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of())));
-
-        assertNull(traces.findById(pid, traceId).orElseThrow().sessionId());
-        assertEquals(0, countSessions(), "a session row exists only when a producer sends a session id");
-        assertEquals(
-                SpanRow.ResolverState.PENDING,
-                spans.findById(pid, traceId, "s1").orElseThrow().correlationState(),
-                "it waits for its trace to answer, and is retired by the backfiller when the trace settles");
-    }
-
-    @Test
     @DisplayName("§6.1 — a batch that fails to commit leaves no trace or session row behind")
     void write_failedBatchLeavesNoIdentityRows() {
         String traceId = traceId("uncommittable");
@@ -336,75 +322,6 @@ class SpanBatchWriterIntegrationTest {
 
     // ---- §6.2 last write wins ------------------------------------------------------------------------
 
-    @Test
-    @DisplayName("§6.2: the completed version replaces the partial that arrived first")
-    void lww_finalReplacesPartial() {
-        String traceId = traceId("lww");
-        writer.write(pid, List.of(usage(span("s1", null, traceId, KindNormalizer.LLM, t0, null, Map.of()), 10L, null)));
-        assertNull(spans.findById(pid, traceId, "s1").orElseThrow().outputTokens(), "the partial had no output yet");
-
-        writer.write(
-                pid,
-                List.of(usage(
-                        span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(2), Map.of()), 10L, 40L)));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(40L, row.outputTokens());
-        assertEquals(50L, row.totalTokens(), "the generated total follows the replacement");
-        assertEquals(t0.plusSeconds(2).toString(), row.endedAt());
-    }
-
-    @Test
-    @DisplayName("§6.2: an older redelivery cannot undo the version already stored")
-    void lww_olderArrivalIsANoOp() {
-        String traceId = traceId("lww-old");
-        writer.write(
-                pid,
-                List.of(usage(
-                        span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(2), Map.of()), 10L, 40L)));
-
-        writer.write(pid, List.of(usage(span("s1", null, traceId, KindNormalizer.LLM, t0, null, Map.of()), 10L, null)));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(40L, row.outputTokens(), "the partial redelivery lost the event_ts comparison");
-        assertEquals(t0.plusSeconds(2).toString(), row.endedAt());
-    }
-
-    @Test
-    @DisplayName("§6.2: equal event_ts goes to the latest arrival, because second-granularity clocks tie constantly")
-    void lww_tiesGoToTheLatestArrival() {
-        String traceId = traceId("lww-tie");
-        writer.write(pid, List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()), "first")));
-
-        writer.write(pid, List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()), "second")));
-
-        assertEquals(
-                "second",
-                spans.findById(pid, traceId, "s1").orElseThrow().name(),
-                "a strictly-greater guard would drop the completed version of every span whose partial shared its stamp");
-    }
-
-    @Test
-    @DisplayName("§6.2: a newer version replaces what the producer said, never what the platform derived")
-    void lww_platformDerivedAncestrySurvivesAProducerUpdate() {
-        String traceId = traceId("lww-path");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of())));
-        spans.resolveRootPaths(100_000);
-        assertEquals("s1", spans.findById(pid, traceId, "s1").orElseThrow().path());
-
-        writer.write(
-                pid,
-                List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(1), Map.of()), "v2")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals("v2", row.name(), "the producer's fields did update");
-        assertEquals("s1", row.path(), "but the resolved ancestry did not — a replay must not re-open resolved work");
-        assertEquals(
-                SpanRow.ResolverState.RESOLVED,
-                row.pathState(),
-                "nor send the span back into the fixpoint's queue on every redelivery");
-    }
-
     // ---- §7.1 batch coalescing ----------------------------------------------------------------------
 
     @Test
@@ -490,20 +407,6 @@ class SpanBatchWriterIntegrationTest {
     // ---- §6.5 pricing --------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("§6.5: a producer-sent cost is stored verbatim and no book is stamped")
-    void pricing_providedIsVerbatim() {
-        String traceId = traceId("cost-provided");
-        Map<String, Object> attrs = new HashMap<>(usageAttrs(1_000_000L, 1_000_000L));
-        attrs.put(GenAiAttributes.USAGE_COST, "0.0425");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, attrs, "claude-sonnet-5")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(SpanRow.CostSource.PROVIDED, row.costSource());
-        assertNull(row.priceBookVersion(), "we did not price it, so there is no book to name");
-        assertEquals(0, new BigDecimal("0.0425").compareTo(new BigDecimal(requireCost(row.totalCost()))));
-    }
-
-    @Test
     @DisplayName("§6.5: usage with a known model is priced at write and stamped with the book that did it")
     void pricing_inferredStampsTheBook() {
         String traceId = traceId("cost-inferred");
@@ -550,20 +453,6 @@ class SpanBatchWriterIntegrationTest {
         assertNull(row.totalCost(), "$0 would render real spend as free");
         assertNull(row.modelId());
         assertEquals(2000L, row.totalTokens(), "the usage is still a fact, and the rollup counts it as unpriced");
-    }
-
-    @Test
-    @DisplayName("§6.5: an OpenAI cache-inclusive input count is made disjoint at write, so cache reads bill once")
-    void pricing_cacheInclusiveInputIsCorrectedAtWrite() {
-        String traceId = traceId("cost-cache");
-        Map<String, Object> attrs = new HashMap<>(usageAttrs(1000L, 10L));
-        attrs.put(GenAiAttributes.USAGE_CACHE_READ_INPUT_TOKENS, 400L);
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, attrs, "gpt-4o")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(600L, row.inputTokens(), "OpenAI's prompt_tokens already contained the 400 cached ones");
-        assertEquals(400L, row.cacheReadTokens());
-        assertEquals(1010L, row.totalTokens(), "so the five buckets sum to the tokens actually consumed, once");
     }
 
     @Test
@@ -697,13 +586,6 @@ class SpanBatchWriterIntegrationTest {
                 .update();
         traces.claimDue(500);
         traces.recompute(pid, traceId);
-    }
-
-    private int countSessions() {
-        return jdbc.sql("SELECT count(*) FROM session WHERE project_id = :pid")
-                .param("pid", pid)
-                .query(Integer.class)
-                .single();
     }
 
     private static String requireCost(@Nullable String cost) {

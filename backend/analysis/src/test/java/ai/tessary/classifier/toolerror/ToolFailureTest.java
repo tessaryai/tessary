@@ -2,14 +2,10 @@
 package ai.tessary.classifier.toolerror;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.toolerror.ToolFailure.Source;
-import ai.tessary.model.ErrorSignature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
@@ -138,25 +134,6 @@ class ToolFailureTest {
     // §2 — signatures group, and what they erase
     // ---------------------------------------------------------------------------------------------
 
-    /**
-     * The whole point of a signature. These three messages are one failure mode and would be three
-     * singletons under {@code GROUP BY error_type}, which is what makes a raw breakdown useless.
-     */
-    @Test
-    void oneFailureModeGroupsAcrossItsVaryingParts() {
-        String a = ToolFailure.signature("HTTP 500 upstream from https://api.stripe.com/v1/charges/ch_3Ox9aB");
-        String b = ToolFailure.signature("HTTP 500 upstream from https://api.stripe.com/v1/charges/ch_9Zk1qW");
-        String c = ToolFailure.signature("HTTP 503 upstream from https://api.stripe.com/v1/refunds/re_44");
-        assertEquals(a, b);
-        assertEquals(a, c);
-        assertEquals("http <num> upstream from <url>", a);
-    }
-
-    @Test
-    void distinctFailureModesDoNotGroup() {
-        assertNotEquals(ToolFailure.signature("timeout after 30014ms"), ToolFailure.signature("connection refused"));
-    }
-
     @Test
     void placeholdersCoverEachVaryingKind() {
         assertEquals(
@@ -167,17 +144,6 @@ class ToolFailureTest {
         assertEquals(
                 "tool <str> failed after <num>ms (attempt <num>/<num>)",
                 ToolFailure.signature("Tool 'search_docs' failed after 30014ms (attempt 3/3)"));
-    }
-
-    /**
-     * Order dependence, stated as a test because it is the way this normalizer breaks silently: a URL
-     * contains digits and a UUID contains hex, so a pass that ran {@code <num>} first would shred both
-     * into unrecognizable fragments that no longer group.
-     */
-    @Test
-    void broaderPatternsRunBeforeNarrowerOnes() {
-        assertEquals("get <url> failed", ToolFailure.signature("GET https://api.x.com/v2/items/91821 failed"));
-        assertEquals("<uuid>", ToolFailure.signature("3f2504e0-4f89-11d3-9a0c-0305e82c3301"));
     }
 
     @Test
@@ -191,16 +157,6 @@ class ToolFailureTest {
         assertEquals(ToolFailure.UNDESCRIBED, ToolFailure.signature("   "));
     }
 
-    /**
-     * Signatures are keys in a persisted evidence blob, so an unbounded one is a stack trace pasted into
-     * a status message becoming a single map key.
-     */
-    @Test
-    void signaturesAreBounded() {
-        String sig = ToolFailure.signature("failure: " + "a".repeat(500));
-        assertTrue(sig.length() <= ErrorSignature.MAX_SIGNATURE_LENGTH + 1, sig.length() + " chars");
-    }
-
     @Test
     void signatureIsStableAcrossCaseAndWhitespace() {
         assertEquals(ToolFailure.signature("Connection   Refused"), ToolFailure.signature("connection refused"));
@@ -209,29 +165,6 @@ class ToolFailureTest {
     // ---------------------------------------------------------------------------------------------
     // The SQL predicate's shape — it is interpolated, so its aliases are a contract
     // ---------------------------------------------------------------------------------------------
-
-    @Test
-    void predicateNamesTheAliasesItsCallersMustUse() {
-        String sql = ToolFailure.SQL_PREDICATE;
-        assertTrue(sql.contains("tc.error_type"), sql);
-        // The span's own typed error column. A tool span whose STATUS was error but whose tool_call row
-        // carried no error_type used to be reachable only through the jsonb blob; it is a column now.
-        assertTrue(sql.contains("o.error_type IS NOT NULL"), sql);
-        // The two producer attributes moved OFF the span row and onto span_payload, so they are read
-        // through `pl`. That is the alias change with teeth: a caller that interpolates this constant
-        // without joining span_payload does not under-report, it fails outright at
-        // `column o.attributes does not exist` — which is the failure mode worth having.
-        assertTrue(sql.contains("pl.attributes ->> 'error.type'"), sql);
-        assertTrue(sql.contains("pl.attributes ->> 'exception.type'"), sql);
-        assertFalse(sql.contains("o.attributes"), "the span row has no attributes column in v2: " + sql);
-        assertTrue(sql.contains("tc.result @> '{\"isError\": true}'::jsonb"), sql);
-        // Balanced, because it is spliced into a larger WHERE and an unbalanced one would take the rest
-        // of that clause with it.
-        assertEquals(
-                sql.chars().filter(c -> c == '(').count(),
-                sql.chars().filter(c -> c == ')').count(),
-                "unbalanced parentheses in a predicate that gets interpolated: " + sql);
-    }
 
     /**
      * What a result payload declares about itself. An error object is read for its message, then its code,

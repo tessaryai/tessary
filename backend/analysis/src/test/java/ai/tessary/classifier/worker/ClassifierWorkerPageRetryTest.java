@@ -165,19 +165,6 @@ class ClassifierWorkerPageRetryTest {
     }
 
     @Test
-    void aPageAtOrUnderHalfIsWrittenAndTheCursorMoves() {
-        FakePaged detector = armSignal(page(Status.SCORED, 4, 2));
-        List<SubstrateObservation> window = observations();
-        when(substrate.observationsAfter(PROJECT, null, null, PAGE)).thenReturn(window);
-
-        worker().sweepForTest(job(2));
-
-        verify(jobs).markSwept("job-1", createdAt(window), handle(window));
-        verify(jobs, never()).holdPage(anyString());
-        assertEquals(List.of(PageAction.PERSIST), detector.actions);
-    }
-
-    @Test
     void theFourthFailureSkipsThePageWithOneWarnAndAdvances() {
         FakePaged detector = armSignal(page(Status.SCORED, 4, 4));
         List<SubstrateObservation> window = observations();

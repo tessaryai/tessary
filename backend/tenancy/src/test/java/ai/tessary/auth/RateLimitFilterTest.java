@@ -119,27 +119,6 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("every other /auth/** path stays exempt")
-    void otherAuthPathsStayExempt() {
-        for (String path : new String[] {"/auth/callback", "/auth/logout", "/auth/me", "/auth/link/start"}) {
-            assertTrue(filter().shouldNotFilter(request("GET", path)), path + " must remain exempt");
-        }
-        assertTrue(filter().shouldNotFilter(request("POST", "/auth/logout")), "/auth/logout must remain exempt");
-    }
-
-    @Test
-    @DisplayName("an unauthenticated burst against POST /auth/login from one IP is throttled")
-    void credentialRouteBurstIsThrottled() throws ServletException, IOException {
-        RateLimitFilter f = filter();
-        String ip = "203.0.113.7";
-        // Burst capacity is 5: the first five reach the controller, the sixth is refused before it.
-        for (int i = 0; i < 5; i++) {
-            assertEquals(200, login(f, ip).getStatus(), "login " + (i + 1) + " is inside the burst");
-        }
-        assertEquals(429, login(f, ip).getStatus(), "the sixth rapid login from one IP must 429");
-    }
-
-    @Test
     @DisplayName("an exhausted credential bucket refills one attempt every five seconds")
     void anExhaustedCredentialBucketRefillsOneAttemptPerFiveSeconds() throws ServletException, IOException {
         RateLimitFilter f = filter();

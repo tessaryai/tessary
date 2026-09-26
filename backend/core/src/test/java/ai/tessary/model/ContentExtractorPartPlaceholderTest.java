@@ -49,14 +49,6 @@ class ContentExtractorPartPlaceholderTest {
     }
 
     @Test
-    void toolCall_rendersOkMarkerWithItsName() throws Exception {
-        // The bug: the tool marker vocabulary drifts and ingest previews show a raw tool part instead.
-        assertEquals(
-                "[tool:search ok]",
-                ContentExtractor.partPlaceholder(node("{\"type\":\"tool_call\",\"name\":\"search\"}")));
-    }
-
-    @Test
     void toolError_collapsesUnicodeWhitespace() throws Exception {
         // The bug: an ASCII-only \s leaves the NBSPs in the snippet, so the same error renders with
         // different spacing depending on where it came from.

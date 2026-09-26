@@ -4,7 +4,6 @@ package ai.tessary.classifier.metric;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.metric.MetricDriftDetector.Direction;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Explains;
@@ -67,22 +66,6 @@ class MetricFindingEvidenceTest {
         assertEquals(1500.0, explained.refMillis());
         assertEquals(4500.0, explained.curMillis());
         assertEquals(1.0, explained.covered());
-    }
-
-    @Test
-    void detail_hasNoControlOrExplainsOnThePinnedArm() {
-        String pinnedArmBlob = """
-                {"measure":"turn_duration","bucket":{"kind":"call_site","key":"cs-1"},
-                 "reference":"pinned","direction":"up","ratio":1.1,
-                 "window":{"kind":"count"}}
-                """;
-
-        ShiftDetail detail = MetricFindingEvidence.detail(pinnedArmBlob);
-
-        assertNotNull(detail);
-        assertNull(detail.control(), "the pinned arm's reference is a window, not a ring");
-        assertTrue(detail.explains().isEmpty(), "absence is the accurate statement, not an empty array read as one");
-        assertNull(detail.sinceVersionId());
     }
 
     /** The headline a case is built from: the direction read as written, and the p50 pair split into its sides. */

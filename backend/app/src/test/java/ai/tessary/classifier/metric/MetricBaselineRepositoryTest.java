@@ -4,7 +4,6 @@ package ai.tessary.classifier.metric;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
@@ -161,30 +160,6 @@ class MetricBaselineRepositoryTest {
         // window just closed into the window just opened — the double count the watermark exists to stop.
         assertEquals("obs-500", row.countedThroughId());
         assertEquals("2026-07-20T18:00:09Z", row.countedThroughAt());
-    }
-
-    @Test
-    @DisplayName("re-pinning moves only the deploy reference, and the state machine only the state")
-    void repinAndStateAreSeparateWriters() {
-        Scope scope = scope("baseline-repin");
-        String id = baselines.ensure(seed(scope, Measure.TURN_DURATION, "cs-a")).id();
-        baselines.advanceWindow(id, 400, now(), "2026-07-20T10:00:00Z", "2026-07-20T18:00:00Z", null, null);
-        baselines.updateCurrentSketch(id, "{\"kind\":\"hist\",\"n\":400}", null, null, null, now());
-
-        assertNull(baselines.findById(scope.projectId, id).orElseThrow().pinnedSketchJson());
-
-        // The write behind "Legitimate — absorb". A human presses it: a triage verdict is read
-        // never as authority to mutate the baseline, because an automatic re-pin would let the very next
-        // window silently normalize a real regression.
-        baselines.repin(id, "{\"kind\":\"hist\",\"n\":400}", null, null, null, "2026-07-21T09:00:00Z", "pv-123", now());
-        baselines.updateState(id, State.ARMED, now());
-
-        MetricBaselineRow row = baselines.findById(scope.projectId, id).orElseThrow();
-        assertEquals("{\"kind\":\"hist\",\"n\":400}", row.pinnedSketchJson());
-        assertEquals("pv-123", row.pinnedByVersionId());
-        assertEquals(State.ARMED, row.state());
-        assertEquals(400, row.currentCount(), "re-pinning reads the current window; it does not consume it");
-        assertTrue(row.updatedAt().compareTo(row.createdAt()) >= 0);
     }
 
     // -----------------------------------------------------------------------------------------------

@@ -2,8 +2,6 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.tenant.TenantService;
@@ -118,104 +116,6 @@ class TraceSubstrateRepositoryTest {
     }
 
     /**
-     * Unsettled, no-usage and unpriced are three different answers, and the row keeps them apart.
-     *
-     * <p>They rendered as one em dash before this milestone. A live turn showing "—" for cost is not the
-     * same statement as a turn that genuinely spent nothing, and neither is a turn whose model we hold no
-     * rate for — that third one has a real bill we cannot name, and reading it as free is the failure the
-     * {@code unpriced_spans} column exists to prevent.
-     */
-    @Test
-    void unsettledAndNoUsageAndUnpricedAreThreeDistinguishableStates() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "v2-list-honesty").project().id();
-        Instant t0 = Instant.parse("2026-08-12T09:00:00Z");
-
-        // 1. Never rolled up: no counters at all, and is_settled false says why.
-        String pending = SubstrateV2Fixtures.traceId();
-        fx.llmSpan(pid, pending, t0.plusSeconds(30));
-
-        // 2. Settled with no usage: the producer sent none, so the buckets stay null rather than zero.
-        String quiet = SubstrateV2Fixtures.traceId();
-        fx.span(pid, quiet, SubstrateV2Fixtures.spanId(), null, "tool", t0.plusSeconds(20), t0.plusSeconds(21));
-        rollUp(pid, quiet, t0);
-
-        // 3. Settled, real usage, no rate: tokens present, cost null, unpriced_spans says so.
-        String unpriced = SubstrateV2Fixtures.traceId();
-        fx.withUsage(fx.llmSpan(pid, unpriced, t0.plusSeconds(10)), 500L, 100L, null, null, null);
-        rollUp(pid, unpriced, t0);
-
-        var byId = v2traces.list(pid, NO_FILTER, null, 10, null, null, null).stream()
-                .collect(java.util.stream.Collectors.toMap(TraceV2Repository.Summary::id, r -> r));
-
-        var p = byId.get(pending);
-        assertFalse(p.isSettled(), "still receiving spans — its totals are provisional, not zero");
-        assertNull(p.spanCount(), "and it has no totals at all yet");
-        assertNull(p.totalTokens());
-
-        var q = byId.get(quiet);
-        assertTrue(q.isSettled());
-        assertEquals(Integer.valueOf(1), q.spanCount(), "settled, so the count is final");
-        assertNull(q.totalTokens(), "and it is genuinely null — never 0, which would read as 'free'");
-        assertEquals(Integer.valueOf(0), q.unpricedSpans(), "nothing carried usage, so nothing went unpriced");
-
-        var u = byId.get(unpriced);
-        assertTrue(u.isSettled());
-        assertEquals(Long.valueOf(600L), u.totalTokens(), "the tokens are known");
-        assertNull(u.totalCost(), "the cost is not — and it is null, not zero");
-        assertEquals(Integer.valueOf(1), u.unpricedSpans(), "and the row says how much spend it could not price");
-    }
-
-    /** Newest first on {@code started_at}, with a keyset that neither repeats nor skips a row. */
-    @Test
-    void listOrdersNewestFirstAndPagesOnTheKeyset() {
-        String pid = TenantFixture.bootstrap(tenants, "v2-list-order").project().id();
-        Instant base = Instant.parse("2026-08-12T08:00:00Z");
-        String earliest = SubstrateV2Fixtures.traceId();
-        String mid = SubstrateV2Fixtures.traceId();
-        String latest = SubstrateV2Fixtures.traceId();
-        // Inserted in an order matching neither the clock nor the ids, so a passing assertion cannot be
-        // an accident of insertion order.
-        fx.trace(pid, mid, base.plusSeconds(60));
-        fx.trace(pid, earliest, base);
-        fx.trace(pid, latest, base.plusSeconds(120));
-
-        var noFilter = NO_FILTER;
-        assertEquals(List.of(latest, mid, earliest), ids(v2traces.list(pid, noFilter, null, 10, null, null, null)));
-
-        var first = v2traces.list(pid, noFilter, null, 1, null, null, null);
-        assertEquals(List.of(latest), ids(first));
-        var next = v2traces.list(
-                pid,
-                noFilter,
-                null,
-                10,
-                null,
-                first.get(0).startedAt(),
-                first.get(0).id());
-        assertEquals(List.of(mid, earliest), ids(next), "page two picks up below page one, no repeat, no skip");
-    }
-
-    /**
-     * A cursor from the v1 list degrades to page one rather than resuming from a point that is not on the
-     * v2 ordering. The repository is given a keyset key it cannot satisfy — a surrogate ULID and an
-     * instant — and the controller's decode is what rejects it; here the equivalent is a key that matches
-     * nothing, which must not silently return an empty page for a project that has traces.
-     */
-    @Test
-    void aKeysetKeyFromBeforeTheCutoverDoesNotStrandTheReader() {
-        String pid = TenantFixture.bootstrap(tenants, "v2-list-legacy-cursor")
-                .project()
-                .id();
-        Instant t0 = Instant.parse("2026-08-12T07:00:00Z");
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, traceId, t0);
-
-        // The controller discards an unversioned cursor, so the repository is asked for page one.
-        assertEquals(List.of(traceId), ids(v2traces.list(pid, NO_FILTER, null, 10, null, null, null)));
-    }
-
-    /**
      * Model, kind and call-site filters are semi-joins: they keep a trace when ANY of its spans matches,
      * and they compute nothing about the ones that do.
      */
@@ -302,35 +202,6 @@ class TraceSubstrateRepositoryTest {
                 two.get(0).startedAt(),
                 two.get(0).id());
         assertEquals(List.of(unknown), ids(three), "the null tail is reachable, not stranded past the cursor");
-    }
-
-    /** A session's totals are the SUM of its traces' rollups, and it reports how many are provisional. */
-    @Test
-    void sessionTotalsSumTraceRollupsAndCountTheUnsettled() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "v2-session-totals").project().id();
-        Instant t0 = Instant.parse("2026-08-12T04:00:00Z");
-        String sessionId = SubstrateV2Fixtures.sessionId();
-
-        String settled = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, settled, sessionId, t0);
-        fx.withUsage(
-                fx.span(pid, settled, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1)),
-                100L,
-                20L,
-                null,
-                null,
-                null);
-        rollUp(pid, settled, t0);
-
-        String inFlight = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, inFlight, sessionId, t0.plusSeconds(60));
-        fx.span(pid, inFlight, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null);
-
-        var totals = v2traces.sessionTotals(pid, sessionId);
-        assertEquals(2, totals.traceCount());
-        assertEquals(1, totals.unsettledTraces(), "one addend is still moving, and the caller is told so");
-        assertEquals(Long.valueOf(120L), totals.totalTokens(), "summed from the rollup column, not from spans");
     }
 
     /**

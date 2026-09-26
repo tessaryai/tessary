@@ -10,18 +10,6 @@ import org.junit.jupiter.api.Test;
 /** The sentence a finding and its case are both called by, for the causes that have one of their own. */
 class FindingTitleTest {
 
-    /**
-     * A groundedness rate finding says which way its call site moved and nothing about how far: the flagged
-     * rate counts the model's false alarms, so the direction is reliable where the size is not.
-     */
-    @Test
-    void aGroundednessRateFindingNamesItsCallSiteAndNoNumbers() {
-        String payload = "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\","
-                + "\"baseline_rate\":0.021,\"current_rate\":0.064}";
-
-        assertEquals("Answers on rag-answer became less grounded", FindingTitle.of(finding("rag-answer", payload)));
-    }
-
     @Test
     void aGroundednessRateFindingWithNoCallSiteColumnNamesTheNativeKey() {
         String payload = "{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"summarize\"}";

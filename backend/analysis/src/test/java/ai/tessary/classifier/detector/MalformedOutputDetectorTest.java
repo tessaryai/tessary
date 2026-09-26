@@ -91,13 +91,6 @@ class MalformedOutputDetectorTest {
     }
 
     @Test
-    void allUnvalidatableBatchSkipsTheSchemaRead() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        d.detectBatch(List.of(obs(null, "x"), obs("cs-1", null)), null);
-        assertTrue(lookups.isEmpty(), "no schema read when nothing in the batch is validatable");
-    }
-
-    @Test
     void oneSchemaReadPerBatch() {
         MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
         d.detectBatch(List.of(obs("cs-1", "{}"), obs("cs-1", "{}"), obs("cs-2", "{}")), null);

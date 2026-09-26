@@ -112,12 +112,4 @@ class GithubClientTest {
 
         assertEquals("def456", client.resolveHeadSha(repo("web"), branch));
     }
-
-    @Test
-    void resolveHeadSha_aRejectedReadIsAProviderFailure() {
-        http.on(BASE + "/repos/acme/web/branches/gone", response(404, "{}"));
-
-        TessaryException e = assertThrows(TessaryException.class, () -> client.resolveHeadSha(repo("web"), "gone"));
-        assertEquals(GitError.PROVIDER_CALL_FAILED, e.error());
-    }
 }

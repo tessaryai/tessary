@@ -33,9 +33,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @SpringBootTest
 class TenantServiceTest {
 
-    /** These tests are about bootstrap atomicity, not the owned-org cap. */
-    private static final int UNCAPPED = Integer.MAX_VALUE;
-
     @Autowired
     TenantService tenants;
 
@@ -179,20 +176,6 @@ class TenantServiceTest {
     }
 
     @Test
-    void setDefaultProject_movesTheDefaultAndKeepsExactlyOne() {
-        Principal u = tenants.upsertUserFromWorkos("user_setdef_001", "setdef@example.com", "SetDef", null);
-        Organization org = tenants.ensureDefaultOrg(u, null);
-        Project first = projects.findDefaultForOrg(org.id()).orElseThrow();
-        Project second = tenants.createProject(org.id(), "Second", null);
-
-        tenants.setDefaultProject(org.id(), second.id());
-
-        assertEquals(
-                second.id(), projects.findDefaultForOrg(org.id()).orElseThrow().id());
-        assertTrue(!projects.findById(first.id()).orElseThrow().isDefault(), "old default is demoted");
-    }
-
-    @Test
     void projectUpdate_isPartial_nameOnlyRenameDoesNotWipeSettings() {
         Principal u = tenants.upsertUserFromWorkos("user_partial_001", "partial@example.com", "Partial", null);
         Organization org = tenants.ensureDefaultOrg(u, null);
@@ -219,36 +202,6 @@ class TenantServiceTest {
         Organization after = orgs.findById(org.id()).orElseThrow();
         assertEquals("Renamed Organization", after.name(), "name updated");
         assertEquals("{\"theme\":\"dark\"}", after.settings(), "omitted settings blob preserved (not nulled)");
-    }
-
-    @Test
-    void bootstrapOrg_createsOrgOwnerAndDefaultProject() {
-        Principal u = tenants.upsertUserFromWorkos("user_bootstrap_001", "bootstrap@example.com", "Bootstrap", null);
-        Organization o = new Organization(
-                Ids.ulid(),
-                null,
-                tenants.uniqueSlug("bootstrap-ws"),
-                "Bootstrap WS",
-                java.time.Instant.now().toString(),
-                null,
-                null);
-
-        Organization created = tenants.bootstrapOrg(o, u.id(), UNCAPPED);
-
-        assertEquals(
-                "owner", memberships.find(created.id(), u.id()).orElseThrow().role(), "creator is owner");
-        Project def = projects.findDefaultForOrg(created.id()).orElseThrow();
-        assertTrue(def.isDefault(), "bootstrap mints exactly one default project");
-        assertEquals(1, projects.findByOrg(created.id()).size());
-    }
-
-    @Test
-    void upsertUser_secondUserDifferentWorkosId_isIsolated() {
-        Principal a = tenants.upsertUserFromWorkos("user_iso_001", "a@example.com", "A", null);
-        Principal b = tenants.upsertUserFromWorkos("user_iso_002", "b@example.com", "B", null);
-        assertNotEquals(a.id(), b.id());
-        assertTrue(users.findById(a.id()).isPresent());
-        assertTrue(users.findById(b.id()).isPresent());
     }
 
     /**

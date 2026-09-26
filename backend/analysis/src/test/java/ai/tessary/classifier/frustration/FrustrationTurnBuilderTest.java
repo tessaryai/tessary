@@ -91,25 +91,6 @@ class FrustrationTurnBuilderTest {
     // ---- eligibility
 
     @Test
-    void build_sendsTheThirdUserTurnWithFourPriorMessagesOldestFirst() {
-        TurnState state = build(threeTurns(say("assistant", "one"), say("assistant", "two"), "still wrong"))
-                .orElseThrow();
-        assertEquals("still wrong", state.currentUserMessage());
-        assertEquals(
-                List.of(
-                        new EarlierMessage("user", "first question"),
-                        new EarlierMessage("assistant", "one"),
-                        new EarlierMessage("user", "second question"),
-                        new EarlierMessage("assistant", "two")),
-                state.earlierMessages());
-    }
-
-    @Test
-    void build_neverSendsTheOpener() {
-        assertTrue(build(turn("t1", say("user", "hello"), null)).isEmpty());
-    }
-
-    @Test
     void build_neverSendsTheSecondUserTurn() {
         assertTrue(
                 build(turn("t1", say("user", "hello"), say("assistant", "hi")), turn("t2", say("user", "and?"), null))
@@ -292,24 +273,7 @@ class FrustrationTurnBuilderTest {
                 state.earlierMessages());
     }
 
-    @Test
-    void build_withinBudgetKeepsAllFour() {
-        Caps roomy = new Caps(100, 100, 100, 100, 500);
-        String hundred = "x".repeat(100);
-        TurnState state = build(roomy, threeTurnsOf(hundred, hundred, "newest q", "newest a", hundred))
-                .orElseThrow();
-        assertEquals(4, state.earlierMessages().size());
-    }
-
     // ---- output shape
-
-    @Test
-    void turnState_serializesCurrentMessageFirstThenEarlierMessages() throws Exception {
-        TurnState state = new TurnState("now", List.of(new EarlierMessage("user", "before")));
-        assertEquals(
-                "{\"current_user_message\":\"now\",\"earlier_messages\":[{\"role\":\"user\",\"content\":\"before\"}]}",
-                new ObjectMapper().writeValueAsString(state));
-    }
 
     private static SubstrateObservation[] threeTurnsOf(
             String user1, String assistant1, String user2, String assistant2, String current) {

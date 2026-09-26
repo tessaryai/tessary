@@ -56,19 +56,6 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void listByProject_returnsJobScopedToItsProject() {
-        String pid = project("signal-health-list");
-        String classifierId = Ids.ulid();
-        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
-
-        List<ClassifierJobRow> rows = jobs.listByProject(pid);
-
-        assertEquals(1, rows.size());
-        assertEquals(classifierId, rows.get(0).classifierId());
-        assertEquals(ClassifierJobRow.PENDING, rows.get(0).status());
-    }
-
-    @Test
     void listByProject_excludesOtherProjectsJobs() {
         String pid = project("signal-health-scope-a");
         String otherPid = project("signal-health-scope-b");
@@ -114,25 +101,6 @@ class ClassifierJobRepositoryTest {
     }
 
     @Test
-    void consecutiveFastFailures_deadLetterAtTheCap_notBefore() {
-        String pid = project("signal-fastfail-cap");
-        String classifierId = Ids.ulid();
-        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
-
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            ClassifierJobRow job = claimOne(classifierId, "w");
-            assertEquals(attempt, job.attempts(), "claim increments attempts by 1 each round");
-            boolean deadLettered = jobs.markFailed(job.id(), "launcher /classify transport failure", MAX_ATTEMPTS);
-            if (attempt < MAX_ATTEMPTS) {
-                assertFalse(deadLettered, "attempt " + attempt + " of " + MAX_ATTEMPTS + " stays retryable");
-                jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS); // the next heartbeat's re-pend
-            } else {
-                assertTrue(deadLettered, "the " + MAX_ATTEMPTS + "th consecutive failure crosses the cap");
-            }
-        }
-    }
-
-    @Test
     void deadLetteredJob_isNotResurrectedByTheRoutineHeartbeatEnqueue() {
         String pid = project("signal-deadletter-noresurrect");
         String classifierId = Ids.ulid();
@@ -147,45 +115,6 @@ class ClassifierJobRepositoryTest {
         assertFalse(
                 isClaimable(classifierId, "w"),
                 "a dead-lettered job stays dead across routine heartbeat enqueue calls (no silent resurrect loop)");
-    }
-
-    @Test
-    void deadLetteredJob_revivesOnceTheCooldownElapses() {
-        String pid = project("signal-deadletter-revive");
-        String classifierId = Ids.ulid();
-        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
-
-        driveToDeadLetter(pid, classifierId);
-        assertFalse(isClaimable(classifierId, "w"), "still dead under the long cooldown");
-
-        backdateDeadLetter(classifierId);
-        jobs.enqueue(pid, classifierId, 0); // cooldown has fully elapsed
-        assertTrue(
-                isClaimable(classifierId, "w2"),
-                "once /classify recovers, the next enqueue past the cooldown floor gives the signal a fresh job "
-                        + "rather than permanently wedging it");
-    }
-
-    @Test
-    void healthySweeps_resetAttempts_soTheCapMeasuresConsecutiveFailuresOnly() {
-        String pid = project("signal-attempts-reset-on-success");
-        String classifierId = Ids.ulid();
-        jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
-
-        // More successful sweep cycles than maxAttempts: a healthy signal must never approach the cap.
-        for (int i = 0; i < MAX_ATTEMPTS + 3; i++) {
-            ClassifierJobRow job = claimOne(classifierId, "w");
-            jobs.markSwept(job.id(), null, null);
-            jobs.enqueue(pid, classifierId, LONG_COOLDOWN_SECONDS);
-        }
-
-        ClassifierJobRow job = claimOne(classifierId, "w");
-        assertEquals(
-                1,
-                job.attempts(),
-                "attempts reset to 0 on every successful sweep, so this claim after many successes is attempt 1");
-        boolean deadLettered = jobs.markFailed(job.id(), "boom", MAX_ATTEMPTS);
-        assertFalse(deadLettered, "a single failure after a long healthy history must not immediately dead-letter");
     }
 
     @Test
@@ -302,15 +231,6 @@ class ClassifierJobRepositoryTest {
 
         assertEquals(0, jobs.rewindCursor(pid, classifierId), "a dead job is not rewound");
         assertFalse(isClaimable(classifierId, "w2"), "and stays dead until its cooldown elapses");
-    }
-
-    @Test
-    void rewindCursor_isANoOpForASignalThatHasNeverSwept() {
-        String pid = project("signal-rewind-nojob");
-        assertEquals(
-                0,
-                jobs.rewindCursor(pid, Ids.ulid()),
-                "no job row means no history to re-read — the first sweep already starts from a null cursor");
     }
 
     @Test

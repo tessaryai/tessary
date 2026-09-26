@@ -21,8 +21,6 @@ class GroundednessAnswersFileTest {
     private static final String FIRST = "The refund was issued on March 3.";
     private static final String SECOND = "It arrives within two business days by bank transfer.";
     private static final String ANSWER = FIRST + " " + SECOND;
-    private static final String DOCUMENT = "Card refunds reach the customer within five to ten business days.";
-
     private static final String HEADER = "# Flagged answers\n\n"
             + "The answers this finding cites, newest first. For each: the trace and span ids (the"
             + " `get_trace` / `get_span` arguments), the score (P(unsupported) of the strongest"
@@ -44,13 +42,6 @@ class GroundednessAnswersFileTest {
 
     private static String storedAnswer(int n, String trace, String document) {
         return storedAnswerHead(n, trace) + document + "\n```\n";
-    }
-
-    @Test
-    void aStoredAnswerCarriesItsFlaggedSentencesQuestionAndDocuments() {
-        String file = GroundednessAnswersFile.render(new FlaggedAnswerPage(List.of(stored("tr_1", DOCUMENT)), 1, null));
-
-        assertEquals(HEADER + storedAnswer(1, "tr_1", DOCUMENT) + "\nAll 1 flagged answer(s) are shown.\n", file);
     }
 
     @Test

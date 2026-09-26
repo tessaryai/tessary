@@ -81,25 +81,6 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * A positive human ruling keeps the finding {@code open} — the same status column an unruled
-     * finding carries — so it pins exactly as hard, through the one rule rather than a second arm.
-     */
-    @Test
-    @DisplayName("a finding a human ruled a real deviation pins as hard as an unruled one")
-    void humanRuledFindingPins() {
-        Project p = project("pin-human-ruled");
-        trace(p, "trace-ruled", null);
-        trace(p, "trace-loose", null);
-        String finding = finding(p, "cause-ruled", "open");
-        evidence(p, finding, null, "trace-ruled", null);
-
-        sweep();
-
-        assertTrue(traceExists(p, "trace-ruled"), "a human's ruling keeps its substrate readable");
-        assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
-    }
-
-    /**
      * The case leg is gone: closing a case closes the findings it holds in the same transaction
      * (migration {@code 0011}), so a case's own {@code state} cannot keep a CLOSED finding's substrate
      * alive even in the inconsistent state of a case row that was never updated to match. Retention

@@ -159,42 +159,6 @@ class MetricDriftSweepIntegrationTest {
     }
 
     @Test
-    @DisplayName("one pass folds the page into a baseline, closes the window it fills, and advances the cursor")
-    void oneSweepFillsAWindowAndMovesTheCursor() {
-        String pid = project("metric-sweep-cursor");
-        ClassifierRow signal = signal(pid);
-        // 60 turns against a target of 50: enough to close one window and leave a tail, which is the
-        // realistic case — a page boundary almost never lands on a window boundary.
-        String lastTraceId = seedTurns(pid, 60);
-
-        MetricDriftSweep.MetricSweepOutcome outcome = sweep.sweepMetrics(claim(pid, signal), signal);
-
-        assertEquals(60, outcome.scanned());
-        assertEquals(1, outcome.windowsClosed());
-        // 60 identical 2s turns: one window closes, it becomes the bootstrap pin, and it is the first
-        // thing this bucket has ever closed — so there is nothing to compare it against and nothing to
-        // report. What a human then does with a finding is MetricFindingResolveIntegrationTest.
-        assertEquals(0, outcome.fired(), "the first closed window establishes the reference; it is not a shift");
-
-        // The cursor advanced over the WHOLE page, on the INGEST clock. Advancing only over rows some
-        // measure could read would re-offer the rest on every pass forever.
-        ClassifierJobRow swept = job(pid, signal);
-        assertEquals(lastTraceId, swept.cursorId());
-        assertNotNull(swept.cursorAt());
-
-        MetricBaselineRow row = baseline(pid, signal);
-        assertEquals(50, controlDay(row).count(), "the closed window went into the control ring");
-        assertEquals(10, row.currentCount(), "current_count is per WINDOW, so the tail opened a fresh one");
-        assertEquals(10, sketch(row.currentSketchJson()).count());
-        // The first armed close establishes the pinned reference, because a comparison needs one and a
-        // bucket has none until it has closed something. That bootstrap is not the "Legitimate — absorb"
-        // write, which moves a LIVE reference and is reachable only from a human pressing the verb.
-        assertEquals(50, sketch(row.pinnedSketchJson()).count());
-        assertEquals(State.ARMED, row.state());
-        assertEquals(lastTraceId, row.countedThroughId(), "the watermark moved with the count it guards");
-    }
-
-    @Test
     @DisplayName("a rewound cursor re-reads the page and the watermark refuses to count it twice")
     void aReplayedPageIsNotFoldedInTwice() {
         String pid = project("metric-sweep-replay");

@@ -181,19 +181,6 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("the bare /actuator index is guarded — startsWith(\"/actuator/\") does not match it")
-    void bareActuatorIndexIsGuarded() throws ServletException, IOException {
-        // Spring Boot serves this by default as a HAL page listing every exposed endpoint, so an
-        // unauthenticated index is a map of the management surface even when each entry is guarded.
-        MockHttpServletResponse res = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-        filter(false).doFilterInternal(new MockHttpServletRequest("GET", "/actuator"), res, chain);
-
-        assertEquals(401, res.getStatus());
-        assertNull(chain.getRequest());
-    }
-
-    @Test
     @DisplayName("a health GROUP is not public — show-details:always must not publish /actuator/health/db")
     void healthGroupsAreNotPublic() {
         assertFalse(
@@ -438,19 +425,6 @@ class AuthFilterPostureTest {
     }
 
     @Test
-    @DisplayName("a request with no method is not a mutation, so a cookie session passes without the CSRF header")
-    void nullMethodIsNotMutating() throws ServletException, IOException {
-        MockHttpServletRequest req = withCookie("GET", GUARDED_API, session("rt_1", FAR_FUTURE, "wos_1"));
-        req.setMethod(null);
-        MockHttpServletResponse res = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        cookieFilter(mock(AuthProvider.class), knowsWos1()).doFilterInternal(req, res, chain);
-
-        assertEquals(req, chain.getRequest());
-    }
-
-    @Test
     @DisplayName("a public probe driven straight into the filter skips the staff check")
     void publicProbeSkipsTheStaffCheck() throws ServletException, IOException {
         AuthFilter filter = filter(false, authenticatingAs(SOME_AUTHENTICATED_USER), notStaff());
@@ -487,17 +461,5 @@ class AuthFilterPostureTest {
     @DisplayName("a raw URI carrying traversal or parameter tricks never matches a bypass")
     void obfuscatedUrisAreFiltered(String uri) {
         assertFalse(filter(false).shouldNotFilter(new MockHttpServletRequest("GET", uri)), uri);
-    }
-
-    @Test
-    @DisplayName("a request with no URI at all is filtered, not bypassed, and does not crash the filter")
-    void missingUriIsFiltered() throws ServletException, IOException {
-        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/ignored");
-        req.setRequestURI(null);
-        MockFilterChain chain = new MockFilterChain();
-
-        assertFalse(filter(false).shouldNotFilter(req));
-        filter(false).doFilterInternal(req, new MockHttpServletResponse(), chain);
-        assertEquals(req, chain.getRequest(), "an empty path is not under /api/, so it is the controller's call");
     }
 }

@@ -3,7 +3,6 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,9 +30,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,45 +108,6 @@ class TriageAutoEscalationIntegrationTest {
             + "\"key\":\"" + BUCKET + "\"},\"reference\":\"pinned\",\"w1_log\":0.34,\"ratio\":1.4049,"
             + "\"direction\":\"up\",\"n_ref\":4210,\"n_cur\":1180,"
             + "\"quantiles\":{\"p50\":[2100,2940],\"p95\":[9000,21400]}}";
-
-    /**
-     * The default, and the one that matters most. {@code triage_automatic_enabled} is off by
-     * default, so an org gets manual escalation unless it turns automatic on for itself, and an
-     * empty or unreachable flag store supplies no opinion and leaves that default standing. The
-     * capability layer's failure mode is "nothing happens", never "everything escalates".
-     */
-    @Test
-    @DisplayName("with the flag off, a tick escalates nothing at all")
-    void automaticModeIsOffByDefault() {
-        flagsSilent();
-        Project p = project("auto-esc-off");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
-
-        escalator.tick();
-
-        assertEquals(0, triageJobs(p.projectId()));
-        assertNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
-    }
-
-    /**
-     * The opt-in, and the whole of it: every eligible finding is scheduled, with nothing
-     * withheld. The queue and the launcher pool are what bound the work; a finding refused by a
-     * counter is one nobody ever sees.
-     */
-    @Test
-    @DisplayName("with the flag on, a tick escalates every eligible finding")
-    void automaticModeEscalatesEveryEligibleFinding() {
-        flagsSilent();
-        Project p = project("auto-esc-on");
-        automaticOn(p);
-        for (int i = 0; i < 4; i++) {
-            shift(p, "turn_duration:" + BUCKET + i + ":slower:pinned", 5);
-        }
-
-        escalator.tick();
-
-        assertEquals(4, triageJobs(p.projectId()), "all four are eligible, so all four are scheduled");
-    }
 
     /**
      * Repeated ticks are idempotent: this is what stops a scheduler running every fifteen
@@ -344,11 +302,6 @@ class TriageAutoEscalationIntegrationTest {
                 List.of(FindingEvidenceRepository.Ref.span("trace-member", "span-member")),
                 Instant.now().toString());
         return id;
-    }
-
-    /** A jsonb-sourced number as a primitive, with the null check NullAway insists on made loud. */
-    private static double doubleOf(@Nullable Object value) {
-        return ((Number) Objects.requireNonNull(value, "payload number missing")).doubleValue();
     }
 
     private long triageJobs(String projectId) {

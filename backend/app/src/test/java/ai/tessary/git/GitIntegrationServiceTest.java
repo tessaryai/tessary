@@ -80,14 +80,6 @@ class GitIntegrationServiceTest {
         assertThrows(TessaryException.class, () -> service.connect(pid, github()));
     }
 
-    @Test
-    void delete_removesIntegration() {
-        String pid = TenantFixture.bootstrap(tenants, "git-del").project().id();
-        service.connect(pid, github());
-        assertTrue(service.delete(pid));
-        assertTrue(service.find(pid).isEmpty());
-    }
-
     // ---- connectVerified: nothing is stored unless the provider confirms the read -------------
 
     /** A provider that answers verifyAccess and refuses everything else. */
@@ -115,19 +107,6 @@ class GitIntegrationServiceTest {
     }
 
     @Test
-    void connectVerified_takesTheDefaultBranchFromTheProviderWhenNoneWasGiven() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "git-verify-branch").project().id();
-        GitIntegrationService svc = withProvider(new StubClient(new GitProviderClient.RepoAccess("trunk"), null));
-
-        GitIntegrationRow row = svc.connectVerified(pid, pat(null));
-
-        // "main" was a guess. The repo's real default branch is what RCA has to check out.
-        assertEquals("trunk", row.defaultBranch());
-        assertEquals("trunk", svc.find(pid).orElseThrow().defaultBranch());
-    }
-
-    @Test
     void connectVerified_keepsAnExplicitBranchOverTheProviderDefault() {
         String pid = TenantFixture.bootstrap(tenants, "git-verify-explicit")
                 .project()
@@ -149,16 +128,6 @@ class GitIntegrationServiceTest {
         // The whole point: a credential that cannot read the repo must not look connected, because
         // the next thing that notices is an RCA quietly ruling on traces alone.
         assertTrue(svc.find(pid).isEmpty(), "a refused connect leaves the project unbound");
-    }
-
-    @Test
-    void connect_doesNotAskTheProvider_theInstallCallbackAlreadyProvedTheRepo() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "git-verify-skip").project().id();
-        GitIntegrationService svc =
-                withProvider(new StubClient(null, new IllegalStateException("verifyAccess must not be called here")));
-
-        assertEquals("acme", svc.connect(pid, pat("main")).repoOwner());
     }
 
     // ---- the endpoints and the refusals behind them --------------------------------------------

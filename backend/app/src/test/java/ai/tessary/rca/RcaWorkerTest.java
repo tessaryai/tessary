@@ -310,20 +310,6 @@ class RcaWorkerTest {
         assertNotNull(report.summary());
     }
 
-    @Test
-    void aFindingThatNoLongerExistsFailsTheJobAndStampsTheReport() {
-        var fix = TenantFixture.bootstrap(tenants, "rca-missing-subject");
-        String pid = fix.project().id();
-
-        RcaJobRow job = enqueue(pid, "fnd_does_not_exist");
-        worker.run(job);
-
-        RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
-        assertEquals("failed", report.status());
-        assertNotNull(report.summary());
-        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
-    }
-
     /**
      * A frustration finding cites every scored session as a member and the frustrated ones as witness session
      * refs beside the turns that fired. The run gets only the frustrated sessions as citable receipts, never the

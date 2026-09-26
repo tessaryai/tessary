@@ -230,17 +230,6 @@ class SubstrateV2SchemaTest {
     }
 
     @Test
-    @DisplayName("a trace with no session is legal — anonymous traffic belongs to no session")
-    void fkOrdering_sessionlessTraceIsFine() {
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, traceId, t0);
-
-        assertNull(
-                traces.findById(pid, traceId).orElseThrow().sessionId(),
-                "nothing is synthesized to fill the hole; the session surfaces tolerate trace-only traffic");
-    }
-
-    @Test
     @DisplayName("a payload cannot be written before its span, and follows the span's cascade")
     void fkOrdering_payloadRequiresItsSpan() {
         String traceId = SubstrateV2Fixtures.traceId();

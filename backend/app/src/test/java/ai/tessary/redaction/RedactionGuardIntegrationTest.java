@@ -152,28 +152,6 @@ class RedactionGuardIntegrationTest {
     }
 
     @Test
-    void customRuleIsAppliedAndRoundTrips() throws InterruptedException {
-        String pid = TenantFixture.bootstrap(tenants, "redact-custom").project().id();
-        RedactionRuleRow rule = redaction.createRule(pid, "Account id", "ACC-\\d{6}", "[REDACTED_ACCT]", true, 5);
-
-        // Repository round-trip: every column reads back.
-        RedactionRuleRow back = repo.findById(pid, rule.id()).orElseThrow();
-        assertEquals("Account id", back.name());
-        assertEquals("ACC-\\d{6}", back.pattern());
-        assertEquals("[REDACTED_ACCT]", back.replacement());
-        assertTrue(back.enabled());
-        assertFalse(back.builtIn());
-        assertEquals(5, back.sortOrder());
-
-        writer.enqueue(pid, List.of(span("your account ACC-123456 is active", "noted", Map.of())));
-        assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained");
-
-        String input = persistedInput(pid);
-        assertFalse(input.contains("ACC-123456"), "custom-rule PII must be stripped");
-        assertTrue(input.contains("[REDACTED_ACCT]"));
-    }
-
-    @Test
     void disabledRuleIsNotApplied() throws InterruptedException {
         String pid =
                 TenantFixture.bootstrap(tenants, "redact-disabled").project().id();

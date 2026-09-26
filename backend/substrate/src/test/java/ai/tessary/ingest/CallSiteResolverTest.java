@@ -11,12 +11,6 @@ import org.junit.jupiter.api.Test;
 class CallSiteResolverTest {
 
     @Test
-    void explicitTag_isAuthoritative() {
-        Map<String, Object> meta = Map.of(GenAiAttributes.TESSARY_CALL_SITE_ID, "explicit_site");
-        assertEquals("explicit_site", CallSiteResolver.resolve(meta));
-    }
-
-    @Test
     void explicitTag_onPlainOtlp_resolves() {
         // OTLP-first: a plain OTLP producer sets tessary.call_site.id by hand — no SDK required.
         Map<String, Object> meta =

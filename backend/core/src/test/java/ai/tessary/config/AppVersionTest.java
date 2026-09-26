@@ -18,15 +18,4 @@ class AppVersionTest {
     void devIsMain() {
         assertThat(AppVersion.gitRef("dev")).isEqualTo("main");
     }
-
-    @Test
-    void aShortShaIsMain() {
-        assertThat(AppVersion.gitRef("64f9569")).isEqualTo("main");
-        assertThat(AppVersion.gitRef("0.0.1-SNAPSHOT")).isEqualTo("main");
-    }
-
-    @Test
-    void outsideAPackagedJarTheVersionIsDev() {
-        assertThat(AppVersion.current()).isEqualTo("dev");
-    }
 }

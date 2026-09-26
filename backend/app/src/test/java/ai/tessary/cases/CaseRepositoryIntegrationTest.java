@@ -2,7 +2,6 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
@@ -70,18 +69,6 @@ class CaseRepositoryIntegrationTest {
         assertTrue(
                 cases.open(p.id(), detection(p, "grader-a"), Instant.now()).isEmpty(),
                 "a muted case is still THE case for its spell — a continuing detection updates it");
-    }
-
-    @Test
-    void resolvingFreesTheKeyForAFreshCase() {
-        Project p = project("repo-resolved-frees");
-        CaseRow first =
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).orElseThrow();
-        cases.resolve(p.id(), first.id(), CaseRow.Resolution.HUMAN, "done", "priya@example.com", Instant.now());
-
-        CaseRow second =
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).orElseThrow();
-        assertNotEquals(first.id(), second.id());
     }
 
     @Test

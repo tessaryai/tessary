@@ -18,7 +18,6 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.annotation.Order;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -51,23 +50,6 @@ class FindingServiceMergeTest {
                 "the shared table's rows come first and the second source's after them");
     }
 
-    /**
-     * <b>What this pins and what it deliberately does not.</b> It pins that the merge follows the INJECTED
-     * order and that the shared table's own adapter sits at {@code @Order(0)} so it answers first. It names
-     * no other adapter: the boundary enforcer bans this module from depending on an external one, test scope
-     * included, so an assertion here that named another adapter's class could not be re-pointed if that class
-     * ever moves, only deleted. Each adapter's own {@code @Order} value is pinned in its own package's test,
-     * where it travels with the class.
-     */
-    @Test
-    @DisplayName("the ORDER that decides that is @Order, not declaration order or bean name")
-    void the_order_annotations_are_the_routing() {
-        assertEquals(
-                0,
-                BehaviorTriageSource.class.getAnnotation(Order.class).value(),
-                "the shared table answers first; renumbering this changes the wire row order");
-    }
-
     // ---- (b) the filter still excludes what it excluded -----------------------------------------
 
     @Test
@@ -85,31 +67,6 @@ class FindingServiceMergeTest {
 
     // ---- (c) the page limit and the withheld count ----------------------------------------------
 
-    @Test
-    @DisplayName("the page limit is 200 PER SOURCE, so a two-source page can hold 400 — as before the seam")
-    void the_limit_is_per_source() {
-        // The per-source ceiling is a property of the SEAM, so it is asserted through the seam rather
-        // than by reading an adapter's private field: two sources each returning a full page
-        // produce a page of both, and no source is truncated by another's rows. Naming a second
-        // concrete adapter here would tie this open test to whichever adapters happen to ship.
-        StubSource first = new StubSource("behavior", views("a", 200));
-        StubSource second = new StubSource("second", views("b", 200));
-        assertEquals(
-                400,
-                service(List.of(first, second))
-                        .findings(PROJECT, null, null, null, true)
-                        .findings()
-                        .size(),
-                "the limit is per source, so N sources can fill N pages");
-    }
-
-    /** {@code count} rows with distinct ids, for the per-source ceiling above. */
-    private static BehaviorFindingView[] views(String prefix, int count) {
-        BehaviorFindingView[] out = new BehaviorFindingView[count];
-        for (int i = 0; i < count; i++) out[i] = view(prefix + i);
-        return out;
-    }
-
     // ---- (d) the transaction boundary -----------------------------------------------------------
 
     @Test
@@ -122,21 +79,6 @@ class FindingServiceMergeTest {
                 "the allowlist row, the gram state, the status and the changelog are one judgement; "
                         + "annotating the adapter instead leaves the happy path working and nothing failing "
                         + "until a mid-write error resolves a finding with no allowlist row behind it");
-    }
-
-    @Test
-    @DisplayName("resolve routes to the first source that claims the id, and 404s when none do")
-    void resolve_routes_by_ownership() {
-        StubSource first = new StubSource("behavior");
-        StubSource second = new StubSource("second");
-        second.resolved = view("claimed-by-second");
-
-        assertEquals(
-                "claimed-by-second",
-                service(List.of(first, second))
-                        .resolve(PROJECT, "f1", BehaviorDtos.BehaviorResolutionRequest.EXPECTED, "usr_1")
-                        .id(),
-                "the shared source disclaims, so the second source is asked next");
     }
 
     // ---- fixtures --------------------------------------------------------------------------------

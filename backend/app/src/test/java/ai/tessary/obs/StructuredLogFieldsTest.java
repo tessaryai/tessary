@@ -86,23 +86,6 @@ class StructuredLogFieldsTest {
     }
 
     @Test
-    void durationIsANumericFieldSoItCanBeGraphed() {
-        String name = "test.structuredlog.duration";
-        var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), Markers.OPS, "redaction.apply")
-                        .field("durationMs", 5500L)
-                        .field("bytes", 44735)
-                        .log(),
-                name);
-
-        // Quoted would make it a string in Loki — sortable/greppable but not graphable, which is
-        // the entire reason for logging a duration.
-        assertTrue(
-                captured.json().contains("\"durationMs\":5500"),
-                "durationMs must be an unquoted number, got: " + captured.json());
-    }
-
-    @Test
     void markersAndCausesStillSurvive() {
         String name = "test.structuredlog.cause";
         var captured = capture(

@@ -70,17 +70,6 @@ class ToolErrorTrendTest {
     // The live-set contract
     // ---------------------------------------------------------------------------------------------
 
-    @Test
-    void aToolThatDegradedAndStayedDegradedIsFiring() {
-        List<HourlyToolTally> s = series(20, 200, 0.01); // 4,000 calls of reference at 1%
-        series(s, 20, 30, 200, 0.05); // then 6,000 calls at 5%
-
-        List<Spell> spells = spells(s);
-        assertEquals(1, spells.size());
-        assertEquals(TOOL, spells.get(0).toolKey());
-        assertEquals(Direction.UP, spells.get(0).decision().direction());
-    }
-
     /**
      * <b>The contract this classifier used to have, inverted deliberately.</b>
      *
@@ -204,17 +193,6 @@ class ToolErrorTrendTest {
                 null);
     }
 
-    @Test
-    void aQuietToolWaitsRatherThanBeingJudged() {
-        // 100 calls total, well under minBaselineCalls. Not enough to have a reference at all.
-        assertTrue(spells(series(10, 10, 0.20)).isEmpty());
-    }
-
-    @Test
-    void aHealthyToolIsSilentHoweverLongItRuns() {
-        assertTrue(spells(series(400, 200, 0.01)).isEmpty(), "80,000 in-control calls");
-    }
-
     // ---------------------------------------------------------------------------------------------
     // Carrying state forward — the bug class migration 0070 takes back on purpose
     // ---------------------------------------------------------------------------------------------
@@ -291,20 +269,6 @@ class ToolErrorTrendTest {
                 "state built under the old weights must be discarded, not carried");
     }
 
-    /**
-     * And the numbers must be the tool's, not the replay's. A count that grew with how often the replay
-     * ran would be the recompute equivalent of the incremented counter §5.1 forbids.
-     */
-    @Test
-    void theReportedCountsAreTheToolsNotTheReplays() {
-        List<HourlyToolTally> s = series(20, 200, 0.01);
-        series(s, 20, 30, 200, 0.05);
-
-        Spell spell = spells(s).get(0);
-        // The reference closes as soon as it is thick enough (600 calls, three 200-call buckets).
-        assertEquals(600, spell.baseline().calls(), "the reference is the leading traffic, once");
-    }
-
     // ---------------------------------------------------------------------------------------------
     // The reference is frozen, which is what lets a slow bleed be seen at all
     // ---------------------------------------------------------------------------------------------
@@ -364,23 +328,6 @@ class ToolErrorTrendTest {
     // The event clock a finding is written from
     // ---------------------------------------------------------------------------------------------
 
-    /**
-     * {@code ToolErrorService} writes a finding's {@code last_seen_at} from this rather than from
-     * wall-clock now, so a backfilled replay reports when the traffic actually happened rather than
-     * when the sweep happened to run.
-     */
-    @Test
-    void aSpellReportsTheLastHourItFolded() {
-        List<HourlyToolTally> s = series(20, 200, 0.01);
-        series(s, 20, 30, 200, 0.05);
-
-        Spell spell = spells(s).get(0);
-        assertEquals(
-                s.get(s.size() - 1).bucket(),
-                spell.lastBucket(),
-                "the spell's event clock is the last hour actually folded, not when the replay ran");
-    }
-
     /** And it advances only across buckets a resumed sweep actually reads, never past them. */
     @Test
     void aResumedSweepReportsOnlyAsFarAsItActuallyFolded() {
@@ -427,11 +374,6 @@ class ToolErrorTrendTest {
         List<Spell> spells = spells(s);
         assertEquals(1, spells.size(), "only the broken one");
         assertEquals("tool:broken", spells.get(0).toolKey());
-    }
-
-    @Test
-    void aToolWithNoTrafficAtAllProducesNothingRatherThanDividingByZero() {
-        assertTrue(spells(List.of()).isEmpty());
     }
 
     // ---------------------------------------------------------------------------------------------

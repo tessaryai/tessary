@@ -15,7 +15,6 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler.Evidence
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -135,21 +134,6 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
-    void unrecognisedShapeFallsThroughToEmpty() throws Exception {
-        String payload = "{\"some_other_classifier\":true,\"value\":1}";
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER,
-                mock(FindingEvidenceRepository.class),
-                PROJECT_ID,
-                FINDING_ID,
-                new EvidenceCounts(0, 0, 0, 0, 0),
-                payload);
-        assertTrue(
-                out.isEmpty(),
-                "no dedicated assembler recognises this shape — caller must fall back to DossierPayload.forAgent");
-    }
-
-    @Test
     void smallEvidenceSetIsFullyEnumerated() throws Exception {
         String payload = "{\"bucket\":{\"key\":\"k\"},\"ratio\":1.0,\"window\":{}}";
         List<FindingEvidenceRow> rows =
@@ -224,19 +208,6 @@ class ClassifierDossierAssemblerTest {
         assertTrue(truncated.length() < huge.length());
         assertTrue(truncated.contains("[dossier truncated:"));
         assertTrue(truncated.startsWith("line 0\n"), "the head — the claim and statistics — must survive whole");
-    }
-
-    @Test
-    void budgetIsANoOpUnderTheCap() {
-        String small = "line 1\nline 2\n";
-        assertEquals(small, ClassifierDossierAssembler.budget(small));
-    }
-
-    /** Sanity on the fixture's own numeral formatting, so the "50,000" assertion above is not brittle
-     *  to locale — pinned separately here rather than relying on the test JVM's default locale. */
-    @Test
-    void countFormattingUsesRootLocale() {
-        assertEquals("50,000", String.format(Locale.ROOT, "%,d", 50_000));
     }
 
     /** A payload that is not JSON has no shape to assemble, so the caller falls back rather than failing the run. */

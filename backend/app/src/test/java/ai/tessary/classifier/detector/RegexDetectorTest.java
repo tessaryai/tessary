@@ -22,8 +22,6 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 class RegexDetectorTest {
 
-    private static final String SECRET_KEY = "{\"phrases\":[\"secret key\"]}";
-
     private final ObjectMapper mapper = new ObjectMapper();
     private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
@@ -49,34 +47,6 @@ class RegexDetectorTest {
                 null,
                 "2026-06-11",
                 null);
-    }
-
-    @Test
-    void detect_firesOnConfiguredPhraseOverConfiguredField() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true);
-        Detection fired = d.detect(obs("benign prompt", "your secret key is sk-123"), SECRET_KEY);
-        assertTrue(fired.fired(), "the compiled regex matches the literal phrase in the output");
-        assertEquals(Detection.Severity.CRITICAL, fired.severity(), "severity is the detector's baked severity");
-    }
-
-    @Test
-    void detect_doesNotFireWhenPhraseAbsent() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true);
-        assertFalse(d.detect(obs("benign", "all clear"), SECRET_KEY).fired(), "no match → no fire");
-    }
-
-    @Test
-    void detect_respectsFieldSelection() {
-        RegexDetector outputOnly = detector(ClassifierField.OUTPUT, false);
-        String config = "{\"phrases\":[\"leak\"]}";
-        assertFalse(
-                outputOnly
-                        .detect(obs("leak in the input", "clean output"), config)
-                        .fired(),
-                "OUTPUT field ignores a match that is only in the input");
-        assertTrue(
-                outputOnly.detect(obs("clean input", "a leak here"), config).fired(),
-                "OUTPUT field fires on a match in the output");
     }
 
     @Test

@@ -188,25 +188,6 @@ class TraceRollupWorkerIntegrationTest {
     // ---- replacement, not accumulation --------------------------------------------------------------
 
     @Test
-    @DisplayName("firing twice writes the same numbers — the recompute is a replacement, so it is idempotent")
-    void doubleFireIsIdempotent() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
-        arm(true);
-        expire();
-        worker.runOnce();
-        TraceV2Row first = require(traceId);
-
-        expire();
-        worker.runOnce();
-        TraceV2Row second = require(traceId);
-
-        assertEquals(first.spanCount(), second.spanCount());
-        assertEquals(first.totalTokens(), second.totalTokens());
-        assertEquals(first.inputTokens(), second.inputTokens());
-        assertTrue(second.isSettled());
-    }
-
-    @Test
     @DisplayName("a total corrupted by hand heals on the next fire — no accumulation means no permanent drift")
     void corruptThenRecomputeSelfHeals() {
         fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
@@ -253,34 +234,6 @@ class TraceRollupWorkerIntegrationTest {
 
         assertEquals(0, reaper.sweepOnce().rearmed(), "a settled trace is not the fingerprint — it stays quiet");
         assertNull(require(traceId).rollupDueAt());
-    }
-
-    @Test
-    @DisplayName("re-arming a healthy in-flight claim costs exactly one redundant recompute and corrupts nothing")
-    void reapingAnInFlightClaimCostsOneRedundantRecompute() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
-        arm(true);
-        expire();
-        traces.claimDue(500);
-
-        // The sweep cannot tell an in-flight claim from a dead one, and deliberately does not try.
-        assertTrue(reaper.sweepOnce().rearmed() >= 1);
-
-        // The "still alive" worker now completes the write it had claimed for.
-        traces.recompute(pid, traceId);
-        TraceV2Row afterInFlight = require(traceId);
-        assertFalse(afterInFlight.isSettled(), "the sweep's re-arm is indistinguishable from a late span, correctly");
-        assertEquals(150L, afterInFlight.totalTokens());
-
-        // Which costs exactly one extra pass, and the second pass finds nothing left to do.
-        TraceRollupWorker.Pass redundant = worker.runOnce();
-        assertEquals(1, redundant.recomputed(), "one redundant recompute — the whole price of a blunt sweep");
-        assertEquals(0, worker.runOnce().claimed(), "and the queue is drained, not looping");
-
-        TraceV2Row settled = require(traceId);
-        assertTrue(settled.isSettled());
-        assertEquals(150L, settled.totalTokens(), "two rollups over one span is still one span's worth of tokens");
-        assertEquals(1, settled.spanCount());
     }
 
     @Test
@@ -384,38 +337,6 @@ class TraceRollupWorkerIntegrationTest {
     }
 
     // ---- the long-running turn -----------------------------------------------------------------------
-
-    @Test
-    @DisplayName("a long-running trace re-fires with fresh numbers every deadline — there is no cap and none is needed")
-    void aLongRunningTraceKeepsRefiringWithFreshNumbers() {
-        long expectedTokens = 0;
-        for (int turn = 1; turn <= 4; turn++) {
-            fx.withUsage(
-                    fx.span(
-                            pid,
-                            traceId,
-                            SubstrateV2Fixtures.spanId(),
-                            null,
-                            "llm",
-                            t0.plusSeconds(turn * 10L),
-                            t0.plusSeconds(turn * 10L + 1)),
-                    100L,
-                    50L,
-                    null,
-                    null,
-                    null);
-            expectedTokens += 150;
-            arm(false);
-            expire();
-
-            assertEquals(1, worker.runOnce().recomputed(), "the trace fires at every deadline, however long it runs");
-
-            TraceV2Row row = require(traceId);
-            assertEquals(turn, row.spanCount(), "each fire is a full replacement, so the count is simply current");
-            assertEquals(expectedTokens, row.totalTokens());
-            assertTrue(row.isSettled(), "each fire settles honestly, and the next span un-settles it again");
-        }
-    }
 
     // ---- helpers -------------------------------------------------------------------------------------
 

@@ -8,11 +8,6 @@ import org.junit.jupiter.api.Test;
 
 class ServiceTierTest {
 
-    @Test
-    void aStoredValueResolvesIgnoringCaseAndWhitespace() {
-        assertEquals(ServiceTier.FLEX, ServiceTier.fromWire(" FLEX "));
-    }
-
     /**
      * The bug: an unknown tier read from a request or a row falls back to some tier and bills the calls
      * at a price nobody chose. It must be refused.

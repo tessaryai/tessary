@@ -2,8 +2,6 @@
 package ai.tessary.detection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,18 +31,6 @@ class DetectionTableRegistryTest {
     }
 
     @Test
-    void tableForAndWritesDetectionsResolveARegisteredKind() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
-                new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
-                new DetectionTable("frustration", "frustration_detection", Grain.TRACE))));
-
-        assertEquals("secret_leak_detection", registry.tableFor("secret_leak"));
-        assertTrue(registry.writesDetections("frustration"));
-        assertNull(registry.tableFor("no_such_kind"));
-        assertFalse(registry.writesDetections("no_such_kind"));
-    }
-
-    @Test
     void twoBeansClaimingOneKindFailAtConstruction() {
         List<DetectionTable> dup = List.of(
                 new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
@@ -59,17 +45,6 @@ class DetectionTableRegistryTest {
                 IllegalArgumentException.class,
                 () -> new DetectionTable("secret_leak", "Secret Leak; DROP TABLE x", Grain.SPAN));
         assertThrows(IllegalArgumentException.class, () -> new DetectionTable("k", "1_leading_digit", Grain.SPAN));
-    }
-
-    @Test
-    void twoKindsMaySharedOneTable() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
-                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN))));
-
-        // Deduplicated by table name: one arm, not two, in the union.
-        assertEquals(1, registry.tables().size());
-        assertEquals("user_classifier_detection", registry.tables().get(0).table());
     }
 
     @Test

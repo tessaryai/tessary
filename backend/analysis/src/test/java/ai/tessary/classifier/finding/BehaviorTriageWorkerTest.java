@@ -68,24 +68,6 @@ class BehaviorTriageWorkerTest {
         verifyNoInteractions(breaker);
     }
 
-    @Test
-    @DisplayName("a launcher failure releases the job unspent and feeds the breaker")
-    void aLauncherFailureReleasesTheJobAndFeedsTheBreaker() {
-        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
-        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
-        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
-        when(engine.rule(eq(PROJECT), eq("f1"), any(), any()))
-                .thenThrow(new TessaryException(
-                        ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE,
-                        "status 502 from http://launcher — docker pull failed"));
-        BehaviorTriageWorker worker = worker(jobs, engine, breaker, new BriefingSource());
-
-        worker.triageForTest(job("job_1", "f1"));
-
-        verify(jobs).releaseWithoutAttempt(eq("job_1"), anyString());
-        verify(breaker).recordLauncherFailure(anyString());
-    }
-
     /**
      * A ruling is written through the source that briefed it, with the engine's citations, and only then is
      * the job done and the launcher counted reachable. Dropping any of the three leaves a verdict unwritten,

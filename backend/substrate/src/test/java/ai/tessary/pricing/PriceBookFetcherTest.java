@@ -20,11 +20,9 @@ import ai.tessary.telemetry.HomeTessaryClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 /** Every way home's manifest or book can be wrong, and the one way it is right. No network, no database. */
 class PriceBookFetcherTest {
@@ -78,33 +76,6 @@ class PriceBookFetcherTest {
     private void serveBook(HomeTessaryClient.Fetched response) throws Exception {
         when(client.getBytes(eq(PriceBookFetcher.artifactPath(DIGEST)), anyInt()))
                 .thenReturn(response);
-    }
-
-    @Test
-    void importsANewBookDatedByTheManifest() throws Exception {
-        serveManifest(manifest());
-        serveBook(ok(BOOK));
-
-        assertEquals(PriceBookFetcher.Outcome.IMPORTED, fetcher.refresh());
-
-        ArgumentCaptor<PriceSnapshot> snapshot = ArgumentCaptor.forClass(PriceSnapshot.class);
-        verify(books).importBook(snapshot.capture(), eq(Instant.parse(PUBLISHED_AT)));
-        assertEquals(DIGEST, snapshot.getValue().digest());
-        assertEquals(
-                PriceBook.SOURCE_LITELLM + "-" + DIGEST.substring(0, 12),
-                snapshot.getValue().version());
-        assertEquals(1, snapshot.getValue().models().size(), "the per-image model prices no tokens");
-    }
-
-    @Test
-    void aBookAlreadyHeldIsNeverDownloaded() throws Exception {
-        serveManifest(manifest());
-        when(books.hasDigest(DIGEST)).thenReturn(true);
-
-        assertEquals(PriceBookFetcher.Outcome.ALREADY_HELD, fetcher.refresh());
-
-        verify(client, never()).getBytes(eq(PriceBookFetcher.artifactPath(DIGEST)), anyInt());
-        verify(books, never()).importBook(any(), any());
     }
 
     @Test

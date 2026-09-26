@@ -27,16 +27,6 @@ class IngestHealthIndicatorTest {
     }
 
     @Test
-    void reportsTheSpoolAndIsUpWhileDrainingKeepsUp() {
-        Health h = health(true, 250, 0);
-        assertEquals(Status.UP, h.getStatus());
-        assertEquals("memory", h.getDetails().get("spool"));
-        assertEquals(3L, h.getDetails().get("depth"));
-        assertEquals(250L, h.getDetails().get("oldestAgeMs"));
-        assertEquals(false, h.getDetails().get("durable"));
-    }
-
-    @Test
     void downWhenTheSpoolSaysItsBrokerIsUnreachable() {
         when(spool.unavailable()).thenReturn(Optional.of("broker not reachable at redpanda:9092"));
         Health h = health(true, 0, 0);

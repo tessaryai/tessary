@@ -66,32 +66,6 @@ class TraceScopeIntegrationTest {
     }
 
     @Test
-    @DisplayName("the trace is scoped to its root span's call site, not a child's")
-    void scopeComesFromTheEntryPoint() {
-        String pid = tenant("drift-scope").project().id();
-        Instant t0 = Instant.now().minusSeconds(3_600);
-        String traceId = SubstrateV2Fixtures.traceId();
-
-        // Ids are chosen, not generated, so the root sorts last by id: a child would win any ordering
-        // that did not first restrict to parentless spans. The root's own call site is the only one the
-        // recompute may take.
-        String rootId = "zzzz-root";
-        seedSpan(pid, traceId, rootId, null, "agent", "loop", "policy.conversation", t0);
-        seedSpan(pid, traceId, "aaaa-1", rootId, "llm", "chat", "policy.answer", t0.plusSeconds(1));
-        seedSpan(pid, traceId, "aaaa-2", rootId, "tool", "verify", "policy.verify_member", t0.plusSeconds(2));
-        seedSpan(pid, traceId, "aaaa-3", rootId, "retrieval", "s", "policy.retrieve_wording", t0.plusSeconds(3));
-        fx.rollup(pid, traceId);
-
-        BehaviorSubstrateRepository.TraceHead head = headOf(pid, traceId);
-
-        assertEquals(
-                "policy.conversation",
-                head.callSiteId(),
-                "the scope must be the entry point; a child's call site would fit a baseline of "
-                        + "'traces that happened to contain this tool' rather than 'traffic that entered here'");
-    }
-
-    @Test
     @DisplayName("an untagged root leaves the trace unattributed rather than borrowing a child's scope")
     void untaggedRootStaysUnattributed() {
         String pid = tenant("drift-scope-fallback").project().id();

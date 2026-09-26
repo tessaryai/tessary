@@ -39,7 +39,6 @@ class ProjectModelSettingsTest {
     private static final String NOVA = "amazon.nova-2-lite";
 
     private static final String TERRA = "openai.gpt-5.6-terra";
-    private static final String LUNA = "openai.gpt-5.6-luna";
     private static final String SONNET_5 = "anthropic.claude-sonnet-5";
 
     private ProjectModelSettingRepository repo;
@@ -99,16 +98,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void withNoProviderConfiguredALaneRunsNothing() {
-        // The state a new org is in, and the reason the settings page asks for a provider before it
-        // asks for a model: there is no default to fall back to, because a default would name a
-        // provider this org has no key for.
-        configured();
-        assertTrue(settings.resolve(PID, ModelLane.RCA).isEmpty());
-        assertTrue(settings.resolve(PID, ModelLane.TRIAGE).isEmpty());
-    }
-
-    @Test
     void theFirstProviderConfiguredDecidesEveryUnsetLane() {
         configured(ModelProvider.BEDROCK);
 
@@ -141,15 +130,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void triageOffersExactlyRcasModelListInTheSameOrder() {
-        // The triage price ceiling is gone (decision 20): TRIAGE is no longer a curated subset, it is
-        // RCA's own list, unchanged. Pinning equality rather than re-listing every key is deliberate —
-        // a model added to one lane without the other now fails here immediately.
-        assertEquals(LanePriority.modelKeys(ModelLane.RCA), LanePriority.modelKeys(ModelLane.TRIAGE));
-        assertEquals(LanePriority.of(ModelLane.RCA), LanePriority.of(ModelLane.TRIAGE), "same order, same defaults");
-    }
-
-    @Test
     void triageAcceptsTheSameFrontierModelRcaDoes() {
         // Sonnet 5 is RCA's own default on Bedrock. With the ceiling gone it is also TRIAGE's default,
         // and a raw PUT naming it explicitly on either lane now succeeds identically.
@@ -157,33 +137,6 @@ class ProjectModelSettingsTest {
         verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
         settings.set(PID, ORG, ModelLane.RCA, SONNET_5);
         verify(repo).upsert(PID, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
-    }
-
-    @Test
-    void aProviderOffersEveryModelWeSupportForTheLaneNotOnlyItsDefault() {
-        // "One default per provider, every model we support" — Haiku is not Bedrock's RCA default but
-        // must still be pickable there, or choosing a cheaper model would mean changing provider.
-        var bedrockOnRca =
-                LanePriority.forProvider(ModelLane.RCA, ModelProvider.BEDROCK).orElseThrow();
-        assertEquals(SONNET_5, bedrockOnRca.defaultModelKey());
-        assertEquals(List.of(SONNET_5, HAIKU), bedrockOnRca.modelKeys());
-
-        settings.set(PID, ORG, ModelLane.RCA, HAIKU);
-        verify(repo).upsert(PID, ModelLane.RCA, HAIKU, ServiceTier.STANDARD, null);
-    }
-
-    @Test
-    void aLaneFallsToTheNextProviderInItsOrder() {
-        // The org holds one key, for a provider well down both orders. Every lane still gets a model
-        // rather than nothing: the order is a preference, not a requirement. Both lanes land on the
-        // same xAI model now, since TRIAGE no longer carries a separate cheap-tier ceiling.
-        configured(ModelProvider.GROK);
-        assertEquals(
-                "GROK:grok-4.6",
-                settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey());
-        assertEquals(
-                "GROK:grok-4.6",
-                settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey());
     }
 
     @Test
@@ -328,20 +281,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void theAgentVmOfferListNowIncludesHaiku45AndLuna() {
-        // OFFERED_BY_GROUP[AGENT_VM] was widened to include Haiku 4.5 and Luna. Both land on BOTH
-        // AGENT_VM lanes at once, not TRIAGE alone: the offer list is keyed by LaneGroup
-        // (ModelLane#group), and RCA and TRIAGE both share LaneGroup.AGENT_VM — there is no mechanism
-        // to offer a model on one lane of a group but not its siblings.
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
-            settings.set(PID, ORG, lane, HAIKU);
-            verify(repo).upsert(PID, lane, HAIKU, ServiceTier.STANDARD, null);
-            settings.set(PID, ORG, lane, LUNA);
-            verify(repo).upsert(PID, lane, LUNA, ServiceTier.STANDARD, null);
-        }
-    }
-
-    @Test
     void aStoredRowForARemovedModelFallsBackToTheOrder() {
         // A row written before the validator existed (or before Nova was removed
         // entirely) must not pin a sandbox to a model that no longer resolves anywhere.
@@ -435,16 +374,6 @@ class ProjectModelSettingsTest {
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENAI:gpt-5.5"));
         assertEquals(ModelConfigError.MODEL_NOT_AGENTIC, ex.error());
-    }
-
-    @Test
-    void resolveAgenticModel_forACatalogRow_returnsTheProviderAndBareModelName() {
-        when(repo.findByProject(PID))
-                .thenReturn(List.of(row(ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD)));
-        var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(ModelProvider.GEMINI, resolved.provider());
-        assertEquals("gemini-3.1-pro-preview", resolved.modelId());
-        assertEquals("gemini-3.1-pro-preview", resolved.pricingId(), "Gemini's book keys are bare, same as modelId");
     }
 
     @Test

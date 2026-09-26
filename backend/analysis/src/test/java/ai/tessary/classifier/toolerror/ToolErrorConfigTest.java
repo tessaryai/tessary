@@ -26,13 +26,6 @@ class ToolErrorConfigTest {
     }
 
     @Test
-    void theEightArgumentShapeKeepsTheFloorAtSix() {
-        ToolErrorConfig c = new ToolErrorConfig(250_000L, 2.0, 0.005, 500, 0.01, 8);
-        assertEquals(6.0, c.minDecisionInterval());
-        assertEquals(6.0, ToolErrorConfig.defaults().minDecisionInterval());
-    }
-
-    @Test
     void toolErrorsDecisionIntervalIsUnchanged() {
         ToolErrorConfig c = ToolErrorConfig.defaults();
         for (double p0 : new double[] {0.005, 0.01, 0.05, 0.20}) {

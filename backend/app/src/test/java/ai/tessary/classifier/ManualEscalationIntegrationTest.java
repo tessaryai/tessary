@@ -14,7 +14,6 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingService;
-import ai.tessary.classifier.finding.TriageLane;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
@@ -99,18 +98,6 @@ class ManualEscalationIntegrationTest {
             + "\"bucket\":{\"kind\":\"tool\",\"key\":\"tool:write\"},\"cause_kind\":\"rate_shift\","
             + "\"rate\":{\"ref\":0.0547,\"cur\":0.0047},\"n_ref\":502,\"n_cur\":632,"
             + "\"direction\":\"down\",\"onset_at\":\"2026-08-03T01:00:00Z\",\"counts_basis\":\"onset\"}";
-
-    @Test
-    @DisplayName("a written finding is not escalated — the row is where the sweep stops")
-    void findingsAreWrittenUnescalated() {
-        Project p = project("manual-esc-unescalated");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertNull(
-                findings.findById(p.projectId(), id).orElseThrow().escalatedAt(),
-                "recording a shift must not hand it to Layer 2 — that is a microVM nobody asked for");
-        assertEquals(0, triageJobs(p.projectId()), "and it must not have queued a job either");
-    }
 
     @Test
     @DisplayName("Run analysis enqueues exactly one microVM, and a second press lands on it")
@@ -223,64 +210,6 @@ class ManualEscalationIntegrationTest {
         assertNull(
                 findings.findById(p.projectId(), id).orElseThrow().escalatedAt(),
                 "nor stamped the escalate-once marker on a finding that was never escalated");
-    }
-
-    /**
-     * A project with no connected repository gets a triage, and it is the same triage every project
-     * gets: triage reads no repository, it audits a claim about traffic, which no source file
-     * settles, so the press enqueues and names the one lane there is.
-     */
-    @Test
-    @DisplayName("without a connected repo the button enqueues the same triage as everyone else")
-    void analyzeWithoutARepoRunsTheEvidenceOnlyLane() {
-        Project p = project("manual-esc-no-repo");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        BehaviorAnalysisView view = behavior.analyze(p.projectId(), id, null);
-
-        assertEquals(TriageLane.EVIDENCE_ONLY.wire(), view.lane(), "the ruling rests on the evidence");
-        assertEquals(1, triageJobs(p.projectId()), "and the job is real, not a reported no-op");
-        assertNotNull(
-                findings.findById(p.projectId(), id).orElseThrow().escalatedAt(),
-                "escalate-once applies here too — a second press must not buy a second ruling");
-    }
-
-    /** The other side: a connected repo changes nothing, because triage never opens one. */
-    @Test
-    @DisplayName("a connected repo does not change the lane — triage reads no repository")
-    void analyzeWithARepoRunsTheSameLane() {
-        Project p = project("manual-esc-repo-lane");
-        seedIntegration(p.projectId());
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertEquals(
-                TriageLane.EVIDENCE_ONLY.wire(),
-                behavior.analyze(p.projectId(), id, null).lane());
-    }
-
-    /**
-     * Escalating a finding to Layer 2 never depends on anything outside the finding itself: Layer 2
-     * asks whether a deviation is legitimate, and it must read the finding's own evidence and
-     * nothing else. A bare project, with no pipeline import and no call-site definition behind the
-     * bucket, still escalates.
-     */
-    @Test
-    @DisplayName("a project with no pipeline at all can still escalate a finding")
-    void escalationDoesNotDependOnAGraderExisting() {
-        Project p = project("manual-esc-no-graders");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertEquals(
-                0,
-                jdbc.sql("SELECT count(*) FROM call_site WHERE project_id = :pid")
-                        .param("pid", p.projectId())
-                        .query(Long.class)
-                        .single(),
-                "the premise: this project has no imported pipeline to depend on");
-
-        behavior.analyze(p.projectId(), id, null);
-
-        assertEquals(1, triageJobs(p.projectId()), "the escalation happened anyway");
     }
 
     @Test

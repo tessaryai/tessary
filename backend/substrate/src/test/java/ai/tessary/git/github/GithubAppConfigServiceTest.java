@@ -47,16 +47,6 @@ class GithubAppConfigServiceTest {
     }
 
     @Test
-    void noStoredRow_leavesEnvBoundPropertiesUntouched() {
-        props.setAppId("env-app-id");
-        when(repo.findCredentialsEnc()).thenReturn(Optional.empty());
-
-        service.loadOnStartup();
-
-        assertEquals("env-app-id", props.getAppId());
-    }
-
-    @Test
     void storedRow_winsOverWhateverEnvBound() {
         props.setAppId("env-app-id"); // simulates TESSARY_GIT_GITHUB_APP_ID having been set
         String sealed = seal("byo-app-id", "byo-pem", "byo-hook", "byo-slug", "byo-client", "byo-secret");

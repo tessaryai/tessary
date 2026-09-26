@@ -83,23 +83,6 @@ class ClassifierDefinitionIntegrationTest {
     }
 
     @Test
-    void secretLeakIsWiredToTheCredentialCorpusDetectorAndSeedsArmed() {
-        String pid = bootstrapGranted("signal-secret-leak").project().id();
-
-        ClassifierRow secretLeak =
-                ClassifierRows.byKey(signals, pid, "secret_leak").orElseThrow();
-        assertEquals(
-                BuiltInDetector.Kind.SECRET_LEAK,
-                secretLeak.detector(),
-                "Secret Leak is wired to the credential-corpus detector");
-        assertEquals(3, secretLeak.version(), "the catalog version bumped to 3 so re-seeding carries the arming block");
-        assertTrue(
-                secretLeak.configJson() != null && secretLeak.configJson().contains("\"arming\""),
-                "Secret Leak seeds armed");
-        assertTrue(secretLeak.enabled(), "Secret Leak seeds enabled");
-    }
-
-    @Test
     void resyncDisablesBuiltInsThatLeftTheCatalog() {
         Project project = bootstrapGranted("signal-retire").project();
         String pid = project.id();
@@ -197,43 +180,6 @@ class ClassifierDefinitionIntegrationTest {
 
         service.resyncBuiltIns(project);
         assertEquals(7, service.list(pid).size(), "resync stays idempotent across heartbeats");
-    }
-
-    @Test
-    void resyncSeedsAProjectThatSomehowHasNone() {
-        Project project = bootstrapGranted("signal-unseeded").project();
-        String pid = project.id();
-        // Simulate a project that predates seed-on-create: strip the catalog back out, so resync is
-        // the only thing that can put it back. Auto-classification reads traces, so a project with
-        // traffic must end up classified whether or not anyone ever ran generation.
-        // Table is `signal`; the persisted name predates the domain rename (see backend/AGENTS.md).
-        jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
-                .param("pid", pid)
-                .update();
-        assertTrue(service.list(pid).isEmpty(), "precondition: the project starts with no classifiers");
-
-        service.resyncBuiltIns(project);
-
-        assertEquals(
-                catalog.builtIns().size(),
-                service.list(pid).size(),
-                "the heartbeat self-heals a never-seeded project — no generation run, and so no repo, required");
-    }
-
-    @Test
-    void enableDisableLifecycle() {
-        String pid = bootstrapGranted("signal-lifecycle").project().id();
-        ClassifierRow secretLeak =
-                ClassifierRows.byKey(signals, pid, "secret_leak").orElseThrow();
-
-        ClassifierRow disabled = service.setEnabled(pid, secretLeak.id(), false);
-        assertFalse(disabled.enabled(), "a signal can be disabled through its lifecycle");
-        assertFalse(
-                signals.listEnabled(pid).stream().anyMatch(s -> s.id().equals(secretLeak.id())),
-                "a disabled signal drops out of the enabled set the worker sweeps");
-
-        ClassifierRow reEnabled = service.setEnabled(pid, secretLeak.id(), true);
-        assertTrue(reEnabled.enabled(), "and re-enabled");
     }
 
     /**

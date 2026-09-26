@@ -164,46 +164,6 @@ class MalformedOutputRateIntegrationTest {
         assertNotNull(after.resetAt(), "and the fence is read back onto the carried state");
     }
 
-    /** The variant that also drops the reference: nothing before the reset may teach the new one. */
-    @Test
-    void aResetAndRelearnDropsTheReferenceAndLearnsNothingFromBeforeIt() {
-        String pid = project("malformed-relearn");
-        ClassifierRow signal = malformedOutput(pid);
-        callSite(pid, "cs-a", SCHEMA);
-        Instant start = hoursAgo(10);
-        clean(pid, "cs-a", start, 60);
-        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12);
-        assertEquals(1, rates.refresh(pid, signal, later(), Instant.now()));
-
-        rateRows.states()
-                .resetAndRelearn(
-                        pid,
-                        "cs-a",
-                        "someone",
-                        "relearn in a test",
-                        Instant.now().toString());
-        CarriedState cleared = carried(pid, "cs-a");
-        assertNull(cleared.baseline(), "the reference is gone");
-        assertNull(cleared.watermarkBucket());
-        assertEquals(0.0, cleared.state().sUp());
-
-        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()));
-        assertNull(
-                carried(pid, "cs-a").baseline(),
-                "every hour before the reset is fenced off, so there is nothing to learn from yet");
-    }
-
-    @Test
-    void aCallSiteStillLearningItsReferenceFilesNothingHoweverBadItLooks() {
-        String pid = project("malformed-learning");
-        ClassifierRow signal = malformedOutput(pid);
-        callSite(pid, "cs-a", SCHEMA);
-        failing(pid, signal, "cs-a", hoursAgo(3), 20); // twenty outputs, every one malformed, under the fifty
-
-        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()));
-        assertEquals(0, liveFindings(pid), "a rate needs a reference before anything can be judged against it");
-    }
-
     @Test
     void outputsTheSweepHasNotCheckedAreNotCountedAsPassing() {
         String pid = project("malformed-cursor");

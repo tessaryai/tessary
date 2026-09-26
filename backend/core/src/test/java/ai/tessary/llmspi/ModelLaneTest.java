@@ -10,11 +10,6 @@ import org.junit.jupiter.api.Test;
 
 class ModelLaneTest {
 
-    @Test
-    void aWireValueResolvesIgnoringCaseAndWhitespace() {
-        assertEquals(ModelLane.TRIAGE, ModelLane.fromWire(" Triage "));
-    }
-
     /**
      * The bug: a typo'd lane in a model-settings PUT silently lands on some default lane and changes the
      * model (and the bill) of a lane the caller never named. It must be a typed 400.

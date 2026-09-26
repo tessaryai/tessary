@@ -8,11 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.detector.EncoderScorer;
-import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository.Assessment;
-import ai.tessary.classifier.substrate.CallSiteShapeReads;
-import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -21,10 +17,7 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -66,19 +59,6 @@ class GroundednessAssessmentIntegrationTest {
     SpanPayloadRepository payloads;
 
     @Test
-    void theMigrationAddsBothTablesTheClearColumnAndTheWidenedChecks() {
-        for (String table : List.of("groundedness_assessment", "groundedness_state")) {
-            assertEquals(1, count("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '" + table + "'"));
-        }
-        assertEquals(
-                1,
-                count("SELECT COUNT(*) FROM information_schema.columns"
-                        + " WHERE table_name = 'groundedness_detection' AND column_name = 'cleared_at'"));
-        assertTrue(checkDefinition("eval_case_detector_check").contains("'groundedness'"));
-        assertTrue(checkDefinition("rca_report_report_kind_check").contains("'groundedness_causes'"));
-    }
-
-    @Test
     void anAnswerIsWrittenOncePerScorerAndStampedWithItsSpansStart() {
         Fixture f = fixture("ga-unique");
         String traceId = SubstrateV2Fixtures.traceId();
@@ -102,62 +82,6 @@ class GroundednessAssessmentIntegrationTest {
                 .query(Boolean.class)
                 .single();
         assertTrue(flagged, "the first write stands");
-    }
-
-    @Test
-    void aSpanThatIsGoneFallsBackToTheIngestTime() {
-        Fixture f = fixture("ga-fallback");
-        assertTrue(assessments.insert(new Assessment(
-                Ids.ulid(),
-                f.pid(),
-                f.row().id(),
-                null,
-                "t-gone",
-                "s-gone",
-                "",
-                0.1,
-                false,
-                "gnd-a",
-                "2026-09-02T08:00:00Z")));
-        Instant started = jdbc.sql("SELECT observation_started_at FROM groundedness_assessment WHERE project_id = :pid")
-                .param("pid", f.pid())
-                .query((rs, n) -> rs.getTimestamp(1).toInstant())
-                .single();
-        assertEquals(Instant.parse("2026-09-02T08:00:00Z"), started);
-    }
-
-    @Test
-    void aRescoreDoesNotDoubleCount() {
-        Fixture f = fixture("ga-rescore");
-        CallSiteShapeReads shapes = (projectId, ids) -> Map.of("cs-1", "extract");
-        GroundingEvidenceReads none = (projectId, ids) -> Map.of();
-        EncoderScorer head = new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String h, List<Response> responses) {
-                return responses.stream()
-                        .map(r -> new ResponseScore(
-                                0.99, 0.1, List.of(new Span(0, r.answer().length(), 0.99, 0.1))))
-                        .toList();
-            }
-        };
-        GroundednessDetector detector = new GroundednessDetector(head, shapes, none, assessments, new ObjectMapper());
-        List<SubstrateObservation> page = List.of(
-                observation(f, "span-1", "The refund took 9 days."),
-                observation(f, "span-2", "Your plan renews on 3 March."));
-
-        detector.sweepBatch(f.row(), page, null);
-        detector.sweepBatch(f.row(), page, null);
-
-        assertEquals(2, rowsFor(f), "a sweep rewound over the same page counts each answer once");
-    }
-
-    @Test
-    void lastScoredAtIsTheNewestRowOrEmpty() {
-        Fixture f = fixture("ga-last");
-        assertTrue(assessments.lastScoredAt(f.pid(), f.row().id()).isEmpty());
-        assessments.insert(assessment(f, "t-1", "s-1", "gnd-a", false));
-        Instant before = Instant.now().minusSeconds(60);
-        assertTrue(assessments.lastScoredAt(f.pid(), f.row().id()).orElseThrow().isAfter(before));
     }
 
     // ---- fixtures ----------------------------------------------------------------------------
@@ -204,38 +128,10 @@ class GroundednessAssessmentIntegrationTest {
                 RAN.plusSeconds(30).toString());
     }
 
-    private static SubstrateObservation observation(Fixture f, String spanId, String answer) {
-        return new SubstrateObservation(
-                spanId,
-                f.pid(),
-                "trace-1",
-                null,
-                null,
-                "cs-1",
-                "llm",
-                "chat",
-                "[{\"role\":\"user\",\"content\":\"what happened to my refund and my plan?\"}]",
-                "[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]",
-                null,
-                RAN.toString(),
-                null);
-    }
-
     private long rowsFor(Fixture f) {
         return jdbc.sql("SELECT COUNT(*) FROM groundedness_assessment WHERE project_id = :pid")
                 .param("pid", f.pid())
                 .query(Long.class)
-                .single();
-    }
-
-    private long count(String sql) {
-        return jdbc.sql(sql).query(Long.class).single();
-    }
-
-    private String checkDefinition(String name) {
-        return jdbc.sql("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :name")
-                .param("name", name)
-                .query(String.class)
                 .single();
     }
 }

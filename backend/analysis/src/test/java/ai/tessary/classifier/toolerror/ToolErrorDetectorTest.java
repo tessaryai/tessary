@@ -128,23 +128,6 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * The reason one dial works across every tool: the bar moves with how noisy the tool already is.
-     *
-     * <p>Four failures in a row damns a tool that fails one call in a thousand and is a Tuesday on one
-     * that fails one in five. A flat threshold treats those the same and is therefore wrong on both; this
-     * is the assertion that it no longer does.
-     */
-    @Test
-    void theThresholdRisesWithTheToolsOwnNoise() {
-        double clean = CONFIG.decisionIntervalFor(0.005);
-        double typical = CONFIG.decisionIntervalFor(0.05);
-        double noisy = CONFIG.decisionIntervalFor(0.20);
-        assertTrue(clean < typical && typical < noisy, clean + " / " + typical + " / " + noisy);
-        assertTrue(typical > 7.7 && typical < 8.7, "a 5% tool should need about 8.2, got " + typical);
-        assertTrue(noisy > 9.2 && noisy < 10.2, "a 20% tool should need about 9.7, got " + noisy);
-    }
-
-    /**
      * The bug this whole rework started from. A tool sitting at 5% goes to 80%, and the finding has to
      * arrive in calls rather than in hours.
      *

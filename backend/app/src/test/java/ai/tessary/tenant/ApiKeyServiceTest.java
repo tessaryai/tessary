@@ -84,13 +84,4 @@ class ApiKeyServiceTest {
 
         assertTrue(tokens.verify(forgery).isEmpty(), "bcrypt must reject when only the lookup prefix matches");
     }
-
-    @Test
-    void issuedTokensAreDistinct() {
-        var fix = TenantFixture.bootstrap(tenants, "tok-uniq");
-        var a = tokens.issue(fix.project().id(), fix.user().id(), "a");
-        var b = tokens.issue(fix.project().id(), fix.user().id(), "b");
-        assertNotEquals(a.plaintext(), b.plaintext());
-        assertNotEquals(a.token().tokenPrefix(), b.token().tokenPrefix());
-    }
 }

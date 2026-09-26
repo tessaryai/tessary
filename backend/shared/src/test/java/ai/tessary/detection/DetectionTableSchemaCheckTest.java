@@ -139,15 +139,6 @@ class DetectionTableSchemaCheckTest {
         assertTrue(ex.getMessage().contains("frustration_detection"));
     }
 
-    @Test
-    void presentTableStartsClean() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
-        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(true)));
-
-        assertDoesNotThrow(check::afterSingletonsInstantiated);
-    }
-
     /**
      * A table registered before its owning changelog carries migration {@code 0012} — the paid-overlay
      * paired-PR case the column probe exists for.

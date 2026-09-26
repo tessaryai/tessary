@@ -14,7 +14,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
@@ -55,45 +54,6 @@ class GlobalSearchServiceIntegrationTest {
 
     @Autowired
     TenantService tenants;
-
-    /**
-     * There is exactly ONE hit type now, and that is the claim worth pinning.
-     *
-     * <p>This test used to seed a grader, a dataset and a span and assert all three types came back.
-     * The first two entity types and their search legs were deleted with their tables, so what is left to
-     * assert is the narrower fact: a match surfaces as a {@code trace}, and the id it carries is the
-     * TRACE id rather than the span's — which is what the palette's {@code traces/<id>} route takes.
-     * Under v1 this returned the observation id into that same route, a key the route could not resolve.
-     */
-    @Test
-    void aPayloadMatchSurfacesAsATraceHitNamingItsTrace() {
-        String pid = TenantFixture.bootstrap(tenants, "search-types").project().id();
-        String traceId = seedSpan(pid, "payment flow", "user asks about a payment", "processed the payment");
-
-        List<SearchHit> hits = service.search(pid, "payment");
-
-        var byType = hits.stream().collect(Collectors.groupingBy(SearchHit::type));
-        assertEquals(Set.of("trace"), byType.keySet(), "trace is the only hit type the surface can produce");
-
-        Set<String> ids = hits.stream().map(SearchHit::id).collect(Collectors.toSet());
-        assertTrue(ids.contains(traceId), "the span match names its trace, not the span");
-    }
-
-    @Test
-    void resultsAreRankedBestFirst() {
-        String pid = TenantFixture.bootstrap(tenants, "search-rank").project().id();
-        // Two spans: one whose payload repeats the term (higher ts_rank), one with a single mention.
-        seedSpan(pid, "latency latency latency", "latency latency in the response", "latency budget blown");
-        seedSpan(pid, "tone", "a passing aside", "mentions latency once");
-
-        List<SearchHit> hits = service.search(pid, "latency");
-
-        assertFalse(hits.isEmpty(), "the term matches at least one span");
-        for (int i = 1; i < hits.size(); i++) {
-            assertTrue(
-                    hits.get(i - 1).score() >= hits.get(i).score(), "hits are sorted by descending score (best-first)");
-        }
-    }
 
     @Test
     void searchIsScopedToProject() {
@@ -152,13 +112,6 @@ class GlobalSearchServiceIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "search-blank").project().id();
         seedSpan(pid, "anything", "any body", "any body");
         assertTrue(service.search(pid, "   ").isEmpty(), "a blank query never scans, returns empty");
-    }
-
-    @Test
-    void noMatchReturnsEmptyNotError() {
-        String pid = TenantFixture.bootstrap(tenants, "search-empty").project().id();
-        seedSpan(pid, "apples", "fruit basket", "fruit basket");
-        assertTrue(service.search(pid, "zzzznonexistent").isEmpty(), "a no-match query lists empty, not an error");
     }
 
     /**

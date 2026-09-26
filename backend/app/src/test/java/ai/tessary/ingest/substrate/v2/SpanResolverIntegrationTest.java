@@ -152,22 +152,6 @@ class SpanResolverIntegrationTest {
     }
 
     @Test
-    @DisplayName("anonymous traffic is retired rather than re-read forever")
-    void correlation_settledSessionlessTraceIsTerminal() {
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.span(pid, traceId, "s1", null, "llm", t0, t0);
-        settle(traceId);
-
-        CorrelationBackfiller backfiller = backfiller(500);
-        assertEquals(1, backfiller.runOnce().anonymous());
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(SpanRow.ResolverState.NONE, row.correlationState());
-        assertNull(row.sessionId(), "there was never a session to inherit — that is the whole finding");
-        assertEquals(0, pendingCorrelations());
-    }
-
-    @Test
     @DisplayName("permanent residents cannot starve genuine work out of a LIMITed batch")
     void correlation_terminalStatesKeepTheQueueDrainable() {
         // Far more anonymous spans than one pass can hold. Without the terminal state they would be

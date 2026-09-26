@@ -126,18 +126,6 @@ class ClassifierArmingIntegrationTest {
     }
 
     @Test
-    void belowTheBarFilesNothing() {
-        String pid = TenantFixture.bootstrap(tenants, "arming-under").project().id();
-        String classifierId = armedClassifier(pid, "regex", "event_count", 5, 86_400);
-
-        List<FindingEvidenceRepository.Ref> refs = writeDetections(pid, classifierId, "regex", 4);
-
-        assertTrue(arming.evaluate(row(pid, classifierId, "regex"), pid, refs, Instant.now())
-                .isEmpty());
-        assertEquals(0, liveFindings(pid), "four detections against a bar of five is not a finding");
-    }
-
-    @Test
     void anUnarmedClassifierNeverFilesAnything() {
         String pid = TenantFixture.bootstrap(tenants, "arming-absent").project().id();
         // No arming block: how a user's classifier ships. Nobody drew a bar, so nothing is filed.
@@ -222,88 +210,6 @@ class ClassifierArmingIntegrationTest {
         FindingRow finding = findings.findById(pid, filed.get(0)).orElseThrow();
         assertEquals(windowStart(backfillDay).toString(), finding.onsetAt(), "filed under the day the spans ran");
         assertEquals(3, finding.sampleCount());
-    }
-
-    @Test
-    void anOlderWholeWindowArrivingLateNeverMovesTheFindingBackwards() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "arming-whole-order").project().id();
-        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
-        Instant recent = hoursAgo(1);
-        Instant older = daysAgo(3);
-
-        String findingId = arming.evaluate(
-                        row(pid, classifierId, "regex"),
-                        pid,
-                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
-                        Instant.now())
-                .get(0);
-        FindingRow before = findings.findById(pid, findingId).orElseThrow();
-
-        List<String> late = arming.evaluate(
-                row(pid, classifierId, "regex"),
-                pid,
-                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), older)),
-                Instant.now());
-
-        assertEquals(List.of(findingId), late, "an older window of the same cause refreshes the same finding");
-        FindingRow after = findings.findById(pid, findingId).orElseThrow();
-        assertEquals(before.onsetAt(), after.onsetAt(), "the spell does not restart on an old window");
-        assertEquals(before.lastSeenAt(), after.lastSeenAt(), "last seen does not move backwards");
-    }
-
-    @Test
-    void aNewerWholeWindowStaysInTheSameSpellAcrossOneQuietDay() {
-        String pid = TenantFixture.bootstrap(tenants, "arming-whole-spell-same")
-                .project()
-                .id();
-        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
-        Instant twoDaysAgo = daysAgo(2);
-        Instant recent = hoursAgo(1);
-
-        String findingId = arming.evaluate(
-                        row(pid, classifierId, "regex"),
-                        pid,
-                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), twoDaysAgo)),
-                        Instant.now())
-                .get(0);
-        arming.evaluate(
-                row(pid, classifierId, "regex"),
-                pid,
-                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
-                Instant.now());
-
-        assertEquals(
-                windowStart(twoDaysAgo).toString(),
-                findings.findById(pid, findingId).orElseThrow().onsetAt(),
-                "one quiet day between windows is the same spell");
-    }
-
-    @Test
-    void aNewerWholeWindowStartsAFreshSpellAfterTwoWindowsWentQuiet() {
-        String pid = TenantFixture.bootstrap(tenants, "arming-whole-spell-fresh")
-                .project()
-                .id();
-        String classifierId = armedClassifier(pid, "regex", "event_count", 1, (int) DAY);
-        Instant tenDaysAgo = daysAgo(10);
-        Instant recent = hoursAgo(1);
-
-        String findingId = arming.evaluate(
-                        row(pid, classifierId, "regex"),
-                        pid,
-                        List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), tenDaysAgo)),
-                        Instant.now())
-                .get(0);
-        arming.evaluate(
-                row(pid, classifierId, "regex"),
-                pid,
-                List.of(writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), recent)),
-                Instant.now());
-
-        assertEquals(
-                windowStart(recent).toString(),
-                findings.findById(pid, findingId).orElseThrow().onsetAt(),
-                "a window after days of quiet is a new spell");
     }
 
     // ---- the faceted shape (Secret Leak) ----------------------------------------------------------

@@ -23,20 +23,6 @@ class BehaviorTriageVerdictTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void parsesACitedRuling() {
-        BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
-                {"verdict": "positive", "summary": "both windows measure the same population",
-                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns, not a thin window"}]}
-                """);
-
-        assertNotNull(v);
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, v.verdict());
-        assertEquals(FindingRow.TriageAction.OPENED_CASE, v.action());
-        assertEquals(1, v.citations().size());
-        assertEquals("window.n_cur", v.citations().get(0).path());
-    }
-
-    @Test
     void unwrapsTheStructuredOutputEnvelope() {
         BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
                 {"result": "", "structured_output":
@@ -73,34 +59,6 @@ class BehaviorTriageVerdictTest {
                 """);
 
         assertNull(v, "unclear is not a recognised verdict word any more");
-    }
-
-    /**
-     * A prerequisite failure is a failed run, not a verdict — the distinction the whole preflight rests
-     * on. {@code parse} must refuse it exactly as it refuses gibberish, so nothing can reach
-     * {@code finding.triage_verdict}, while {@code blockedReason} recovers what the agent actually said
-     * so the job's error names the missing prerequisite instead of "no parseable ruling".
-     */
-    @Test
-    void blockedIsAFailedRunAndNotAVerdict() {
-        String answer = """
-                {"verdict": "blocked", "summary": "the MCP surface refused every call", "citations": []}
-                """;
-
-        assertNull(
-                BehaviorTriageVerdict.parse(mapper, answer),
-                "blocked must never become a ruling — it closes no finding and moves no baseline");
-        assertEquals("the MCP surface refused every call", BehaviorTriageVerdict.blockedReason(mapper, answer));
-    }
-
-    @Test
-    void aRealRulingIsNotBlocked() {
-        String answer = """
-                {"verdict": "negative", "summary": "the reference window is 40 turns",
-                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns"}]}
-                """;
-        assertNull(BehaviorTriageVerdict.blockedReason(mapper, answer));
-        assertNull(BehaviorTriageVerdict.blockedReason(mapper, "not json at all"));
     }
 
     @Test

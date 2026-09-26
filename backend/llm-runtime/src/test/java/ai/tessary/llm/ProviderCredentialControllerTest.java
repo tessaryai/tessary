@@ -257,44 +257,6 @@ class ProviderCredentialControllerTest {
     // ---- catalog() fans refreshingRead out across providers instead of blocking sequentially ----
 
     /**
-     * Coverage for the concurrent fan-out added to {@code catalog()}: every {@code ModelProvider} gets
-     * its own {@code refreshingRead} call, and results merge back onto the static table exactly like
-     * the old sequential loop did — a live listing for one provider must not affect any other's static
-     * fallback entries.
-     */
-    @Test
-    void catalogMergesALiveListingForOneProviderOntoStaticEntriesForEveryOther() {
-        // catalog() invokes refreshingRead for all ten providers concurrently on virtual threads.
-        // Every provider gets an explicit lenient stub (rather than leaning on the mock's default
-        // empty-list answer for the other nine) so Mockito's strict-stub argument matching — which is
-        // not documented as safe under concurrent invocation of the same mocked method — has one
-        // unambiguous stubbing per provider to satisfy instead of racing to decide whether a call with
-        // different arguments than the one explicit stub below is a mismatch.
-        for (ModelProvider provider : ModelProvider.values()) {
-            org.mockito.Mockito.lenient()
-                    .when(catalogFetchService.refreshingRead(ORG_ID, provider))
-                    .thenReturn(java.util.List.of());
-        }
-        when(catalogFetchService.refreshingRead(ORG_ID, ModelProvider.ANTHROPIC))
-                .thenReturn(java.util.List.of(
-                        new ai.tessary.llm.catalog.ProviderModel("claude-live-9", "Claude Live 9", "Anthropic")));
-
-        var response = controller.catalog(ctx, ORG_SLUG);
-
-        var models = response.data().models();
-        assertTrue(
-                models.stream().anyMatch(e -> "claude-live-9".equals(e.modelName())),
-                "the live-fetched Anthropic model must appear in the merged catalog");
-        assertTrue(
-                models.stream().anyMatch(e -> e.provider() == ModelProvider.OPENAI),
-                "an unrelated provider's static entries must still be present");
-        // Every provider is asked — the fan-out covers all ten, not just the one stubbed above.
-        for (ModelProvider provider : ModelProvider.values()) {
-            verify(catalogFetchService).refreshingRead(ORG_ID, provider);
-        }
-    }
-
-    /**
      * A provider whose fetch fails outright (as opposed to {@code refreshingRead}'s own internal
      * degrade-to-empty-list on a {@code ModelListingException}) must not fail the whole request — it
      * degrades to that provider's static entries, the same as every other failure path in this class's

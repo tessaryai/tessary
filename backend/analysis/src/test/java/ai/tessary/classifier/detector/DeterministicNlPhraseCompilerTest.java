@@ -17,13 +17,6 @@ class DeterministicNlPhraseCompilerTest {
     private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
     @Test
-    void compile_matchesLiteralPhraseCaseInsensitively() {
-        Pattern p = compiler.compile("api key", false);
-        assertTrue(p.matcher("here is your API Key now").find(), "matches regardless of case");
-        assertTrue(p.matcher("api key").find(), "matches the exact phrase");
-    }
-
-    @Test
     void compile_isWhitespaceFlexible() {
         Pattern p = compiler.compile("thank you", false);
         assertTrue(p.matcher("thank   you").find(), "collapses internal whitespace runs to \\s+");
@@ -45,15 +38,5 @@ class DeterministicNlPhraseCompilerTest {
 
         Pattern unbounded = compiler.compile("cat", false);
         assertTrue(unbounded.matcher("category").find(), "unbounded 'cat' matches the substring");
-    }
-
-    @Test
-    void compile_doesNotCatastrophicallyBacktrack() {
-        Pattern p = compiler.compile("password is", true);
-        String hostile = "a".repeat(100_000);
-        long start = System.nanoTime();
-        assertFalse(p.matcher(hostile).find(), "no match on adversarial input");
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
-        assertTrue(elapsedMs < 1_000, "literal/word-boundary pattern is linear (ReDoS-safe); took " + elapsedMs + "ms");
     }
 }

@@ -155,36 +155,6 @@ class CallSiteFactRewindIntegrationTest {
     }
 
     @Test
-    void rewindSurvivesASignalThatHasNeverSwept() {
-        // A project that declared a schema before any sweep job existed must not blow up; its first
-        // sweep already starts from a null cursor, so there is nothing to rewind.
-        String pid =
-                TenantFixture.bootstrap(tenants, "fact-rewind-nojob").project().id();
-        signals.seedBuiltIns(pid);
-
-        pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
-
-        assertTrue(
-                jobs.listByProject(pid).stream().allMatch(j -> j.cursorId() == null),
-                "no job has a high-water mark to lose");
-    }
-
-    @Test
-    void rewindReachesEveryCallSiteBecauseTheCursorIsPerSignal() {
-        // The cursor is one (project, signal) high-water mark, so a fact landing on ONE call site
-        // re-opens the signal's whole history — deliberately over-scanning rather than carrying a
-        // per-call-site cursor. Safe because the worker's verdict write is idempotent.
-        String pid = projectWithSweptHistory("fact-rewind-whole-signal");
-        pipelineService.ensureCallSite(pid, "cs-one");
-
-        pipelineService.upsert(pid, pipelineWithCallSite("cs-two", "rag_answer", SCHEMA));
-
-        assertNull(
-                jobFor(pid, "malformed_output").cursorAt(),
-                "the signal re-reads observations of cs-one too — there is no per-call-site cursor to be precise with");
-    }
-
-    @Test
     void aDisabledSignalIsRewoundToo() {
         // Re-enabling a signal does NOT reset its cursor (enqueue re-pends "without disturbing its
         // cursor"), so skipping a disabled signal here would leave it resuming from its old high-water

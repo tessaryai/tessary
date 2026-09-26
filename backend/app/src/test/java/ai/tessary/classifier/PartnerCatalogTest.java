@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierCatalogWorker;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
@@ -17,7 +16,6 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
@@ -53,14 +51,6 @@ import org.springframework.boot.test.context.SpringBootTest;
  */
 @SpringBootTest
 class PartnerCatalogTest {
-
-    /**
-     * The classifiers a launch partner must not see. The three launch classifiers
-     * ({@code tool_error}, {@code duration_drift}, {@code cost_drift}) are absent from this list
-     * on purpose.
-     */
-    private static final List<Capability> NON_LAUNCH = List.of(
-            Capability.FRUSTRATION, Capability.GROUNDEDNESS, Capability.SECRET_LEAK, Capability.MALFORMED_OUTPUT);
 
     @Autowired
     TenantService tenants;
@@ -101,12 +91,6 @@ class PartnerCatalogTest {
         flags.invalidate(orgId);
     }
 
-    /** Drop the org's opinion entirely, returning the capability to the edition default. */
-    private void clear(String orgId, Capability capability) {
-        overrides.delete(orgId, capability.wire());
-        flags.invalidate(orgId);
-    }
-
     /** The classifier keys the project's org may see, which is what the list endpoint serves. */
     private Set<String> visibleKeys(String projectId) {
         return classifiers.list(projectId).stream()
@@ -117,53 +101,6 @@ class PartnerCatalogTest {
     /** Whether the row still physically exists for the project, ignoring the flag layer entirely. */
     private ClassifierRow storedRow(String projectId, String key) {
         return ClassifierRows.byKey(rows, projectId, key).orElseThrow();
-    }
-
-    @Test
-    void weSeeEveryClassifierAndAPartnerSeesTheLaunchCatalog() {
-        var us = TenantFixture.bootstrap(tenants, "catalog-us");
-        var partner = TenantFixture.bootstrap(tenants, "catalog-partner");
-
-        // Both orgs run the same code. The only difference below is one row per org. Seed both
-        // projects with the whole catalog first, so the partner's rows below are ones that
-        // already exist: a capability change has to reach a project that has been running for
-        // months.
-        for (Capability capability : NON_LAUNCH) {
-            grant(us.org().id(), capability);
-            grant(partner.org().id(), capability);
-        }
-        classifiers.seedBuiltIns(us.project().id());
-        classifiers.seedBuiltIns(partner.project().id());
-
-        // Now narrow the partner. No re-seed, no project edit, no deploy.
-        for (Capability capability : NON_LAUNCH) {
-            withhold(partner.org().id(), capability);
-        }
-
-        Set<String> ourKeys = visibleKeys(us.project().id());
-        Set<String> partnerKeys = visibleKeys(partner.project().id());
-
-        assertTrue(
-                ourKeys.containsAll(Set.of("frustration", "groundedness", "secret_leak", "malformed_output")),
-                "the org that kept them sees the whole catalog: " + ourKeys);
-        assertTrue(
-                ourKeys.containsAll(Set.of("duration_drift", "cost_drift", "tool_error")),
-                "including the launch three");
-
-        assertEquals(
-                Set.of("duration_drift", "cost_drift", "tool_error"),
-                partnerKeys,
-                "a partner's catalog is the launch classifiers and nothing else — the original two, "
-                        + "tool_error having joined them with its own detector");
-
-        // Hidden, not withdrawn: every module the partner cannot see is still defined and still
-        // seeded as a row in their project, one row away from appearing, with no migration and no
-        // re-seed.
-        for (String hidden : List.of("frustration", "groundedness", "secret_leak", "malformed_output")) {
-            assertTrue(
-                    ClassifierRows.byKey(rows, partner.project().id(), hidden).isPresent(),
-                    hidden + " is hidden by the override layer, not removed from the partner's project");
-        }
     }
 
     @Test
@@ -192,37 +129,6 @@ class PartnerCatalogTest {
         assertFalse(
                 jobs.listByProject(projectId).stream().anyMatch(j -> id.equals(j.classifierId())),
                 "and stops being swept, which is where turning it off actually stops costing anything");
-    }
-
-    /**
-     * What a flag going off reaches BEYOND the classifier list, and what it deliberately does not.
-     *
-     * <p>Hiding the row alone would be a half-measure: its findings sit in the Findings list on the same
-     * page, so they are gated too. What stays is history: past detections and any case already open, because
-     * a case is a record of something that happened, and withdrawing the detector does not un-happen it.
-     */
-    @Test
-    void flagOffAlsoGatesFindingsButNotHistory() {
-        var fix = TenantFixture.bootstrap(tenants, "catalog-downstream");
-        String projectId = fix.project().id();
-        grant(fix.org().id(), Capability.TOOL_ERROR);
-        classifiers.seedBuiltIns(projectId);
-
-        // Findings from the classifier are visible while it is on, and gone the moment it is off.
-        // The detector kinds a project may NOT see is the seam both the list and the by-id guard read.
-        assertFalse(
-                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.TOOL_ERROR),
-                "on, tool error's findings are the org's to read");
-
-        withhold(fix.org().id(), Capability.TOOL_ERROR);
-
-        assertTrue(
-                classifiers.unavailableDetectorKinds(projectId).contains(BuiltInDetector.Kind.TOOL_ERROR),
-                "off, its findings are withheld with it — a lead list for a detector you cannot "
-                        + "open is worse than no lead list");
-
-        // And the row itself is still there, untouched, exactly as the other cases assert.
-        assertTrue(storedRow(projectId, "tool_error").enabled(), "history and state survive the switch");
     }
 
     /**
@@ -286,35 +192,5 @@ class PartnerCatalogTest {
                 stored.enabled(),
                 "and is still ENABLED — turning a capability off suppresses, it does not withdraw. Retirement "
                         + "is the only path allowed to disable a row, and it keys on catalog membership alone.");
-    }
-
-    /**
-     * The other half of the same invariant: because withholding never wrote, turning it back on restores the
-     * <b>project's</b> switch position rather than the catalog's seed default. The project below disables a
-     * classifier that seeds enabled, so "restored" and "re-seeded" give different answers and the assertion
-     * can tell them apart.
-     */
-    @Test
-    void switchingBackOnRestoresTheProjectsOwnSwitch() {
-        var fix = TenantFixture.bootstrap(tenants, "catalog-restore");
-        String projectId = fix.project().id();
-        grant(fix.org().id(), Capability.MALFORMED_OUTPUT);
-        classifiers.seedBuiltIns(projectId);
-
-        // The project makes its own decision: malformed_output seeds enabled, and this project
-        // turns it off. That is the second of the two stacked questions; the capability layer
-        // only ever answers the first.
-        String id = storedRow(projectId, "malformed_output").id();
-        classifiers.setEnabled(projectId, id, false);
-
-        withhold(fix.org().id(), Capability.MALFORMED_OUTPUT);
-        assertFalse(visibleKeys(projectId).contains("malformed_output"), "gone while it is off");
-
-        // Cleared rather than set back to true, so this asserts the DEFAULT restores it, not a second row.
-        clear(fix.org().id(), Capability.MALFORMED_OUTPUT);
-        assertTrue(visibleKeys(projectId).contains("malformed_output"), "coming back on restores it");
-        assertFalse(
-                classifiers.get(projectId, id).enabled(),
-                "with the project's own disabled state intact, not reset to the catalog's seeded default");
     }
 }

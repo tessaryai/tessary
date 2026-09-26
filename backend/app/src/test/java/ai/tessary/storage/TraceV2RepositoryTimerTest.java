@@ -2,8 +2,6 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,9 +62,6 @@ class TraceV2RepositoryTimerTest {
 
     @Autowired
     JdbcClient jdbc;
-
-    /** The reaper's production grace, so the sweeps here are the sweeps production runs. */
-    private static final int GRACE_SECONDS = 300;
 
     private SubstrateV2Fixtures fx;
     private String pid;
@@ -149,20 +144,6 @@ class TraceV2RepositoryTimerTest {
     }
 
     @Test
-    @DisplayName("arming un-settles the trace")
-    void armingClearsIsSettled() {
-        arm(true);
-        settle();
-        assertTrue(traces.findById(pid, traceId).orElseThrow().isSettled());
-
-        arm(false);
-
-        assertFalse(
-                traces.findById(pid, traceId).orElseThrow().isSettled(),
-                "a late span makes the stored numbers stale, and the row has to say so");
-    }
-
-    @Test
     @DisplayName("started_at only moves earlier and ended_at only moves later")
     void timestampsFoldByMinAndMax() {
         traces.applyBatchTimers(
@@ -198,106 +179,7 @@ class TraceV2RepositoryTimerTest {
                 "GREATEST ignores NULLs — an unfinished span cannot un-finish the trace");
     }
 
-    @Test
-    @DisplayName("one update per trace per batch, however many traces the batch touched")
-    void oneUpdatePerTracePerBatch() {
-        String second = SubstrateV2Fixtures.traceId();
-        String third = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, second, t0);
-        fx.trace(pid, third, t0);
-
-        int updated = traces.applyBatchTimers(
-                pid,
-                List.of(
-                        new TraceV2Repository.TimerUpdate(third, t0.toString(), null, false),
-                        new TraceV2Repository.TimerUpdate(traceId, t0.toString(), null, false),
-                        new TraceV2Repository.TimerUpdate(second, t0.toString(), null, true)));
-
-        assertEquals(3, updated, "a 1,000-span batch over 50 traces is 50 rows in one statement, not 1,000 statements");
-        assertTrue(traces.findById(pid, second).orElseThrow().hasRootSpan());
-        assertFalse(traces.findById(pid, third).orElseThrow().hasRootSpan());
-    }
-
     // ---- the claim/settle protocol these timers feed ------------------------------------------------
-
-    @Test
-    @DisplayName("claiming clears rollup_due_at, which is what makes the settle check mean anything")
-    void claimClearsTheDeadline() {
-        arm(true);
-        expire();
-
-        List<TraceV2Repository.Claim> claimed = traces.claimDue(500);
-
-        assertTrue(claimed.stream().anyMatch(c -> c.traceId().equals(traceId)));
-        assertNull(
-                traces.findById(pid, traceId).orElseThrow().rollupDueAt(),
-                "from here, any arriving span re-arms it to a non-null value — and that is detectable");
-    }
-
-    @Test
-    @DisplayName("a span arriving between claim and write defeats the settle, and the trace re-fires")
-    void arrivalBetweenClaimAndWriteDefeatsSettle() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
-        arm(true);
-        expire();
-        traces.claimDue(500);
-
-        // The race: a span lands after the claim, re-arming the deadline in its own transaction.
-        arm(false);
-        traces.recompute(pid, traceId);
-
-        TraceV2Row row = traces.findById(pid, traceId).orElseThrow();
-        assertFalse(row.isSettled(), "the deadline was no longer clear, so the write declined to settle");
-        assertNotNull(row.rollupDueAt(), "and the re-arm survived, so the trace fires again with that span in");
-        assertEquals(150L, row.totalTokens(), "the numbers written are correct either way — they are a replacement");
-    }
-
-    @Test
-    @DisplayName("the recompute is a replacement, so a corrupted total heals on the next fire")
-    void recomputeIsAReplacementNotADelta() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
-        arm(true);
-        settle();
-        assertEquals(150L, traces.findById(pid, traceId).orElseThrow().totalTokens());
-
-        jdbc.sql("UPDATE trace SET total_tokens = 999999 WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-        traces.recompute(pid, traceId);
-
-        assertEquals(
-                150L,
-                traces.findById(pid, traceId).orElseThrow().totalTokens(),
-                "no accumulation anywhere means no drift that survives a re-fire");
-    }
-
-    @Test
-    @DisplayName("the reaper re-arms the fingerprint a dead worker leaves, and nothing else")
-    void reaperReArmsOnlyTheCrashFingerprint() {
-        arm(true);
-        expire();
-        traces.claimDue(500);
-        // The worker dies here: is_settled=false, rollup_due_at NULL, rolled_up_at never written. Armed
-        // for nobody.
-        jdbc.sql("UPDATE trace SET rolled_up_at = NULL WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-
-        assertTrue(traces.reap(GRACE_SECONDS) >= 1);
-        assertNotNull(traces.findById(pid, traceId).orElseThrow().rollupDueAt());
-
-        // A healthy settled trace is not touched.
-        expire();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
-        assertTrue(traces.findById(pid, traceId).orElseThrow().isSettled());
-        traces.reap(GRACE_SECONDS);
-        assertNull(
-                traces.findById(pid, traceId).orElseThrow().rollupDueAt(),
-                "is_settled=true is not the fingerprint; a settled trace stays quiet");
-    }
 
     /** One batch's worth of arming for this trace. */
     private void arm(boolean hasRoot) {

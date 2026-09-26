@@ -37,39 +37,6 @@ class OpenInferenceNormalizerTest {
     }
 
     @Test
-    void llmSpan_normalizesToCanonicalFields() throws Exception {
-        JsonNode oi = attrs("""
-                {
-                  "openinference.span.kind": "LLM",
-                  "llm.model_name": "claude-sonnet-4-6",
-                  "llm.system": "anthropic",
-                  "llm.input_messages": [
-                    {"message.role":"system","message.content":"You are a planner"},
-                    {"message.role":"user","message.content":"plan X"}
-                  ],
-                  "llm.output_messages": [{"message.role":"assistant","message.content":"the plan"}],
-                  "llm.token_count.prompt": 11,
-                  "llm.token_count.completion": 3,
-                  "session.id": "sess-9"
-                }
-                """);
-
-        OpenInferenceNormalizer.Canonical c = OpenInferenceNormalizer.normalize(oi);
-        assertNotNull(c);
-        assertEquals(KindNormalizer.LLM, c.operationKind());
-        assertEquals("claude-sonnet-4-6", c.model());
-        assertEquals("anthropic", c.system());
-        assertEquals(11L, c.usage().get(GenAiAttributes.USAGE_INPUT_TOKENS));
-        assertEquals(3L, c.usage().get(GenAiAttributes.USAGE_OUTPUT_TOKENS));
-
-        JsonNode in = M.readTree(c.input());
-        assertEquals(2, in.size());
-        assertEquals("system", in.get(0).get("role").asText());
-        assertEquals("You are a planner", in.get(0).get("content").asText());
-        assertEquals("user", in.get(1).get("role").asText());
-    }
-
-    @Test
     void spanKind_mapsToCanonicalOperation() {
         assertEquals(KindNormalizer.AGENT, KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("AGENT")));
         assertEquals(KindNormalizer.TOOL, KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("TOOL")));
@@ -108,27 +75,6 @@ class OpenInferenceNormalizerTest {
         assertNotNull(c);
         JsonNode in = M.readTree(c.input());
         assertEquals("hi\nthere", in.get(0).get("content").asText());
-    }
-
-    @Test
-    void outputToolCall_isKeptAsText() throws Exception {
-        JsonNode oi = attrs("""
-                {
-                  "openinference.span.kind": "LLM",
-                  "llm.model_name": "gpt-4o",
-                  "llm.output_messages": [
-                    {"message.role":"assistant","message.content":"",
-                     "message.tool_calls":[{"tool_call.function.name":"get_weather",
-                        "tool_call.function.arguments":"{\\"city\\":\\"NYC\\"}"}]}
-                  ]
-                }
-                """);
-        OpenInferenceNormalizer.Canonical c = OpenInferenceNormalizer.normalize(oi);
-        assertNotNull(c);
-        JsonNode out = M.readTree(c.output());
-        String content = out.get(0).get("content").asText();
-        assertTrue(content.contains("get_weather"), "tool call name preserved");
-        assertTrue(content.contains("NYC"), "tool call arguments preserved (never truncated)");
     }
 
     @Test

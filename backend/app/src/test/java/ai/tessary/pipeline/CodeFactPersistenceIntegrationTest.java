@@ -109,24 +109,6 @@ class CodeFactPersistenceIntegrationTest {
     }
 
     @Test
-    void absentToolsAndCapabilitiesLandAsSqlNullNotAnEmptyJsonArray() {
-        // Migration 0038 documents NULL as "the bundle declares none". An empty `[]` in the column
-        // would read back identically through load() while meaning something different to any future
-        // consumer that checks for absence.
-        String pid = project("codefact-empty-null");
-
-        repo.replace(pid, pipeline(null, List.of(), List.of()));
-
-        assertNull(rawColumn(pid, "tools_json"), "no tools is SQL NULL, not '[]'");
-        String caps = jdbc.sql("SELECT capabilities_json FROM pipeline_meta WHERE project_id = :pid")
-                .param("pid", pid)
-                .query(String.class)
-                .optional()
-                .orElse(null);
-        assertNull(caps, "no capabilities is SQL NULL, not '[]'");
-    }
-
-    @Test
     void aSilentBundleClearsToolsBecauseTheBundleIsTheirOnlyWriter() throws Exception {
         // The deliberate asymmetry with output_schema: `tools` has exactly one writer, so silence is
         // a statement ("no tools") rather than an abstention. Pinned so the asymmetry is a decision

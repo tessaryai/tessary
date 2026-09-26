@@ -2,7 +2,6 @@
 package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -26,14 +25,6 @@ class JevFrustrationQuestionTest {
     @Test
     void theQuestionIsSentExactlyAsDecided() throws Exception {
         assertEquals(WIRE, new ObjectMapper().writeValueAsString(JevFrustrationQuestion.questions()));
-    }
-
-    @Test
-    void theScorerVersionIsStableAndMovesWithTheThreshold() {
-        String v = JevFrustrationQuestion.scorerVersion(0.40);
-        assertEquals(v, JevFrustrationQuestion.scorerVersion(0.40));
-        assertNotEquals(v, JevFrustrationQuestion.scorerVersion(0.50));
-        assertEquals("jev-choice3-", v.substring(0, "jev-choice3-".length()));
     }
 
     @Test

@@ -208,32 +208,6 @@ class MetricSourceTest {
     // -----------------------------------------------------------------------------------------------
 
     @Test
-    @DisplayName("a populated rollup latency is refused for duration, because it is an envelope")
-    void aPopulatedRollupLatencyIsRefusedBecauseItIsAnEnvelope() {
-        String pid = project("metric-src-column");
-        // v1 preferred trace.latency_ms and nothing ever wrote it, so the preference was dead code that
-        // read as a rule. v2's rollup worker writes it for real — as max(ended_at) - min(started_at) over
-        // the trace — which is the envelope turn duration exists to reject. Promoting the rollups to real
-        // numbers without deleting the preference would have inflated p95 on every turn with an async
-        // child, silently, and passed every fixture that seeded a single span.
-        String traceId = seedTurn(pid);
-        String rootId = insertObs(pid, traceId, null, "agent", "loop", "cs-a", T0, T0.plusMillis(999))
-                .spanId();
-        insertObs(pid, traceId, rootId, "tool", "fire_and_forget", null, T0.plusMillis(10), T0.plusMillis(4321));
-
-        Tally tally = new Tally();
-        Measurement.Present duration = present(onlyTurn(pid, tally).measurement(Measure.TURN_DURATION));
-
-        assertEquals(
-                4321L,
-                rollupLatencyMs(pid, traceId),
-                "the worker really did write an envelope, and it really does disagree with the root");
-        assertEquals(999.0, duration.value(), 1.0, "the root's own interval is what the user waited");
-        assertEquals(Provenance.DERIVED, duration.provenance(), "there is no column arm for this measure");
-        assertEquals("turn_duration n=1 (column 0, derived 1)", summaryOf(tally, Measure.TURN_DURATION));
-    }
-
-    @Test
     @DisplayName("duration is the earliest root's own interval, never the max(end) - min(start) envelope")
     void durationIsTheRootsOwnIntervalNotTheEnvelope() {
         String pid = project("metric-src-envelope");

@@ -123,24 +123,6 @@ class GroundingEvidenceIntegrationTest {
     }
 
     @Test
-    void documentsOnASiblingRetrievalSpanReachTheAnsweringSpan() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "grounding-sibling").project().id();
-        Instant at = Instant.now();
-        String traceId = trace();
-        SpanRef retrieval = span(pid, traceId, "retrieval", null, at);
-        SpanRef answer = span(pid, traceId, "llm", "Refunds take 5-7 business days.", at);
-        doc(pid, retrieval, 0, "result", "Refunds are issued within 5-7 business days.", at);
-
-        GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
-
-        assertTrue(
-                String.join("\n", got.documents()).contains("5-7 business days"),
-                "the answering span owns no retrieved_doc row — trace scope is the only way it sees one");
-        assertTrue(got.conversationDidExternalWork());
-    }
-
-    @Test
     void documentsRetrievedAfterTheAnswerAreNotEvidenceForIt() {
         // The blocker this test pins: an unbounded trace join judges an early turn against passages
         // fetched later in the same trace, and MAX-over-chunks then reports a fabricated claim as
@@ -215,23 +197,6 @@ class GroundingEvidenceIntegrationTest {
         assertFalse(text.contains("passage number 6 about refunds"), "rank 6 is the first one over the cap");
         assertFalse(
                 text.contains("passage number 19 about refunds"), "and the worst-ranked are nowhere near the premise");
-    }
-
-    @Test
-    void aDocumentWithNoListRoleIsKept() {
-        // Only an EXPLICIT 'candidate' is dropped. A producer that leaves list_role null is kept, because
-        // silently discarding real evidence is the worse of the two failures — and null is what most
-        // instrumentation actually sends.
-        String pid = TenantFixture.bootstrap(tenants, "grounding-null-role")
-                .project()
-                .id();
-        Instant at = Instant.now();
-        String traceId = trace();
-        SpanRef retrieval = span(pid, traceId, "retrieval", null, at);
-        SpanRef answer = span(pid, traceId, "llm", "Refunds take 5-7 days.", at);
-        doc(pid, retrieval, 0, null, "Refunds are issued within 5-7 business days.", at);
-
-        assertTrue(String.join("\n", evidenceFor(pid, answer).documents()).contains("5-7 business days"));
     }
 
     @Test

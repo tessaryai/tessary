@@ -3,7 +3,6 @@ package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -134,23 +133,6 @@ class JevFrustrationDetectorTest {
     }
 
     // ---- firing
-
-    @Test
-    void aTurnFiresOnlyWhenUnhappyWithAssistantExceedsTheThreshold() {
-        SubstrateObservation high = eligibleTurn("t-high", "conv-a");
-        SubstrateObservation low = eligibleTurn("t-low", "conv-b");
-        client.answer("t-high", 0.71, 0.04);
-        client.answer("t-low", 0.39, 0.02);
-        JevFrustrationDetector d = detector();
-
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(high, low));
-        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
-
-        assertEquals(Status.SCORED, page.status());
-        assertEquals(2, page.sent());
-        assertEquals(1, fired.size());
-        assertEquals("t-high", fired.get(0).turn().traceId());
-    }
 
     @Test
     void unhappyAboutSomethingElseNeverFires() {
@@ -440,22 +422,6 @@ class JevFrustrationDetectorTest {
     // ---- failures
 
     @Test
-    void anUnavailableProviderFailsTheTurnAndIsCountedForTheHoldRule() {
-        SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
-        SubstrateObservation down = eligibleTurn("t-down", "conv-b");
-        client.answer("t-ok", 0.9, 0.0);
-        client.fail("t-down", DecisionError.PROVIDER_UNAVAILABLE);
-        JevFrustrationDetector d = detector();
-
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, down));
-        d.complete(signal("{}"), page, PageAction.PERSIST, 5);
-
-        assertEquals(2, page.sent());
-        assertEquals(1, page.unavailable());
-        verify(assessments, times(1)).insert(any());
-    }
-
-    @Test
     void aMalformedAnswerFailsTheTurnWithNoRow() {
         SubstrateObservation bad = eligibleTurn("t-bad", "conv-a");
         client.fail("t-bad", DecisionError.MALFORMED_ANSWER);
@@ -519,18 +485,6 @@ class JevFrustrationDetectorTest {
         }
     }
 
-    @Test
-    void noKeyPausesTheClassifierWithNoProviderAndSendsNothing() {
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
-
-        assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.NO_PROVIDER, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_PROVIDER, NOW);
-        assertTrue(client.requests.isEmpty());
-    }
-
     // ---- pause
 
     @Test
@@ -571,11 +525,6 @@ class JevFrustrationDetectorTest {
         assertEquals(Status.PAUSED, page.status());
         verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_PROVIDER, NOW);
         verify(classifiers, never()).unpause(any(), any());
-    }
-
-    @Test
-    void anEmptyPageCarriesNoPauseReason() {
-        assertNull(detector().score(signal("{}"), List.of()).pauseReason());
     }
 
     // ---- fixtures

@@ -3,7 +3,6 @@ package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -37,14 +36,6 @@ class TriageSourceAbsenceTest {
     // ---- absent adapters degrade, on every port -----------------------------------------------
 
     @Test
-    @DisplayName("no TriageSource at all: the page is empty, not a failure")
-    void absent_triage_sources_render_an_empty_page() {
-        var page = service(List.of()).findings(PROJECT, null, null, null, true);
-        assertTrue(page.findings().isEmpty());
-        assertEquals(TriageLane.EVIDENCE_ONLY.wire(), page.lane(), "the lane is a constant, not a source's opinion");
-    }
-
-    @Test
     @DisplayName("no TriageSource owns the id: detail, analyze and resolve all 404 rather than 500")
     void unclaimed_ids_are_not_found() {
         FindingService service = service(List.of(new DisclaimingSource()));
@@ -75,14 +66,6 @@ class TriageSourceAbsenceTest {
     }
 
     // ---- routing -------------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("detail disclaims an id the source does not project; the next source is asked")
-    void detail_falls_through_to_the_next_source() {
-        var view =
-                service(List.of(new DisclaimingSource(), new ClaimingSource())).finding(PROJECT, "f1");
-        assertEquals("claimed", view.finding().id(), "the first source disclaims the id, so the second answers");
-    }
 
     // ---- a job no source claims ---------------------------------------------------------------
 

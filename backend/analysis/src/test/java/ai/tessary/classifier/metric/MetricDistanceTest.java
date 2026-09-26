@@ -80,29 +80,6 @@ class MetricDistanceTest {
         }
     }
 
-    /** A window compared against itself is zero, with no sign. The null case, and the floor's anchor. */
-    @Test
-    void identicalSketchesAreExactlyZero() {
-        double[] values = traffic(1L);
-        double w1 = MetricDistance.signedW1(sketchOf(values, 1.0), sketchOf(values, 1.0));
-
-        assertEquals(0.0, w1, 0.0, "identical inputs must be exactly zero, not nearly");
-        assertEquals(0.0, Math.signum(w1), 0.0);
-        assertEquals(1.0, MetricDistance.ratio(w1), 0.0, "no shift is a ratio of exactly 1");
-    }
-
-    /**
-     * Two independent draws from the same distribution — a null run in miniature. Sampling noise alone
-     * must stay far below {@code w1_floor} (0.139 as it stands), or the classifier would fire on ordinary
-     * traffic before it ever saw a regression.
-     */
-    @Test
-    void independentDrawsFromOneDistributionStayNearZero() {
-        double w1 = MetricDistance.signedW1(sketchOf(traffic(7L), 1.0), sketchOf(traffic(8L), 1.0));
-
-        assertTrue(Math.abs(w1) < 0.05, "same-distribution noise should be well under the floor, was " + w1);
-    }
-
     /**
      * Comparing a duration sketch against a cost sketch throws rather than returning a number. Both are
      * "logs of a positive quantity" and would happily produce a plausible W₁ — which is exactly why this

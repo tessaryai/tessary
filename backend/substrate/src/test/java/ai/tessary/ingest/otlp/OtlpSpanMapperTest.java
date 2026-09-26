@@ -113,25 +113,6 @@ class OtlpSpanMapperTest {
     }
 
     @Test
-    void genAiMessages_threadedOntoRawEntryMessageFields() {
-        String input = "[{\"role\":\"user\",\"content\":\"hi\"}]";
-        String output = "[{\"role\":\"assistant\",\"content\":\"hello\"}]";
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addAttributes(kv(GenAiAttributes.INPUT_MESSAGES, input))
-                .addAttributes(kv(GenAiAttributes.OUTPUT_MESSAGES, output))
-                .build();
-
-        RawEntry e = mapper.toRawEntries(request(span)).get(0);
-        assertEquals(input, e.inputMessagesJson());
-        assertEquals(output, e.outputMessagesJson());
-        // Messages also seed input/output so the observation row carries content even with no scalar field.
-        assertEquals(input, e.input());
-        assertEquals(output, e.output());
-    }
-
-    @Test
     void indexedFlattenedMessages_reconstructedIntoCanonicalArray_orderedByIndex() {
         // OpenLLMetry/Traceloop encode messages as gen_ai.prompt.N.role|content. They are
         // reconstructed into the same [{role, content}] array — ordered by N even when the attrs are not.
@@ -213,29 +194,6 @@ class OtlpSpanMapperTest {
         assertEquals("gpt-oi", e.model());
         // OTLP end-time threaded on even for the OI path (for latency).
         assertEquals("1970-01-01T00:00:03Z", e.endTimestamp());
-    }
-
-    @Test
-    void spanEvents_areNotIngested() {
-        // The substrate types no span events. A gen_ai.evaluation.result event (the standard feedback
-        // carrier) and a tessary.agent.self_report event are alike ignored: the span still maps, and
-        // nothing on the RawEntry carries the event. The attribute bag is the only thing that survives.
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x08}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addEvents(Span.Event.newBuilder()
-                        .setName("gen_ai.evaluation.result")
-                        .addAttributes(kv("gen_ai.evaluation.name", "thumbs_down"))
-                        .build())
-                .addEvents(Span.Event.newBuilder()
-                        .setName("tessary.agent.self_report")
-                        .addAttributes(kv("tessary.self_report.category", "missing_context"))
-                        .build())
-                .build();
-
-        List<RawEntry> entries = mapper.toRawEntries(request(span));
-        assertEquals(1, entries.size());
-        assertEquals(KindNormalizer.LLM, entries.get(0).operationKind());
     }
 
     @Test

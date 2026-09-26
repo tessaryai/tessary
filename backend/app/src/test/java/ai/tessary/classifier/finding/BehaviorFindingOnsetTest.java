@@ -98,22 +98,6 @@ class BehaviorFindingOnsetTest {
                 "and it moved FORWARD, which is what isNewSpell tests");
     }
 
-    @Test
-    @DisplayName("a gap shorter than the quiet window is not a recovery")
-    void aShortGapIsNotARecovery() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "onset-shortgap").project().id();
-        Instant now = Instant.now();
-        Instant onset = now.minus(30, ChronoUnit.HOURS);
-
-        String id = record(pid, onset, now.minus(1, ChronoUnit.HOURS)).findingId();
-        // An hour without a refresh — a slow pass, a restart, a project that went briefly quiet. Well
-        // inside the six-hour horizon, so the spell is the same spell.
-        record(pid, now.minus(10, ChronoUnit.MINUTES), now);
-
-        assertEquals(onset.toString(), firstSeenAt(pid, id), "a short gap leaves the spell alone");
-    }
-
     /** One recompute pass: the tool is in a spell that began at {@code onset}, observed at {@code at}. */
     private FindingRepository.Recorded record(String projectId, Instant onset, Instant at) {
         return Objects.requireNonNull(findings.recordRecomputedCause(

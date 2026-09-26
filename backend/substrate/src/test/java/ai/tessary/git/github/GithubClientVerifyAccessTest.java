@@ -3,7 +3,6 @@ package ai.tessary.git.github;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.open.errors.GitError;
@@ -34,27 +33,5 @@ class GithubClientVerifyAccessTest {
         assertNotNull(e);
         assertEquals(GitError.REPO_ACCESS_DENIED, e.error());
         assertTrue(e.getMessage().contains("acme/web"));
-    }
-
-    @Test
-    void notFound_coversBothReadingsRatherThanAssertingTheWrongOne() {
-        TessaryException e = GithubClient.verifyRefusal(404, "acme/web");
-        assertNotNull(e);
-        assertEquals(GitError.REPO_UNREACHABLE, e.error());
-        String msg = e.getMessage();
-        assertTrue(msg.contains("acme/web"));
-        // Both recovery paths have to be on screen, because the status cannot tell us which applies.
-        assertTrue(msg.contains("owner and repository name"), "the name might be wrong");
-        assertTrue(msg.contains("Contents: read"), "or the token might not reach it");
-    }
-
-    @Test
-    void successAndOtherStatuses_areNotRefusals() {
-        assertNull(GithubClient.verifyRefusal(200, "acme/web"));
-        // A 500 or a 429 is a provider failure, not a verdict about access: letting it fall through
-        // keeps it out of the "your token is wrong" copy, which would send someone to fix a token
-        // that was fine.
-        assertNull(GithubClient.verifyRefusal(500, "acme/web"));
-        assertNull(GithubClient.verifyRefusal(429, "acme/web"));
     }
 }

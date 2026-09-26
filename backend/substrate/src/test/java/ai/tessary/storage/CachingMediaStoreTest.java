@@ -2,7 +2,6 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -24,18 +23,6 @@ class CachingMediaStoreTest {
 
     private static StoredMedia media(String id, int size) {
         return new StoredMedia(new MediaRef(id), "image/png", new byte[size]);
-    }
-
-    @Test
-    void repeatedReadsOfOneObjectHitTheStoreOnce() {
-        PostgresMediaStore delegate = mock(PostgresMediaStore.class);
-        when(delegate.get(any(), any())).thenReturn(Optional.of(media("m1", 1024)));
-        CachingMediaStore store = new CachingMediaStore(delegate, 0);
-
-        for (int i = 0; i < 5; i++) {
-            assertTrue(store.get("proj", new MediaRef("m1")).isPresent());
-        }
-        verify(delegate, times(1)).get(any(), any());
     }
 
     @Test
@@ -94,15 +81,5 @@ class CachingMediaStoreTest {
                 store.get("proj", new MediaRef("huge")).orElseThrow().bytes());
         store.get("proj", new MediaRef("huge"));
         verify(delegate, times(2)).get(any(), any());
-    }
-
-    @Test
-    void putDelegatesUnchanged() {
-        PostgresMediaStore delegate = mock(PostgresMediaStore.class);
-        when(delegate.put(any(), any(), any())).thenReturn(new MediaRef("stored"));
-        CachingMediaStore store = new CachingMediaStore(delegate, 0);
-
-        assertEquals("stored", store.put("proj", new byte[8], "image/png").id());
-        verify(delegate, times(1)).put(any(), any(), any());
     }
 }

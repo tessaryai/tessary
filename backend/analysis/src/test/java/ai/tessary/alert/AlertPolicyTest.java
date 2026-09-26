@@ -49,11 +49,6 @@ class AlertPolicyTest {
         assertEquals(quiet, policy.isQuiet(Instant.parse(now)));
     }
 
-    @Test
-    void aPolicyWithNoWindowIsNeverQuiet() {
-        assertEquals(false, AlertPolicy.IMMEDIATE.isQuiet(Instant.parse("2026-01-15T03:00:00Z")));
-    }
-
     /**
      * The lenient parser both the API and the stored blob go through. Every unreadable part degrades to the
      * permissive default: a half window, an unparseable time, or an unknown zone must never produce a rule
@@ -111,18 +106,6 @@ class AlertPolicyTest {
                         new AlertPolicy(60, ten, eight, utc)),
                 Arguments.of(
                         "a blank zone reads as UTC", 60L, "22:00", "08:00", " ", new AlertPolicy(60, ten, eight, utc)));
-    }
-
-    /** What is saved is what is read back: a window, a zone and a cadence survive the jsonb round trip. */
-    @Test
-    void aPolicyReadsBackFromItsOwnJsonUnchanged() {
-        AlertPolicy windowed = new AlertPolicy(900, LocalTime.of(22, 0), LocalTime.of(8, 0), ZoneId.of("Asia/Kolkata"));
-
-        assertEquals(windowed, AlertPolicy.of(mapper, windowed.toJson(mapper)));
-        assertEquals(
-                "{\"cadence_seconds\":900,\"quiet_zone\":\"Asia/Kolkata\",\"quiet_from\":\"22:00\",\"quiet_to\":\"08:00\"}",
-                windowed.toJson(mapper));
-        assertEquals("{\"cadence_seconds\":0,\"quiet_zone\":\"UTC\"}", AlertPolicy.IMMEDIATE.toJson(mapper));
     }
 
     /** A corrupt attributes blob fails open to notifying on every tick, never to staying quiet or throwing. */

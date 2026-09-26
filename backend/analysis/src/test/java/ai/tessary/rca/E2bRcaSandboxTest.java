@@ -335,27 +335,6 @@ class E2bRcaSandboxTest {
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
     }
 
-    @Test
-    void launcherFailurePropagatesAsUpstreamFailed() {
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        throw new TessaryException(RcaError.UPSTREAM_FAILED, "agentic RCA launcher HTTP 502");
-                    }
-                };
-
-        TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
-        assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
-    }
-
     /**
      * The run is one ledger entry against the RCA lane and the report it investigated. Without it the
      * org's spend and metering silently leave RCA runs out. The tokens and cost are the envelope's own

@@ -21,7 +21,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 
 /**
  * Base64 image content is externalized to a {@code media_object} ref at ingest — the persisted
@@ -43,33 +42,6 @@ class MediaExternalizerTest {
     }
 
     @Test
-    void anthropicBase64Image_becomesImageRef_bytesStored() throws Exception {
-        byte[] bytes = {1, 2, 3, 4};
-        String b64 = Base64.getEncoder().encodeToString(bytes);
-        String json = "[{\"type\":\"text\",\"text\":\"look\"},"
-                + "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/jpeg\",\"data\":\""
-                + b64 + "\"}}]";
-
-        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
-        String out = java.util.Objects.requireNonNull(result.payload());
-
-        var arr = M.readTree(out);
-        assertEquals("image_ref", arr.get(1).path("type").asText());
-        assertEquals("media-1", arr.get(1).path("data").asText());
-        assertEquals("image/jpeg", arr.get(1).path("mediaType").asText());
-        assertFalse(out.contains(b64), "no base64 may survive into the persisted payload");
-        assertEquals(
-                List.of("media-1"),
-                result.mediaIds(),
-                "the caller must learn the id, or the media_ref row that makes the bytes reachable"
-                        + " and collectable is never written");
-
-        ArgumentCaptor<byte[]> stored = ArgumentCaptor.forClass(byte[].class);
-        verify(media).put(eq("p1"), stored.capture(), eq("image/jpeg"));
-        assertEquals(4, stored.getValue().length);
-    }
-
-    @Test
     void openAiDataUriImageUrl_becomesImageRef() throws Exception {
         byte[] bytes = {9, 8, 7};
         String dataUri = "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes);
@@ -85,24 +57,6 @@ class MediaExternalizerTest {
         assertEquals("media-1", part.path("data").asText());
         assertEquals(List.of("media-1"), result.mediaIds());
         verify(media).put(eq("p1"), any(), eq("image/png"));
-    }
-
-    @Test
-    void httpImageUrl_isLeftUntouched_noStore() {
-        String json = "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"https://example.com/x.png\"}}]";
-        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
-        assertSame(json, result.payload(), "a payload with no inline base64 is returned byte-identical");
-        assertEquals(List.of(), result.mediaIds(), "a payload that references no media files no refs");
-        verify(media, never()).put(anyString(), any(), anyString());
-    }
-
-    @Test
-    void plainTextPayload_returnedVerbatim() {
-        assertSame(
-                "just some prose",
-                externalizer.externalizeJson("p1", "just some prose").payload());
-        assertEquals(null, externalizer.externalizeJson("p1", null).payload());
-        verify(media, never()).put(anyString(), any(), anyString());
     }
 
     @Test

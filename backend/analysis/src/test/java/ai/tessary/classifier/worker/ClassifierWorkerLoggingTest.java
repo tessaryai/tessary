@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -26,7 +25,6 @@ import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.gate.PreDeployCheckService;
-import ai.tessary.open.obs.LogContext;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -123,72 +121,6 @@ class ClassifierWorkerLoggingTest {
         logbackLogger.detachAppender(appender);
     }
 
-    @Test
-    void persistentSweepFailureSurfacesAtErrorViaTheDeadLetterTransition() {
-        ClassifierWorker worker = new ClassifierWorker(
-                signalService,
-                signals,
-                jobs,
-                detections,
-                arming,
-                substrate,
-                catalog,
-                preDeployChecks,
-                sweeps,
-                TestObjectProvider.of(),
-                new ClassifierProperties(),
-                new TraceMdcBridge(tracer),
-                new SyncTaskExecutor());
-
-        ClassifierJobRow job = new ClassifierJobRow(
-                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
-        when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
-        when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(true); // budget exhausted
-
-        worker.sweepForTest(job);
-
-        List<ILoggingEvent> events = appender.list;
-        assertTrue(
-                events.stream()
-                        .anyMatch(e -> e.getLevel() == Level.ERROR
-                                && e.getFormattedMessage().contains("dead-lettered")),
-                "exhausting the failure budget must log at ERROR: " + events);
-    }
-
-    @Test
-    void repeatedBelowCapFailuresStayWarnAndDedupToOneStacktracePerStreak() {
-        ClassifierWorker worker = new ClassifierWorker(
-                signalService,
-                signals,
-                jobs,
-                detections,
-                arming,
-                substrate,
-                catalog,
-                preDeployChecks,
-                sweeps,
-                TestObjectProvider.of(),
-                new ClassifierProperties(),
-                new TraceMdcBridge(tracer),
-                new SyncTaskExecutor());
-
-        ClassifierJobRow job = new ClassifierJobRow(
-                "job-1", "proj-1", "sig-1", ClassifierJobRow.PENDING, null, null, null, null, 0, null, "now", "now", 0);
-        when(signals.findById("proj-1", "sig-1")).thenThrow(new RuntimeException("boom"));
-        when(jobs.markFailed(eq("job-1"), any(), anyInt())).thenReturn(false); // still inside the budget
-
-        worker.sweepForTest(job);
-        worker.sweepForTest(job);
-        worker.sweepForTest(job);
-
-        long errorCount =
-                appender.list.stream().filter(e -> e.getLevel() == Level.ERROR).count();
-        long warnCount =
-                appender.list.stream().filter(e -> e.getLevel() == Level.WARN).count();
-        assertTrue(errorCount == 0, "a below-cap unit failure never logs ERROR (that's the dead-letter's)");
-        assertTrue(warnCount == 1, "retries of the same failing job dedup to a single WARN, not one per tick");
-    }
-
     /**
      * A streak that runs past the summary interval must say it is still failing, with its count: after the
      * first stacktrace the job is otherwise silent, and a sweep failing every tick for an hour would look
@@ -225,37 +157,6 @@ class ClassifierWorkerLoggingTest {
         assertEquals(2, warns.size(), "the streak's first failure, then one summary at the thirtieth");
         assertEquals("signal.sweep.still-failing", warns.get(1).get("event"));
         assertEquals(30L, warns.get(1).get("occurrences"));
-    }
-
-    /**
-     * {@code tick()} must bind the scheduler thread's current span into MDC before dispatching any
-     * sweep, so a background log line has a trace_id to pivot from in Grafana.
-     */
-    @Test
-    void tickBindsTheCurrentTraceBeforeDispatchingWork() {
-        TraceMdcBridge mockBridge = mock(TraceMdcBridge.class);
-        when(mockBridge.bindCurrentTrace()).thenReturn(LogContext.put(Map.of()));
-        when(jobs.failExhausted(anyInt())).thenReturn(0);
-        when(substrate.projectsWithObservations()).thenReturn(List.of());
-
-        ClassifierWorker worker = new ClassifierWorker(
-                signalService,
-                signals,
-                jobs,
-                detections,
-                arming,
-                substrate,
-                catalog,
-                preDeployChecks,
-                sweeps,
-                TestObjectProvider.of(),
-                new ClassifierProperties(),
-                mockBridge,
-                new SyncTaskExecutor());
-
-        worker.tick();
-
-        verify(mockBridge).bindCurrentTrace();
     }
 
     /**

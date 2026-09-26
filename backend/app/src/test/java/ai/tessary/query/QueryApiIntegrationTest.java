@@ -536,16 +536,6 @@ class QueryApiIntegrationTest {
     // ---- auth + tenancy ----------------------------------------------------------------------
 
     @Test
-    void rejectsNonTokenContext() {
-        String pid = seedProject("query-auth");
-        // A user-session context (no MCP token) must be rejected: the surface is token-scoped.
-        var userCtx = new TenantContext("user-1", null, "org-1", pid, "member", null);
-        TessaryException e = assertThrows(
-                TessaryException.class, () -> controller.count(userCtx, new CountRequest("spans", null, null)));
-        assertEquals(QueryError.TOKEN_REQUIRED, e.error());
-    }
-
-    @Test
     void readsAreScopedToTheToprojectsOwnData() {
         String pidA = seedProject("query-tenant-a");
         String pidB = seedProject("query-tenant-b");

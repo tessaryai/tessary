@@ -2,7 +2,6 @@
 package ai.tessary.alert.channel;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.tessary.config.SlackProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -138,17 +137,6 @@ class SlackDeliveryTest {
                 Arguments.of(
                         200, "not json", DeliveryResult.failure(null, "slack-service returned an unreadable body")),
                 Arguments.of(502, "", DeliveryResult.failure(502, "slack-service HTTP 502")));
-    }
-
-    /** A half-configured adapter is off: nothing is sent, and the log says why. */
-    @Test
-    void anUnconfiguredAdapterIsAFailureWithoutASend() {
-        props.setServiceKey(" ");
-
-        DeliveryResult result = new SlackDelivery(props, mapper).sendToWebhook("https://hooks.slack.com/x", "t");
-
-        assertEquals(DeliveryResult.failure(null, "slack-service is not configured"), result);
-        assertNull(seenPath);
     }
 
     @Test

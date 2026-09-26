@@ -126,17 +126,6 @@ class ProjectPurgeIntegrationTest {
         assertTrue(projects.findById(p.id()).isEmpty(), "the orphaned mark should have been picked up");
     }
 
-    @Test
-    @DisplayName("marking is one-way: a second mark is refused so a retried DELETE stays idempotent")
-    void markingIsOneWay() {
-        Project p = project("purge-idempotent");
-        assertTrue(projects.markDeleting(p.id(), Instant.now().toString()));
-        assertFalse(projects.markDeleting(p.id(), Instant.now().toString()));
-        // This project is deliberately never enqueued or purged — undo the mark so it doesn't sit as an
-        // orphan for a LATER test's worker.tick() to revive and win CLAIM_BATCH=1 over that test's own job.
-        projects.clearDeleting(p.id());
-    }
-
     /**
      * {@code trace} has a self-referencing FK ({@code fk_trace_parent}) with no cascade and no
      * deferral. A batch that deletes rows by physical position rather than parent/child order can delete

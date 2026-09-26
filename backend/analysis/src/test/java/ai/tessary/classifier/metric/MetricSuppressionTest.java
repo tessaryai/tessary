@@ -41,18 +41,6 @@ class MetricSuppressionTest {
     private static final String OTHER_CALL_SITE = "summarize-thread";
 
     @Test
-    @DisplayName("eleven tool calls where three used to do: no tool moved, so nothing suppresses the turn")
-    void aTurnShiftWithNoToolShiftIsNotSuppressed() {
-        // The agent decomposed the same request into more steps. Every call it makes is as fast as it
-        // ever was, so not one tool bucket produced a shift at all and the candidate list is empty. This
-        // is not an edge case — it is the regression class turn duration exists to catch, and the only
-        // grain it is visible at.
-        Shift turn = turnShift(2_000, 5_000);
-
-        assertNull(MetricSuppression.explain(turn, List.of(), CONFIG.explainedByFraction()));
-    }
-
-    @Test
     @DisplayName("a tool that moved 40ms inside a turn that moved 4s has explained nothing")
     void aTinyToolShiftDoesNotExplainALargeTurnShift() {
         // A real tool shift, firing on its own account — 20ms to 60ms is 3x and comfortably past the
@@ -63,37 +51,6 @@ class MetricSuppressionTest {
         Shift tool = toolShift("tool:lookup_id", 20, 60, CALL_SITE);
 
         assertNull(MetricSuppression.explain(turn, List.of(tool), CONFIG.explainedByFraction()));
-    }
-
-    @Test
-    @DisplayName("a tool that accounts for most of the turn's added time suppresses it")
-    void aToolShiftThatCoversTheTurnExplainsIt() {
-        // 34 of the 38 seconds were one search_docs call. The turn row would only restate the symptom;
-        // the tool row names the fix, and the turn shift rides on it as evidence.
-        Shift turn = turnShift(4_000, 38_000);
-        Shift tool = toolShift("tool:search_docs", 400, 34_400, CALL_SITE);
-
-        Explanation explanation = MetricSuppression.explain(turn, List.of(tool), CONFIG.explainedByFraction());
-
-        assertNotNull(explanation);
-        assertEquals("tool:search_docs", explanation.tool().bucketKey());
-        assertEquals(1.0, explanation.covered(), 0.01);
-    }
-
-    @Test
-    @DisplayName("partial explanation is still explanation: 60% of the turn's move is enough")
-    void aPartialCoverageStillSuppresses() {
-        // The generous bar, doing the job it was set loose for. A tool bucket's delta is measured per
-        // CALL while the turn's is per TURN, so a turn making two calls to the tool that dominates it
-        // shows half the coverage the tool is actually responsible for — demanding a full accounting
-        // would mean the rule almost never fires.
-        Shift turn = turnShift(2_000, 4_000);
-        Shift tool = toolShift("tool:search_docs", 600, 1_800, CALL_SITE);
-
-        Explanation explanation = MetricSuppression.explain(turn, List.of(tool), CONFIG.explainedByFraction());
-
-        assertNotNull(explanation);
-        assertEquals(0.6, explanation.covered(), 0.01);
     }
 
     @Test

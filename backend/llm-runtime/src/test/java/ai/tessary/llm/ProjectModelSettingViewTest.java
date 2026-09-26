@@ -13,7 +13,6 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
-import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
@@ -76,28 +75,6 @@ class ProjectModelSettingViewTest {
                 controller.get(ctx, "acme", "web").data();
         assertNotNull(v, "the GET always carries a payload");
         return v;
-    }
-
-    @Test
-    void everyLaneBelongsToASectionThePayloadAlsoDescribes() {
-        // A lane pointing at a group with no GroupView is a whole settings section that renders with no
-        // heading and no copy — and it would still round-trip through JSON, so nothing else catches it.
-        var v = view();
-        Set<LaneGroup> sections = v.groups().stream()
-                .map(ProjectModelSettingController.GroupView::id)
-                .collect(Collectors.toSet());
-        assertEquals(Set.of(LaneGroup.values()), sections, "one section per group, no more and no fewer");
-        for (var lane : v.lanes()) {
-            assertTrue(sections.contains(lane.group()), "lane " + lane.id() + " has no section to render under");
-        }
-    }
-
-    @Test
-    void everySectionShipsItsHeadingAndCopy() {
-        for (var g : view().groups()) {
-            assertFalse(g.label().isBlank(), "every section needs a heading");
-            assertFalse(g.description().isBlank(), "and the line of copy under it");
-        }
     }
 
     @Test

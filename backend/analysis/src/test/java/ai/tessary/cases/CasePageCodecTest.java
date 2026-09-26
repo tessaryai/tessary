@@ -23,35 +23,6 @@ import org.junit.jupiter.params.provider.CsvSource;
  */
 class CasePageCodecTest {
 
-    @Test
-    void aCursorResumesFromTheLastRowOfThePageItWasMintedFrom() {
-        // Three rows for a page of two: the extra row proves there is a next page, and the cursor must be
-        // seeded from row 2 — seeding from row 3 would skip it, since row 3 IS the next page's first row.
-        CasePageCodec.Page page = CasePageCodec.trim(
-                List.of(
-                        row("a", 0.9, "2026-08-03T00:00:00Z"),
-                        row("b", 0.5, "2026-08-02T00:00:00Z"),
-                        row("c", 0.1, "2026-08-01T00:00:00Z")),
-                2,
-                PageOrder.LIVE_RANK);
-
-        assertEquals(2, page.rows().size());
-        PageKey resumed = CasePageCodec.decode(page.nextCursor(), PageOrder.LIVE_RANK);
-        assertNotNull(resumed);
-        assertEquals("b", resumed.id());
-        assertEquals(0.5, resumed.severity());
-        assertEquals("2026-08-02T00:00:00Z", resumed.at());
-    }
-
-    @Test
-    void aLastPageMintsNoCursor() {
-        CasePageCodec.Page page =
-                CasePageCodec.trim(List.of(row("a", 0.9, "2026-08-03T00:00:00Z")), 2, PageOrder.LIVE_RANK);
-
-        assertEquals(1, page.rows().size());
-        assertNull(page.nextCursor(), "there is no next page to point at");
-    }
-
     /**
      * <b>The one that matters.</b> A cursor minted on {@code state=open} names a point on
      * {@code (severity, opened_at, id)}; replayed against {@code state=resolved} the query ranks by

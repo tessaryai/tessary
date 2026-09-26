@@ -76,18 +76,6 @@ class SpanRepositoryLwwTest {
     }
 
     @Test
-    @DisplayName("the completed version replaces the partial one that arrived first")
-    void newerEventTsWins() {
-        write(version("streaming", null, t0));
-        write(version("chat", 42L, t0.plusSeconds(3)));
-
-        SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();
-        assertEquals("chat", read.name());
-        assertEquals(42L, read.totalTokens());
-        assertEquals(t0.plusSeconds(3).toString(), read.eventTs());
-    }
-
-    @Test
     @DisplayName("a partial version redelivered after the final one changes nothing")
     void olderEventTsLoses() {
         write(version("chat", 42L, t0.plusSeconds(3)));

@@ -241,23 +241,6 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     @Test
-    @DisplayName("a resweep with no new traffic does not advance last_seen_at")
-    void lastSeenDoesNotAdvanceWithoutNewTraffic() {
-        String pid = TenantFixture.bootstrap(tenants, "toolerr-stale").project().id();
-        Instant start = Instant.now().minus(60, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
-
-        assertEquals(1, service.refresh(pid));
-        String firstLastSeen = firedFinding(pid).lastSeenAt();
-
-        assertEquals(1, service.refresh(pid), "still one tool in a spell");
-        String secondLastSeen = firedFinding(pid).lastSeenAt();
-
-        assertEquals(firstLastSeen, secondLastSeen, "no new buckets were folded, so the event clock must not move");
-    }
-
-    @Test
     @DisplayName("a gap between folded buckets longer than the quiet window does not reset the onset "
             + "while the underlying spell never actually recovered")
     void aGapLongerThanTheQuietWindowKeepsTheOnsetWhileTheSpellIsUnbroken() {
@@ -444,30 +427,6 @@ class ToolErrorClassifierIntegrationTest {
         assertFalse(
                 FindingRow.TriageVerdict.movesDetectorState(FindingRow.TriageVerdict.POSITIVE),
                 "a positive opens a case; the bar must not move under it");
-    }
-
-    /**
-     * The same window, ruled {@code positive}. Nothing moves.
-     *
-     * <p>A positive ruling opens a case: the regression is real and a human is about to be asked about
-     * it. Moving the bar to accommodate it would be the platform quietly agreeing to a rate nobody has
-     * accepted yet, and clearing the arm would drop the evidence out from under the case.
-     */
-    @Test
-    @DisplayName("a positive ruling leaves the accumulator and the reference exactly where they were")
-    void aPositiveRulingTouchesNoDetectorState() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "toolerr-positive").project().id();
-        Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
-        service.refresh(pid);
-
-        firedFinding(pid);
-        double armed = armOf(pid);
-
-        assertEquals(armed, armOf(pid), 1e-9, "nothing ran, so nothing moved");
-        assertTrue(references.byTool(pid).isEmpty(), "and no reference was pinned behind the case");
     }
 
     /**

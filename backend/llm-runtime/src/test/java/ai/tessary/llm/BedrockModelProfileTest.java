@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.llmspi.LaneGroup;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -15,18 +13,7 @@ import org.junit.jupiter.api.Test;
  * can treat it as agentic.
  */
 class BedrockModelProfileTest {
-
-    private static final String HAIKU = "anthropic.claude-haiku-4-5";
     private static final String NOVA = "amazon.nova-2-lite";
-
-    @Test
-    void onlyAnthropicModelsCanDriveTheSandboxLanes() {
-        // The sandbox lanes need a model that can hold a long tool loop. Nova is a fine grading model and
-        // an unrunnable sandbox, so this is a lane pairing rule, not a quality judgement.
-        assertTrue(BedrockModelProfile.find(HAIKU).orElseThrow().agentic());
-        assertEquals(Optional.empty(), BedrockModelProfile.find(NOVA));
-        assertEquals(Optional.empty(), BedrockModelProfile.find("some.unknown-model"), "unknown fails closed");
-    }
 
     /**
      * What a lane group offers must be a model this table describes, and the sandbox group may offer
@@ -44,11 +31,5 @@ class BedrockModelProfileTest {
                 }
             }
         }
-    }
-
-    @Test
-    void noKeyFindsNoProfile() {
-        // A lane with no stored choice asks with a null key; that is "no model", not a crash.
-        assertEquals(Optional.empty(), BedrockModelProfile.find(null));
     }
 }

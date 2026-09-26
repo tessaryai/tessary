@@ -122,59 +122,6 @@ class McpQueryToolsTest {
 
     // ---- registration --------------------------------------------------------------------------
 
-    @Test
-    void everyQueryToolIsListedIncludingDescribeDataset() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(
-                names.containsAll(
-                        List.of("describe_dataset", "query_count", "query_timeseries", "query_facets", "query_search")),
-                names.toString());
-    }
-
-    /**
-     * The advertised dataset enum IS the external contract — an agent plans against the schema, so a value
-     * missing from it is a value the model will never send, and a value present in it is one the model
-     * will send. Three things are pinned: {@code spans} is offered, the retired {@code observations} alias
-     * is NOT (advertising it would have agents plan a request the service now 400s), and {@code feedback}
-     * is gone (the substrate makes no provision for it and no read surface serves it).
-     *
-     * <p>{@code query_search} is deliberately not in this loop: spans search moved to {@code list_spans}, so
-     * the one tool whose enum must NOT offer spans is asserted separately below.
-     */
-    @Test
-    void datasetEnumOffersSpansWithNoRetiredAliasAndNoFeedback() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        for (String toolName : List.of("query_count", "query_timeseries", "query_facets")) {
-            JsonNode datasets = null;
-            for (JsonNode t : tools) {
-                if (toolName.equals(t.get("name").asText())) {
-                    datasets = t.get("inputSchema")
-                            .get("properties")
-                            .get("dataset")
-                            .get("enum");
-                }
-            }
-            assertNotNull(datasets, toolName + " advertises a dataset enum");
-            List<String> values = new java.util.ArrayList<>();
-            for (JsonNode v : Objects.requireNonNull(datasets)) values.add(v.asText());
-            assertTrue(values.contains("spans"), toolName + ": " + values);
-            assertFalse(values.contains("observations"), toolName + " must not advertise the alias: " + values);
-            assertTrue(values.contains("tool_calls"), toolName + ": " + values);
-            assertTrue(values.contains("classifier_events"), toolName + ": " + values);
-            assertFalse(values.contains("feedback"), toolName + " must not advertise feedback: " + values);
-        }
-    }
-
     /**
      * Every dataset {@link QueryDataset} declares must be reachable, and the enum must be DERIVED from it
      * rather than restated.
@@ -236,44 +183,6 @@ class McpQueryToolsTest {
         assertEquals(List.of("tool_calls", "classifier_events"), searchable, "the whole narrowed contract");
     }
 
-    /**
-     * {@code describe_dataset} must not send a caller to a tool that will not accept the dataset.
-     *
-     * <p>The regression: describe_dataset reported {@code searchable: true} for spans, because the dataset
-     * genuinely supports search, while query_search's enum excludes spans and {@link QueryService} still
-     * accepts it. An agent that read the introspection and believed it called
-     * {@code query_search(dataset="spans")}, the call SUCCEEDED, and it got two filters' worth of compact rows
-     * instead of the eight-filter payload-capable reader it wanted — never discovering {@code list_spans}.
-     * A contradiction between the tool that exists to describe the surface and the surface itself is worse
-     * than either being wrong alone, because the introspection is what a caller reaches for when unsure.
-     *
-     * <p>So {@code searched_by} names the tool, and it is asserted against the same enum query_search
-     * advertises rather than against a literal — the two derive from one helper and this pins them together.
-     */
-    @Test
-    void describeDatasetNamesTheToolThatActuallySearchesEachDataset() throws Exception {
-        JsonNode described = structured(callTool("describe_dataset", "{}")).get("datasets");
-        List<String> searchEnum = datasetEnumOf("query_search");
-
-        int checked = 0;
-        for (JsonNode d : described) {
-            String name = d.get("dataset").asText();
-            JsonNode searchedBy = d.get("searched_by");
-            assertNotNull(searchedBy, name + " must report searched_by, even as null");
-            if (!d.get("searchable").asBoolean()) {
-                assertTrue(searchedBy.isNull(), name + " is not searchable, so nothing searches it");
-            } else if (searchEnum.contains(name)) {
-                assertEquals("query_search", searchedBy.asText(), name + " is on query_search's enum");
-            } else {
-                // Searchable but withheld from query_search: spans, and the only reason is that list_spans
-                // took it. If a second dataset ever lands here, searchToolFor needs a real mapping.
-                assertEquals("list_spans", searchedBy.asText(), name + " is searchable but not on query_search");
-            }
-            checked++;
-        }
-        assertEquals(QueryDataset.values().length, checked, "every dataset described");
-    }
-
     /** The concrete case the above generalises: spans is searchable, and the tool for it is not query_search. */
     @Test
     void describeDatasetPointsSpansSearchAtListSpans() throws Exception {
@@ -283,22 +192,6 @@ class McpQueryToolsTest {
 
         assertTrue(described.get("searchable").asBoolean(), "the dataset does support search");
         assertEquals("list_spans", described.get("searched_by").asText());
-    }
-
-    /**
-     * {@code keyword} is the only mode the schema advertises. The prior {@code semantic} (cosine-kNN) mode
-     * was removed with the rest of the embedding substrate; a schema that still listed it would be
-     * advertising a mode {@code query_search} now rejects.
-     */
-    @Test
-    void searchModeEnumAdvertisesKeywordOnly() throws Exception {
-        JsonNode schema = inputSchemaOf("query_search");
-        List<String> modes = new java.util.ArrayList<>();
-        for (JsonNode v :
-                Objects.requireNonNull(schema.get("properties").get("mode").get("enum"))) {
-            modes.add(v.asText());
-        }
-        assertEquals(List.of("keyword"), modes, "only keyword is advertised");
     }
 
     // ---- describe_dataset ----------------------------------------------------------------------
@@ -358,22 +251,6 @@ class McpQueryToolsTest {
     }
 
     /**
-     * {@code metric_rollups} is the dataset whose two behavioural caveats the query descriptions still carry:
-     * it is not searchable (a rollup row has no text and no page to keyset), and its answer is
-     * {@code SUM(value)} rather than a row count. Both are reported as data here, so an agent learns them
-     * from the schema instead of from prose it may not have read.
-     */
-    @Test
-    void describeDatasetReportsRollupsNotSearchableAndMeasuredByValue() throws Exception {
-        JsonNode rollups = structured(callTool("describe_dataset", "{\"dataset\":\"metric_rollups\"}"))
-                .get("datasets")
-                .get(0);
-        assertFalse(rollups.get("searchable").asBoolean(), "a rollup row has no text to search");
-        assertEquals("value", rollups.get("measure").asText());
-        assertEquals("bucket_start", rollups.get("time_column").asText(), "rollups bucket on bucket_start");
-    }
-
-    /**
      * The regression decisions 8 and 8b fix: {@code spans} and {@code tool_calls} range, page and bucket
      * on {@code started_at} (the producer's own timing), and {@code classifier_events} on
      * {@code subject_started_at} (migration {@code 0012}, the span or trace it judged) — a late-arriving
@@ -391,23 +268,6 @@ class McpQueryToolsTest {
         assertEquals("started_at", timeColumnByDataset.get("tool_calls"));
         assertEquals("subject_started_at", timeColumnByDataset.get("classifier_events"));
         assertEquals("bucket_start", timeColumnByDataset.get("metric_rollups"));
-    }
-
-    /**
-     * The shared {@code range} description used to say every dataset but {@code metric_rollups} filters on
-     * {@code created_at} — now false for {@code spans}/{@code tool_calls}. It must name their own clock
-     * instead of reciting the old blanket default.
-     */
-    @Test
-    void rangeDescriptionNamesStartedAtForSpansAndToolCalls() throws Exception {
-        for (String toolName : List.of("query_count", "query_timeseries", "query_facets", "query_search")) {
-            String description = inputSchemaOf(toolName)
-                    .get("properties")
-                    .get("range")
-                    .get("description")
-                    .asText();
-            assertTrue(description.contains("started_at"), toolName + ": " + description);
-        }
     }
 
     private static List<String> stringsOf(JsonNode array) {

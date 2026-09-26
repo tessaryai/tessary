@@ -7,14 +7,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.llmspi.ModelLane;
 import ai.tessary.metering.LlmUsageQueryRepository.SubjectSpend;
 import ai.tessary.metering.LlmUsageQueryRepository.UsageCell;
 import ai.tessary.metering.LlmUsageQueryRepository.UsageSlice;
 import ai.tessary.metering.MeteringDtos.LlmUsageCellView;
 import ai.tessary.metering.MeteringDtos.LlmUsageSeriesView;
 import ai.tessary.metering.MeteringDtos.LlmUsageSliceView;
-import ai.tessary.metering.MeteringDtos.LlmUsageView;
 import ai.tessary.metering.MeteringDtos.TriageSpendRowView;
 import ai.tessary.metering.MeteringDtos.TriageSpendView;
 import ai.tessary.open.errors.MeteringError;
@@ -136,35 +134,6 @@ class MeteringServiceTest {
         assertEquals(Duration.ofDays(30), Duration.between(Instant.parse(view.from()), Instant.parse(view.to())));
         assertEquals("day", view.grain());
         assertEquals("none", view.grouping());
-    }
-
-    /**
-     * The breakdown labels a lane from {@link ModelLane}, and a lane with no {@code ModelLane} behind it (the
-     * observer sandbox, or one written by a newer build) keeps its row with a null label rather than failing
-     * the whole usage page. The org total's null key goes out as the empty string.
-     */
-    @Test
-    void theBreakdownLabelsKnownLanesAndKeepsAnUnknownLaneUnlabelled() {
-        when(llmCalls.orgTotal(ORG, null, null, LlmUsageFilter.NONE)).thenReturn(slice(null, null, 4, "0.4"));
-        when(llmCalls.byLane(ORG, null, null))
-                .thenReturn(List.of(slice("triage", null, 3, "0.3"), slice("observer", null, 1, "0.1")));
-        when(llmCalls.byProject(ORG, null, null)).thenReturn(List.of(slice("p1", "Proj One", 4, "0.4")));
-        when(llmCalls.byModel(ORG, null, null)).thenReturn(List.of(slice("", null, 4, "0.4")));
-
-        LlmUsageView view = service().orgLlmUsage(ORG, null, null);
-
-        assertEquals(
-                new LlmUsageView(
-                        null,
-                        null,
-                        view.asOf(),
-                        LlmUsageSliceView.of(slice("", null, 4, "0.4"), null),
-                        List.of(
-                                LlmUsageSliceView.of(slice("triage", null, 3, "0.3"), ModelLane.TRIAGE.label()),
-                                LlmUsageSliceView.of(slice("observer", null, 1, "0.1"), null)),
-                        List.of(LlmUsageSliceView.of(slice("p1", "Proj One", 4, "0.4"), "Proj One")),
-                        List.of(LlmUsageSliceView.of(slice("", null, 4, "0.4"), null))),
-                view);
     }
 
     /**

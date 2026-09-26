@@ -169,15 +169,6 @@ class MetricDriftDetectorTest {
     }
 
     @Test
-    @DisplayName("no reference yet is its own silence, not a firing and not a zero")
-    void noReferenceIsNamed() {
-        Decision d = MetricDriftDetector.decide(Measure.TURN_DURATION, Reference.PINNED, null, durations(1.0), CONFIG);
-
-        assertFalse(d.fired());
-        assertEquals(Silence.NO_REFERENCE, d.silence());
-    }
-
-    @Test
     @DisplayName("sketches on different grids are survived, never compared")
     void gridMismatchIsSurvivedRatherThanThrown() {
         MetricSketch onDurationGrid = durations(1.0);

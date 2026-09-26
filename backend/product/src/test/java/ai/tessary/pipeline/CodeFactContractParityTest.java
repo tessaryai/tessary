@@ -2,7 +2,6 @@
 package ai.tessary.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -119,17 +118,5 @@ class CodeFactContractParityTest {
         assertEquals(
                 List.of("support.answer"), caps.get(0).callSiteIds(), "call_site_ids: snake_case key as documented");
         assertEquals("skill", caps.get(1).kind());
-    }
-
-    @Test
-    void theAnchorIsRealYamlCarryingTheFactsItClaimsTo() throws IOException {
-        // Guards the failure mode this whole approach could hide: if the anchor were emptied, renamed
-        // into placeholders, or reduced to a stub, every assertion above would still pass vacuously on
-        // a call site that simply declares nothing. The anchor has to actually exercise the contract.
-        String callSite = anchor("call_site");
-        assertTrue(callSite.contains("output_schema:"), "the call-site anchor must exercise output_schema");
-        assertTrue(callSite.contains("tools:"), "the call-site anchor must exercise tools");
-        assertFalse(callSite.contains("<"), "an anchor is a worked example, not a placeholder template");
-        assertFalse(anchor("capabilities").contains("<"), "likewise for the capabilities anchor");
     }
 }

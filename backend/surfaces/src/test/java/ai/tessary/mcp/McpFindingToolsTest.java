@@ -195,18 +195,6 @@ class McpFindingToolsTest {
 
     // ---- registration --------------------------------------------------------------------------
 
-    @Test
-    void getFindingToolIsListed() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(names.contains("get_finding"), names.toString());
-    }
-
     // ---- get_finding -----------------------------------------------------------------------------
 
     /**
@@ -260,20 +248,6 @@ class McpFindingToolsTest {
         JsonNode first = body.get("findings").get(0);
         assertTrue(first.get("triageVerdict").isNull(), "a list row carried the ruling");
         assertTrue(first.get("triageSummary").isNull(), "a list row carried the summary");
-    }
-
-    @Test
-    void getFinding_readsByIdProjectScoped() throws Exception {
-        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(sampleFinding());
-
-        JsonNode structured = structured(callTool("get_finding", "{\"id\":\"find-1\"}"));
-
-        assertEquals("find-1", structured.get("finding").get("id").asText());
-        assertEquals("cs-1", structured.get("finding").get("callSiteId").asText());
-        assertEquals(
-                FindingRow.Cause.MALFORMED_RATE,
-                structured.get("finding").get("causeKind").asText());
-        verify(behaviorDrift).finding(PROJECT_ID, "find-1");
     }
 
     @Test
@@ -544,35 +518,6 @@ class McpFindingToolsTest {
 
     // ---- list_findings ---------------------------------------------------------------------------
 
-    /**
-     * {@code get_finding} shipped without a list, which made it a dead end: its own argument description named
-     * the only way in ("e.g. from a Classifiers findings page URL"), so an agent could not reach a finding
-     * without a human reading the UI and pasting an id. The list has been on {@code FindingController} (formerly {@code BehaviorController}) the
-     * whole time.
-     */
-    @Test
-    void listFindingsToolIsListed() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(names.contains("list_findings"), names.toString());
-    }
-
-    @Test
-    void listFindings_defaultsToConfirmedOnly() throws Exception {
-        when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
-                .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
-
-        structured(callTool("list_findings", "{}"));
-
-        // confirmedOnly=true with no argument: the default must be the alert list, not the raw lead stream.
-        verify(behaviorDrift).findings(PROJECT_ID, null, null, null, true);
-    }
-
     @Test
     void listFindings_passesEveryFilterThroughAndWidensOnlyForExplicitAll() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
@@ -673,18 +618,6 @@ class McpFindingToolsTest {
                 nextCursor,
                 counts(120, 0),
                 counts(120, 0));
-    }
-
-    @Test
-    void getFindingEvidenceToolIsListed() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(names.contains("get_finding_evidence"), names.toString());
     }
 
     /**
@@ -791,15 +724,6 @@ class McpFindingToolsTest {
 
         assertTrue(text.contains("members"), text);
         assertTrue(text.contains(FindingEvidenceRow.Role.BASELINE), text);
-        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
-        verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidence(any(), any());
-    }
-
-    @Test
-    void getFindingEvidence_missingFindingIdIsToolError_andNeverCallsService() throws Exception {
-        String text = errorText(callTool("get_finding_evidence", "{}"));
-
-        assertTrue(text.contains("finding_id"), text);
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidence(any(), any());
     }

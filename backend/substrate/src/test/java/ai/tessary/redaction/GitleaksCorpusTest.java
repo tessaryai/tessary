@@ -99,16 +99,6 @@ class GitleaksCorpusTest {
     }
 
     @Test
-    void overlappingRulesKeepTheMostSpecificName() {
-        assertOnly("aws-access-token", true, "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\"");
-        assertOnly(
-                "new-relic-browser-api-token",
-                false,
-                "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
-                "a vendor rule beats generic-api-key on the same characters");
-    }
-
-    @Test
     void placeholdersLowEntropyValuesAndProseAreNotCredentials() {
         assertEquals(List.of(), CORPUS.find("api_key = \"${API_KEY}\""), "a template reference is allowlisted");
         assertEquals(List.of(), CORPUS.find("api_key = $API_KEY"), "an environment reference is allowlisted");

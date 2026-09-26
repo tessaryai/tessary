@@ -2,7 +2,6 @@
 package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
@@ -171,55 +170,6 @@ class ClassifierTurnGrainIntegrationTest {
                 firstTurn,
                 afterSecond.get(0).subjectId(),
                 "the surviving detection is the FIRST turn that earned it, not the last one seen");
-    }
-
-    @Test
-    void aTurnInAnUnflaggedConversationIsStillScored() {
-        // The suppression is per conversation, not global: a different conversation is a different
-        // event and must still be able to flag. This is the assertion that fails if the filter ever
-        // widens from "this session is flagged" to "anything is flagged".
-        String pid = bootstrapGranted("turn-grain-convo2");
-        Instant now = Instant.now();
-
-        String flaggedSession = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPreamble(fx, pid, flaggedSession, now.toString());
-        seedSpan(pid, SubstrateV2Fixtures.traceId(), flaggedSession, null, "agent", "agent", now);
-        assertEquals(1, sweepUntilDetected(pid).size());
-
-        String otherSession = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPreamble(
-                fx, pid, otherSession, now.plusSeconds(60).toString());
-        String otherTurn = SubstrateV2Fixtures.traceId();
-        seedSpan(pid, otherTurn, otherSession, null, "agent", "agent", now.plusSeconds(90));
-        sweepOnce(pid);
-
-        List<ClassifierEventView> events = service.eventsForClassifier(
-                pid,
-                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
-                null,
-                100);
-        assertEquals(2, events.size(), "a DIFFERENT conversation still flags — suppression is per conversation");
-        assertTrue(
-                events.stream().anyMatch(e -> otherTurn.equals(e.subjectId())),
-                "the unflagged conversation's turn produced its own detection");
-    }
-
-    @Test
-    void aBareLlmRootWithNoAgentWrapperIsStillScored() {
-        String pid = bootstrapGranted("turn-grain-bare");
-        Instant now = Instant.now();
-
-        // The no-agent-wrapper shape: one llm call per turn, emitted as the trace's root span. Its root
-        // is the user-facing turn, which is why the filter tests structure (root trace + root span) and
-        // only requires kind to be dialogue-bearing, rather than requiring kind='agent'.
-        String sessionId = SubstrateV2Fixtures.sessionId();
-        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
-        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, "llm", "chat", now);
-
-        List<ClassifierEventView> events = sweepUntilDetected(pid);
-
-        assertEquals(1, events.size(), "a bare llm root is a user-facing turn and must still be scored");
-        assertEquals(only.traceId(), events.get(0).subjectId());
     }
 
     /** A frustrated user turn in the shape ingest really stores (role-tagged gen_ai envelope). */

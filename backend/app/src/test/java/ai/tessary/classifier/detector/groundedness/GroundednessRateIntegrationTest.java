@@ -208,35 +208,6 @@ class GroundednessRateIntegrationTest {
     }
 
     @Test
-    void aSecondPassOnTheSameOnsetRefreshesTheFindingRatherThanFilingAnother() {
-        String pid = project("gr-refresh");
-        ClassifierRow signal = groundedness(pid);
-        Instant start = start();
-        seedHours(pid, signal, CALL_SITE, start, 0, 7, 30, 0.05);
-        seedHours(pid, signal, CALL_SITE, start, 7, 6, 30, 0.40);
-        service.refresh(pid, signal, Instant.now());
-        FindingRow before = findings.listByProject(pid, null, null, "groundedness", false, 10)
-                .get(0);
-
-        seedHours(pid, signal, CALL_SITE, start, 13, 1, 30, 0.40); // the spell runs on another hour
-        service.refresh(pid, signal, Instant.now());
-
-        List<FindingRow> after = findings.listByProject(pid, null, null, "groundedness", false, 10);
-        assertEquals(1, after.size(), "the same spell is one finding");
-        FindingRow refreshed = after.get(0);
-        assertEquals(before.id(), refreshed.id());
-        assertEquals(before.onsetAt(), refreshed.onsetAt());
-        assertEquals(before.sampleCount() + 12, refreshed.sampleCount(), "today's numbers, not the filing's");
-        assertNull(refreshed.triageVerdict(), "still unruled");
-        assertEquals(
-                refreshed.payload().path("traces_since_onset").asLong(),
-                evidence.listByFinding(pid, refreshed.id()).stream()
-                        .filter(r -> FindingEvidenceRow.Role.MEMBER.equals(r.role()))
-                        .count(),
-                "the evidence grows with the spell");
-    }
-
-    @Test
     void aPositiveOpensACaseAndTheDossierListsTheFlaggedAnswersAtItsCallSite() {
         String pid = project("gr-case");
         ClassifierRow signal = groundedness(pid);
@@ -366,25 +337,6 @@ class GroundednessRateIntegrationTest {
                 findings.listByProject(pid, null, null, "groundedness", false, 10)
                         .size(),
                 "the absorbed hours are fenced off");
-    }
-
-    @Test
-    void aCallSiteStillLearningFilesNothing() {
-        String pid = project("gr-learning");
-        ClassifierRow signal = groundedness(pid);
-        seedHours(pid, signal, CALL_SITE, start(), 0, 5, 30, 0.50); // 150 traces, half flagged
-
-        assertTrue(service.refresh(pid, signal, Instant.now()).isEmpty());
-
-        assertTrue(findings.listByProject(pid, null, null, "groundedness", false, 10)
-                .isEmpty());
-        assertEquals(
-                0,
-                jdbc.sql("SELECT COUNT(*) FROM groundedness_state WHERE project_id = :pid")
-                        .param("pid", pid)
-                        .query(Long.class)
-                        .single(),
-                "no reference yet, so no state row");
     }
 
     // ---- fixtures

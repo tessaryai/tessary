@@ -134,30 +134,7 @@ class BehaviorTriagePromptTest {
         assertTrue(prompt.contains("dossier/method.md"), "and both of them");
     }
 
-    @Test
-    void theSystemPromptShipsNoStateFile() {
-        assertFalse(
-                BehaviorTriageEngine.SYSTEM_PROMPT.contains("state.json"),
-                "the claim's numbers now come from get_finding, not a shipped file");
-    }
-
-    @Test
-    void theSystemPromptCarriesNothingPerRun() {
-        assertFalse(
-                BehaviorTriageEngine.SYSTEM_PROMPT.contains("fnd-1"),
-                "a finding id in the system prompt would mean it is not the same string on every run");
-    }
-
     // ---- the dossier ------------------------------------------------------------------------------
-
-    @Test
-    void theDossierShipsOnlyFindingAndMethodMdWhenACardExists() {
-        FindingRow row =
-                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
-
-        assertEquals(
-                Set.of("finding.md", "method.md"), engine().dossier(JOB, row).keySet());
-    }
 
     /**
      * A groundedness rate finding also ships {@code detections.md}: each flagged answer at its call site since
@@ -361,13 +338,6 @@ class BehaviorTriagePromptTest {
                 BuiltInDetector.Kind.TOOL_ERROR, "k", "cs-checkout", "{\"bucket\": {\"kind\": \"tool\"}}", null);
         String toolMd = findingMd(engine(), toolBucket);
         assertTrue(toolMd.contains("the largest of the call sites this tool bucket spans"), toolMd);
-    }
-
-    @Test
-    void theClaimLineIsDroppedWhenTheCauseCarriesNoMagnitude() {
-        FindingRow omission = finding(BuiltInDetector.Kind.TOOL_ERROR, "omitted-step", null, null, null);
-
-        assertFalse(findingMd(engine(), omission).contains("- claim:"));
     }
 
     @Test

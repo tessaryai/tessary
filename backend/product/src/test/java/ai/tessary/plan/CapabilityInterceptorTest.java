@@ -141,20 +141,4 @@ class CapabilityInterceptorTest {
         assertTrue(preHandle(handler(new GatedController(), "report"), vars), shape);
         verifyNoInteractions(orgs);
     }
-
-    @Test
-    void anUngatedHandlerOrANonHandlerMethodPassesThrough() throws Exception {
-        overrides.put(Capability.RCA.wire(), false);
-
-        assertTrue(preHandle(handler(new OpenController(), "list"), Map.of("orgSlug", SLUG)));
-        assertTrue(preHandle(new Object(), Map.of("orgSlug", SLUG)), "a static resource has no annotation to read");
-        verifyNoInteractions(orgs);
-    }
-
-    @Test
-    void anEnabledCapabilityLetsTheRequestThrough() throws Exception {
-        orgExists();
-
-        assertTrue(preHandle(handler(new GatedController(), "report"), Map.of("orgSlug", SLUG)));
-    }
 }

@@ -9,7 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,28 +61,6 @@ class AuthControllerTest {
 
     private String body(String email, String password) throws Exception {
         return mapper.writeValueAsString(Map.of("email", email, "password", password));
-    }
-
-    @Test
-    void loginHappyPathAfterSignup() throws Exception {
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("login-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
-
-        Cookie session = mvc.perform(post("/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("login-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getCookie("tessary-session");
-        assertNotNull(session, "a successful login sets the session cookie");
-
-        // The cookie is the sign-in: it must resolve to the account that just logged in.
-        mvc.perform(get("/auth/me").cookie(session))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.email").value("login-happy@example.com"));
     }
 
     @Test

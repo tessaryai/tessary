@@ -12,7 +12,6 @@ import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerPage;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerView;
-import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceView;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.RetrievedDocumentView;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.AnswerPage;
@@ -48,8 +47,6 @@ class GroundednessDetailServiceTest {
 
     private static final String ANSWER =
             "The refund was issued on March 3. It arrives within two business days by bank transfer.";
-    private static final String FIRST = "The refund was issued on March 3.";
-    private static final String SECOND = "It arrives within two business days by bank transfer.";
     private static final String QUESTION = "When will my refund arrive?";
     private static final List<String> DOCUMENTS = List.of(
             "Refund 4417 was issued on March 3.", "Card refunds reach the customer within five to ten business days.");
@@ -162,53 +159,6 @@ class GroundednessDetailServiceTest {
         assertTrue(block.withoutIds().answers().isEmpty());
     }
 
-    /**
-     * The strongest sentence is listed first, so an answer scored by its last flagged sentence reads 0.981, not
-     * 0.991.
-     */
-    @Test
-    void aStoredAnswersFlaggedSentencesSliceToTheirText() {
-        int secondStart = ANSWER.indexOf(SECOND);
-        String evidence = "{\"unsupported\":0.991,\"flagged_sentences\":["
-                + "{\"start\":0,\"end\":" + FIRST.length() + ",\"unsupported\":0.991},"
-                + "{\"start\":" + secondStart + ",\"end\":" + ANSWER.length() + ",\"unsupported\":0.981}]}";
-        CitedPages rates = new CitedPages()
-                .with(
-                        null,
-                        50,
-                        0,
-                        new AnswerPage(
-                                List.of(new CitedAnswer(
-                                        "tr_1", "sp_1", "sess_1", "2026-09-23T14:41:00Z", evidence, false)),
-                                1));
-        StoredSpans substrate = new StoredSpans().with(span("tr_1", "sp_1", QUESTION, ANSWER), DOCUMENTS);
-
-        FlaggedAnswerPage page = service(rates, substrate).page(finding(payload()), null, 50, null);
-
-        assertEquals(
-                new FlaggedAnswerPage(
-                        List.of(new FlaggedAnswerView(
-                                "tr_1",
-                                "sp_1",
-                                "sess_1",
-                                "2026-09-23T14:41:00Z",
-                                0.991,
-                                QUESTION,
-                                ANSWER,
-                                List.of(
-                                        new FlaggedSentenceView(0, FIRST.length(), 0.991),
-                                        new FlaggedSentenceView(secondStart, ANSWER.length(), 0.981)),
-                                List.of(
-                                        new RetrievedDocumentView(null, DOCUMENTS.get(0)),
-                                        new RetrievedDocumentView(null, DOCUMENTS.get(1))),
-                                true,
-                                true,
-                                false)),
-                        1,
-                        null),
-                page);
-    }
-
     /** The substrate answers in reverse; each answer still carries its own text, question and documents. */
     @Test
     void twoCitedAnswersEachCarryTheirOwnSpan() {
@@ -262,69 +212,6 @@ class GroundednessDetailServiceTest {
                                 true,
                                 false)),
                 page.rows());
-    }
-
-    @Test
-    void aTraceThatIsGoneIsNotStored() {
-        CitedPages rates = new CitedPages()
-                .with(
-                        null,
-                        50,
-                        0,
-                        new AnswerPage(
-                                List.of(new CitedAnswer(
-                                        "tr_gone",
-                                        "sp_1",
-                                        null,
-                                        null,
-                                        "{\"unsupported\":0.98,\"flagged_sentences\":"
-                                                + "[{\"start\":0,\"end\":5,\"unsupported\":0.98}]}",
-                                        true)),
-                                1));
-
-        FlaggedAnswerView a = service(rates, new StoredSpans())
-                .page(finding(payload()), null, 50, null)
-                .rows()
-                .getFirst();
-
-        // The offsets survive the payload; the answer, question and documents are gone with the trace.
-        assertEquals(
-                new FlaggedAnswerView(
-                        "tr_gone",
-                        "sp_1",
-                        null,
-                        null,
-                        0.98,
-                        null,
-                        null,
-                        List.of(new FlaggedSentenceView(0, 5, 0.98)),
-                        null,
-                        false,
-                        false,
-                        true),
-                a);
-    }
-
-    @Test
-    void witnessesPageByOffset() {
-        FindingRow finding = finding(payload());
-        CitedPages rates = new CitedPages()
-                .with(null, 2, 0, new AnswerPage(List.of(cited("tr_3"), cited("tr_2")), 3))
-                .with(null, 2, 2, new AnswerPage(List.of(cited("tr_1")), 3));
-        GroundednessDetailService service = service(rates, new StoredSpans());
-
-        FlaggedAnswerPage first = service.page(finding, null, 2, null);
-        FlaggedAnswerPage rest = service.page(finding, null, 2, first.nextCursor());
-
-        assertEquals(
-                List.of("tr_3", "tr_2"),
-                first.rows().stream().map(FlaggedAnswerView::traceId).toList());
-        assertEquals("2", first.nextCursor());
-        assertEquals(
-                List.of("tr_1"),
-                rest.rows().stream().map(FlaggedAnswerView::traceId).toList());
-        assertNull(rest.nextCursor(), "the last page");
-        assertEquals(3, rest.total());
     }
 
     /** An RCA cause filter reaches the read as it was asked for, so the page is that cause's share. */

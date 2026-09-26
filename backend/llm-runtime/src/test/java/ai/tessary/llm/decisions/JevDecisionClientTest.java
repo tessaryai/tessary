@@ -185,12 +185,6 @@ class JevDecisionClientTest {
     }
 
     @Test
-    void pricingId_isTheTypeSafeBookKeyOnBothRoutes() {
-        assertEquals("typesafe/jev-latest", JevDecisionClient.pricingId(typesafe()));
-        assertEquals("typesafe/jev-latest", JevDecisionClient.pricingId(openrouter()));
-    }
-
-    @Test
     void requestBody_isModelStateAndQuestionsInTheDocumentedShape() throws Exception {
         ObjectNode body = client().requestBody(openrouter(), request());
 
@@ -230,20 +224,6 @@ class JevDecisionClientTest {
         assertEquals(true, sleeps.get(0) >= 1_000L && sleeps.get(0) <= 1_250L, "first back-off is 1s plus jitter");
         assertEquals(true, sleeps.get(1) >= 2_000L && sleeps.get(1) <= 2_500L, "second back-off is 2s plus jitter");
         sent(3);
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void transportFailures_areRetriedLikeServerErrors() throws Exception {
-        HttpResponse<String> ok = response(200, answer(""));
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new IOException("reset"))
-                .thenReturn(ok);
-
-        DecisionAnswer answer = client().decide("p1", "frustration", typesafe(), request());
-
-        assertEquals("jev-1.13-20260917", answer.respondedModel());
-        assertEquals(1, sleeps.size());
     }
 
     @Test

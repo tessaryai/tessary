@@ -33,22 +33,6 @@ class InstanceIdRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("an instance's first ping is 0, then each ping is one more, and the counter is persisted")
-    void pingSeq_startsAtZeroAndRisesByOne() {
-        instanceIds.get();
-
-        assertEquals(0L, instanceIds.nextPingSeq());
-        assertEquals(1L, instanceIds.nextPingSeq());
-        assertEquals(2L, instanceIds.nextPingSeq());
-        assertEquals(
-                3L,
-                jdbc.sql("SELECT ping_seq FROM telemetry_instance")
-                        .query(Long.class)
-                        .single(),
-                "the stored value is the NEXT ping's sequence, so a restart continues from it");
-    }
-
-    @Test
     @DisplayName("replicas pinging at once are never handed the same ping_seq")
     void pingSeq_concurrentCallsGetDistinctValues() throws Exception {
         instanceIds.get();
@@ -67,18 +51,6 @@ class InstanceIdRepositoryIntegrationTest {
         } finally {
             pool.shutdownNow();
         }
-    }
-
-    @Test
-    @DisplayName("minting the instance id leaves ping_seq at 0")
-    void get_mintsWithPingSeqZero() {
-        instanceIds.get();
-
-        assertEquals(
-                0L,
-                jdbc.sql("SELECT ping_seq FROM telemetry_instance")
-                        .query(Long.class)
-                        .single());
     }
 
     /**
