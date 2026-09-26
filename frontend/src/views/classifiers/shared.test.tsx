@@ -60,4 +60,11 @@ describe("RunTriageButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run triage again" }));
     expect(onAnalyze).toHaveBeenCalled();
   });
+
+  it("is the bare button before any run, with no status beside it", () => {
+    render(<RunTriageButton finding={{ triageStatus: "pending" } as BehaviorFinding} busy={false} onAnalyze={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Run triage" })).toBeTruthy();
+    expect(screen.queryByText("Pending")).toBeNull();
+  });
 });
