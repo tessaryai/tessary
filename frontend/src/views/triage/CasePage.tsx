@@ -66,6 +66,7 @@ import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, 
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
+import { traceLinker } from "../traceLinker";
 import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
 
 /** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
@@ -384,7 +385,7 @@ export function CasePage() {
           <HowOutputsBroke
             findingId={detail.latest_finding_id}
             detail={detail.malformed_output}
-            linkToTrace={traceLink(basePath)}
+            linkToTrace={traceLinker(basePath)}
           />
         </Block>
       )}
@@ -498,12 +499,6 @@ export function CasePage() {
 
 /* ------------------------------------------------------------------ pieces */
 
-/** Where a trace, and the span within it when there is one, opens. */
-function traceLink(basePath: string) {
-  return (traceId: string, spanId?: string | null) =>
-    `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`;
-}
-
 function Block({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
   return (
     <section className="mt-8.5">
@@ -585,7 +580,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
           <LeakTimeline secretLeak={secretLeak} />
           <LeakPins
             secretLeak={secretLeak}
-            linkToTrace={traceLink(basePath)}
+            linkToTrace={traceLinker(basePath)}
           />
         </>
       ) : malformedOutput ? (
@@ -936,7 +931,7 @@ function Failures({ detail, basePath }: { detail: CaseDetail; basePath: string }
 
 /** One failing call: when, what it was, and what it returned. */
 function ErrorSpanRow({ span, basePath }: { span: EvidenceSpan; basePath: string }) {
-  const to = span.traceId != null ? traceLink(basePath)(span.traceId, span.spanId) : null;
+  const to = span.traceId != null ? traceLinker(basePath)(span.traceId, span.spanId) : null;
 
   const body = (
     <>

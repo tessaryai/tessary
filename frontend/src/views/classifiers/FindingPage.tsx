@@ -39,6 +39,7 @@ import { FrustratedConversations } from "./FrustratedConversations";
 import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
+import { traceLinker } from "../traceLinker";
 
 type Detail = BehaviorFindingDetail;
 
@@ -55,12 +56,7 @@ export function FindingPage() {
    * these from the slugs instead.
    */
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
-  /** Absolute, not `../traces/...`: these hand-build the href for a plain `<a>` rather than a
-   *  react-router `<Link>` (the timeline and the failing-output viewer render dozens of these off
-   *  data, not JSX), and a relative href on a plain anchor resolves against the URL rather than the
-   *  route tree — exactly the mismatch this page's own top note warns `navigate()` about. */
-  const traceLink = (traceId: string, spanId?: string | null) =>
-    `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`;
+  const traceLink = traceLinker(basePath);
 
   const detailQ = useQuery({
     queryKey: ["behavior-finding", api.base, findingId],
@@ -82,9 +78,8 @@ export function FindingPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["behavior-finding", api.base, findingId] }),
   });
 
-  if (detailQ.isLoading) return <div style={CONTAINER}><LoadingRow /></div>;
   if (detailQ.isError) return <div style={CONTAINER}><ErrorNote error={detailQ.error} /></div>;
-  if (!detailQ.data) return null;
+  if (!detailQ.data) return <div style={CONTAINER}><LoadingRow /></div>;
 
   const detail: Detail = detailQ.data;
   const finding = detail.finding;
