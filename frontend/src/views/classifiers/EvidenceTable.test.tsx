@@ -37,7 +37,11 @@ const span = (over: Partial<EvidenceSpan>) =>
     spanId: null,
     ...over,
   }) as EvidenceSpan;
-const page = (rows: EvidenceSpan[], nextCursor: string | null = null, recordedCounts = { witness: 3, member: 40 }) => ({
+const page = (
+  rows: EvidenceSpan[],
+  nextCursor: string | null = null,
+  recordedCounts: Record<string, number> = { witness: 3, member: 40, baseline: 0 },
+) => ({
   rows,
   nextCursor,
   counts: recordedCounts,
@@ -115,6 +119,7 @@ describe("EvidenceTable", () => {
     renderTable();
     await screen.findByText("Timeout", { exact: false });
     expect(screen.getByText("2 of 43")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Baseline/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Member (40)" }));
 
