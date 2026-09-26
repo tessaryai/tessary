@@ -215,8 +215,7 @@ function CommandPalette() {
   // global ESC consumers stacked underneath (the Ask rail, any open Rail) don't
   // also close on the same keypress.
   useEffect(() => {
-    const dlg = dlgRef.current;
-    if (!dlg) return;
+    const dlg = dlgRef.current!;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -240,14 +239,15 @@ function CommandPalette() {
     };
   }, [close]);
 
+  // Only enabled commands reach here: a disabled one renders a disabled button and is left out of
+  // `selectable`, and every enabled command carries its `run`.
   const runCommand = (cmd: Command) => {
-    if (cmd.disabled || !cmd.run) return;
     // Record navigations as recents (skip the recents entries themselves and pure actions).
     if (cmd.group === "Navigation" || cmd.group === "Settings") {
       pushRecent(orgSlug, projectSlug, { path: targetPath(cmd, projectBase), label: cmd.label });
     }
     close();
-    cmd.run();
+    cmd.run!();
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

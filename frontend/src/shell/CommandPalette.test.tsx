@@ -6,7 +6,7 @@
  * response overwrite a newer one. It is never a dead end: no match still offers a way out.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import type { SearchResults } from "../api/types";
 import { currentLocation, renderRoute } from "../test/render";
@@ -238,6 +238,39 @@ describe("server search", () => {
 
     expect(await screen.findByText("2 results")).toBeTruthy();
     expect(screen.queryByText(/alpha trace/)).toBeNull();
+  });
+
+  it("drops a search the next keystroke cancelled without reporting search as unavailable", async () => {
+    mocks.search.mockImplementation(
+      (q: string, signal: AbortSignal) =>
+        new Promise((resolve, reject) => {
+          if (q === "beta") resolve({ hits: [hit("tr-b", "beta trace")] });
+          // A browser's AbortError is an Error; whatever the rejection, a cancelled search is not a failure.
+          signal.addEventListener("abort", () => reject(new Error("The operation was aborted.")));
+        }),
+    );
+    renderPalette();
+    const box = openPalette();
+
+    fireEvent.change(box, { target: { value: "alpha" } });
+    await waitFor(() => expect(mocks.search).toHaveBeenCalledTimes(1));
+    fireEvent.change(box, { target: { value: "beta" } });
+    // The cancelled request rejects at once; the new one is still waiting out its debounce.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryByText(/Search is unavailable/)).toBeNull();
+
+    expect(await screen.findByText("1 result")).toBeTruthy();
+  });
+
+  it("prints a result's title plainly when the match was elsewhere in it", async () => {
+    mocks.search.mockResolvedValue({ hits: [hit("tr-7", "Checkout failed", "refund requested")] });
+    renderPalette();
+    const box = openPalette();
+
+    fireEvent.change(box, { target: { value: "refund" } });
+
+    const row = (await screen.findByText("Checkout failed")).closest("button")!;
+    expect(row.querySelectorAll("mark, .bg-accent-subtle")).toHaveLength(0);
   });
 
   it("falls back to matching pages when search is unavailable", async () => {
