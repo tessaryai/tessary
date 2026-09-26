@@ -113,7 +113,7 @@ class TraceRollupWorkerIntegrationTest {
     @Test
     @DisplayName("the claim clears the deadline, and a quiet trace settles on the write that follows")
     void claimClearsTheDeadlineAndAQuietTraceSettles() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
+        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
         arm(true);
         expire();
 
@@ -135,7 +135,7 @@ class TraceRollupWorkerIntegrationTest {
     @Test
     @DisplayName("a span arriving between the claim and the write defeats the settle, and the re-fire includes it")
     void aSpanArrivingMidRollupDefeatsSettleAndIsIncludedOnTheRefire() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
+        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
         arm(true);
         expire();
 
@@ -146,10 +146,7 @@ class TraceRollupWorkerIntegrationTest {
         fx.withUsage(
                 fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(1), t0.plusSeconds(2)),
                 10L,
-                5L,
-                null,
-                null,
-                null);
+                5L);
         arm(true); // the §6.1 re-arm, in the same transaction as the span row in production
 
         traces.recompute(pid, traceId);
@@ -172,9 +169,7 @@ class TraceRollupWorkerIntegrationTest {
     @DisplayName("is_settled is honest: a late span un-settles a settled trace the moment it lands")
     void isSettledIsHonestAboutLateArrivals() {
         fx.llmSpan(pid, traceId, t0);
-        arm(true);
-        expire();
-        worker.runOnce();
+        rollUp(true);
         assertTrue(require(traceId).isSettled());
 
         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0.plusSeconds(30), t0.plusSeconds(31));
@@ -190,10 +185,8 @@ class TraceRollupWorkerIntegrationTest {
     @Test
     @DisplayName("a total corrupted by hand heals on the next fire — no accumulation means no permanent drift")
     void corruptThenRecomputeSelfHeals() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
-        arm(true);
-        expire();
-        worker.runOnce();
+        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
+        rollUp(true);
 
         jdbc.sql("UPDATE trace SET total_tokens = 999999, span_count = 42, unpriced_spans = 7"
                         + " WHERE project_id = :pid AND id = :id")
@@ -215,7 +208,7 @@ class TraceRollupWorkerIntegrationTest {
     @Test
     @DisplayName("the reaper re-arms the fingerprint a dead worker leaves, and leaves a settled trace alone")
     void reaperReArmsStrandedTracesOnly() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
+        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
         arm(true);
         expire();
         // The worker dies here: claimed (deadline cleared), never written back.
@@ -259,29 +252,18 @@ class TraceRollupWorkerIntegrationTest {
     @Test
     @DisplayName("unpriced_spans counts spans of ANY kind that carried usage — an unpriced tool call is spend too")
     void unpricedSpansCountsEveryKindThatCarriedUsage() {
-        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L, null, null, null);
+        fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
         fx.withUsage(
-                fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0, t0.plusSeconds(1)),
-                20L,
-                null,
-                null,
-                null,
-                null);
+                fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0, t0.plusSeconds(1)), 20L, null);
         fx.withUsage(
                 fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "embedding", t0, t0.plusSeconds(1)),
                 30L,
-                null,
-                null,
-                null,
                 null);
         // Priced, so not a hole in the total.
         fx.withCost(
                 fx.withUsage(
                         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1)),
                         40L,
-                        null,
-                        null,
-                        null,
                         null),
                 "0.000400",
                 null,
@@ -291,9 +273,7 @@ class TraceRollupWorkerIntegrationTest {
         // Unpriced but carrying no usage at all: nothing could have been billed, so it is not a hole.
         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0, t0.plusSeconds(1));
 
-        arm(true);
-        expire();
-        worker.runOnce();
+        rollUp(true);
 
         TraceV2Row row = require(traceId);
         assertEquals(5, row.spanCount());
@@ -309,9 +289,7 @@ class TraceRollupWorkerIntegrationTest {
         SpanRow child = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(2));
         fx.withPreviews(child, "an inner prompt", "an inner completion", "call-site-99");
 
-        arm(true);
-        expire();
-        worker.runOnce();
+        rollUp(true);
 
         TraceV2Row row = require(traceId);
         assertEquals("what the user asked", row.inputPreview());
@@ -326,17 +304,13 @@ class TraceRollupWorkerIntegrationTest {
                 pid, traceId, SubstrateV2Fixtures.spanId(), "parent-not-here-yet", "llm", t0, t0.plusSeconds(2));
         fx.withPreviews(child, "an inner prompt", "an inner completion", "call-site-99");
 
-        arm(false); // no root in this batch, so has_root_span stays false
-        expire();
-        worker.runOnce();
+        rollUp(false); // no root in this batch, so has_root_span stays false
 
         TraceV2Row row = require(traceId);
         assertEquals(1, row.spanCount(), "the rollup still ran — the previews are the only thing waiting");
         assertNull(row.inputPreview());
         assertNull(row.callSiteId());
     }
-
-    // ---- the long-running turn -----------------------------------------------------------------------
 
     // ---- helpers -------------------------------------------------------------------------------------
 
@@ -371,6 +345,12 @@ class TraceRollupWorkerIntegrationTest {
     /** One batch's worth of arming for this trace — the §7.1 update the write path issues. */
     private void arm(boolean hasRoot) {
         traces.applyBatchTimers(pid, List.of(new TraceV2Repository.TimerUpdate(traceId, t0.toString(), null, hasRoot)));
+    }
+
+    private void rollUp(boolean hasRoot) {
+        arm(hasRoot);
+        expire();
+        worker.runOnce();
     }
 
     /**

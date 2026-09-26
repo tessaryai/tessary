@@ -191,7 +191,7 @@ class TracesControllerTest {
         rollUp(t.pid(), quiet, t0);
 
         String unpriced = SubstrateV2Fixtures.traceId();
-        fx.withUsage(fx.llmSpan(t.pid(), unpriced, t0.plusSeconds(10)), 400L, 100L, null, null, null);
+        fx.withUsage(fx.llmSpan(t.pid(), unpriced, t0.plusSeconds(10)), 400L, 100L);
         rollUp(t.pid(), unpriced, t0);
 
         var byId = ok(controller.list(

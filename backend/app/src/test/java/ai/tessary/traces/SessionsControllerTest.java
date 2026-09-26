@@ -112,10 +112,7 @@ class SessionsControllerTest {
                 fx.withUsage(
                         fx.span(pid, first, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1)),
                         200L,
-                        50L,
-                        null,
-                        null,
-                        null),
+                        50L),
                 "0.01",
                 "0.02",
                 null,
@@ -126,12 +123,7 @@ class SessionsControllerTest {
         String second = SubstrateV2Fixtures.traceId();
         fx.trace(pid, second, sessionId, t0.plusSeconds(60));
         fx.withUsage(
-                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null),
-                10L,
-                5L,
-                null,
-                null,
-                null);
+                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null), 10L, 5L);
 
         var detail = ok(controller.detail(ctx, org, proj, sessionId));
         assertEquals(sessionId, detail.id());
@@ -197,10 +189,7 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(1))
                         .write(),
                 100L,
-                50L,
-                null,
-                null,
-                null);
+                50L);
         rollUp(t1, t0);
 
         String t2 = SubstrateV2Fixtures.traceId();
@@ -215,10 +204,7 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(31))
                         .write(),
                 200L,
-                75L,
-                null,
-                null,
-                null);
+                75L);
         rollUp(t2, t0.plusSeconds(30));
 
         String t3 = SubstrateV2Fixtures.traceId();
@@ -233,10 +219,7 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(61))
                         .write(),
                 10L,
-                5L,
-                null,
-                null,
-                null);
+                5L);
         rollUp(t3, t0.plusSeconds(60));
 
         var page = ok(controller.list(ctx, org, proj, 50, null, "totals"));

@@ -98,13 +98,13 @@ class VitalsServiceIntegrationTest {
         // scope here is the second line of defence.
         SpanRow agent = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", RAN, RAN.plusSeconds(5));
         agent = fx.withPreviews(agent, null, null, "cs-checkout");
-        agent = fx.withUsage(agent, 1_000_000L, 0L, null, null, null);
+        agent = fx.withUsage(agent, 1_000_000L, 0L);
         fx.withCost(agent, "2.00", "0", null, null, "provided");
 
         // The llm leaf that actually made the call.
         SpanRow leaf = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), agent.id(), "llm", RAN, RAN.plusSeconds(4));
         leaf = fx.withPreviews(leaf, null, null, "cs-checkout");
-        leaf = fx.withUsage(leaf, 1_000_000L, 0L, null, null, null);
+        leaf = fx.withUsage(leaf, 1_000_000L, 0L);
         fx.withCost(leaf, "2.00", "0", null, null, "inferred");
 
         settle(pid, traceId, RAN, RAN.plusSeconds(5));
@@ -128,7 +128,7 @@ class VitalsServiceIntegrationTest {
         SpanRow span = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(2));
         span = fx.withPreviews(span, null, null, "cs-a");
         // Usage known, rate unknown. The cost columns stay null and cost_source says why.
-        fx.withUsage(span, 500_000L, 500_000L, null, null, null);
+        fx.withUsage(span, 500_000L, 500_000L);
         settle(pid, traceId, RAN, RAN.plusSeconds(2));
 
         Group total = compute(pid).total();
@@ -178,7 +178,7 @@ class VitalsServiceIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(1));
         root = fx.withPreviews(root, null, null, "cs-z");
-        root = fx.withUsage(root, 1_000_000L, 0L, null, null, null);
+        root = fx.withUsage(root, 1_000_000L, 0L);
         fx.withCost(root, "2.00", "0", null, null, "inferred");
         // Timers only: the trace has an end (so a latency) but has never been rolled up, which is
         // precisely what is_settled = false says.

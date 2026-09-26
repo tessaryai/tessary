@@ -87,9 +87,9 @@ class TraceSubstrateRepositoryTest {
         String traceId = SubstrateV2Fixtures.traceId();
 
         SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(2));
-        fx.withCost(fx.withUsage(root, 100L, 40L, null, null, null), "0.001", "0.002", null, null, "inferred");
+        fx.withCost(fx.withUsage(root, 100L, 40L), "0.001", "0.002", null, null, "inferred");
         SpanRow child = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(1));
-        fx.withCost(fx.withUsage(child, 10L, 5L, null, null, null), "0.0001", "0.0002", null, null, "inferred");
+        fx.withCost(fx.withUsage(child, 10L, 5L), "0.0001", "0.0002", null, null, "inferred");
         rollUp(pid, traceId, t0);
 
         TraceV2Row stored = v2traces.findById(pid, traceId).orElseThrow();

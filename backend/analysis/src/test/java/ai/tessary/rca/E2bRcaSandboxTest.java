@@ -37,6 +37,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -131,26 +132,9 @@ class E2bRcaSandboxTest {
      */
     @Test
     void prefersTheValidatedStructuredOutputOverTheRawReplyText() throws Exception {
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        try {
-                            return envelopeWithStructuredOutput(
-                                    "Here you go:\n```json\n{\"verdict\":\"model_change\"}\n```",
-                                    "{\"verdict\":\"model_change\",\"summary\":\"s\"}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(bodyJson -> envelopeWithStructuredOutput(
+                "Here you go:\n```json\n{\"verdict\":\"model_change\"}\n```",
+                "{\"verdict\":\"model_change\",\"summary\":\"s\"}"));
 
         RcaSandbox.SandboxRun run = sandbox.run(request());
 
@@ -162,25 +146,10 @@ class E2bRcaSandboxTest {
     @Test
     void returnsAgentResultTextAndPostsFullBody() throws Exception {
         StringBuilder posted = new StringBuilder();
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        posted.append(bodyJson);
-                        try {
-                            return envelope("{\"verdict\":\"behavior_change\"}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(bodyJson -> {
+            posted.append(bodyJson);
+            return envelope("{\"verdict\":\"behavior_change\"}");
+        });
 
         RcaSandbox.SandboxRun run = sandbox.run(request());
 
@@ -209,25 +178,10 @@ class E2bRcaSandboxTest {
                         "global.anthropic.claude-sonnet-4-6")));
 
         StringBuilder posted = new StringBuilder();
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        settings,
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        posted.append(bodyJson);
-                        try {
-                            return envelope("{}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(settings, mock(LlmUsageAccountant.class), bodyJson -> {
+            posted.append(bodyJson);
+            return envelope("{}");
+        });
 
         sandbox.run(request());
 
@@ -252,25 +206,10 @@ class E2bRcaSandboxTest {
                         ai.tessary.llm.ModelProvider.GEMINI, "gemini-2.5-pro", "gemini-2.5-pro")));
 
         StringBuilder posted = new StringBuilder();
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        settings,
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        posted.append(bodyJson);
-                        try {
-                            return envelope("{}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(settings, mock(LlmUsageAccountant.class), bodyJson -> {
+            posted.append(bodyJson);
+            return envelope("{}");
+        });
 
         sandbox.run(request());
 
@@ -284,25 +223,10 @@ class E2bRcaSandboxTest {
     @Test
     void aRepolessRequestOmitsTheCloneFields() throws Exception {
         StringBuilder posted = new StringBuilder();
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        posted.append(bodyJson);
-                        try {
-                            return envelope("{}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(bodyJson -> {
+            posted.append(bodyJson);
+            return envelope("{}");
+        });
 
         sandbox.run(new RcaSandbox.SandboxRequest(
                 "proj", "g1", null, null, Map.of(), "p", "{}", "https://api.example/mcp", "tsy_a_secret", "report-1"));
@@ -316,20 +240,7 @@ class E2bRcaSandboxTest {
 
     @Test
     void blankResultFailsClosed() {
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        return "{\"raw\":\"{}\",\"turns\":[],\"startMs\":0}";
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(bodyJson -> "{\"raw\":\"{}\",\"turns\":[],\"startMs\":0}");
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
@@ -344,39 +255,11 @@ class E2bRcaSandboxTest {
     void aFinishedRunBooksItsTokensAndCostToTheReport() throws Exception {
         LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
         E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        usage,
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        try {
-                            return envelope("{\"verdict\":\"behavior_change\"}");
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                };
+                stubbed(noLaneSetting(), usage, bodyJson -> envelope("{\"verdict\":\"behavior_change\"}"));
 
         sandbox.run(request());
 
-        verify(usage)
-                .recordSandboxRun(
-                        eq("proj"),
-                        eq("rca"),
-                        any(),
-                        any(),
-                        eq(false),
-                        eq(10L),
-                        eq(5L),
-                        eq(0L),
-                        eq(0L),
-                        eq(new BigDecimal("0.42")),
-                        eq(new LlmUsageAccountant.Subject("rca_report", "report-1")));
+        verifyBooked(usage, 10, 5, new BigDecimal("0.42"));
     }
 
     /**
@@ -391,28 +274,14 @@ class E2bRcaSandboxTest {
                 502,
                 "{\"error\":\"sandbox orchestration failed\",\"kind\":\"agent_failed\","
                         + "\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}")) {
-            RcaProperties p = props();
-            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
-            E2bRcaSandbox sandbox = new E2bRcaSandbox(
-                    p, new ObserverProperties(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER);
+            RcaProperties p = launcherAt(launcher.getLocalPort());
+            E2bRcaSandbox sandbox = sandbox(p, usage);
 
             TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
             assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
         }
 
-        verify(usage)
-                .recordSandboxRun(
-                        eq("proj"),
-                        eq("rca"),
-                        any(),
-                        any(),
-                        eq(false),
-                        eq(7L),
-                        eq(3L),
-                        eq(0L),
-                        eq(0L),
-                        isNull(),
-                        eq(new LlmUsageAccountant.Subject("rca_report", "report-1")));
+        verifyBooked(usage, 7, 3, null);
     }
 
     /**
@@ -478,8 +347,7 @@ class E2bRcaSandboxTest {
         try (ServerSocket closed = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             port = closed.getLocalPort();
         }
-        RcaProperties p = props();
-        p.getAgentic().setLauncherUrl("http://127.0.0.1:" + port);
+        RcaProperties p = launcherAt(port);
 
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> sandbox(p).run(request()));
@@ -506,8 +374,7 @@ class E2bRcaSandboxTest {
             })
     void aRejectedRunCarriesTheLaunchersDiagnosis(String body, String expected) throws Exception {
         try (ServerSocket launcher = launcherAnswering(502, body)) {
-            RcaProperties p = props();
-            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+            RcaProperties p = launcherAt(launcher.getLocalPort());
 
             TessaryException ex =
                     assertThrows(TessaryException.class, () -> sandbox(p).run(request()));
@@ -521,8 +388,7 @@ class E2bRcaSandboxTest {
     @Test
     void anAcceptedRunReadsItsResultFromTheLaunchersBody() throws Exception {
         try (ServerSocket launcher = launcherAnswering(200, envelope("{\"summary\":\"from the launcher\"}"))) {
-            RcaProperties p = props();
-            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
+            RcaProperties p = launcherAt(launcher.getLocalPort());
 
             assertEquals(
                     "{\"summary\":\"from the launcher\"}",
@@ -539,8 +405,7 @@ class E2bRcaSandboxTest {
     void anInterruptedWaitFailsTheRunAndKeepsTheInterrupt() throws Exception {
         // Accepts connections into its backlog and never answers them.
         try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
-            RcaProperties p = props();
-            p.getAgentic().setLauncherUrl("http://127.0.0.1:" + silent.getLocalPort());
+            RcaProperties p = launcherAt(silent.getLocalPort());
             E2bRcaSandbox sandbox = sandbox(p);
 
             Thread.currentThread().interrupt();
@@ -563,20 +428,7 @@ class E2bRcaSandboxTest {
      */
     @Test
     void anUnreadableEnvelopeFailsClosedWithItsCause() {
-        E2bRcaSandbox sandbox =
-                new E2bRcaSandbox(
-                        props(),
-                        new ObserverProperties(),
-                        noLaneSetting(),
-                        credentials(),
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                        return "<html>not an envelope</html>";
-                    }
-                };
+        E2bRcaSandbox sandbox = stubbed(bodyJson -> "<html>not an envelope</html>");
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
 
@@ -584,30 +436,67 @@ class E2bRcaSandboxTest {
         assertTrue(ex.getCause() instanceof IOException, String.valueOf(ex.getCause()));
     }
 
-    private static E2bRcaSandbox sandbox(RcaProperties p) {
-        return new E2bRcaSandbox(
-                p,
-                new ObserverProperties(),
-                noLaneSetting(),
-                credentials(),
-                mock(LlmUsageAccountant.class),
-                OpenTelemetry.noop(),
-                MAPPER);
-    }
-
     @Test
     void unconfiguredLauncherFailsClosed() {
         RcaProperties bare = new RcaProperties(); // launcherUrl unset
-        E2bRcaSandbox sandbox = new E2bRcaSandbox(
-                bare,
-                new ObserverProperties(),
-                noLaneSetting(),
-                credentials(),
-                mock(LlmUsageAccountant.class),
-                OpenTelemetry.noop(),
-                MAPPER);
+        E2bRcaSandbox sandbox = sandbox(bare);
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+    }
+
+    /** The launcher's answer to one posted request body, standing in for the HTTP round trip. */
+    @FunctionalInterface
+    private interface Launcher {
+        String answer(String bodyJson) throws Exception;
+    }
+
+    private static E2bRcaSandbox stubbed(Launcher launcher) {
+        return stubbed(noLaneSetting(), mock(LlmUsageAccountant.class), launcher);
+    }
+
+    private static E2bRcaSandbox stubbed(ProjectModelSettings settings, LlmUsageAccountant usage, Launcher launcher) {
+        return new E2bRcaSandbox(
+                props(), new ObserverProperties(), settings, credentials(), usage, OpenTelemetry.noop(), MAPPER) {
+            @Override
+            String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
+                try {
+                    return launcher.answer(bodyJson);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+        };
+    }
+
+    private static E2bRcaSandbox sandbox(RcaProperties p) {
+        return sandbox(p, mock(LlmUsageAccountant.class));
+    }
+
+    private static E2bRcaSandbox sandbox(RcaProperties p, LlmUsageAccountant usage) {
+        return new E2bRcaSandbox(
+                p, new ObserverProperties(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER);
+    }
+
+    private static RcaProperties launcherAt(int port) {
+        RcaProperties p = props();
+        p.getAgentic().setLauncherUrl("http://127.0.0.1:" + port);
+        return p;
+    }
+
+    private static void verifyBooked(LlmUsageAccountant usage, long in, long out, @Nullable BigDecimal cost) {
+        verify(usage)
+                .recordSandboxRun(
+                        eq("proj"),
+                        eq("rca"),
+                        any(),
+                        any(),
+                        eq(false),
+                        eq(in),
+                        eq(out),
+                        eq(0L),
+                        eq(0L),
+                        cost == null ? isNull() : eq(cost),
+                        eq(new LlmUsageAccountant.Subject("rca_report", "report-1")));
     }
 }

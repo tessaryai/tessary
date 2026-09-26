@@ -283,6 +283,10 @@ public final class SubstrateV2Fixtures {
      * fixture that could not express "the producer sent no output tokens" would make the generated-column
      * invariant untestable.
      */
+    public SpanRow withUsage(SpanRow row, @Nullable Long inputTokens, @Nullable Long outputTokens) {
+        return withUsage(row, inputTokens, outputTokens, null, null, null);
+    }
+
     public SpanRow withUsage(
             SpanRow row,
             @Nullable Long inputTokens,

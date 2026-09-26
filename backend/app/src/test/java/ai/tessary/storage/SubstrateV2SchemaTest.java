@@ -81,7 +81,7 @@ class SubstrateV2SchemaTest {
     @DisplayName("one populated bucket makes the total a sum over the rest as zeros")
     void totalTokens_partialUsageSumsTheKnownBuckets() {
         SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
-        fx.withUsage(span, 10L, null, null, null, null);
+        fx.withUsage(span, 10L, null);
 
         assertEquals(
                 10L,
@@ -93,7 +93,7 @@ class SubstrateV2SchemaTest {
     @DisplayName("a bucket the producer explicitly sent as zero is not the same fact as an absent one")
     void totalTokens_explicitZeroIsNotNull() {
         SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
-        fx.withUsage(span, 0L, null, null, null, null);
+        fx.withUsage(span, 0L, null);
 
         assertEquals(
                 0L,
@@ -118,7 +118,7 @@ class SubstrateV2SchemaTest {
         SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
         // Usage present, cost absent: exactly the `unpriced` case, and the one where a zero would read as
         // a real spend being free.
-        fx.withUsage(span, 1000L, 500L, null, null, null);
+        fx.withUsage(span, 1000L, 500L);
 
         SpanRow read = spans.findById(pid, span.traceId(), span.id()).orElseThrow();
         assertEquals(1500L, read.totalTokens());
