@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { span } from "../../test/fixtures";
-import { chatItems, planConversation, planTools } from "./detail-chat";
+import { chatItems, groupTools, planConversation, planTools, spanItems } from "./detail-chat";
 import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBounds, traceSummary } from "./detail-data";
 import { spanKindLabel, spanLabel } from "./detail-icons";
 import { toolStepOf } from "./detail-tool";
@@ -36,6 +36,41 @@ describe("planTools", () => {
     expect(plan.parentOf.get("exec")).toBe("llm");
     expect(plan.orphans.size).toBe(0);
     expect(plan.byLlm.get("llm")!.map((s) => s.key)).toEqual(["exec"]);
+  });
+});
+
+describe("planTools on a text-only turn", () => {
+  it("claims nothing for a model turn that answered in plain text", () => {
+    const plan = planTools([
+      span({ id: "llm", output: j([{ role: "assistant", content: "Your refund is on its way." }]) }),
+      span({ id: "exec", kind: "tool", name: "lookup", started_at: "2026-09-25T10:00:01Z" }),
+    ]);
+    expect(plan.byLlm.size).toBe(0);
+    expect(plan.parentOf.size).toBe(0);
+  });
+});
+
+describe("spanItems", () => {
+  it("draws nothing for a span the plan has no entry for", () => {
+    expect(spanItems(undefined)).toEqual([]);
+  });
+});
+
+describe("groupTools", () => {
+  it("runs consecutive tool calls into one group, and starts a new group after a message", () => {
+    const step = (key: string) => ({ key, name: key, args: null, result: null, failed: false });
+    const message = { kind: "message", text: "hi", rest: [] } as unknown as Parameters<typeof groupTools>[0][number];
+    const grouped = groupTools([
+      { kind: "tool", step: step("a") },
+      { kind: "tool", step: step("b") },
+      message,
+      { kind: "tool", step: step("c") },
+    ]);
+    expect(grouped.map((g) => (g.kind === "tools" ? g.steps.map((s) => s.key) : g.kind))).toEqual([
+      ["a", "b"],
+      "message",
+      ["c"],
+    ]);
   });
 });
 

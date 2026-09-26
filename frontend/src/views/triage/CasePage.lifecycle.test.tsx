@@ -326,6 +326,17 @@ describe("closing a case", () => {
   });
 });
 
+describe("the meta line", () => {
+  it("names the classifier as the classifiers page does, and no call site for the unattributed sentinel", async () => {
+    api.getCase.mockResolvedValue(plainCase({}, { detector: "tool_error", call_site_id: "__unattributed__" }));
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText("Tool error")).toBeTruthy();
+    expect(screen.queryByText("__unattributed__")).toBeNull();
+  });
+});
+
 describe("running RCA", () => {
   it("runs RCA for this case, and withholds the closing verbs until there is a report", async () => {
     api.getCase.mockResolvedValue(plainCase());
