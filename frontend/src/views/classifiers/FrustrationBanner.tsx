@@ -26,6 +26,7 @@ export function FrustrationBanner({ classifier }: { classifier: Classifier }) {
     }
   });
   const [enabling, setEnabling] = useState(false);
+  const stopEnabling = () => setEnabling(false);
 
   const settingsQ = useQuery({ queryKey: ["model-settings", api.base], queryFn: api.getModelSettings });
   const credentialsQ = useQuery({
@@ -81,8 +82,8 @@ export function FrustrationBanner({ classifier }: { classifier: Classifier }) {
       {enabling && (
         <FrustrationEnableModal
           classifierId={classifier.id}
-          onClose={() => setEnabling(false)}
-          onEnabled={() => setEnabling(false)}
+          onClose={stopEnabling}
+          onEnabled={stopEnabling}
         />
       )}
     </section>

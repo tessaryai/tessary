@@ -137,5 +137,20 @@ describe("FrustrationBanner", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable Frustration" }));
     await screen.findByRole("heading", { name: "Enable Frustration" });
     await screen.findByLabelText("OpenRouter API key");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Enable Frustration" })).toBeNull();
+  });
+
+  it("shows while storage refuses to say it was dismissed", () => {
+    const spy = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    getModelSettings.mockResolvedValue(SETTINGS);
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    renderBanner();
+
+    expect(screen.getByText("Frustration classifier is off")).toBeTruthy();
+    spy.mockRestore();
   });
 });

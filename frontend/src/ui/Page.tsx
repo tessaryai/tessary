@@ -6,8 +6,8 @@ import { cn } from "./cn";
 
 export type Crumb = { label: ReactNode; to?: string };
 
+/** A trail of at least one crumb: `PageHeader` renders none for an empty one. */
 export function Breadcrumb({ trail }: { trail: Crumb[] }) {
-  if (trail.length === 0) return null;
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-small text-muted">
       {trail.map((c, i) => {

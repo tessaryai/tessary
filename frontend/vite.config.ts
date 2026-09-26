@@ -52,7 +52,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/**/*.d.ts"],
+      // main.tsx only mounts the app into the page; every test mounts what it needs itself.
+      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/**/*.d.ts", "src/main.tsx"],
       reporter: ["text-summary", "json-summary", "json", "html"],
     },
   },

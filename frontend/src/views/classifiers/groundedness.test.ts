@@ -3,9 +3,17 @@
  * The setup links move to the running version's tag, and the status words read a 12-hour clock: time
  * alone today, with the date on any other day, and in production the later of a score and a run.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroundednessStatus } from "../../api/types";
-import { GROUNDEDNESS_AWS_MD, atRef, clockTime, notScoringLabel, restartPrompt, rowState } from "./groundedness";
+import {
+  GROUNDEDNESS_AWS_MD,
+  atRef,
+  clockTime,
+  notScoringLabel,
+  readSetupFlag,
+  restartPrompt,
+  rowState,
+} from "./groundedness";
 
 function at(day: number, hour: number, minute: number): Date {
   return new Date(2026, 8, day, hour, minute);
@@ -61,5 +69,16 @@ describe("groundedness", () => {
     expect(rowState(status({ state: "off", ever_swept: false }))).toBe("not_set_up");
     expect(rowState(status({ state: "off", ever_swept: true }))).toBe("off");
     expect(rowState(status({ state: "off", ever_swept: false, available: true }))).toBe("off");
+  });
+});
+
+describe("readSetupFlag", () => {
+  it("reads no setup under way when storage refuses", () => {
+    const spy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+
+    expect(readSetupFlag("acme", "default")).toBe(false);
+    spy.mockRestore();
   });
 });

@@ -972,8 +972,11 @@ describe("app entry redirects", () => {
     const { container } = renderApp("/");
 
     await waitFor(() => expect(container.textContent).toContain("not a member of any organization"));
-    expect(within(container).getByRole("button", { name: "Sign out" })).toBeTruthy();
     expect(mockedAuth.mode).not.toHaveBeenCalled();
+
+    vi.mocked(mockedAuth.logout).mockResolvedValueOnce({ frontendUrl: "about:blank" });
+    within(container).getByRole("button", { name: "Sign out" }).click();
+    await waitFor(() => expect(mockedAuth.logout).toHaveBeenCalled());
   });
 
   it("sends an organization whose only project is the sample to create a real one", async () => {

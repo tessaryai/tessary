@@ -10,6 +10,8 @@ import { chatItems, groupTools, planConversation, planTools, spanItems } from ".
 import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBounds, traceSummary } from "./detail-data";
 import { spanKindLabel, spanLabel } from "./detail-icons";
 import { toolStepOf } from "./detail-tool";
+import { sessionSummary } from "./session-detail-data";
+import { batchSteps, sessionBounds } from "./detail-views";
 import { traceItem } from "../../test/fixtures";
 
 const j = (v: unknown) => JSON.stringify(v);
@@ -182,5 +184,44 @@ describe("corrupt parent chains", () => {
       start: Date.parse("2026-09-25T10:00:00Z"),
       end: Date.parse("2026-09-25T10:00:03Z"),
     });
+  });
+});
+
+describe("sessionSummary", () => {
+  it("says nothing before the session has been read", () => {
+    expect(sessionSummary(undefined, false)).toBe("");
+  });
+});
+
+describe("batchSteps", () => {
+  const step = (key: string) => ({ key, name: key, args: null, result: null, failed: false });
+
+  it("runs an unrequested execution into the calls just before it rather than starting a new group", () => {
+    const llm = span({ id: "llm", kind: "llm" });
+    const orphan = span({ id: "exec", kind: "tool", name: "lookup", attributes: { "gen_ai.tool.call.id": "x" } } as never);
+    const groups = batchSteps([llm, orphan], {
+      byLlm: new Map([["llm", [step("requested")]]]),
+      orphans: new Map([["exec", step("orphan")]]),
+      parentOf: new Map(),
+    });
+
+    expect(groups.map((g) => (g.kind === "tools" ? g.steps.map((s) => s.key) : g.span.id))).toEqual([
+      "llm",
+      ["requested", "orphan"],
+    ]);
+  });
+});
+
+describe("sessionBounds", () => {
+  it("spans every trace it can place in time, skipping one with no times and no spans", () => {
+    const placed = traceItem({ id: "a", started_at: "2026-09-25T10:00:00Z", ended_at: "2026-09-25T10:05:00Z" });
+    const later = traceItem({ id: "b", started_at: "2026-09-25T11:00:00Z", ended_at: "2026-09-25T11:01:00Z" });
+    const unplaced = traceItem({ id: "c", started_at: null, ended_at: null } as never);
+
+    expect(sessionBounds([placed, unplaced, later], new Map())).toEqual({
+      start: Date.parse("2026-09-25T10:00:00Z"),
+      end: Date.parse("2026-09-25T11:01:00Z"),
+    });
+    expect(sessionBounds([unplaced], new Map())).toBeNull();
   });
 });

@@ -109,7 +109,7 @@ type StepGroup = { kind: "tools"; steps: ToolStep[] } | { kind: "span"; span: Sp
  * span for, and vice versa. Tool spans already accounted for are skipped here so
  * nothing is drawn twice; the rest are shown where they ran.
  */
-function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
+export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
   const out: StepGroup[] = [];
   const pushTools = (list: ToolStep[]) => {
     const last = out[out.length - 1];
@@ -581,7 +581,10 @@ export function SessionTreeView({
  * preference order {@link traceBounds} uses (a trace's own started_at/ended_at over scanning its spans),
  * just min/maxed across every trace in the session instead of read from one.
  */
-function sessionBounds(traces: TraceListItem[], spansByTrace: SpansByTrace): { start: number; end: number } | null {
+export function sessionBounds(
+  traces: TraceListItem[],
+  spansByTrace: SpansByTrace,
+): { start: number; end: number } | null {
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   for (const t of traces) {
