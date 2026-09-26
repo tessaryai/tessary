@@ -224,6 +224,26 @@ describe("choosing a model", () => {
     await waitFor(() => expect(setLaneModel).toHaveBeenLastCalledWith("triage", { model_key: "OPENROUTER:openai/gpt-5.6-terra" }));
   });
 
+  it("sets a priced triage model directly when its provider's default has no price to compare", async () => {
+    const unpricedDefault = {
+      ...TRIAGE,
+      lanes: [
+        {
+          ...TRIAGE.lanes[0],
+          provider_options: [{ ...TRIAGE.lanes[0].provider_options[0], default_model_key: "mystery-model" }, TRIAGE.lanes[0].provider_options[1]],
+        },
+      ],
+    };
+    getModelSettings.mockResolvedValue(unpricedDefault);
+    setLaneModel.mockResolvedValue(unpricedDefault);
+    renderModels();
+
+    fireEvent.change(await screen.findByLabelText("Triage model"), { target: { value: "claude-opus" } });
+
+    await waitFor(() => expect(setLaneModel).toHaveBeenCalledWith("triage", { model_key: "claude-opus" }));
+    expect(screen.queryByRole("heading", { name: "This model costs more per triage run" })).toBeNull();
+  });
+
   it("never sets a model served through a provider the org holds no key for", async () => {
     getModelSettings.mockResolvedValue(TRIAGE);
     renderModels();
