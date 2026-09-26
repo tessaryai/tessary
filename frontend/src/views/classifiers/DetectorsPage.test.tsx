@@ -17,14 +17,16 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import type {
+  BehaviorFinding,
   Classifier,
   ClassifierDailyVolume,
   ClassifierEvent,
   ClassifierHealth,
   GroundednessStatus,
 } from "../../api/types";
+import { ToastProvider } from "../../ui";
 import { DetectionRow, DetectorsPage } from "./DetectorsPage";
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
@@ -35,6 +37,10 @@ const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>
 const EMPTY_VOLUME: ClassifierDailyVolume = { days: [], trace_totals: [], classifiers: [] };
 const getClassifierDailyVolume = vi.fn<() => Promise<ClassifierDailyVolume>>(async () => EMPTY_VOLUME);
 const listClassifierHealth = vi.fn<() => Promise<ClassifierHealth[]>>(async () => []);
+const listClassifierEvents = vi.fn<(id: string, limit?: number) => Promise<ClassifierEvent[]>>(async () => []);
+const listBehaviorFindings = vi.fn();
+const analyzeBehaviorFinding = vi.fn();
+const resolveBehaviorFinding = vi.fn();
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
@@ -50,7 +56,12 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
         listClassifierHealth,
         setClassifierEnabled,
         getGroundednessStatus,
-        listClassifierEvents: async () => [],
+        listClassifierEvents,
+        listBehaviorFindings,
+        analyzeBehaviorFinding,
+        resolveBehaviorFinding,
+        getClassifierTuning: () => new Promise(() => {}),
+        getClassifierDebug: () => new Promise(() => {}),
         getModelSettings: () => new Promise(() => {}),
       },
       orgApi: { base: "/api/orgs/acme", listProviderCredentials: () => new Promise(() => {}) },
@@ -76,6 +87,10 @@ afterEach(() => {
   window.localStorage.clear();
   getClassifierDailyVolume.mockImplementation(async () => EMPTY_VOLUME);
   listClassifierHealth.mockImplementation(async () => []);
+  listClassifierEvents.mockImplementation(async () => []);
+  listBehaviorFindings.mockReset();
+  analyzeBehaviorFinding.mockReset();
+  resolveBehaviorFinding.mockReset();
 });
 
 function classifier(overrides: Partial<Classifier>): Classifier {
@@ -97,12 +112,19 @@ function classifier(overrides: Partial<Classifier>): Classifier {
   };
 }
 
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function Search() {
+  return <output aria-label="search">{useLocation().search}</output>;
+}
+
+function renderPage(route = "/") {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       <QueryClientProvider client={qc}>
-        <DetectorsPage />
+        <ToastProvider>
+          <DetectorsPage />
+          <Search />
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -419,5 +441,209 @@ describe("DetectorsPage, Groundedness", () => {
 
     await screen.findByText("Turn off Groundedness?", { selector: "h2" });
     expect(setClassifierEnabled).not.toHaveBeenCalled();
+  });
+});
+
+describe("DetectorsPage, Groundedness setup", () => {
+  it("marks setup under way once the prompt is copied, and clears it when the model answers and it enables", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+    listClassifiers.mockResolvedValue([groundednessRow()]);
+    getGroundednessStatus.mockResolvedValue(status({}));
+    setClassifierEnabled.mockResolvedValue(groundednessRow({ enabled: true }));
+    const qc = renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Enable Groundedness" }));
+    const modal = await screen.findByRole("dialog");
+    fireEvent.click(within(modal).getByRole("button", { name: /Copy/ }));
+
+    await waitFor(() => expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).not.toBeNull());
+    expect(screen.getByText("Setting up...")).toBeTruthy();
+
+    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
+    await qc.invalidateQueries();
+
+    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true));
+    expect(await within(modal).findByText("Groundedness enabled")).toBeTruthy();
+    expect(window.localStorage.getItem("tsy-groundedness-setup:acme/default")).toBeNull();
+    fireEvent.click(within(modal).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes the turn-off question without turning it off", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(setClassifierEnabled).not.toHaveBeenCalled();
+  });
+
+  it("closes the restart guide from the rail", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(
+      status({ state: "not_scoring", configured: true, ever_swept: true, last_scored_at: todayAt(14, 2) }),
+    );
+    renderPage("/?classifier=clf-g");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restart model" }));
+    const modal = (await screen.findByText("Restart model", { selector: "h2" })).closest("dialog")!;
+    fireEvent.click(within(modal).getAllByRole("button", { name: "Close" }).at(-1)!);
+
+    await waitFor(() => expect(screen.queryByText("Restart model", { selector: "h2" })).toBeNull());
+  });
+
+  it("closes the Frustration enable modal without enabling", async () => {
+    listClassifiers.mockResolvedValue([classifier({})]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Enable Frustration" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(setClassifierEnabled).not.toHaveBeenCalled();
+  });
+});
+
+describe("the detail rail", () => {
+  const COST = classifier({
+    id: "clf-c",
+    classifier_key: "cost_drift",
+    name: "Cost drift",
+    detector: "cost_drift",
+    enabled: true,
+  });
+  const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
+    ({
+      id,
+      title: `Cost rose on ${id}`,
+      detector: "cost_drift",
+      causeKey: `cost_drift:${id}`,
+      traceCount: 12,
+      triageStatus: "pending",
+      triageSummary: null,
+      triageVerdict: null,
+      humanVerdictAt: null,
+      ...over,
+    }) as BehaviorFinding;
+  const rail = () => screen.getByRole("dialog", { name: "Cost drift detail" });
+  const search = () => screen.getByLabelText("search").textContent;
+
+  it("opens on the row pressed and closes back to the catalog", async () => {
+    listClassifiers.mockResolvedValue([COST]);
+    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Cost drift"));
+    expect(search()).toBe("?classifier=clf-c");
+    expect(await within(rail()).findByText(/Nothing has drifted/)).toBeTruthy();
+    expect(listBehaviorFindings).toHaveBeenCalledWith("cost_drift");
+
+    fireEvent.click(within(rail()).getByRole("button", { name: "Close" }));
+    expect(search()).toBe("");
+  });
+
+  it("offers triage and the verdicts on an untriaged finding, and only the ruling on a triaged one", async () => {
+    listClassifiers.mockResolvedValue([COST]);
+    listBehaviorFindings.mockResolvedValue({
+      findings: [
+        finding("f-2", {
+          triageStatus: "done",
+          triageVerdict: "positive",
+          triageSummary: "The price change explains it.",
+        }),
+        finding("f-1"),
+        finding("f-3", { triageStatus: "in_flight" }),
+      ],
+    });
+    analyzeBehaviorFinding.mockRejectedValueOnce(new Error("no sandbox")).mockResolvedValue({});
+    resolveBehaviorFinding.mockRejectedValueOnce(new Error("locked")).mockResolvedValue({});
+    renderPage("/?classifier=clf-c");
+
+    const first = (await within(await screen.findByRole("dialog")).findByText("Cost rose on f-1")).parentElement!;
+    const second = within(rail()).getByText("Cost rose on f-2").parentElement!;
+    const third = within(rail()).getByText("Cost rose on f-3").parentElement!;
+    expect(within(first).getByText("seen 12× · not triaged yet")).toBeTruthy();
+    expect(within(second).getByText("seen 12× · triage ruled positive")).toBeTruthy();
+    expect((within(second).getByRole("button", { name: "Triaged" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(second).queryByRole("button", { name: "Absorb as legitimate" })).toBeNull();
+    expect(within(first).getByRole("button", { name: "Absorb as legitimate" })).toBeTruthy();
+    expect((within(third).getByRole("button", { name: "Triaging…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(within(second).getByRole("button", { name: "Full ruling" }));
+    expect(within(second).getByText("cost_drift:f-2")).toBeTruthy();
+    fireEvent.click(within(second).getByRole("button", { name: "Less" }));
+    expect(within(second).queryByText("cost_drift:f-2")).toBeNull();
+
+    fireEvent.click(within(first).getByRole("button", { name: "Run triage" }));
+    expect(await within(rail()).findByText("no sandbox")).toBeTruthy();
+    fireEvent.click(within(first).getByRole("button", { name: "Run triage" }));
+    await waitFor(() => expect(analyzeBehaviorFinding).toHaveBeenLastCalledWith("f-1"));
+
+    const verbs = within(first).getAllByRole("button").filter((b) => b.textContent !== "Run triage");
+    fireEvent.click(verbs[0]);
+    expect(await within(rail()).findByText("locked")).toBeTruthy();
+    fireEvent.click(verbs[1]);
+    await waitFor(() => expect(resolveBehaviorFinding).toHaveBeenLastCalledWith("f-1", "not_expected"));
+    expect(resolveBehaviorFinding.mock.calls[0]).toEqual(["f-1", "expected"]);
+  });
+
+  it("says when the findings could not be read", async () => {
+    listClassifiers.mockResolvedValue([COST]);
+    listBehaviorFindings.mockRejectedValue(new Error("findings unavailable"));
+    renderPage("/?classifier=clf-c");
+
+    expect(await within(await screen.findByRole("dialog")).findByText("findings unavailable")).toBeTruthy();
+  });
+
+  it("summarises each detection's evidence, and opens its trace when it has one", async () => {
+    listClassifiers.mockResolvedValue([COST]);
+    listBehaviorFindings.mockResolvedValue({ findings: [] });
+    const detection = (id: string, over: Partial<ClassifierEvent>) => event({ id, ...over });
+    listClassifierEvents.mockResolvedValue([
+      detection("d1", {
+        trace_id: "trace-1",
+        evidence_json: JSON.stringify({ matched_value: ["a", "b"], pattern: "x".repeat(100), empty: "", none: [], gone: null }),
+      }),
+      detection("d2", { subject_kind: "session", subject_id: "sess-9", evidence_json: "not json" }),
+      detection("d3", { evidence_json: "42", confidence: "low" }),
+      detection("d4", { evidence_json: JSON.stringify({ gone: null }) }),
+      ...Array.from({ length: 21 }, (_, i) => detection(`e${i}`, {})),
+    ]);
+    renderPage("/?classifier=clf-c");
+
+    const r = await screen.findByRole("dialog", { name: "Cost drift detail" });
+    expect(await within(r).findByText(`matched value a, b · pattern ${"x".repeat(90)}…`)).toBeTruthy();
+    expect(within(r).getByText("trace-1").closest("a")!.getAttribute("href")).toBe("/traces/trace-1");
+    expect(within(r).getByText("session sess-9").closest("a")).toBeNull();
+    expect(within(r).getByText("not json")).toBeTruthy();
+    expect(within(r).getByText("42")).toBeTruthy();
+    expect(within(r).getByText("low confidence")).toBeTruthy();
+    expect(within(r).getByText("25 most recent · select one to open the trace")).toBeTruthy();
+    expect(listClassifierEvents).toHaveBeenCalledWith("clf-c", 25);
+  });
+
+  it("says a disabled classifier is not sweeping when it has no detections", async () => {
+    listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool error", detector: "tool_error" })]);
+    renderPage("/?classifier=clf-t");
+
+    expect(await screen.findByText(/Disabled, so it isn't sweeping/)).toBeTruthy();
+  });
+
+  it("retries a paused classifier from the rail, and says why a retry was refused", async () => {
+    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
+    setClassifierEnabled.mockRejectedValueOnce(new Error("key still rejected")).mockResolvedValue({});
+    renderPage("/?classifier=clf-1");
+
+    const r = await screen.findByRole("dialog", { name: "Frustration detail" });
+    expect(within(r).getByText(/The provider rejected the stored key/)).toBeTruthy();
+    fireEvent.click(within(r).getByRole("button", { name: "Retry" }));
+    expect(await within(r).findByText("key still rejected")).toBeTruthy();
+    fireEvent.click(within(r).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledTimes(2));
+    expect(setClassifierEnabled).toHaveBeenLastCalledWith("clf-1", true);
+    await waitFor(() => expect(listClassifiers).toHaveBeenCalledTimes(2));
   });
 });
