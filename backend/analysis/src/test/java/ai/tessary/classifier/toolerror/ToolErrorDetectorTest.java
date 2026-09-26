@@ -22,7 +22,6 @@ class ToolErrorDetectorTest {
     private static final ToolErrorConfig CONFIG = ToolErrorConfig.defaults();
     private static final Recognized BOOM = new Recognized(Source.SPAN_STATUS, "boom");
 
-    /** An in-control reference of {@code calls} calls, {@code failures} of which failed. */
     private static ToolErrorRate pinned(long calls, long failures) {
         ToolErrorRate r = new ToolErrorRate();
         for (long i = 0; i < failures; i++) r.add(BOOM);
@@ -30,12 +29,11 @@ class ToolErrorDetectorTest {
         return r;
     }
 
-    /** Fold one call in, as a bucket of one. */
     private static State step(State s, ToolErrorRate ref, ToolErrorConfig config, boolean failed, String at) {
         return ToolErrorDetector.advanceBucket(s, ref, config, 1, failed ? 1 : 0, at);
     }
 
-    /** Feed {@code n} calls at rate {@code p} and return where the run alarmed, or -1 if it never did. */
+    /** Feed {@code n} calls at rate {@code p}; returns where the run alarmed, or -1. */
     private static long callsToAlarm(ToolErrorRate ref, double p, long n, Random rng) {
         State s = State.EMPTY;
         for (long i = 1; i <= n; i++) {
@@ -45,19 +43,10 @@ class ToolErrorDetectorTest {
         return -1;
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // The shipped operating point does what it claims
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * The claim {@code DEFAULT_ARL_TARGET} makes is that the derived threshold buys a false alarm roughly
-     * every 250,000 calls, on every tool rather than only on clean ones. That number came from a Monte
-     * Carlo outside this repo, so this asserts it against the shipping code — loosely, since it is a
-     * stochastic quantity and a tight bound would be a flaky test, but tightly enough to catch the failure
-     * that matters: a scoring bug that turns the run length into hundreds rather than hundreds of
-     * thousands.
-     *
-     * <p>Fixed seed. A calibration test that fails one run in twenty is a test people learn to re-run.
+     * {@code DEFAULT_ARL_TARGET} claims a false alarm about every 250,000 calls, a number from an external Monte
+     * Carlo, asserted here loosely enough not to flake but tightly enough to catch a scoring bug that makes the run
+     * length hundreds. Fixed seed.
      */
     @Test
     void inControlTrafficRunsAVeryLongTimeBeforeAFalseAlarm() {
@@ -68,13 +57,11 @@ class ToolErrorDetectorTest {
         for (int i = 0; i < runs; i++) {
             if (callsToAlarm(ref, 0.01, 40_000, rng) > 0) alarms++;
         }
-        // 12 runs x 40k calls = 480k in-control calls. At the designed ARL0 of ~250k the expectation is
-        // about two. Four or more would put the true run length near 100k, which is a different detector
-        // from the one the javadoc describes.
+        // 480k in-control calls at an ARL0 of ~250k expect about two; four or more means a run length near 100k.
         assertTrue(alarms <= 4, alarms + " false alarms in 480k in-control calls — h is not buying its ARL");
     }
 
-    /** The other half: a run length that long is worthless if a real regression never trips it. */
+    /** The other half: a real regression still trips it. */
     @Test
     void aSustainedDoublingIsCaughtWithinAFewThousandCalls() {
         ToolErrorRate ref = pinned(20_000, 200); // 1% in control
@@ -84,9 +71,8 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * The case a percentage-point threshold cannot see and the reason {@code shiftFloor} exists: twice
-     * nearly-zero is still nearly-zero, so without the floor the detector would be tuned for a shift too
-     * small to distinguish from silence on exactly the tool whose failing matters most.
+     * Why {@code shiftFloor} exists: twice nearly-zero is still nearly-zero, so the tool whose failing matters most
+     * would be undetectable.
      */
     @Test
     void aToolThatNeverFailedAndStartsFailingIsCaught() {
@@ -97,23 +83,11 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * The case that used to force an effect-size gate to exist, and still the most instructive test here.
+     * A sustained 20.0% to 21.1% is a real change and nobody's problem. The old effect-size gate that declined it
+     * measured against the tool's whole history, so it also silenced every real outage, and is gone.
      *
-     * <p>A sustained 20.0% -> 21.1% is a real change in the process and is also nobody's problem. A
-     * classifier that opens a case for it teaches a partner to stop reading it. This used to be handled
-     * downstream: the accumulator crossed after about 3,000 calls and an effect-size gate declined to
-     * make a case of it. That gate measured the shift over every call since the reference was pinned,
-     * which on any tool with history is the baseline by construction, so it also silenced every real
-     * outage. It is gone.
-     *
-     * <p>What holds the line now is the threshold itself. A flat 6.0 gave this tool a false-alarm run
-     * length of about 5,288 calls — forty-seven times hotter than intended — and the wobble was riding
-     * that leak. At the derived {@code h} of ~9.9 the accumulator's own break-even rate does the work:
-     * 21.1% sits below it, so the statistic drifts down and only a lucky excursion ever reaches the bar.
-     *
-     * <p><b>Tolerated, not impossible.</b> A sequential test can make a real-but-small shift rare and
-     * cannot make it never, so this asserts the separation rather than silence: a shift the detector is
-     * tuned for is caught almost immediately, and the wobble survives orders of magnitude longer.
+     * <p>The derived threshold (h about 9.9, where a flat 6.0 gave a run length 47x too short) now puts 21.1% below
+     * the accumulator's break-even. Tolerated, not impossible: this asserts the separation, not silence.
      */
     @Test
     void wobbleOnAnAlreadyFailingToolIsToleratedFarLongerThanARealShift() {
@@ -128,12 +102,8 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * The bug this whole rework started from. A tool sitting at 5% goes to 80%, and the finding has to
-     * arrive in calls rather than in hours.
-     *
-     * <p>It used to take 15,512 calls, because the magnitude gate measured the burst against the tool's
-     * lifetime average — 5.001% against 5%, an effect size of 0.00004 — and declined it until the burst
-     * had diluted a million healthy calls. The denominator is now the run, so the same burst reads 80%.
+     * The bug this rework started from: 5% to 80% took 15,512 calls, because the gate measured the burst against the
+     * lifetime average (effect size 0.00004). The denominator is now the run.
      */
     @Test
     void aBurstOnAToolWithLongHistoryIsCaughtInCallsNotThousands() {
@@ -142,14 +112,9 @@ class ToolErrorDetectorTest {
         assertTrue(at > 0 && at < 40, "an 80% outage should be caught almost immediately, took " + at);
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Onset — the thing a window scheme could not recover
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * The accumulator returning to zero IS the statement that whatever happened is over, so a burst that
-     * the following successes wash out must leave no onset behind. Otherwise every case would date itself
-     * to the first bad afternoon the tool ever had.
+     * The accumulator reaching zero means the episode is over, so a washed-out burst leaves no onset; otherwise every
+     * case dates to the tool's first bad afternoon.
      */
     @Test
     void aBurstThatWashesOutLeavesNoOnset() {
@@ -175,10 +140,6 @@ class ToolErrorDetectorTest {
         assertEquals("2026-08-01T09:00:00Z", d.onsetAt(), "the case should date to when the rate turned");
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Both directions, and the guard on the improvement arm
-    // ---------------------------------------------------------------------------------------------
-
     @Test
     void failuresCollapsingOnANoisyToolAlsoAlarms() {
         ToolErrorRate ref = pinned(40_000, 4000); // 10% in control, above downArmMinRate
@@ -189,7 +150,7 @@ class ToolErrorDetectorTest {
         assertEquals(Direction.DOWN, d.direction());
     }
 
-    /** Below the guard there is nothing to lose, and a halving of it is undetectable anyway. */
+    /** Below the guard a halving is undetectable, and there is nothing to lose. */
     @Test
     void theImprovementArmDoesNotRunOnAToolThatBarelyFails() {
         ToolErrorRate ref = pinned(40_000, 40); // 0.1%, below downArmMinRate
@@ -199,17 +160,13 @@ class ToolErrorDetectorTest {
         assertFalse(ToolErrorDetector.decide(s, ref, CONFIG).fired());
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Silence always explains itself
-    // ---------------------------------------------------------------------------------------------
-
     @Test
     void aToolWithNoReferenceYetSaysSo() {
         Decision d = ToolErrorDetector.decide(State.EMPTY, new ToolErrorRate(), CONFIG);
         assertEquals(Silence.NO_BASELINE, d.silence());
     }
 
-    /** A wait, not a skip — the distinction tool-error.md §3.3 turns on. */
+    /** A wait, not a skip (tool-error.md §3.3). */
     @Test
     void aThinReferenceWaitsRatherThanJudging() {
         Decision d = ToolErrorDetector.decide(State.EMPTY, pinned(100, 1), CONFIG);
@@ -227,14 +184,9 @@ class ToolErrorDetectorTest {
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // The arithmetic that would break silently
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * Without Jeffreys smoothing a spotless tool has a raw in-control rate of exactly zero and
-     * {@code ln(p1/0)} is infinite — so the unsmoothed estimator makes the most alarming case in the
-     * product the one case the detector cannot score at all.
+     * Without Jeffreys smoothing a spotless tool's rate is zero and {@code ln(p1/0)} infinite: the most alarming case
+     * could not be scored.
      */
     @Test
     void aSpotlessToolStillHasAFiniteScore() {
@@ -254,19 +206,14 @@ class ToolErrorDetectorTest {
 
     @Test
     void aMultipleOfOneCannotDisableTheDetector() {
-        // ln(p1/p0) with p1 == p0 is zero on every call, which is a detector that can never fire.
+        // With p1 == p0 every call scores zero and the detector can never fire.
         ToolErrorConfig c = new ToolErrorConfig(250_000L, 1.0, 0.005, 500, 0.01, 8);
         assertTrue(c.shiftMultiple() > 1.0, "clamped to " + c.shiftMultiple());
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // The run, and reading it back out of the accumulator
-    // ---------------------------------------------------------------------------------------------
-
     /**
-     * The reported rate has to span the run the onset names, so its denominator dies with the run. A
-     * counter that outlived it would date a finding to 14:03 and then quote a rate measured from last
-     * Tuesday, which is the bug this rework exists to fix in its other form.
+     * The reported rate's denominator dies with the run; one that outlived it would date a finding to 14:03 and quote
+     * a rate from last Tuesday.
      */
     @Test
     void theRunDenominatorDiesWithTheRun() {
@@ -284,9 +231,8 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * Failure counts are derived rather than stored, so if the inversion is wrong every finding quotes a
-     * rate nobody can trace and absorption pins a reference nobody agreed to. Exact within a run, because
-     * a run is a stretch over which the accumulator never touched its floor.
+     * Failure counts are derived, not stored, so a wrong inversion would misquote every finding and pin an unagreed
+     * reference. Exact within a run.
      */
     @Test
     void theAccumulatorInvertsToTheFailuresBehindIt() {
@@ -306,7 +252,7 @@ class ToolErrorDetectorTest {
         assertEquals(failures, ToolErrorDetector.failuresFromS(s.sUp(), s.callsSinceOnsetUp(), p0, p1));
     }
 
-    /** And the decision quotes that run, not the tool's history. */
+    /** The decision quotes the run, not the tool's history. */
     @Test
     void theDecisionReportsTheRunRateNotTheLifetimeAverage() {
         ToolErrorRate ref = pinned(1_000_000, 50_000); // 5%, with a million calls behind it
@@ -322,9 +268,8 @@ class ToolErrorDetectorTest {
     }
 
     /**
-     * Criticality is read after the crossing, never at it: every alarm crosses from below, so the
-     * statistic at that moment says only that the bar was reached. What separates a mild drift from an
-     * outage is how far past it the evidence keeps going.
+     * Criticality is read after the crossing: every alarm crosses from below, and how far past the bar the evidence
+     * goes separates drift from outage.
      */
     @Test
     void criticalityGrowsWithAccumulatedEvidence() {
@@ -334,14 +279,12 @@ class ToolErrorDetectorTest {
         double anHourIn = ToolErrorDetector.criticality(809);
         double aDayIn = ToolErrorDetector.criticality(19_410);
         assertTrue(justAlarmed < anHourIn && anHourIn < aDayIn, justAlarmed + " / " + anHourIn + " / " + aDayIn);
-        // Natural log, so every 10 points is 2.72x more evidence.
         assertEquals(10.0, ToolErrorDetector.criticality(Math.E * 100) - ToolErrorDetector.criticality(100), 1e-9);
     }
 
     /**
-     * The ceiling is gone, and this is the property that removal exists to protect: a catastrophic outage
-     * and a mild one used to pin to the same number within a day, which made criticality a flat tie
-     * exactly when a work queue most needs an order.
+     * With the old cap a catastrophic and a mild outage pinned to the same number within a day, a flat tie when the
+     * queue most needs an order.
      */
     @Test
     void theAccumulatorIsNoLongerCapped() {

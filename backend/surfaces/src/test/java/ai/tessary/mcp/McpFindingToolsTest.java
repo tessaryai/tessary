@@ -51,12 +51,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit-level behaviour of the three classifier-finding MCP tools: {@code list_findings},
- * {@code get_finding} and {@code get_finding_evidence}. All three delegate to
- * {@link FindingService}, which is both the project scope and the per-detector capability gate (a
- * finding whose detector this org lacks reads not-found, same as a genuinely missing id), and render its
- * views verbatim. The {@link FindingService} is mocked — this pins the MCP wrapper contract
- * (project scoping, arg mapping, view shaping, error mapping), not the classifier logic itself.
+ * The finding MCP tools ({@code list_findings}, {@code get_finding}, {@code get_finding_evidence}) at the wrapper,
+ * with {@link FindingService} mocked. The service is the project scope and the per-detector gate: a finding whose
+ * detector the org lacks reads not-found.
  */
 class McpFindingToolsTest {
 
@@ -73,7 +70,7 @@ class McpFindingToolsTest {
         Project project =
                 new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
         when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // The finding tool never uses these; the registry needs them to register the other tools.
+        // Unused by the finding tools, but the registry needs them.
         PipelineService pipeline = mock(PipelineService.class);
         QueryService query = mock(QueryService.class);
         SpanRepository spans = mock(SpanRepository.class);
@@ -92,7 +89,6 @@ class McpFindingToolsTest {
         this.dispatcher = new McpDispatcher(registry, mapper);
     }
 
-    /** A project-scoped MCP-token context, as AuthFilter mints for an {@code tsy_}. */
     private TenantContext ctx() {
         return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
     }
@@ -154,12 +150,11 @@ class McpFindingToolsTest {
                 null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        // No evidence set on the detail: get_finding returns the CLAIM, and get_finding_evidence pages
-        // the population — which is the split this fixture used to blur by carrying one ref inline.
+        // No evidence on the detail: get_finding returns the claim and get_finding_evidence pages the population.
         return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
-    /** The same finding after triage ruled on it, which is what must never reach an agent. */
+    /** The same finding after triage ruled, which must never reach an agent. */
     private static BehaviorFindingDetailView triagedFinding() {
         BehaviorFindingDetailView base = sampleFinding();
         BehaviorFindingView f = base.finding();
@@ -193,18 +188,10 @@ class McpFindingToolsTest {
                 base.groundedness());
     }
 
-    // ---- registration --------------------------------------------------------------------------
-
-    // ---- get_finding -----------------------------------------------------------------------------
-
     /**
-     * The context firewall, pinned where the prompt tests cannot reach.
-     *
-     * <p>Layer-3 RCA gets a finding id and nothing else: no ruling, no summary, not even the fact that a
-     * triage pass happened. It runs with a project admin key against this surface and is handed its own
-     * finding's id, so before this was redacted, {@code get_finding} answered the question the whole lane
-     * exists to answer independently. {@code AgenticRcaPromptTest} could not catch it: it greps the
-     * prompt string, and this leak was in the tool.
+     * The context firewall, pinned where prompt tests cannot reach: RCA runs with a project key against this surface,
+     * so {@code get_finding} once handed it the triage ruling the lane must reach independently. {@code
+     * AgenticRcaPromptTest} greps the prompt and could not see a leak in the tool.
      */
     @Test
     void getFinding_neverReturnsTheTriageRuling() throws Exception {
@@ -224,9 +211,8 @@ class McpFindingToolsTest {
     }
 
     /**
-     * Under the open/closed model a person's ruling is a ruling like any other — set on the same
-     * columns triage writes — so redacting the verdict and leaving {@code humanVerdictAt} standing
-     * would still tell RCA that a person decided this, only not what they decided.
+     * A person's ruling uses the same columns as triage's, so leaving {@code humanVerdictAt} would still tell RCA
+     * that a person decided.
      */
     @Test
     void getFinding_neverReturnsWhoRuled() throws Exception {
@@ -319,10 +305,7 @@ class McpFindingToolsTest {
         return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
-    /**
-     * {@code get_finding}'s summary blocks now carry every number R3 added, and the agent view still
-     * drops the sample this classifier's blob names: {@code failing_traces}.
-     */
+    /** The summary carries every R3 number, and the agent view still drops {@code failing_traces}. */
     @Test
     void getFinding_toolError_carriesSummaryNumbers_andDropsFailingTraces() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-2")).thenReturn(toolErrorFinding());
@@ -456,9 +439,8 @@ class McpFindingToolsTest {
     }
 
     /**
-     * The whole R3 checklist for Secret Leak in one test: the summary numbers ({@code basis}, {@code
-     * threshold}, {@code windowSeconds}) that were missing, the masked key that must survive, and the
-     * witness trace/span ids that must not — the case decision 12 calls out by name.
+     * The R3 checklist for Secret Leak: {@code basis}, {@code threshold} and {@code windowSeconds} present, the
+     * masked key kept, witness ids dropped (decision 12).
      */
     @Test
     void getFinding_secretLeak_carriesSummaryNumbers_andDropsWitnessIds() throws Exception {
@@ -514,8 +496,7 @@ class McpFindingToolsTest {
     }
 
     /**
-     * Frustration, groundedness and regex/threshold classifiers had no summary block before R3 — this
-     * is the new one, built off exactly what {@code ClassifierArming} already wrote to the payload.
+     * The armed-window summary for classifiers with no richer block, built from what {@code ClassifierArming} wrote.
      */
     @Test
     void getFinding_armedWindow_carriesSummaryForAClassifierWithNoRicherDetailOfItsOwn() throws Exception {
@@ -530,8 +511,6 @@ class McpFindingToolsTest {
         assertEquals(86_400, armedWindow.get("windowSeconds").asLong());
     }
 
-    // ---- list_findings ---------------------------------------------------------------------------
-
     @Test
     void listFindings_passesEveryFilterThroughAndWidensOnlyForExplicitAll() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
@@ -545,7 +524,7 @@ class McpFindingToolsTest {
         verify(behaviorDrift).findings(PROJECT_ID, "open", "cs-1", "duration_drift", false);
     }
 
-    /** The lane is rendered on every page: which Layer-2 lane this project's findings are ruled on. */
+    /** Every page names the Layer-2 lane its findings are ruled on. */
     @Test
     void listFindings_rendersLane() throws Exception {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
@@ -565,8 +544,6 @@ class McpFindingToolsTest {
 
         assertTrue(text.contains("boom"), text);
     }
-
-    // ---- get_finding_evidence --------------------------------------------------------------------
 
     private static Map<String, Long> counts(long member, long baseline) {
         Map<String, Long> out = new java.util.LinkedHashMap<>();
@@ -635,11 +612,9 @@ class McpFindingToolsTest {
     }
 
     /**
-     * A row carries what was measured on it, not just a pointer to it: the ids still round-trip (a
-     * trace-grain row carries no span id, a span-grain row carries both, since span identity under
-     * substrate v2 is the composite key), and {@code rank} survives with its gaps intact — it is the
-     * detector's order, not an index — but latency, tokens, cost and call site ride along, which is what
-     * lets a reader rank the page before it opens anything.
+     * A row carries its measurements, not just a pointer: ids round-trip (a trace-grain row has no span id), {@code
+     * rank} keeps its gaps as the detector's order, and latency, tokens, cost and call site ride along so a reader
+     * can rank before opening anything.
      */
     @Test
     void getFindingEvidence_pagesRowsWithTheirMeasurements() throws Exception {
@@ -667,7 +642,7 @@ class McpFindingToolsTest {
         assertEquals(3, second.get("rank").asInt());
         assertEquals(84, second.get("latencyMs").asLong());
         assertEquals("Timeout", second.get("errorType").asText());
-        // A tool span has neither, and an empty cell is the honest answer rather than a zero.
+        // A tool span has neither; an empty cell is honest, a zero would not be.
         assertTrue(second.get("totalTokens").isNull(), "a tool span has no tokens");
         assertEquals(0, second.get("models").size(), "a tool span carries no model");
         assertFalse(second.get("notRolledUp").asBoolean(), "the flags are always false on a single-step row");
@@ -675,11 +650,7 @@ class McpFindingToolsTest {
         assertEquals(120, body.get("counts").get("member").asLong());
     }
 
-    /**
-     * The previews stay on the table the UI renders and never reach this door. An agent that wants a
-     * body asks {@code get_span} for one span on purpose, instead of being handed a thousand truncated
-     * ones it did not ask for.
-     */
+    /** Previews never reach this door; an agent asks {@code get_span} for a body on purpose. */
     @Test
     void getFindingEvidence_dropsThePayloadPreviews() throws Exception {
         when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
@@ -692,7 +663,6 @@ class McpFindingToolsTest {
         assertFalse(first.has("outputPreview"), first.toString());
     }
 
-    /** The paging contract: default limit, the cap, the role filter and the cursor all reach the service. */
     @Test
     void getFindingEvidence_passesRoleLimitAndCursorThroughAndClampsTheLimit() throws Exception {
         when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("find-1"), any(), anyInt(), any()))
@@ -705,10 +675,7 @@ class McpFindingToolsTest {
         verify(behaviorDrift).findingEvidenceSpans(PROJECT_ID, "find-1", FindingEvidenceRow.Role.MEMBER, 1000, "c-1");
     }
 
-    /**
-     * {@code count_only} is the cheap first call, and its answer must not read as an empty evidence set:
-     * {@code rowsOmitted} is what separates "I did not ask for rows" from "there are none".
-     */
+    /** {@code rowsOmitted} separates "I did not ask for rows" from "there are none". */
     @Test
     void getFindingEvidence_countOnlyReturnsBothCountMapsAndNoRows() throws Exception {
         when(behaviorDrift.findingEvidence(PROJECT_ID, "find-1"))
@@ -718,20 +685,16 @@ class McpFindingToolsTest {
 
         assertEquals(0, body.get("refs").size());
         assertTrue(body.get("rowsOmitted").asBoolean(), "count_only omits rows rather than returning none");
-        // The sizing call returns no rows, so there is nothing to join spans to.
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidenceSpans(any(), any(), any(), anyInt(), any());
-        // Live below recorded is retention, not a lost write — the pair is the whole point of sending both.
+        // Live below recorded is retention, not a lost write.
         assertEquals(118, body.get("counts").get("member").asLong());
         assertEquals(120, body.get("recordedCounts").get("member").asLong());
-        // A detector with no enumerable reference side reports an explicit zero, never an absent key.
+        // A detector with no reference side reports an explicit zero, never an absent key.
         assertTrue(body.get("counts").has("baseline"), "every role is reported: " + body.get("counts"));
         assertEquals(0, body.get("counts").get("baseline").asLong());
     }
 
-    /**
-     * An unknown role is an error rather than an empty page. An empty page here would read as "this claim
-     * has nothing behind it", which is the one wrong answer that looks like a finished audit.
-     */
+    /** An unknown role is an error: an empty page would look like a finished audit of nothing. */
     @Test
     void getFindingEvidence_unknownRoleIsToolError_andNeverCallsService() throws Exception {
         String text = errorText(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"role\":\"members\"}"));
@@ -742,10 +705,7 @@ class McpFindingToolsTest {
         verify(behaviorDrift, org.mockito.Mockito.never()).findingEvidence(any(), any());
     }
 
-    /**
-     * The gate is the service's, exactly as for {@code get_finding}: a cross-tenant id and a finding whose
-     * detector this org does not hold both surface as not-found rather than as forbidden.
-     */
+    /** Cross-tenant ids and ungranted detectors both read not-found, as for {@code get_finding}. */
     @Test
     void getFindingEvidence_notFoundIsCleanToolError() throws Exception {
         when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("other-tenant"), any(), anyInt(), any()))
