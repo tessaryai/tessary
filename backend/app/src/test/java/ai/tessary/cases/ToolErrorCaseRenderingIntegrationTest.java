@@ -33,17 +33,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * A case opened from a finding in the shared {@code finding} table, rendered whole: the Layer-2 ruling
- * that opened it, the exemplar trace the finding recorded, and the absorb affordance.
- *
- * <p>It seeds a {@code TOOL_ERROR} case through the open {@code FindingRepository} and
- * {@code FindingEvidenceRepository} and asserts on {@code CaseService.detail}, stating the
- * shared-table zone contract on its own.
+ * A case opened from the shared {@code finding} table, rendered whole: the Layer-2 ruling, the exemplar trace, and
+ * the absorb affordance. Seeds a {@code TOOL_ERROR} case through the open repositories and asserts on {@code
+ * CaseService.detail}.
  */
 @SpringBootTest
 class ToolErrorCaseRenderingIntegrationTest {
 
-    /** The citations a repo-grounded ruling rests on, in the stored shape. */
+    /** A repo-grounded ruling's citations, as stored. */
     private static final String CITATIONS = "[{\"path\":\"docs/sop/billing.md#L12\",\"reason\":"
             + "\"the SOP requires the account lookup before any balance is quoted\"}]";
 
@@ -138,11 +135,7 @@ class ToolErrorCaseRenderingIntegrationTest {
         assertTrue(view.absorbAvailable(), "a behaviour finding still has a reference an absorb can move");
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
-
-    /** A plain tenant. Nothing here reads a capability: a tool-error case is always open. */
+    /** A plain tenant; a tool-error case is always open. */
     private Project project(String slug) {
         return TenantFixture.bootstrap(tenants, slug).project();
     }
@@ -163,13 +156,7 @@ class ToolErrorCaseRenderingIntegrationTest {
         return cases.open(p.id(), detection, Instant.now()).orElseThrow().id();
     }
 
-    /**
-     * A trace a case can hand a reader, with the id the finding names.
-     *
-     * <p>The ids here are readable labels rather than hex, on purpose: a producer trace id is free-form
-     * text by contract, and these are the exact strings the seeded findings record, so hexifying them
-     * would only put a translation table between the fixture and its own assertions.
-     */
+    /** A trace with the id the finding names. Readable labels, since producer trace ids are free-form text. */
     private void seedTrace(Project p, String traceId) {
         fx.namedTrace(p.id(), traceId, traceId, Instant.now());
     }

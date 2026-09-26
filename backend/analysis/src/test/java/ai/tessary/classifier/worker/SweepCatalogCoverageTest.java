@@ -25,20 +25,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every catalog kind that sweeps at a fitting tier has exactly one sweep that claims it.
- *
- * <p>This is the invariant the registry depends on and the one nothing else pins.
- * {@code ClassifierWorkerLoggingTest} stubs {@code kinds()} on mocks, so it never reads what the real
- * sweeps declare and cannot see a kind fall off one.
- *
- * <p>The failure is silent and total: an unmatched kind is inert by design, one WARN and
- * {@code markSwept}, so dropping a kind from a sweep's {@code kinds()} stops that classifier from
- * writing findings for every project on every deployment, while every other check stays green. The
- * only signal is a {@code signal.sweep.no-handler} WARN per job.
- *
- * <p>Sweeps are built with mocked collaborators rather than through a Spring context, since
- * {@code kinds()} is a declaration, not behaviour: nothing here needs a wired bean, a database, or a
- * container. A new sweep is added to {@link #openSweeps()}.
+ * Every catalog kind that sweeps at a fitting tier has exactly one sweep claiming it, the invariant the registry
+ * depends on and nothing else pins ({@code ClassifierWorkerLoggingTest} stubs {@code kinds()}). An unmatched kind is
+ * inert by design, so dropping one silently stops that classifier's findings everywhere, with only a {@code
+ * signal.sweep.no-handler} WARN. Sweeps are built with mocks, since {@code kinds()} is a declaration; add a new one
+ * to {@link #openSweeps()}.
  */
 class SweepCatalogCoverageTest {
 
@@ -64,8 +55,7 @@ class SweepCatalogCoverageTest {
             }
         }
 
-        // Compared as whole sets on purpose: a one-way containment check would pass while a sweep claimed a
-        // kind the catalog no longer defines, which is the same bug seen from the other end.
+        // Whole sets: one-way containment would miss a sweep claiming a kind the catalog dropped.
         assertEquals(
                 fittingTierKinds,
                 claimed,
@@ -75,7 +65,7 @@ class SweepCatalogCoverageTest {
                         + "other end");
     }
 
-    /** Every sweep this tree defines. A new one is added here, and the list is the enumeration. */
+    /** Every sweep this tree defines. */
     private static List<ClassifierSweep> openSweeps() {
         ClassifierJobRepository jobs = mock(ClassifierJobRepository.class);
         return List.of(

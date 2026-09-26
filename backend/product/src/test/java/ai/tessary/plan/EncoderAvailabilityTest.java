@@ -29,10 +29,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.health.contributor.Status;
 
 /**
- * {@link EncoderAvailability} against a loopback {@link ServerSocket} standing in for the model's
- * {@code GET /healthz} (forbidden-apis bans {@code com.sun.net.httpserver}, and the backend carries no
- * HTTP-mock dependency): the answers a probe can land on, and that each is what the health contributor
- * and the sweep gate read.
+ * {@link EncoderAvailability} against a loopback {@link ServerSocket} {@code GET /healthz} (forbidden-apis bans
+ * {@code com.sun.net.httpserver}): each answer a probe lands on, as the health contributor and sweep gate read it.
  */
 class EncoderAvailabilityTest {
 
@@ -78,7 +76,7 @@ class EncoderAvailabilityTest {
 
     @Test
     void a200WithoutTheGroundednessHeadIsUnavailable() throws IOException {
-        // A server with no groundedness model loaded: healthy, but not this model.
+        // Healthy, but no groundedness model loaded.
         EncoderAvailability encoder = serve(200, "{\"ok\": true, \"heads\": []}");
 
         EncoderAvailability.Snapshot s = encoder.refresh();
@@ -110,18 +108,15 @@ class EncoderAvailabilityTest {
     }
 
     /**
-     * The model goes away by moving the URL to the local port of an open loopback client connection:
-     * nothing listens there, so the connect is refused, and while the connection holds the port the
-     * kernel hands it to no one else. Closing the stub's socket instead left it listening on Linux until
-     * the stub's in-flight {@code accept()} returned, so the next probe could still be answered 200.
+     * The model goes away by pointing at an open client connection's local port: nothing listens and the kernel keeps
+     * the port. Closing the stub left it listening on Linux until its in-flight accept() returned.
      */
     @Test
     void anUnreachableServiceIsUnavailable() throws IOException {
         EncoderAvailability encoder = serve(200, HEALTHY);
         encoder.refresh();
 
-        // The model goes away: the next probe flips the answer, so sweeps pause rather than run
-        // against nothing.
+        // The next probe flips, so sweeps pause.
         EncoderAvailability.Snapshot s;
         try (ServerSocket peer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
                 Socket held = new Socket(peer.getInetAddress(), peer.getLocalPort())) {
@@ -155,7 +150,7 @@ class EncoderAvailabilityTest {
         assertEquals("tessary.observer.encoder.url is not a URL", s.reason());
     }
 
-    /** A diagnostic that can stop the platform starting is the worse bug: a bad URL is logged, not thrown. */
+    /** A bad URL is logged, not thrown: a diagnostic must not stop the platform starting. */
     @Test
     void aBootProbeThatCannotEvenBuildItsRequestNeverFailsStartup() {
         ObserverProperties props = new ObserverProperties();

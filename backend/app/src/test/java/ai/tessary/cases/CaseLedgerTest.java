@@ -21,13 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * {@link CaseLedger#openOrJoin} against real Postgres, so the partial indexes ({@code
- * ux_eval_case_live}, {@code locked_at IS NULL}) and the ISO-text comparisons are exercised rather
- * than simulated.
- *
- * <p>Event-driven now (decision 1): there is no periodic sweep to reconcile, so every test here calls
- * {@code openOrJoin} directly on one finding at a time, exactly as {@link CaseOpener} does inside a
- * ruling's own transaction.
+ * {@link CaseLedger#openOrJoin} against real Postgres, so the partial indexes and ISO-text comparisons run for real.
+ * Each test calls it on one finding, as {@link CaseOpener} does inside a ruling's transaction (decision 1).
  */
 @SpringBootTest
 @TestPropertySource(properties = "test.context-group=case-ledger")
@@ -103,7 +98,7 @@ class CaseLedgerTest {
         Project p = project("ledger-severity-peak");
         ledger.openOrJoin(p.id(), detection(p, "grader-a", 0.4, Instant.parse("2026-07-01T10:00:00Z")), null, now());
 
-        // A milder second finding must not pull the case's severity down.
+        // A milder finding must not lower the severity.
         CaseRow milder = ledger.openOrJoin(
                 p.id(),
                 withFinding(
@@ -117,7 +112,7 @@ class CaseLedgerTest {
                 kinds(p, milder),
                 "a milder finding recurs but does not escalate");
 
-        // A genuinely worse one raises the peak and escalates.
+        // A worse one raises the peak and escalates.
         CaseRow worse = ledger.openOrJoin(
                 p.id(),
                 withFinding(
@@ -135,8 +130,7 @@ class CaseLedgerTest {
         CaseDetection detection = detection(p, "grader-a", 0.4, Instant.parse("2026-07-01T10:00:00Z"));
         ledger.openOrJoin(p.id(), detection, null, now());
 
-        // The SAME finding, re-applied — ClassifierArming does exactly this on every sweep of a
-        // still-firing facet.
+        // The same finding re-applied, as ClassifierArming does on every sweep of a firing facet.
         CaseRow reapplied = ledger.openOrJoin(p.id(), detection, null, now());
 
         assertEquals(1, reapplied.findingCount(), "no second link for a finding already on this case");
@@ -153,9 +147,8 @@ class CaseLedgerTest {
                 p.id(), detection(p, "grader-b", 0.4, Instant.parse("2026-07-01T10:00:00Z")), null, now());
         String findingOnB = Objects.requireNonNull(caseB.latestFindingId());
 
-        // A detection under case A's key, but carrying B's already-linked finding — never a real shape
-        // ensureCaseFor produces (a finding it hands over is always freshly qualified, case_id NULL),
-        // but the ledger must still refuse to relabel it.
+        // Under A's key but carrying B's linked finding: ensureCaseFor never produces it, but the ledger must refuse
+        // to relabel.
         CaseRow result = ledger.openOrJoin(
                 p.id(),
                 withFinding(detection(p, "grader-a", 0.9, Instant.parse("2026-07-01T10:00:00Z")), findingOnB),
@@ -232,8 +225,6 @@ class CaseLedgerTest {
                 "absorbing closes what the case holds");
     }
 
-    // ---- helpers -----------------------------------------------------------------------------
-
     private Project project(String name) {
         return TenantFixture.bootstrap(tenants, name).project();
     }
@@ -267,7 +258,7 @@ class CaseLedgerTest {
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** A finding of this project's own, for a test that needs a SECOND one under the same case. */
+    /** A second finding under the same case. */
     private String freshFinding(Project p, String cause) {
         String now = Instant.now().toString();
         return Objects.requireNonNull(findings.recordArmedWindow(

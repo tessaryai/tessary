@@ -23,15 +23,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The code-tracked facts survive a real round-trip through Postgres — parse is only half the contract,
- * and the columns are new in migration 0038.
- *
- * <p>Asserts against the raw column as well as the reconstituted record, because the two failure modes
- * that matter here are invisible through {@code load()} alone: a JSON value stored as the four-character
- * text {@code "null"} reads back as a perfectly good {@code NullNode}, and an empty list stored as the
- * text {@code "[]"} reads back as an empty list — both indistinguishable from the correct SQL NULL
- * unless the column itself is inspected. {@code SubstrateReadRepository} filters on {@code IS NOT NULL},
- * so that distinction is what decides whether a classifier sees a schema at all.
+ * Code-tracked facts round-trip through Postgres (migration 0038). Asserted on the raw column too: JSON {@code
+ * "null"} text and {@code "[]"} read back through {@code load()} indistinguishable from SQL NULL, and {@code
+ * SubstrateReadRepository} filters on {@code IS NOT NULL}, which decides whether a classifier sees a schema.
  */
 @SpringBootTest
 class CodeFactPersistenceIntegrationTest {
@@ -84,12 +78,9 @@ class CodeFactPersistenceIntegrationTest {
 
     @Test
     void anExplicitNullSchemaPersistsAsSqlNullNotTheTextNull() {
-        // The bug this pins: Jackson binds `output_schema: null` to NullNode, so a `!= null` guard
-        // stores the four-character string "null". That is not SQL NULL, so it never clears the
-        // capture the contract says it clears — and callSiteOutputSchemas (IS NOT NULL) would keep
-        // handing "null" to the Malformed Output classifier as a schema. networknt compiles "null"
-        // into a permissive schema rather than rejecting it, so the detector's compile-failure escape
-        // hatch never engages and every plain-text output falls through to the not_json branch.
+        // Jackson binds `output_schema: null` to NullNode, so a `!= null` guard stored the string "null": the capture
+        // never cleared and callSiteOutputSchemas kept handing it to Malformed Output, where networknt compiles it
+        // permissively and every plain-text output lands in not_json.
         String pid = project("codefact-explicit-null");
 
         repo.replace(pid, pipeline(NullNode.getInstance(), List.of(), List.of()));
@@ -110,9 +101,8 @@ class CodeFactPersistenceIntegrationTest {
 
     @Test
     void aSilentBundleClearsToolsBecauseTheBundleIsTheirOnlyWriter() throws Exception {
-        // The deliberate asymmetry with output_schema: `tools` has exactly one writer, so silence is
-        // a statement ("no tools") rather than an abstention. Pinned so the asymmetry is a decision
-        // someone has to re-argue rather than something a later edit quietly flips.
+        // `tools` has one writer, so silence means "no tools", unlike output_schema. Pinned so flipping it is a
+        // decision.
         String pid = project("codefact-tools-cleared");
         repo.replace(pid, pipeline(null, List.of(new CallSite.ToolSpec("search", null, null, null)), List.of()));
         assertNotNull(rawColumn(pid, "tools_json"), "setup: tools stored");
