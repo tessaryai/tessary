@@ -19,11 +19,8 @@ import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 /**
- * What the sample project actually shows a first-time user, asserted on the generated rows rather than
- * on the generator's intent. Every case here is a defect this dataset shipped with once: a reader who
- * opens "Sample project" is being shown a claim about what the product looks like in use, and a nonsense
- * ticket subject or a JSON blob in the preview column undoes that claim faster than an empty project
- * would have.
+ * What the sample project shows a first-time user, asserted on generated rows. Every case is a defect it once shipped
+ * with.
  */
 class SampleShowcaseTest {
 
@@ -51,10 +48,7 @@ class SampleShowcaseTest {
         }
     }
 
-    /**
-     * The two placeholders that used to be filled from one flat "products" pool, which produced
-     * "How do I add teammates to Storage upgrade?" and "How to cancel API credits subscription".
-     */
+    /** Once filled from one flat pool, giving "How do I add teammates to Storage upgrade?". */
     @Test
     void planPhrasingNeverReceivesAnAddOnOrAnIntegration() {
         Set<String> subjects = new HashSet<>();
@@ -72,12 +66,7 @@ class SampleShowcaseTest {
         }
     }
 
-    /**
-     * Every ticket ends on an action a reader can name — a drafted reply, a hand-off to tier 2, or a
-     * completed export. It used to end 5% of the time straight after {@code classify_intent}, with an
-     * {@code ok} status on every span, no reply and no error: not an abandoned conversation, just a
-     * trace that reads as though the generator stopped halfway.
-     */
+    /** Every ticket ends on a nameable action. 5% once ended right after {@code classify_intent} with all spans ok. */
     @Test
     void everyTicketEndsOnATerminalAction() {
         SampleShowcase.Dataset dataset = generate();
@@ -92,15 +81,13 @@ class SampleShowcaseTest {
         }
     }
 
-    /** Every ticket's body refers to a date at or before the day the ticket was filed. */
+    /** A ticket's body refers to a date at or before its filing day. */
     @Test
     void aTicketNeverReferencesADateAfterItself() {
         for (TraceV2Row trace : generate().traces()) {
             assertNotNull(trace.startedAt());
         }
-        // The generator subtracts 2..10 days before formatting, so the only way this can regress is a
-        // change that formats the trace's own start again — which the subject/body assertions below
-        // would not catch on their own.
+        // The generator subtracts 2..10 days; only formatting the trace's own start again would regress this.
         assertTrue(
                 SampleShowcase.generate("proj_test", 42L, NOW, "media_pdf", "media_png").traces().stream()
                         .noneMatch(t ->
@@ -117,8 +104,7 @@ class SampleShowcaseTest {
             assertTrue(stat.nPost() > 0, stat.callSiteId() + " has no current window");
             assertTrue(stat.meanPost() > stat.meanPre(), stat.callSiteId() + " does not actually drift up");
         }
-        // Only "previous" is true of what this generator computes; a "pinned" reference would put
-        // "versus its own recent window (pinned reference)" into a finding's basis.
+        // Only "previous" is true of this generator; "pinned" would mislabel the basis.
         assertTrue(drift.stream().allMatch(s -> "previous".equals(s.reference())));
     }
 
@@ -130,11 +116,8 @@ class SampleShowcaseTest {
         assertEquals(180, image.getHeight());
     }
     /**
-     * The defect that made the sample project's headline gesture fail: every seeded finding had zero
-     * {@code finding_evidence} rows, so {@code RcaAnalysisService} threw before it started and a
-     * "Run RCA" press returned {@code SUBJECT_NOT_FOUND} — a message naming the finding, over a
-     * table nobody had written. Asserted on the generated stats rather than on the seeder, because
-     * the sides have to come out of the SAME spans the drift numbers were computed from.
+     * Seeded findings had no {@code finding_evidence}, so "Run RCA" returned {@code SUBJECT_NOT_FOUND}. The sides
+     * must come from the same spans as the drift numbers.
      */
     @Test
     void everyDriftStatCarriesBothEvidenceSides_soRcaCanRunOnIt() {
@@ -144,8 +127,7 @@ class SampleShowcaseTest {
                     stat.classifierKey() + "/" + stat.subjectId() + " has no baseline to compare against");
             assertFalse(
                     stat.memberTraceIds().isEmpty(), stat.classifierKey() + "/" + stat.subjectId() + " flags nothing");
-            // RcaAnalysisService.sides subtracts the flagged set from the baseline. A trace on both
-            // sides would let the agent cite one trace as both halves of its own comparison.
+            // A trace on both sides would let the agent cite it as both halves.
             Set<String> overlap = new HashSet<>(stat.baselineTraceIds());
             overlap.retainAll(stat.memberTraceIds());
             assertTrue(overlap.isEmpty(), stat.subjectId() + " cites the same trace on both sides: " + overlap);
@@ -153,10 +135,8 @@ class SampleShowcaseTest {
     }
 
     /**
-     * {@code tool_error} claims a FRACTION, and {@code sides} reads its witnesses as the flagged set
-     * and its members as what that was a fraction of. Collapse the two and {@code failingCohortShape}
-     * — the check whose whole job is describing what the failures share — gets handed the whole
-     * population and reports the shape of ordinary traffic instead.
+     * {@code tool_error}'s witnesses are the flagged set and its members the population; collapsed, {@code
+     * failingCohortShape} describes ordinary traffic.
      */
     @Test
     void onlyToolErrorDrawsWitnesses_andTheyAreAStrictSubsetOfItsMembers() {

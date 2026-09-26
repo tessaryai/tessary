@@ -20,11 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 /**
- * No {@code ApplicationContextRunner} here — {@code backend/shared} carries no Spring Boot test
- * harness dependency (only plain {@code junit-jupiter}) and none is needed:
- * {@link DetectionTableSchemaCheck} is a plain object with an {@code ObjectProvider<DataSource>}
- * constructor argument, exercised directly. Real JDBC objects are stood in with
- * {@link Proxy} rather than a mocking library, since none is on this module's test classpath either.
+ * {@code backend/shared} has no Spring Boot test harness or mocking library, so {@link DetectionTableSchemaCheck} is
+ * exercised directly with JDBC objects stood in by {@link Proxy}.
  */
 class DetectionTableSchemaCheckTest {
 
@@ -57,9 +54,8 @@ class DetectionTableSchemaCheckTest {
     }
 
     /**
-     * A {@link DataSource} that answers the table-existence query with {@code tableExists} and the
-     * {@code subject_started_at} column probe (recognised by {@code information_schema} appearing in
-     * the SQL text) with {@code columnExists}, so the two checks can be exercised independently.
+     * Answers the table-existence query with {@code tableExists} and the {@code subject_started_at} probe (SQL naming
+     * {@code information_schema}) with {@code columnExists}.
      */
     @SuppressWarnings("unchecked")
     private static DataSource fakeDataSource(boolean tableExists, boolean columnExists) {
@@ -139,19 +135,7 @@ class DetectionTableSchemaCheckTest {
         assertTrue(ex.getMessage().contains("frustration_detection"));
     }
 
-    @Test
-    void presentTableStartsClean() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
-        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(true)));
-
-        assertDoesNotThrow(check::afterSingletonsInstantiated);
-    }
-
-    /**
-     * A table registered before its owning changelog carries migration {@code 0012} — the paid-overlay
-     * paired-PR case the column probe exists for.
-     */
+    /** A table registered before its changelog carries migration {@code 0012}: the paid-overlay paired-PR case. */
     @Test
     void missingSubjectStartedAtColumnFailsBootNamingKindAndTable() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
@@ -165,11 +149,7 @@ class DetectionTableSchemaCheckTest {
         assertTrue(ex.getMessage().contains("subject_started_at"));
     }
 
-    /**
-     * The bug: a database that refuses the connection at boot surfaces as a bare SQLException that says
-     * nothing about which registered table was being checked. The failure names the table and kind and
-     * keeps the driver's exception as its cause.
-     */
+    /** A refused connection at boot names the table and kind, keeping the driver's exception as its cause. */
     @Test
     void unreachableDatabaseFailsBootNamingTheTableWithTheDriverCause() {
         SQLException refused = new SQLException("connection refused");

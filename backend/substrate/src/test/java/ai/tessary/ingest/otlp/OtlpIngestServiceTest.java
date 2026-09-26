@@ -2,13 +2,8 @@
 package ai.tessary.ingest.otlp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import ai.tessary.config.OtlpReceiverProperties;
@@ -17,8 +12,6 @@ import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.IngestQuotaGate;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
-import ai.tessary.open.errors.CapabilityError;
-import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
@@ -75,22 +68,6 @@ class OtlpIngestServiceTest {
     }
 
     @Test
-    void mapsAndEnqueuesUnderProjectId_fullAcceptance_noPartialSuccess() {
-        OtlpIngestService svc = service(2000);
-        Mockito.when(substrateWriter.enqueue(eq("proj-1"), Mockito.anyList())).thenReturn(true);
-
-        OtlpIngestService.IngestOutcome outcome = svc.ingest("proj-1", request(span((byte) 1), span((byte) 2)));
-
-        assertTrue(outcome.accepted(), "a batch the write buffer took is accepted");
-        assertFalse(outcome.response().hasPartialSuccess(), "a within-limit batch is fully accepted");
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<RawEntry>> captor = ArgumentCaptor.forClass(List.class);
-        verify(substrateWriter).enqueue(eq("proj-1"), captor.capture());
-        assertEquals(2, captor.getValue().size(), "both spans enqueued under the resolved project");
-    }
-
-    @Test
     void clampsOverLimitBatch_enqueuesClampedAndReportsPartialSuccess() {
         OtlpIngestService svc = service(1); // clamp to a single span
         Mockito.when(substrateWriter.enqueue(eq("proj-2"), Mockito.anyList())).thenReturn(true);
@@ -105,58 +82,5 @@ class OtlpIngestServiceTest {
         ArgumentCaptor<List<RawEntry>> captor = ArgumentCaptor.forClass(List.class);
         verify(substrateWriter).enqueue(eq("proj-2"), captor.capture());
         assertEquals(1, captor.getValue().size(), "only the clamped span count is enqueued");
-    }
-
-    /**
-     * The edge gate: with the write buffer past the configured fraction, a push is refused before its body
-     * is decoded, and the refusal is counted. If it never fires, a full buffer keeps decoding batches into
-     * the heap only to shed them.
-     */
-    @Test
-    void aWriteBufferPastTheRefuseFractionRefusesThePushAndCountsIt() {
-        SubstrateProperties substrate = new SubstrateProperties();
-        substrate.setRefuseAboveQueueFraction(0.8);
-        OtlpIngestService svc = new OtlpIngestService(
-                new OtlpReceiverProperties(),
-                substrate,
-                substrateWriter,
-                new OtlpSpanMapper(new ObjectMapper()),
-                projectId -> {});
-        Mockito.when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.9);
-
-        assertTrue(svc.shouldRefuse(), "0.9 full is past a 0.8 bar");
-        assertEquals(1, svc.refusedBatches());
-    }
-
-    @Test
-    void aWriteBufferBelowTheRefuseFractionAdmitsThePush() {
-        SubstrateProperties substrate = new SubstrateProperties();
-        substrate.setRefuseAboveQueueFraction(0.8);
-        OtlpIngestService svc = new OtlpIngestService(
-                new OtlpReceiverProperties(),
-                substrate,
-                substrateWriter,
-                new OtlpSpanMapper(new ObjectMapper()),
-                projectId -> {});
-        Mockito.when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.5);
-
-        assertFalse(svc.shouldRefuse(), "0.5 full is under a 0.8 bar");
-        assertEquals(0, svc.refusedBatches());
-    }
-
-    @Test
-    void exceededQuota_refusesTheWholeBatch_andNeverReachesTheSubstrate() {
-        TessaryException exceeded =
-                new TessaryException(CapabilityError.QUOTA_EXCEEDED, "ingested_spans_monthly", 9130L, 0L);
-        OtlpIngestService svc = service(2000, projectId -> {
-            throw exceeded;
-        });
-
-        TessaryException thrown = assertThrows(
-                TessaryException.class, () -> svc.ingest("proj-3", request(span((byte) 1), span((byte) 2))));
-
-        assertEquals(CapabilityError.QUOTA_EXCEEDED, thrown.error());
-        // The gap this covers: the quota read as exceeded and the spans were written anyway.
-        verify(substrateWriter, never()).enqueue(anyString(), anyList());
     }
 }

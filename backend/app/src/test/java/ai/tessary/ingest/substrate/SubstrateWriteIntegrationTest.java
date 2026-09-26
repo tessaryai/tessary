@@ -38,25 +38,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Acceptance test for the async substrate write path end to end — {@code enqueue} → sample → redact →
- * drain → write — against the real pgvector Postgres (Testcontainers).
+ * The async substrate write path end to end (enqueue, sample, redact, drain, write) against real Postgres, through
+ * {@link SubstrateWriter} rather than the writer directly: a replayed batch is a no-op, side tables land on producer
+ * keys, and a full burst drains inside the budget without blocking the producer.
  *
- * <p><b>What this covers that {@code SpanBatchWriterIntegrationTest} does not.</b> That test calls the
- * writer directly to pin the §6/§7 protocol. This one goes through {@link SubstrateWriter}, so it is
- * where the things the drainer owns are asserted: that a replayed batch is a no-op end to end, that the
- * side tables the write path extracts land on the producer's own keys, and that a full burst drains
- * inside the throughput budget without ever blocking the producer.
- *
- * <p>No grading {@code run} row exists at any point and no LLM call happens — the path is structural
- * only.
- *
- * <p>There is deliberately no queue override: the burst below runs at the SHIPPED defaults. It stays far
- * inside the byte budget (~1%), so it proves the defaults hold a real burst rather than showing where the
- * budget sheds; {@code SubstrateWriterResilienceTest} covers the byte accounting at the edge.
+ * <p>The burst runs at the shipped queue defaults, about 1% of the byte budget; {@code SubstrateWriterResilienceTest}
+ * covers the edge.
  */
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
-// Own context on purpose: it counts JDBC round trips across a full burst, so another class writing spans into the
-// same context would corrupt the measurement.
+// Own context: it counts JDBC round trips across a burst, which another class's writes would corrupt.
 @TestPropertySource(properties = "test.context-group=substrate-write")
 class SubstrateWriteIntegrationTest {
 
@@ -75,9 +65,8 @@ class SubstrateWriteIntegrationTest {
     RedactionService redaction;
 
     /**
-     * Counts JDBC executions: every {@code execute*} on a statement the pool hands
-     * out is one, and a JDBC batch is one, because it is one round trip. Wraps the pool's DataSource in a
-     * reflective proxy, so the count is what the driver was asked to run and not what a repository claims.
+     * Counts JDBC executions (a batch is one round trip) through a proxied DataSource, so the count is what the
+     * driver ran.
      */
     @TestConfiguration
     static class StatementCounting {
@@ -106,10 +95,8 @@ class SubstrateWriteIntegrationTest {
                     });
         }
 
-        // Only PreparedStatement executions are counted: the drain path issues no plain Statement, and a
-        // commit is not a statement. Proxied with every interface the driver's object implements: the
-        // pool casts the statement it is handed back to CallableStatement, and a PreparedStatement-only
-        // proxy fails that cast.
+        // Only PreparedStatement executions count. Proxied with every interface the driver's object has, because the
+        // pool casts it back to CallableStatement.
         static PreparedStatement countingStatement(PreparedStatement ps) {
             return (PreparedStatement)
                     Proxy.newProxyInstance(ps.getClass().getClassLoader(), interfacesOf(ps), (proxy, m, args) -> {
@@ -202,8 +189,7 @@ class SubstrateWriteIntegrationTest {
         assertEquals(6, count("span_payload", pid), "and one payload row beside it");
         assertEquals(3, count("tool_call", pid), "every tool span lands as a first-class tool_call");
 
-        // Structured, typed — not blobs: the kind and the correlation handles are queryable columns, and
-        // the tool call is joined by the producer pair rather than a platform surrogate.
+        // Typed, queryable columns, and tool calls joined by the producer pair.
         assertEquals(
                 3,
                 jdbc.sql("SELECT COUNT(*) FROM span WHERE project_id = :pid AND kind = 'tool'")
@@ -230,7 +216,7 @@ class SubstrateWriteIntegrationTest {
                         .single(),
                 "and there is no v1 surrogate pointer left to carry — 0083 dropped the column with the"
                         + " table it pointed at");
-        // The structural user handle is lifted onto the session and denormalized onto the trace.
+        // The user handle is lifted onto the session and denormalized onto the trace.
         assertEquals(
                 2,
                 jdbc.sql("SELECT COUNT(*) FROM session WHERE project_id = :pid AND user_id LIKE 'user-%'")
@@ -238,7 +224,7 @@ class SubstrateWriteIntegrationTest {
                         .query(Integer.class)
                         .single());
 
-        // Replay the same batch (at-least-once delivery): every write dedupes on the producer's own keys.
+        // A replayed batch dedupes on the producer's keys.
         writer.enqueue(pid, batch);
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained replay");
         assertEquals(2, count("session", pid));
@@ -251,9 +237,8 @@ class SubstrateWriteIntegrationTest {
 
     @Test
     void conversationIdRidesTheTraceRatherThanASecondTreeLevel() throws InterruptedException {
-        // v2 has no conversation tier: sessions never nest, and a producer's gen_ai.conversation.id is a
-        // column on the trace. A conversation-only batch (no session.id) is legal and stays session-less
-        // rather than having a session synthesized for it.
+        // v2 has no conversation tier: a conversation-only batch stays session-less rather than getting a synthesized
+        // session.
         String pid =
                 TenantFixture.bootstrap(tenants, "substrate-conv").project().id();
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
@@ -314,11 +299,8 @@ class SubstrateWriteIntegrationTest {
 
     @Test
     void aTraceKeyedSourceThatReusesOneSpanIdCollapsesToOneSpan() throws InterruptedException {
-        // A trace-keyed source keys EVERY row of a trace by the trace id, so a multi-span trace arrives as
-        // N entries sharing one span id. Span identity IS the producer's, so those are one span by
-        // definition and the last-write-wins upsert resolves them — no duplicate rows, no failed batch.
-        // (What is lost is telemetry the producer made indistinguishable; that is the producer's bug, and
-        // it is now visible as a span count rather than hidden behind a synthesized surrogate.)
+        // A trace-keyed source gives every row of a trace one span id; span identity is the producer's, so the LWW
+        // upsert makes them one span, with no duplicates and no failed batch.
         String pid =
                 TenantFixture.bootstrap(tenants, "substrate-upload").project().id();
         Map<String, Object> meta = Map.of("session.id", "conv-up");
@@ -371,9 +353,8 @@ class SubstrateWriteIntegrationTest {
 
     @Test
     void aRetrievalSpanLandsItsPassagesAsFirstClassRows() throws InterruptedException {
-        // An OpenInference RETRIEVER span flattens its retrieved passages as
-        // retrieval.documents.{N}.document.{id|content|score} attributes; the write path re-assembles them
-        // into retrieved_doc rows keyed on the producer pair, and the span end-time lands as ended_at.
+        // OpenInference RETRIEVER passages become retrieved_doc rows keyed on the producer pair; the span's end lands
+        // as ended_at.
         String pid = TenantFixture.bootstrap(tenants, "substrate-rag").project().id();
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
         String t1 = Instant.parse("2026-01-01T00:00:01Z").toString();
@@ -426,7 +407,7 @@ class SubstrateWriteIntegrationTest {
                 .single();
         assertEquals(0.91, topScore, 1e-9, "the top-ranked document keeps its score, ordered by seq");
 
-        // Replay (at-least-once): each document's id is derived from (project, trace, span, seq).
+        // Each document id derives from (project, trace, span, seq).
         writer.enqueue(pid, List.of(retriever));
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "replay drained");
         assertEquals(2, count("retrieved_doc", pid), "replay collides on the derived primary key");
@@ -439,7 +420,7 @@ class SubstrateWriteIntegrationTest {
                 TenantFixture.bootstrap(tenants, "toolcall-usage").project().id();
         String t0 = Instant.parse("2026-01-01T00:00:00Z").toString();
 
-        // A tool span: name/id/type live in gen_ai.tool.* attributes; args ride the typed messages.
+        // Tool name, id and type come from gen_ai.tool.* attributes.
         Map<String, Object> toolMeta = Map.of(
                 "session.id",
                 "conv-tool",
@@ -463,7 +444,6 @@ class SubstrateWriteIntegrationTest {
                 null,
                 "[{\"role\":\"assistant\",\"parts\":[{\"type\":\"tool_call\",\"id\":\"tu_1\",\"name\":\"Bash\",\"arguments\":{\"command\":\"ls\"}}]}]",
                 "[{\"role\":\"tool\",\"parts\":[{\"type\":\"tool_result\",\"id\":\"tu_1\",\"content\":\"file.txt\"}]}]");
-        // A chat span carrying token usage including cache tokens.
         Map<String, Object> usageMeta = new java.util.HashMap<>();
         usageMeta.put("session.id", "conv-tool");
         usageMeta.put(GenAiAttributes.USAGE_INPUT_TOKENS, 40053);
@@ -492,17 +472,14 @@ class SubstrateWriteIntegrationTest {
         assertNotNull(args);
         assertTrue(args.contains("command"), "clean arguments = the tool_call part's arguments, not the wrapper");
 
-        // Usage is typed columns now, not a jsonb bag a reader has to parse.
         assertEquals(
                 "15206", one("SELECT cache_read_tokens::text FROM span WHERE project_id = :pid AND kind = 'llm'", pid));
         assertEquals(
                 "16829",
                 one("SELECT cache_write_tokens::text FROM span WHERE project_id = :pid AND kind = 'llm'", pid));
-        // The cache-inclusive correction happens at WRITE time now, for every producer: the OTel
-        // convention defines gen_ai.usage.input_tokens as the whole prompt, so BOTH cache buckets
-        // (15,206 read + 16,829 write) are carved out of the stated 40,053 and input_tokens stores the
-        // 8,018 fresh ones. Left in, those tokens would be billed twice — once at the input rate, once at
-        // their own cache rate — and, because cost is never repriced, permanently.
+        // The OTel convention makes input_tokens the whole prompt, so both cache buckets are carved out at write
+        // time, leaving the 8,018 fresh tokens. Left in, they would be billed twice, permanently, since cost is never
+        // repriced.
         assertEquals("8018", one("SELECT input_tokens::text FROM span WHERE project_id = :pid AND kind = 'llm'", pid));
         assertEquals(
                 "40058",
@@ -511,11 +488,9 @@ class SubstrateWriteIntegrationTest {
     }
 
     /**
-     * The same burst drained twice, once on a project with no rules (the guard's
-     * no-op path) and once with every built-in rule enabled, over bodies large enough for the regexes
-     * to matter. The ratio is logged for the runbook's "Redaction is burning CPU" section; the bound
-     * is only there so a regression back to a quadratic pattern (the 2026-07-31 incident, 8 KB = 172 ms)
-     * fails loudly rather than being read off a log line.
+     * The same burst drained with no rules and with every built-in rule, over bodies big enough for the regexes to
+     * matter. The ratio is logged for the runbook; the bound fails a regression to a quadratic pattern (the
+     * 2026-07-31 incident: 8 KB in 172 ms).
      */
     @Test
     void redactionCostIsMeasuredAgainstTheUnredactedDrain() throws InterruptedException {
@@ -549,7 +524,7 @@ class SubstrateWriteIntegrationTest {
         assertTrue(ratio < 5.0, "redaction multiplied drain time by " + ratio + ", wanted < 5x");
     }
 
-    /** Five hundred root spans with the given body, teed one conversation per batch; returns the drain time. */
+    /** 500 root spans with the given body, one conversation per batch; returns the drain time. */
     private long drainBurst(String pid, String body, String tag) throws InterruptedException {
         List<List<RawEntry>> batches = new ArrayList<>();
         for (int c = 0; c < 100; c++)
@@ -560,7 +535,7 @@ class SubstrateWriteIntegrationTest {
         return Duration.ofNanos(System.nanoTime() - start).toMillis();
     }
 
-    /** About 4 KB of prose with one address and one phone number, the shape of a real support transcript. */
+    /** About 4 KB of support-transcript prose with one address and one phone number. */
     private static String chattyBody() {
         StringBuilder sb = new StringBuilder(4200);
         while (sb.length() < 4000) {
@@ -597,8 +572,7 @@ class SubstrateWriteIntegrationTest {
         String pid =
                 TenantFixture.bootstrap(tenants, "substrate-burst").project().id();
 
-        // A full-sized ingest burst: 1000 spans across 20
-        // sessions x 5 conversations, teed batch-per-conversation like the dataset path.
+        // 1,000 spans over 20 sessions x 5 conversations, one batch per conversation.
         List<List<RawEntry>> batches = new ArrayList<>();
         for (int s = 0; s < 20; s++) {
             for (int c = 0; c < 5; c++) {
@@ -608,41 +582,33 @@ class SubstrateWriteIntegrationTest {
         long shedBefore = writer.shedBatches();
 
         long enqueueStart = System.nanoTime();
-        // The drain clock starts with the first enqueue: the drainer is already writing while the burst
-        // is still being offered, so a clock started after the loop would under-measure the objective.
+        // The drain clock starts at the first enqueue, since the drainer writes while the burst is offered.
         long drainStart = enqueueStart;
         for (List<RawEntry> b : batches) {
             writer.enqueue(pid, b);
         }
         long enqueueMillis = Duration.ofNanos(System.nanoTime() - enqueueStart).toMillis();
-        // Producer-side SLO: the tee is non-blocking — enqueueing the whole burst is instant
-        // relative to any I/O (generous CI bound; locally this is < 5ms).
+        // The tee is non-blocking: enqueueing the burst is instant beside any I/O.
         assertTrue(enqueueMillis < 1000, "enqueue of 100 batches took " + enqueueMillis + "ms");
 
-        // Drainer-side SLO: >= 200 spans/s sustained => 1000 spans in <= 5s; allow generous CI
-        // headroom but fail if throughput collapses.
         long executionsBefore = StatementCounting.EXECUTIONS.get();
         assertTrue(writer.awaitIdle(Duration.ofSeconds(120)), "burst drained");
         long drainMillis = Duration.ofNanos(System.nanoTime() - drainStart).toMillis();
         long executions = StatementCounting.EXECUTIONS.get() - executionsBefore;
 
         assertEquals(0L, writer.shedBatches() - shedBefore, "shipped defaults hold the whole burst — nothing shed");
-        // The published drain objective: >= 200 spans/s sustained on the reference
-        // Postgres, so 1,000 spans in at most 5 s. Measured 0.5 s on a laptop, so this is a 10x
-        // headroom for CI, and a collapse to per-span round trips (twice that) still fails it.
+        // The published objective is at least 200 spans/s, so 1,000 spans within 5 s. About 0.5 s locally: 10x CI
+        // headroom, and per-span round trips still fail it.
         assertTrue(
                 drainMillis <= 5_000, "1000 spans drained in " + drainMillis + " ms, wanted <= 5000 (>= 200 spans/s)");
         assertEquals(0L, writer.failedBatches());
         assertEquals(1000, count("span", pid), "every span of the burst landed exactly once");
-        // Surface the measured rate for the SLO statement (>= 200 spans/s target, CI headroom above).
         log.info("substrate burst: 1000 spans drained in {} ms, {} JDBC executions", drainMillis, executions);
-        // O(1) statements per batch, not O(spans): one JDBC batch per table plus the batch-scoped
-        // reads and updates. 100 batches of 10 spans used to cost well over 2,000 executions.
+        // Constant statements per batch, not per span; 100 batches of 10 once cost over 2,000 executions.
         assertTrue(
                 executions <= 100 * 15, "JDBC executions for 100 batches: " + executions + ", wanted O(1) per batch");
 
-        // The same constant must hold for a batch twenty times larger, or the bound above only proves
-        // "about one statement per span": one 200-span conversation costs the same handful of executions.
+        // A batch twenty times larger costs the same handful, or the bound only proves "about one per span".
         long largeBefore = StatementCounting.EXECUTIONS.get();
         writer.enqueue(pid, conversation("burst-large", "tr-large", 199));
         assertTrue(writer.awaitIdle(Duration.ofSeconds(60)), "large batch drained");

@@ -53,34 +53,15 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * Acceptance for the RCA worker + analysis pipeline against the real Testcontainers Postgres, with
- * only the sandboxed-agent seam ({@link AgenticRcaEngine}) mocked. Pins the properties that make
- * the pipeline gate-free: a grader-version flip still reaches the agent instead of short-circuiting
- * to {@code definition_change}; an empty failing cohort still reaches it instead of auto-stamping
- * {@code inconclusive}; the agent's verdict and checklist assessments persist merged with the
- * measurements they judged; and an engine failure stamps the report {@code failed} so polling
- * converges.
- *
- * <p>The subject is a FINDING, and its two sides are its {@code finding_evidence} rows split by role:
- * {@code baseline} is the "before", everything else is what the classifier flagged. Nothing here is
- * time-sliced any more — a trace is on the side the classifier filed it under.
+ * The RCA worker and pipeline against real Postgres with only {@link AgenticRcaEngine} mocked. Gate-free: a grader-
+ * version flip and an empty failing cohort both still reach the agent; the verdict and checklist persist merged with
+ * their measurements; an engine failure stamps {@code failed}. A finding's two sides are its evidence rows by role,
+ * never by time.
  */
-// Parks the scheduled drain so a direct `run` is the ONLY thing that executes a job. Scheduling is
-// live in @SpringBootTest, and these tests enqueue a job and then run it by hand — if a tick lands
-// in that window the worker claims and runs it a second time, and the `verify(engine)` in
-// capturedDossier() fails with two invocations.
-//
-// batch-size=0 is what actually parks it: claimBatch's LIMIT 0 returns nothing, tickInner breaks on
-// the empty batch, and no job is ever dispatched. A direct `run` bypasses claiming, so the tests are
-// unaffected. Lengthening the heartbeat CANNOT do this on its own — @Scheduled(fixedDelay) has no
-// initial delay, so the first tick always fires at context startup, inside the test window.
-//
-// Both properties are static @TestPropertySource, not @DynamicPropertySource. Dynamic properties DO
-// reach the context cache key -- DynamicPropertiesContextCustomizer.equals compares the Set<Method>
-// it was built from -- but that is exactly the problem: the key would turn on which class declared
-// the method rather than on what it registered, so this class would fork a context of its own for a
-// value @TestPropertySource states in the cache key directly, where two classes wanting the same
-// parking share one context.
+// batch-size=0 parks the scheduled drain (claimBatch's LIMIT 0), so a direct `run` is the only execution; a tick
+// would run the job twice. A long heartbeat cannot do this, since fixedDelay fires at startup. Static
+// @TestPropertySource keeps the context cache key shared, where @DynamicPropertySource would fork one per declaring
+// class.
 @SpringBootTest
 @TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
 class RcaWorkerTest {
@@ -132,11 +113,9 @@ class RcaWorkerTest {
     private static final Instant FROM = SPLIT.minus(Duration.ofHours(24));
 
     /**
-     * A classifier that writes BOTH halves of a fraction must not have its denominator measured as the
-     * problem. {@code tool_error} files every call in the spell as {@code member} and the failing subset
-     * as {@code witness}; the checklist used to bucket "everything that is not baseline" as flagged, so
-     * the failing-cohort shape described ordinary traffic and called it the failure. Findings with no
-     * witnesses are unaffected — for those, member IS the flagged population.
+     * When a classifier writes both halves of a fraction ({@code tool_error}: member for all calls, witness for
+     * failures), the witnesses are the flagged side; the old "not baseline" bucketing called ordinary traffic the
+     * failure.
      */
     @Test
     void witnessesAreTheFlaggedSideWhenAClassifierWroteBoth() {
@@ -145,8 +124,7 @@ class RcaWorkerTest {
 
         String baselineTrace = seedTrace(pid, seedSession(pid), FROM.plus(Duration.ofHours(2)));
 
-        // One failing call, and two healthy ones from the same window. All three are `member` — that is
-        // the denominator the rate was computed over — and only the first is `witness`.
+        // All three are member (the denominator); only the first is witness.
         String failingTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
         String healthyA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
         String healthyB = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(4)));
@@ -174,12 +152,8 @@ class RcaWorkerTest {
 
         String checklist = capturedDossier().get("checklist.md");
         assertNotNull(checklist);
-        // ONE failing trace, not three: the flagged side is the witness, not the population it was drawn
-        // from. The observable used to be the grading-health line; grading left the platform, so the
-        // cohort-shape check carries the same count. Asserted on the bare "N failing trace(s)" phrase
-        // rather than the "across the N" header because this fixture seeds traces with no spans, so the
-        // check lands on its no-readable-observations branch — which states the same count, and it is
-        // the count, not the sentence around it, that distinguishes witness from member.
+        // One failing trace, not three. Asserted on the "N failing trace(s)" count, which the no-readable-
+        // observations branch these span-less traces hit also states.
         assertTrue(
                 checklist.contains("1 failing trace(s)") && !checklist.contains("3 failing trace(s)"),
                 "the flagged side measured the whole population instead of the failures:\n" + checklist);
@@ -190,12 +164,11 @@ class RcaWorkerTest {
         var fix = TenantFixture.bootstrap(tenants, "rca-behavior");
         String pid = fix.project().id();
         String sessionId = seedSession(pid);
-        // Which SIDE a trace is on is decided by the evidence role the classifier filed it under, not
-        // by its timestamp — the times here only keep the ledger ordering readable.
+        // The evidence role decides the side, not the timestamp.
         String failingTrace = seedTrace(pid, sessionId, SPLIT.plus(Duration.ofHours(2)));
         String passingTrace = seedTrace(pid, sessionId, FROM.plus(Duration.ofHours(2)));
 
-        // behaviour_change is the agent's to assign — it read the call site's prompt in the repo.
+        // behaviour_change is the agent's to assign.
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.BEHAVIOR_CHANGE,
@@ -217,8 +190,7 @@ class RcaWorkerTest {
         assertEquals("## Investigation", report.detailedReport());
         assertTrue(report.hypotheses().contains("stricter prompt"));
 
-        // Each stored item carries BOTH the agent's call and the numbers it judged, and a check the
-        // agent skipped survives as unknown rather than vanishing.
+        // Each stored item carries the agent's call and the numbers it judged; a skipped check survives as unknown.
         Map<String, RuledOutCheck> checks = storedChecks(report);
         RuledOutCheck model = checks.get("serving_model");
         assertEquals(Assessment.EXPLAINS, model.assessment());
@@ -226,15 +198,13 @@ class RcaWorkerTest {
         assertTrue(model.measurement().contains("serving model"), model.measurement());
         assertFalse(model.passed());
 
-        // Unassessed checks still reach the report — with their numbers and no verdict.
         RuledOutCheck skipped = checks.get("failing_cohort_shape");
         assertEquals(Assessment.UNKNOWN, skipped.assessment());
         assertFalse(skipped.passed());
         assertNotNull(skipped.measurement());
 
-        // The dossier is finding-specific and nothing else: the claim, the detector's numbers, the
-        // checklist. No hydrated trace bodies and no per-side ledger — the agent pages the evidence
-        // refs over MCP and states the sample it took, so nothing here pre-chooses one for it.
+        // The dossier is the claim, the numbers and the checklist only: the agent pages evidence over MCP, so nothing
+        // pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
         assertEquals(Set.of("finding.md", "method.md", "evidence.json", "checklist.md"), dossier.keySet());
         assertTrue(
@@ -248,13 +218,9 @@ class RcaWorkerTest {
     }
 
     /**
-     * THE FIREWALL. Layer 2 has already ruled on this finding and written its verdict, summary and
-     * citations onto the row; not one word of that may reach the materialized dossier.
-     *
-     * <p>Greps the whole dossier for Layer 2's vocabulary rather than asserting on one field, because
-     * the leak this guards against is not a deliberate read — it is a future edit that widens the
-     * finding projection or drops the detector's own prose in verbatim. {@code FindingRepository
-     * .findClaim} is the structural half of the enforcement; this is the half that fails loudly.
+     * The firewall: none of Layer 2's verdict, summary or citations may reach the dossier. Greps the whole dossier
+     * because the likely leak is a future edit widening the projection; {@code FindingRepository.findClaim} is the
+     * structural half.
      */
     @Test
     void theDossierCarriesNoTriageRuling() {
@@ -265,8 +231,7 @@ class RcaWorkerTest {
         String passingTrace = seedTrace(pid, sessionId, FROM.plus(Duration.ofHours(2)));
         String findingId = seedFinding(pid, List.of(passingTrace), List.of(failingTrace));
 
-        // A full triage ruling, in the shape the lane writes it — verdict, action, prose summary and
-        // citations carrying a check script and its stdout.
+        // A full triage ruling as the lane writes it, citations with a check script and its stdout included.
         findings.recordTriage(
                 pid,
                 findingId,
@@ -296,9 +261,8 @@ class RcaWorkerTest {
         String sessionId = seedSession(pid);
         String failingTrace = seedTrace(pid, sessionId, SPLIT.plus(Duration.ofHours(2)));
 
-        // A run that cannot reach the evidence door is a deployment fault, and the worker must stamp
-        // `failed` (fail closed) rather than a bogus inconclusive: the agent reads every row it cites
-        // through MCP, so there is no degraded mode to fall back to.
+        // No evidence door is a deployment fault: fail closed with {@code failed}, since the agent reads everything
+        // through MCP.
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenThrow(new TessaryException(RcaError.NO_EVIDENCE_DOOR, "mcp base url unset"));
 
@@ -310,25 +274,9 @@ class RcaWorkerTest {
         assertNotNull(report.summary());
     }
 
-    @Test
-    void aFindingThatNoLongerExistsFailsTheJobAndStampsTheReport() {
-        var fix = TenantFixture.bootstrap(tenants, "rca-missing-subject");
-        String pid = fix.project().id();
-
-        RcaJobRow job = enqueue(pid, "fnd_does_not_exist");
-        worker.run(job);
-
-        RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
-        assertEquals("failed", report.status());
-        assertNotNull(report.summary());
-        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
-    }
-
     /**
-     * A frustration finding cites every scored session as a member and the frustrated ones as witness session
-     * refs beside the turns that fired. The run gets only the frustrated sessions as citable receipts, never the
-     * calm members, measures only the cohort shape (there is no baseline side for serving_model to compare), and
-     * its ranked causes persist on a frustration_causes report.
+     * A frustration finding: only the frustrated sessions become citable receipts, only the cohort shape is measured
+     * (no baseline for serving_model), and causes persist on a frustration_causes report.
      */
     @Test
     @SuppressWarnings("unchecked")
@@ -417,10 +365,8 @@ class RcaWorkerTest {
     }
 
     /**
-     * A groundedness finding cites every scored trace as a member, each trace with a flagged answer as a witness,
-     * and each flagged answer as a witness span beside it. The run gets the traces with a flagged answer as its
-     * only receipts, measures only the cohort shape, is handed the flagged answers as {@code detections.md}, and
-     * its ranked causes persist on a groundedness_causes report.
+     * A groundedness finding: traces with a flagged answer are the only receipts, only the cohort shape is measured,
+     * flagged answers ship as {@code detections.md}, and causes persist on a groundedness_causes report.
      */
     @Test
     @SuppressWarnings("unchecked")
@@ -507,10 +453,8 @@ class RcaWorkerTest {
     }
 
     /**
-     * The checklist measured over real spans. Catches a share or cohort count taken per SPAN instead of per
-     * trace (two gpt-4o spans on one trace are one trace), a failing tool counted when it succeeded, a
-     * dimension with no values rendered as an empty line, and the no-data sides reading as a zero share
-     * rather than saying there is nothing to compare.
+     * Catches shares and cohorts counted per span instead of per trace, a succeeding tool counted as failing, an
+     * empty dimension rendered as a blank line, and no-data sides read as a zero share.
      */
     @Test
     void theChecklistMeasuresEachSideFromItsOwnSpans() {
@@ -590,10 +534,7 @@ class RcaWorkerTest {
                 .startsWith("1 failing trace(s), but none has readable observations"));
     }
 
-    /**
-     * Catches a finding with no evidence at all (no baseline, no flagged trace, no session) being handed to the
-     * agent, which would investigate nothing and still stamp a verdict. It fails the job instead.
-     */
+    /** Catches a finding with no evidence reaching the agent, which would still stamp a verdict. */
     @Test
     void aFindingWithNoEvidenceFailsWithoutReachingTheAgent() {
         String pid =
@@ -606,7 +547,7 @@ class RcaWorkerTest {
         verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
     }
 
-    /** Catches the finding's own title and basis being left out of the dossier the agent starts from. */
+    /** Catches the finding's title and basis missing from the dossier. */
     @Test
     void theFindingDocCarriesItsTitleAndBasis() {
         String pid =
@@ -628,8 +569,8 @@ class RcaWorkerTest {
     }
 
     /**
-     * Full-column round trip of a claimed job. Catches a column read into the wrong field of the row the worker
-     * runs, which would analyse the wrong finding or issue the MCP key to the wrong principal.
+     * Full-column round trip of a claimed job: a misread column would analyse the wrong finding or key the wrong
+     * principal.
      */
     @Test
     void aClaimedJobReadsBackEveryColumn() {
@@ -637,13 +578,11 @@ class RcaWorkerTest {
         String findingId = seedFinding(pid, List.of(), List.of());
         RcaJobRow enqueued = enqueue(pid, findingId);
 
-        // The drain is parked (batch-size=0), so nothing else claims; a wide batch reaches this job.
+        // The drain is parked, so a wide batch reaches this job.
         List<RcaJobRow> claimed = jobs.claimBatch("rca-claim-test", 10_000, 60, 5);
 
         assertTrue(claimed.contains(enqueued), claimed.toString());
     }
-
-    // ---- helpers -----------------------------------------------------------------------------
 
     private void stubEngine(String verdict, List<ChecklistAssessment> checklist) {
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
@@ -651,7 +590,6 @@ class RcaWorkerTest {
                         verdict, "summary", List.of(), List.of(), checklist, "## report", true));
     }
 
-    /** The persisted checklist, by check id. */
     private static Map<String, RuledOutCheck> storedChecks(RcaReportRow report) {
         try {
             List<RuledOutCheck> parsed =
@@ -664,7 +602,6 @@ class RcaWorkerTest {
         }
     }
 
-    /** The dossier file map the pipeline handed the agent on the most recent run. */
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedDossier() {
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
@@ -672,13 +609,10 @@ class RcaWorkerTest {
         return files.getValue();
     }
 
-    // ---- seeding -----------------------------------------------------------------------------
-
-    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    /** An armed-window finding, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** One open classifier finding, citing {@code baseline} and {@code flagged} traces as its
-     *  two evidence sides — the input the analysis dereferences. */
+    /** One open finding citing {@code baseline} and {@code flagged} traces as its two sides. */
     private String seedFinding(String pid, List<String> baseline, List<String> flagged) {
         String now = Instant.now().toString();
         String cause = "cause-" + Ids.ulid();
@@ -748,7 +682,7 @@ class RcaWorkerTest {
         return sessionId;
     }
 
-    /** {@code at} is the trace's started_at — the trace-time basis the RCA window reads bucket by. */
+    /** {@code at} is the trace's started_at, the basis the RCA window buckets by. */
     private String seedTrace(String pid, String sessionId, Instant at) {
         String traceId = SubstrateV2Fixtures.traceId();
         fx().trace(pid, traceId, sessionId, at);

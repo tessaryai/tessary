@@ -28,9 +28,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * "How outputs broke" over hand-written stores: the edges the integration suite's real detections do not
- * reach (an unreadable schema, evidence refs that are not failing traces, bucket fields, a document cut
- * between two highlighted lines).
+ * "How outputs broke" over hand-written stores, for edges the integration suite does not reach: an unreadable schema,
+ * non-failing evidence refs, bucket fields, and a document cut between highlighted lines.
  */
 class MalformedOutputDetailServiceTest {
 
@@ -59,10 +58,7 @@ class MalformedOutputDetailServiceTest {
             },
             new ObjectMapper());
 
-    /**
-     * Catches the block being built for a finding it does not describe: another cause's finding, or a
-     * malformed-rate one with no call site to read a schema or failures for.
-     */
+    /** Not built for another cause's finding, or a rate finding with no call site. */
     @ParameterizedTest
     @CsvSource(
             nullValues = "NULL",
@@ -77,8 +73,8 @@ class MalformedOutputDetailServiceTest {
     }
 
     /**
-     * Catches an undeclared or unparseable schema failing the block (the buckets still have counts to show),
-     * and a failing-trace list that carries non-witness refs, session refs with no trace, or one trace twice.
+     * An undeclared or unparseable schema still shows the buckets; the failing-trace list drops non-witness refs,
+     * traceless session refs, and repeats.
      */
     @Test
     void anUnreadableSchemaLeavesTheTreeEmptyAndOnlyWitnessTracesAreListed() {
@@ -104,10 +100,8 @@ class MalformedOutputDetailServiceTest {
     }
 
     /**
-     * Catches a bucket ({@code not_json}, {@code other}) highlighting lines of a document that happens to parse
-     * although the bucket names no field in it; an envelope with no assistant text rendering the envelope
-     * instead of the empty answer; and a document cut at the cap keeping highlight lines past the cut (or
-     * dropping the ones still on screen).
+     * A bucket naming no field highlights nothing even in a parseable document; an envelope with no assistant text
+     * renders the empty answer; a document cut at the cap keeps only on-screen highlight lines.
      */
     @ParameterizedTest
     @CsvSource(
@@ -133,7 +127,7 @@ class MalformedOutputDetailServiceTest {
         assertEquals(lines.isBlank() ? List.of() : List.of(Integer.valueOf(lines)), row.highlightLines());
     }
 
-    /** {@code items} whose first and last elements carry a {@code sku}, with padding between that runs past the cap. */
+    /** {@code items} whose first and last elements carry a {@code sku}, padded past the cap. */
     private static String skuFirstAndLast() {
         StringBuilder sb = new StringBuilder("{\"items\":[{\"sku\":1}");
         for (int i = 0; i < 2_000; i++) sb.append(",{\"p\":\"xxxxxxxxxx\"}");

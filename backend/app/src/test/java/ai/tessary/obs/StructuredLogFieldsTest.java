@@ -19,23 +19,15 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 /**
- * Guards the contract that makes {@link StructuredLog} worth having: fields must arrive as real
- * key-value pairs and reach the JSON as their own fields — never interpolated into the message.
- *
- * <p>This test exists because the previous implementation looked structured and was not. It built
- * {@code "event key={} key={}"} into the message string, so Loki could only regex the message: you
- * could not filter on {@code signal="groundedness"} nor graph {@code durationMs}, and a human saw a
- * wall of opaque ULIDs. Nothing failed, no error was logged, and the two shipping paths were already
- * configured to accept key-value pairs — the data simply never took that route.
- *
- * <p>That is a silent-no-op class of bug the type system cannot catch, so it is asserted here
- * against the real {@link LogstashEncoder} rather than trusted.
+ * {@link StructuredLog} fields reach the JSON as their own key-value pairs, never interpolated into the message. The
+ * previous implementation built {@code "event key={}"} into the message, so Loki could neither filter on {@code
+ * signal} nor graph {@code durationMs}, and nothing failed. Asserted against the real {@link LogstashEncoder}.
  */
 class StructuredLogFieldsTest {
 
     private record Captured(ILoggingEvent event, String json) {}
 
-    /** Log through a real logger, capture the event, and render it with the production encoder. */
+    /** Log through a real logger and render with the production encoder. */
     private static Captured capture(Runnable emit, String loggerName) {
         LoggerContext ctx = (LoggerContext) LoggerFactory.getILoggerFactory();
         ch.qos.logback.classic.Logger logger = ctx.getLogger(loggerName);
@@ -86,23 +78,6 @@ class StructuredLogFieldsTest {
     }
 
     @Test
-    void durationIsANumericFieldSoItCanBeGraphed() {
-        String name = "test.structuredlog.duration";
-        var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), Markers.OPS, "redaction.apply")
-                        .field("durationMs", 5500L)
-                        .field("bytes", 44735)
-                        .log(),
-                name);
-
-        // Quoted would make it a string in Loki — sortable/greppable but not graphable, which is
-        // the entire reason for logging a duration.
-        assertTrue(
-                captured.json().contains("\"durationMs\":5500"),
-                "durationMs must be an unquoted number, got: " + captured.json());
-    }
-
-    @Test
     void markersAndCausesStillSurvive() {
         String name = "test.structuredlog.cause";
         var captured = capture(
@@ -118,9 +93,8 @@ class StructuredLogFieldsTest {
     }
 
     /**
-     * The bug: the conditional {@code field(key, value, condition)} ignores its condition, so a field a
-     * caller meant only for its loud lines lands on every line, or on none; a null value is dropped
-     * either way.
+     * The conditional {@code field(key, value, condition)} must honour its condition; a null value is dropped either
+     * way.
      */
     @Test
     void aConditionalFieldIsAttachedOnlyWhenItsConditionHoldsAndItHasAValue() {

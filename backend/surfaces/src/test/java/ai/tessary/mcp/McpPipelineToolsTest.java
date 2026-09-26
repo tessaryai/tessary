@@ -35,19 +35,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * The pipeline-backed MCP tools: {@code get_project}, {@code list_call_sites} and {@code list_failure_modes}
- * render the project's imported {@code pipeline.yaml} for an agent. The {@link PipelineService} is mocked with a
- * real {@link Pipeline} parsed from its wire shape, so what is asserted is the MCP rendering (which fields reach
- * the agent, under which names) and the filter semantics of {@code list_failure_modes}.
+ * {@code get_project}, {@code list_call_sites}, and {@code list_failure_modes} rendering the imported {@code
+ * pipeline.yaml}, over a real {@link Pipeline}: which fields reach the agent, under which names, and the failure-mode
+ * filters.
  */
 class McpPipelineToolsTest {
 
     private static final String PROJECT_ID = "proj-1";
 
-    /**
-     * Two call sites (one with observed traffic stats, one without) and two failure modes that differ on every
-     * axis {@code list_failure_modes} filters by, so each filter keeps exactly one of them.
-     */
+    /** Two call sites (with and without traffic stats) and two failure modes differing on every filtered axis. */
     private static final String PIPELINE_JSON = """
             {
               "version": "0.3.0",
@@ -120,11 +116,7 @@ class McpPipelineToolsTest {
         return mapper.valueToTree(result.get("structuredContent"));
     }
 
-    /**
-     * {@code get_project} is the tool an agent starts from, so the pack roll-up and the judge runtime ride on it:
-     * dropping either would leave the agent unable to tell which concern bundles are engaged without a second
-     * call it has no tool for.
-     */
+    /** The agent starts from {@code get_project}, so the pack roll-up and judge runtime ride on it. */
     @Test
     void getProject_rollsUpThePacksAndTheJudgeRuntime() throws Exception {
         JsonNode project = call("get_project", "{}");
@@ -145,10 +137,7 @@ class McpPipelineToolsTest {
                 project.get("runtime"));
     }
 
-    /**
-     * Each call site carries its observed traffic stats when the pipeline has them, and no {@code observed} key
-     * when it does not: a block of nulls would read as "measured, and all zero".
-     */
+    /** No {@code observed} key without stats: a block of nulls would read as measured zero. */
     @Test
     void listCallSites_rendersObservedStatsOnlyForACallSiteThatHasThem() throws Exception {
         JsonNode sites = call("list_call_sites", "{}").get("call_sites");
@@ -189,10 +178,7 @@ class McpPipelineToolsTest {
                 modes.get(0));
     }
 
-    /**
-     * Each filter keeps only the modes that match it. A filter the handler forgot to apply would return both
-     * modes, which an agent reads as "these are the failure modes of cs-a" when one of them belongs elsewhere.
-     */
+    /** Each filter keeps only its matches; a forgotten filter would attribute another call site's mode to cs-a. */
     @ParameterizedTest(name = "{0}={1} keeps {2}")
     @CsvSource({
         "call_site_id, cs-a, fm-1",
@@ -237,12 +223,9 @@ class McpPipelineToolsTest {
         assertEquals("no project bound to this token", nullProject.getMessage());
     }
 
-    /**
-     * {@code strArg} tolerates a null argument map (a handler called with no arguments at all) as "no filter"
-     * rather than throwing a NullPointerException that would surface as a -32603.
-     */
+    /** {@code strArg} reads a null argument map as no filter, not an NPE surfacing as -32603. */
     @Test
-    @SuppressWarnings("NullAway") // deliberate: a null argument map is the input the guard handles
+    @SuppressWarnings("NullAway") // a null argument map is the input the guard handles
     void aHandlerCalledWithANullArgumentMapReadsItAsNoFilter() {
         McpTool listFailureModes = Objects.requireNonNull(registry.tool("list_failure_modes"));
 

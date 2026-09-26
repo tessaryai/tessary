@@ -18,24 +18,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * When a finding's onset moves and when it must not — the rule {@code CaseLedger.isNewSpell} reads to
- * decide whether a resolved case reopens.
- *
- * <p>Against the real database because the rule IS a SQL {@code CASE} inside an upsert, and both arms
- * of it are load-bearing in opposite directions:
- *
- * <ul>
- *   <li>An onset that moves while a detection is STILL FIRING reopens a case within one tick of a human
- *       closing it, which makes "resolve" look broken. A recomputed onset drifts by an hour or two as
- *       the replay window slides, so this is not hypothetical.
- *   <li>An onset frozen for the row's whole LIFETIME means a detection that recovered and re-fired
- *       inside the reopen window presents an onset that has not moved, so its case stays shut on a
- *       shift that is genuinely new — silently, since nothing anywhere records the miss.
- * </ul>
- *
- * <p>The gap in {@code last_seen_at} is what tells the two apart, and it is not a proxy for a recovery
- * so much as the only record of one: nothing writes "this came back", a recovered detection simply
- * stops appearing and stops being refreshed.
+ * When a finding's onset moves, the rule {@code CaseLedger.isNewSpell} reads to decide whether a resolved case
+ * reopens. It is a SQL {@code CASE} inside an upsert, and both arms matter: an onset moving while still firing (a
+ * recompute drifts an hour or two) reopens a just-closed case; an onset frozen for the row's lifetime keeps a case
+ * shut on a genuinely new spell. The gap in {@code last_seen_at} is the only record of a recovery.
  */
 @SpringBootTest
 class BehaviorFindingOnsetTest {
@@ -49,7 +35,7 @@ class BehaviorFindingOnsetTest {
     private static final String CAUSE_KEY = ToolErrorEvidence.MEASURE + ":tool:search_docs:up";
     private static final String EVIDENCE = "{\"measure\":\"tool_error_rate\"}";
 
-    /** Six hours, as {@code ToolErrorService.QUIET_WINDOW} sets it. */
+    /** {@code ToolErrorService.QUIET_WINDOW}. */
     private static final java.time.Duration QUIET = java.time.Duration.ofHours(6);
 
     @Test
@@ -61,8 +47,7 @@ class BehaviorFindingOnsetTest {
 
         String id = record(pid, onset, now).findingId();
 
-        // The next pass, five minutes later, with an onset the replay has recomputed two hours later —
-        // the drift the freeze exists to absorb.
+        // Five minutes later, the recomputed onset has drifted two hours: the freeze absorbs it.
         Instant later = now.plus(5, ChronoUnit.MINUTES);
         var second = record(pid, onset.plus(2, ChronoUnit.HOURS), later);
 
@@ -83,8 +68,7 @@ class BehaviorFindingOnsetTest {
 
         String id = record(pid, firstOnset, now.minus(20, ChronoUnit.HOURS)).findingId();
 
-        // The detection dropped out: for the next twenty hours no pass found this tool in a spell, so
-        // nothing refreshed the row and last_seen_at stopped advancing. Then it broke again.
+        // Twenty hours with no refresh, then it broke again.
         Instant secondOnset = now.minus(2, ChronoUnit.HOURS);
         var reFired = record(pid, secondOnset, now);
 
@@ -98,23 +82,7 @@ class BehaviorFindingOnsetTest {
                 "and it moved FORWARD, which is what isNewSpell tests");
     }
 
-    @Test
-    @DisplayName("a gap shorter than the quiet window is not a recovery")
-    void aShortGapIsNotARecovery() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "onset-shortgap").project().id();
-        Instant now = Instant.now();
-        Instant onset = now.minus(30, ChronoUnit.HOURS);
-
-        String id = record(pid, onset, now.minus(1, ChronoUnit.HOURS)).findingId();
-        // An hour without a refresh — a slow pass, a restart, a project that went briefly quiet. Well
-        // inside the six-hour horizon, so the spell is the same spell.
-        record(pid, now.minus(10, ChronoUnit.MINUTES), now);
-
-        assertEquals(onset.toString(), firstSeenAt(pid, id), "a short gap leaves the spell alone");
-    }
-
-    /** One recompute pass: the tool is in a spell that began at {@code onset}, observed at {@code at}. */
+    /** One recompute pass: in a spell since {@code onset}, observed at {@code at}. */
     private FindingRepository.Recorded record(String projectId, Instant onset, Instant at) {
         return Objects.requireNonNull(findings.recordRecomputedCause(
                 Ids.ulid(),

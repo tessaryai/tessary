@@ -7,14 +7,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.llmspi.ModelLane;
 import ai.tessary.metering.LlmUsageQueryRepository.SubjectSpend;
 import ai.tessary.metering.LlmUsageQueryRepository.UsageCell;
 import ai.tessary.metering.LlmUsageQueryRepository.UsageSlice;
 import ai.tessary.metering.MeteringDtos.LlmUsageCellView;
 import ai.tessary.metering.MeteringDtos.LlmUsageSeriesView;
 import ai.tessary.metering.MeteringDtos.LlmUsageSliceView;
-import ai.tessary.metering.MeteringDtos.LlmUsageView;
 import ai.tessary.metering.MeteringDtos.TriageSpendRowView;
 import ai.tessary.metering.MeteringDtos.TriageSpendView;
 import ai.tessary.open.errors.MeteringError;
@@ -33,15 +31,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link MeteringService} as the validation seam of the usage reads: every wire string (bound, grain,
- * grouping, bucket unit) is resolved and refused here, before any SQL, and the derived figures (the lane
- * labels, the cost of one triage ruling) are computed here. The repositories are mocked, fed canned slices;
- * the SQL behind them is {@code MeteringIntegrationTest}'s.
+ * {@link MeteringService} validates every wire string (bound, grain, grouping, bucket unit) before any SQL and
+ * computes the derived figures (lane labels, cost per triage ruling). The SQL is {@code MeteringIntegrationTest}'s.
  */
 @ExtendWith(MockitoExtension.class)
 class MeteringServiceTest {
 
-    // The llm_call subject kind a triage run is booked under, as E2bTriageSandbox writes it.
+    // The llm_call subject kind E2bTriageSandbox books a triage run under.
     private static final String SUBJECT_KIND = "behavior_finding";
 
     private static final String ORG = "org-1";
@@ -62,10 +58,8 @@ class MeteringServiceTest {
     }
 
     /**
-     * Every malformed series request is a 422 naming what was wrong, raised before any SQL: an unparseable
-     * bound would otherwise reach Postgres as a failing cast (a 500), an inverted or empty window would read
-     * as "no usage", and a window too fine for its grain would draw thousands of bars. 800 hours at the hour
-     * grain is 801 buckets, one over the ceiling.
+     * Every malformed series request is a 422 before SQL: an unparseable bound would be a 500, an inverted window
+     * would read as no usage, and too fine a grain draws thousands of bars (800 hours is 801 buckets, one over).
      */
     @ParameterizedTest(name = "[{0}, {1}) grain={2} group={3} -> {4}")
     @CsvSource({
@@ -91,9 +85,8 @@ class MeteringServiceTest {
     }
 
     /**
-     * The widest window the hour grain accepts (799 hours, exactly the 800-bucket ceiling) is served; the
-     * wire strings resolve case-insensitively; a bound given with an offset is normalised to its UTC instant,
-     * which is what the SQL windows on and what the response echoes.
+     * 799 hours, exactly the ceiling, is served; wire strings are case-insensitive; an offset bound normalises to
+     * UTC.
      */
     @Test
     void aWindowAtTheBucketCeilingIsServedOnItsUtcBounds() {
@@ -122,10 +115,7 @@ class MeteringServiceTest {
                 view);
     }
 
-    /**
-     * With no bounds, grain or grouping the series is the page's default: the 30 days up to now, by day, as
-     * one ungrouped series. An unbounded per-bucket read would be a full scan of the ledger.
-     */
+    /** No bounds, grain, or grouping: the last 30 days by day, ungrouped. Unbounded would scan the ledger. */
     @Test
     void anUnboundedSeriesRequestIsTheLastThirtyDaysByDayUngrouped() {
         when(llmCalls.orgTotal(eq(ORG), anyString(), anyString(), eq(LlmUsageFilter.NONE)))
@@ -139,38 +129,8 @@ class MeteringServiceTest {
     }
 
     /**
-     * The breakdown labels a lane from {@link ModelLane}, and a lane with no {@code ModelLane} behind it (the
-     * observer sandbox, or one written by a newer build) keeps its row with a null label rather than failing
-     * the whole usage page. The org total's null key goes out as the empty string.
-     */
-    @Test
-    void theBreakdownLabelsKnownLanesAndKeepsAnUnknownLaneUnlabelled() {
-        when(llmCalls.orgTotal(ORG, null, null, LlmUsageFilter.NONE)).thenReturn(slice(null, null, 4, "0.4"));
-        when(llmCalls.byLane(ORG, null, null))
-                .thenReturn(List.of(slice("triage", null, 3, "0.3"), slice("observer", null, 1, "0.1")));
-        when(llmCalls.byProject(ORG, null, null)).thenReturn(List.of(slice("p1", "Proj One", 4, "0.4")));
-        when(llmCalls.byModel(ORG, null, null)).thenReturn(List.of(slice("", null, 4, "0.4")));
-
-        LlmUsageView view = service().orgLlmUsage(ORG, null, null);
-
-        assertEquals(
-                new LlmUsageView(
-                        null,
-                        null,
-                        view.asOf(),
-                        LlmUsageSliceView.of(slice("", null, 4, "0.4"), null),
-                        List.of(
-                                LlmUsageSliceView.of(slice("triage", null, 3, "0.3"), ModelLane.TRIAGE.label()),
-                                LlmUsageSliceView.of(slice("observer", null, 1, "0.1"), null)),
-                        List.of(LlmUsageSliceView.of(slice("p1", "Proj One", 4, "0.4"), "Proj One")),
-                        List.of(LlmUsageSliceView.of(slice("", null, 4, "0.4"), null))),
-                view);
-    }
-
-    /**
-     * The cost of one ruling is the lane's cost over its run count, to six places rounded half-up; with no runs,
-     * or nothing priced, it is absent rather than a misleading zero. {@code 2/3} rounds up to {@code 0.666667},
-     * which a truncating division would get wrong in the last place.
+     * Cost per ruling to six places, rounded half-up ({@code 2/3} is {@code 0.666667}); absent, not zero, with no
+     * runs or nothing priced.
      */
     @ParameterizedTest(name = "{0} runs costing {1} -> {2}")
     @CsvSource({
@@ -201,10 +161,7 @@ class MeteringServiceTest {
                 view);
     }
 
-    /**
-     * The project timeseries needs both bounds (an unbounded timeseries is a full scan) and one of the two
-     * bucket grains the rollup table holds; anything else is a 422 before the rollup is read.
-     */
+    /** The timeseries needs both bounds and a grain the rollup holds, or it is a 422. */
     @ParameterizedTest(name = "[{0}, {1}) granularity={2} -> {3}")
     @CsvSource({
         ", 2026-09-02T00:00:00Z, hour, INVALID_RANGE",

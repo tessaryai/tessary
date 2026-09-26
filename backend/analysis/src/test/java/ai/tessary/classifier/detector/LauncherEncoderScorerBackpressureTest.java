@@ -37,16 +37,15 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * What the token-head client does when the encoder pushes back, against a loopback {@link
- * ServerSocket} HTTP responder (forbidden-apis bans {@code com.sun.net.httpserver}): a throttled
- * request (429/503) is retried with backoff and then succeeds, or fails past the retry budget; a
- * refused one (400) is bisected down to the single offending response, which comes back UNSCORED while the rest are scored; requests are sized by
- * count and estimated tokens, so a long response travels alone; a non-numeric score is a fault, never a
- * clean 0.0; no more than {@code encoder.max-inflight} requests are open at once; and a connection that
- * never opens is unreachable, while a 500 or a 401 is a fault. The responder serves each connection on its
- * own thread, so it can see requests that overlap.
+ * The token-head client under encoder pushback, against a loopback {@link ServerSocket} responder (forbidden-apis
+ * bans {@code com.sun.net.httpserver}). 429/503 retries with backoff, then fails past the budget; a 400 is bisected
+ * to the one offending response, which comes back unscored; requests are sized by count and estimated tokens; a non-
+ * numeric score is a fault; at most {@code encoder.max-inflight} requests are open; a connection that never opens is
+ * unreachable, while a 500 or 401 is a fault.
  */
 class LauncherEncoderScorerBackpressureTest {
 
@@ -118,7 +117,7 @@ class LauncherEncoderScorerBackpressureTest {
                         try (client) {
                             handleOne(client);
                         } catch (IOException | InterruptedException e) {
-                            // the client is gone; nothing to answer
+                            // the client is gone
                         }
                     },
                     "stub-classify-handler");
@@ -216,18 +215,21 @@ class LauncherEncoderScorerBackpressureTest {
         return new Response(List.of("passage"), "q?", answer);
     }
 
+    /** A numeric Retry-After is waited instead of the backoff. */
     @Test
     void aThrottledRequestIsRetriedAndThenScored() {
         throttleFirst = 2;
+        retryAfter = "3";
         List<ResponseScore> out = scorer.scoreResponses("groundedness", List.of(r("a"), r("b")));
         assertEquals(2, out.size());
         assertTrue(out.stream().allMatch(ResponseScore::scored));
         assertEquals(3, requests.get(), "two 429s, then the one that answered");
+        assertEquals(List.of(3_000L, 3_000L), waits);
     }
 
     /**
-     * With no Retry-After the backoff is 2 s doubling: four waits between five sends, then the last
-     * throttled reply fails the request. A backoff of zero would hammer a throttled encoder five times in a row.
+     * No Retry-After: 2 s doubling, four waits between five sends, then fail. Zero backoff would hammer a throttled
+     * encoder.
      */
     @Test
     void throttlingPastTheRetryBudgetBacksOffDoublingThenFailsTheRequest() {
@@ -241,18 +243,6 @@ class LauncherEncoderScorerBackpressureTest {
         assertFalse(e instanceof EncoderUnreachableException, "a throttled encoder is up, and failing the sweep");
         assertEquals(List.of(2_000L, 4_000L, 8_000L, 16_000L), waits);
         assertEquals(5, requests.get(), "the first send and four retries");
-    }
-
-    @Test
-    void aNumericRetryAfterIsWaitedInsteadOfTheBackoff() {
-        throttleFirst = 1;
-        retryAfter = "3";
-
-        List<ResponseScore> out = scorer.scoreResponses("groundedness", List.of(r("a")));
-
-        assertEquals(List.of(3_000L), waits);
-        assertEquals(1, out.size());
-        assertTrue(out.getFirst().scored());
     }
 
     /** Node serialises a NaN score as null; read as 0.0 it would record the answer as clean. */
@@ -280,10 +270,9 @@ class LauncherEncoderScorerBackpressureTest {
     }
 
     /**
-     * The target is the local port of an open client connection: nothing listens there, so the connect is
-     * refused, and while the connection holds the port the kernel hands it to no one else. Closing the stub's
-     * socket instead freed its port, which a busy runner could hand to another listener before the connect.
-     * A socket that is only bound would hold the port too, but macOS drops the SYN rather than refusing it.
+     * The target is the local port of an open client connection: nothing listens, and the kernel hands the port to no
+     * one else while it is held. A closed port could be reused by another listener; a merely bound socket drops the
+     * SYN on macOS.
      */
     @Test
     void aRefusedConnectionIsUnreachableAndMarksTheModelDown() throws IOException {
@@ -301,34 +290,24 @@ class LauncherEncoderScorerBackpressureTest {
         assertTrue(unreachable.getFirst().startsWith("unreachable: "), unreachable.getFirst());
     }
 
-    @Test
-    void aServerErrorIsAFaultNotUnreachable() {
-        failWith = 500;
+    /** A model answering 500 is broken, not asleep, and a wrong key (401) is a fault the attempts should count. */
+    @ParameterizedTest
+    @ValueSource(ints = {500, 401})
+    void aServerErrorIsAFaultNotUnreachable(int status) {
+        failWith = status;
 
         IllegalStateException e =
                 assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
 
-        assertFalse(e instanceof EncoderUnreachableException, "a model that answers 500 is broken, not asleep");
-        assertTrue(unreachable.isEmpty());
-    }
-
-    @Test
-    void anUnauthorisedAnswerIsAFaultNotUnreachable() {
-        failWith = 401;
-
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> scorer.scoreResponses("groundedness", List.of(r("a"))));
-
-        assertFalse(e instanceof EncoderUnreachableException, "a wrong key is a fault the attempts should count");
+        assertFalse(e instanceof EncoderUnreachableException);
         assertTrue(unreachable.isEmpty());
     }
 
     @Test
     void requestsAreSizedByEstimatedTokensSoALongResponseTravelsAlone() {
-        String longAnswer = "x".repeat(60_000); // ~15k estimated tokens at 4 bytes a token
-        // The short answer rides with the first long one (15k < 24k tokens), the second long one would take
-        // the request to 30k and so starts its own, and the trailing short answer rides with it. Count alone
-        // (16) would have put all four in one request, two 8k-window answers together.
+        String longAnswer = "x".repeat(60_000); // ~15k estimated tokens
+        // The short answer rides with the first long one; the second would reach 30k tokens so it starts its own. By
+        // count alone (16) all four would share one request.
         List<ResponseScore> out =
                 scorer.scoreResponses("groundedness", List.of(r("a"), r(longAnswer), r(longAnswer), r("b")));
 
@@ -347,10 +326,7 @@ class LauncherEncoderScorerBackpressureTest {
         assertEquals(17, out.size());
     }
 
-    /**
-     * With {@code encoder.max-inflight} 1, a second sweep waits for the first request's permit instead of
-     * posting beside it: the encoder never sees two requests open at once, so it sheds nothing.
-     */
+    /** With max-inflight 1, a second sweep waits for the permit, so the encoder never sees two requests at once. */
     @Test
     void noMoreThanMaxInflightRequestsAreOpenAtOnce() throws InterruptedException {
         ObserverProperties props = new ObserverProperties();
@@ -366,7 +342,7 @@ class LauncherEncoderScorerBackpressureTest {
         a.start();
         awaitTrue(() -> open.get() == 1, "the first request reaches the encoder");
         b.start();
-        // Either b queues for the permit (right) or its request reaches the encoder beside a's (wrong).
+        // b either queues for the permit (right) or reaches the encoder beside a (wrong).
         awaitTrue(() -> open.get() == 2 || waitsOnASemaphore(b), "the second sweep posts or queues");
         release.countDown();
         a.join(10_000);
@@ -428,10 +404,7 @@ class LauncherEncoderScorerBackpressureTest {
         assertEquals(1, requests.get(), "no retry after the interrupt");
     }
 
-    /**
-     * A 200 whose body is not JSON is a fault, and the exception carries no cause: Jackson's message quotes
-     * the body, and a chained cause would carry it into the worker's logs.
-     */
+    /** A non-JSON 200 is a fault with no chained cause: Jackson's message quotes the body into the logs. */
     @Test
     void anUnparseableReplyIsAFaultWithNoChainedBody() {
         rawBody = "<html>secret-bearing proxy page</html>";

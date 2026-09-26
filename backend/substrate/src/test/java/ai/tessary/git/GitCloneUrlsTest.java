@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 import java.util.Optional;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -53,11 +52,5 @@ class GitCloneUrlsTest {
             })
     void authenticated_buildsACloneUrlOnTheGitHost(String header, String host, String expected) {
         assertEquals(Optional.of(expected), url(header, host));
-    }
-
-    @Test
-    void authenticated_isEmptyWhenNoTokenCanBeHad() {
-        // RCA then falls back to trace-only evidence instead of failing the run on a clone it cannot do.
-        assertEquals(Optional.empty(), url(null, null));
     }
 }

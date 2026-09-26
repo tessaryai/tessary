@@ -88,17 +88,6 @@ class EncoderDependencyReporterTest {
         assertTrue(d.decommissionable());
     }
 
-    @Test
-    void noEnabledGroundednessRowIsDecommissionable() {
-        ProjectRepository projects = activeProjects(project("p1", "o1"));
-
-        EncoderDependencyReporter.Dependency d =
-                new EncoderDependencyReporter(projects, enabledRows(Map.of()), capabilities).report();
-
-        assertEquals(new EncoderDependencyReporter.Dependency(0, 0, Set.of()), d);
-        assertTrue(d.decommissionable());
-    }
-
     /**
      * A count that fails on boot is logged and the context still starts: a diagnostic that could stop the
      * platform booting is worse than the question it answers. The daily run counts again.

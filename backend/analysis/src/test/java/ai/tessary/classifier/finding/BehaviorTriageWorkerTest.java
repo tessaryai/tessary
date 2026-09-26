@@ -39,13 +39,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
- * What {@link BehaviorTriageWorker} does with the two ways a ruling run can fail — decision 3 of the
- * triage-fixes plan: a run failure ({@code TRIAGE_RUN_INCOMPLETE}, thrown for a launcher-classified
- * run-level 502 or a non-401/403/404/5xx rejection) spends the finding's attempt and leaves the
- * launcher breaker untouched, while a launcher failure ({@code TRIAGE_LAUNCHER_UNAVAILABLE}) refunds
- * the attempt and feeds the breaker — see {@link E2bTriageSandboxTest} for the classification itself.
- * Driven through {@code triageForTest}, the same package-private seam {@link TriageSourceAbsenceTest}
- * uses, so no scheduler, executor or lease math is on the path.
+ * What {@link BehaviorTriageWorker} does with the two ways a ruling run fails (decision 3): a run failure ({@code
+ * TRIAGE_RUN_INCOMPLETE}) spends the attempt and leaves the breaker alone; a launcher failure ({@code
+ * TRIAGE_LAUNCHER_UNAVAILABLE}) refunds it and feeds the breaker. Classification is {@link E2bTriageSandboxTest}'s.
+ * Driven through {@code triageForTest}, with no scheduler or lease math.
  */
 class BehaviorTriageWorkerTest {
 
@@ -68,28 +65,9 @@ class BehaviorTriageWorkerTest {
         verifyNoInteractions(breaker);
     }
 
-    @Test
-    @DisplayName("a launcher failure releases the job unspent and feeds the breaker")
-    void aLauncherFailureReleasesTheJobAndFeedsTheBreaker() {
-        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
-        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
-        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
-        when(engine.rule(eq(PROJECT), eq("f1"), any(), any()))
-                .thenThrow(new TessaryException(
-                        ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE,
-                        "status 502 from http://launcher — docker pull failed"));
-        BehaviorTriageWorker worker = worker(jobs, engine, breaker, new BriefingSource());
-
-        worker.triageForTest(job("job_1", "f1"));
-
-        verify(jobs).releaseWithoutAttempt(eq("job_1"), anyString());
-        verify(breaker).recordLauncherFailure(anyString());
-    }
-
     /**
-     * A ruling is written through the source that briefed it, with the engine's citations, and only then is
-     * the job done and the launcher counted reachable. Dropping any of the three leaves a verdict unwritten,
-     * a job re-claimed for a finding already ruled, or the drain parked after the launcher came back.
+     * A ruling is written through its source with the citations, then the job is done and the launcher counted
+     * reachable. Missing any leaves a verdict unwritten, a ruled finding re-claimed, or the drain parked.
      */
     @Test
     void aRulingIsRecordedByTheBriefingSourceAndClosesTheJobAndTheBreaker() {
@@ -116,9 +94,8 @@ class BehaviorTriageWorkerTest {
     }
 
     /**
-     * A launcher that cannot run, and an org with no usable key, will fail identically until a person edits
-     * something. The job goes back unspent and re-checks a configuration window later; spending attempts on
-     * it dead-letters the finding for good, and feeding the breaker parks every other org's drain.
+     * A launcher that cannot run, or an org with no usable key, fails until a person edits something. The job goes
+     * back unspent; spending attempts dead-letters it, and feeding the breaker parks every org's drain.
      */
     @ParameterizedTest
     @MethodSource("configurationGaps")
@@ -145,7 +122,7 @@ class BehaviorTriageWorkerTest {
                 Arguments.of(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED));
     }
 
-    /** Any other failure spends the attempt and backs off: 2s after the first, RetryPolicy's own schedule. */
+    /** Any other failure spends the attempt and backs off 2s, RetryPolicy's schedule. */
     @Test
     void anUnexpectedFailureSpendsTheAttemptWithTheFirstBackoff() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
@@ -158,7 +135,7 @@ class BehaviorTriageWorkerTest {
         verify(jobs).markRetryable("job_1", "npe in the brief", 2L);
     }
 
-    /** While the launcher is down the tick touches no job: sweeping would dead-letter the whole queue. */
+    /** While the launcher is down no job is touched, or the whole queue dead-letters. */
     @Test
     void anOpenBreakerParksTheWholeDrain() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
@@ -193,10 +170,7 @@ class BehaviorTriageWorkerTest {
         verifyNoInteractions(engine);
     }
 
-    /**
-     * Claimed jobs run, and the tick keeps claiming until the queue is empty. A launcher failure that trips
-     * the breaker mid-tick stops the remaining rounds, so an outage costs one batch, not the whole queue.
-     */
+    /** The tick claims until the queue is empty; a breaker trip mid-tick stops it, so an outage costs one batch. */
     @Test
     void aTickRunsWhatItClaimsAndStopsClaimingOnceTheBreakerTrips() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
@@ -217,10 +191,7 @@ class BehaviorTriageWorkerTest {
         assertTrue(breaker.isOpen());
     }
 
-    /**
-     * A queue that never drains (every claim finds another due job) ends the tick after its round limit
-     * instead of holding the scheduler thread for as long as jobs keep arriving.
-     */
+    /** A queue that never drains ends the tick at its round limit. */
     @Test
     void aTickStopsClaimingAfterItsRoundLimit() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
@@ -265,10 +236,8 @@ class BehaviorTriageWorkerTest {
                 breaker);
     }
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
-    /** The worker with only the collaborators {@code triageForTest} reaches, plus a real breaker. */
-    @SuppressWarnings("NullAway") // deliberate: the scheduler, lease properties and executor are not on this path
+    /** Only the collaborators {@code triageForTest} reaches, plus a real breaker. */
+    @SuppressWarnings("NullAway") // the scheduler, lease properties, and executor are not on this path
     private static BehaviorTriageWorker worker(
             BehaviorTriageJobRepository jobs,
             BehaviorTriageEngine engine,

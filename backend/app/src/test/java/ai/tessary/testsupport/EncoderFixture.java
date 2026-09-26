@@ -14,17 +14,11 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Makes the instance's encoder answer, for tests whose subject is an encoder-backed classifier.
+ * Makes the instance's encoder answer, for encoder-backed classifier tests. {@code groundedness} sweeps only while
+ * its model answers the probe, so a test expecting a sweep would otherwise test the pause. This stands up a loopback
+ * listener answering {@code 200} with the head, points the shared {@link ObserverProperties} at it, and re-probes.
  *
- * <p>{@code groundedness} sweeps only while its model answers the health probe ({@link
- * EncoderAvailability}): with it down, nothing is enqueued and a claimed job goes back to pending. A
- * test that expects the classifier to sweep is therefore testing the pause unless the encoder is up
- * first. This stands a loopback listener up that answers {@code 200} with the {@code groundedness}
- * head to everything, points the shared {@link ObserverProperties} at it and re-probes, so the real
- * probe and the real sweep gate are what run.
- *
- * <p>The properties bean is shared by the whole context: every {@link #up()} must be paired with a
- * {@link #down()} in {@code @AfterEach}, or the next test class inherits an answering encoder.
+ * <p>The properties bean is shared: pair every {@link #up()} with {@link #down()} in {@code @AfterEach}.
  */
 @Component
 public class EncoderFixture {
@@ -43,7 +37,7 @@ public class EncoderFixture {
         this.encoder = encoder;
     }
 
-    /** Stand the stub up and make the instance see an available encoder. Idempotent. */
+    /** Idempotent. */
     public synchronized void up() {
         if (socket != null) return;
         try {
@@ -60,7 +54,7 @@ public class EncoderFixture {
         if (!s.available()) throw new IllegalStateException("stub encoder did not come up: " + s.reason());
     }
 
-    /** Tear the stub down and return the instance to its unprobed, unavailable state. Idempotent. */
+    /** Back to unprobed and unavailable. Idempotent. */
     public synchronized void down() {
         if (socket == null) return;
         try {

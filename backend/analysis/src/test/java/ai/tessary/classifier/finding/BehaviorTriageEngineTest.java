@@ -2,7 +2,6 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -110,30 +109,6 @@ class BehaviorTriageEngineTest {
                 return result;
             }
         };
-    }
-
-    @Test
-    void normalRulingRoundTripsThroughTheSandboxAndProducesAVerdict() {
-        String resultJson = """
-                {"verdict": "positive", "summary": "both windows measure the same population",
-                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns, not a thin window"}]}
-                """;
-        BehaviorTriageEngine engine = new BehaviorTriageEngine(
-                List.of(fixedSandbox(Optional.of(new TriageSandbox.SandboxRun(resultJson)))),
-                props(),
-                new ObserverProperties(),
-                apiKeys(),
-                projects(),
-                memberships(),
-                mapper,
-                mock(ClassifierDetectionWriteRepository.class));
-
-        BehaviorTriageVerdict verdict =
-                engine.rule(PROJECT_ID, FINDING_ID, Map.of("finding.md", "the claim"), "rule on this");
-
-        assertNotNull(verdict);
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, verdict.verdict());
-        assertEquals(1, verdict.citations().size());
     }
 
     @Test

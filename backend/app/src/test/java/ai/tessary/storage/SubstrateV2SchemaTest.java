@@ -12,6 +12,7 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,51 +66,24 @@ class SubstrateV2SchemaTest {
         t0 = Instant.parse("2026-08-12T10:00:00Z");
     }
 
-    // ---- generated columns: the all-null battery ---------------------------------------------------
-
+    /** Null means "the producer sent nothing"; zero is a measurement. Known buckets sum, unknown ones add nothing. */
     @Test
-    @DisplayName("every usage bucket null yields a null total — never 0")
-    void totalTokens_allNullIsNull() {
-        SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
+    void totalTokens_isNullOnlyWhenEveryBucketIsNull() {
+        SpanRow none = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
+        SpanRow partial = fx.withUsage(fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0), 10L, null);
+        SpanRow zero = fx.withUsage(fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0), 0L, null);
+        SpanRow all = fx.withUsage(fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0), 1L, 2L, 4L, 8L, 16L);
 
-        SpanRow read = spans.findById(pid, span.traceId(), span.id()).orElseThrow();
-        assertNull(read.totalTokens(), "a span the producer sent no usage for did not consume zero tokens");
+        SpanRow read = spans.findById(pid, none.traceId(), none.id()).orElseThrow();
+        assertNull(read.totalTokens(), "a span with no usage did not consume zero tokens");
         assertNull(read.totalCost(), "and it did not cost zero dollars either");
+        assertEquals(10L, totalTokens(partial));
+        assertEquals(0L, totalTokens(zero));
+        assertEquals(31L, totalTokens(all), "all five buckets, reasoning tokens included");
     }
 
-    @Test
-    @DisplayName("one populated bucket makes the total a sum over the rest as zeros")
-    void totalTokens_partialUsageSumsTheKnownBuckets() {
-        SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
-        fx.withUsage(span, 10L, null, null, null, null);
-
-        assertEquals(
-                10L,
-                spans.findById(pid, span.traceId(), span.id()).orElseThrow().totalTokens(),
-                "known buckets sum; unknown ones contribute nothing rather than voiding the total");
-    }
-
-    @Test
-    @DisplayName("a bucket the producer explicitly sent as zero is not the same fact as an absent one")
-    void totalTokens_explicitZeroIsNotNull() {
-        SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
-        fx.withUsage(span, 0L, null, null, null, null);
-
-        assertEquals(
-                0L,
-                spans.findById(pid, span.traceId(), span.id()).orElseThrow().totalTokens(),
-                "'the producer measured zero' is a measurement; 'the producer sent nothing' is not");
-    }
-
-    @Test
-    @DisplayName("all five buckets ride the total, reasoning tokens included")
-    void totalTokens_countsEveryBucket() {
-        SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
-        fx.withUsage(span, 1L, 2L, 4L, 8L, 16L);
-
-        assertEquals(
-                31L,
-                spans.findById(pid, span.traceId(), span.id()).orElseThrow().totalTokens());
+    private @Nullable Long totalTokens(SpanRow span) {
+        return spans.findById(pid, span.traceId(), span.id()).orElseThrow().totalTokens();
     }
 
     @Test
@@ -118,7 +92,7 @@ class SubstrateV2SchemaTest {
         SpanRow span = fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0);
         // Usage present, cost absent: exactly the `unpriced` case, and the one where a zero would read as
         // a real spend being free.
-        fx.withUsage(span, 1000L, 500L, null, null, null);
+        fx.withUsage(span, 1000L, 500L);
 
         SpanRow read = spans.findById(pid, span.traceId(), span.id()).orElseThrow();
         assertEquals(1500L, read.totalTokens());
@@ -227,17 +201,6 @@ class SubstrateV2SchemaTest {
         sessions.getOrCreateAll(List.of(SubstrateV2Fixtures.sessionRow(pid, sessionId, t0.toString())));
         traces.getOrCreateAll(List.of(row));
         assertTrue(traces.findById(pid, traceId).isPresent());
-    }
-
-    @Test
-    @DisplayName("a trace with no session is legal — anonymous traffic belongs to no session")
-    void fkOrdering_sessionlessTraceIsFine() {
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, traceId, t0);
-
-        assertNull(
-                traces.findById(pid, traceId).orElseThrow().sessionId(),
-                "nothing is synthesized to fill the hole; the session surfaces tolerate trace-only traffic");
     }
 
     @Test

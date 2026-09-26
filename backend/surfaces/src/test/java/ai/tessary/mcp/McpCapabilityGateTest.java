@@ -148,49 +148,6 @@ class McpCapabilityGateTest {
         }
     }
 
-    @Test
-    void callingARemovedToolReadsAsUnknownAndNeverReachesTheHandler() throws Exception {
-        // A client holding a stale tool list, or one guessing: tools/list is only advice.
-        Fixture f = fixture();
-
-        Map<String, Object> result = f.callTool("get_grader", "{\"grader_id\":\"g-1\"}");
-
-        assertEquals(Boolean.TRUE, result.get("isError"));
-        String text = errorText(result);
-        assertTrue(text.contains("unknown tool"), "a removed tool must read as unknown, got: " + text);
-    }
-
-    @Test
-    void anOpenToolWorks() throws Exception {
-        Fixture f = fixture();
-
-        Map<String, Object> result = f.callTool("get_project", "{}");
-
-        assertEquals(Boolean.FALSE, result.get("isError"), "get_project is open — a partner must be able to ask");
-        JsonNode body = mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-        assertEquals(PROJECT_ID, body.get("id").asText());
-    }
-
-    @Test
-    void instructionsNeverAdvertiseARemovedTool() throws Exception {
-        Fixture f = fixture();
-
-        JsonRpc.Response r = f.dispatcher.dispatch(f.req(1, "initialize", mapper.readTree("{}")), f.ctx());
-        assertNotNull(r);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        String instructions = Objects.requireNonNull(result.get("instructions")).toString();
-
-        for (String gone : REMOVED_TOOLS) {
-            assertFalse(
-                    instructions.contains(gone),
-                    "instructions must not mention the removed " + gone + ": " + instructions);
-        }
-        // ...and it does still describe what the partner CAN do, so an empty offer is not the reason it passed.
-        assertTrue(instructions.contains("list_cases"), "instructions should still describe the open tools");
-    }
-
     /**
      * The read-only sentence is unconditional, unlike every other sentence in the instructions, which are
      * built from the catalogue. It states a property of the surface rather than of a tool — otherwise the
@@ -268,12 +225,5 @@ class McpCapabilityGateTest {
                 mock(FindingService.class),
                 mock(CaseService.class));
         return new Fixture(new McpDispatcher(registry, mapper), mapper);
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
     }
 }

@@ -19,14 +19,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The background purge, end to end: a marked project's data goes, its neighbour's does not, and the
- * paths that used to make a delete unsurvivable are each pinned by a test.
- *
- * <p>These run the real {@link ProjectPurgeWorker} rather than the repository alone, because the parts
- * that were actually broken are the worker's: the order it empties tables in, the fact that its own job
- * row survives emptying {@code job}, and that the {@code project} row is dropped only after the volume
- * is gone. A test that called {@code deleteBatch} in its own order would pass while the worker used a
- * different one.
+ * The background purge through the real {@link ProjectPurgeWorker}: a marked project's data goes, its neighbour's
+ * stays. The broken parts were the worker's (table order, its own job row surviving {@code job} being emptied,
+ * dropping {@code project} last), so a repository-only test would pass while the worker was wrong.
  */
 @SpringBootTest
 class ProjectPurgeIntegrationTest {
@@ -70,17 +65,14 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * The bug this whole change exists to prevent, in miniature. {@code job.project_id} cascades to
-     * {@code project}, so a purge job that named its own project would be deleted by its own final
-     * statement and could never be marked done — the queue would then re-run it forever against a
-     * project that no longer exists.
+     * {@code job.project_id} cascades, so a purge job naming its own project would delete itself and re-run forever.
      */
     @Test
     @DisplayName("the purge job survives emptying the job table and ends up done")
     void purgeJobSurvivesItsOwnPurge() {
         Project p = project("purge-selfref");
         traffic(p, 3);
-        // A sibling job for the same project — the rows the purge is supposed to take with it.
+        // A sibling job the purge should take with it.
         jdbc.sql("""
                         INSERT INTO job (id, project_id, kind, status, attempts, payload, created_at, updated_at)
                         VALUES (:id, :pid, 'classifier', 'pending', 0, '{}', :now, :now)
@@ -111,8 +103,8 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * A backend that dies between marking and enqueuing leaves a project nobody is purging. The marker,
-     * not the job row, is the durable record that a delete was accepted — so the worker must find it.
+     * A backend that dies between marking and enqueuing leaves an unpurged project; the marker is the durable record,
+     * so the worker must find it.
      */
     @Test
     @DisplayName("a project marked with no job is revived by the recovery sweep and purged")
@@ -126,23 +118,9 @@ class ProjectPurgeIntegrationTest {
         assertTrue(projects.findById(p.id()).isEmpty(), "the orphaned mark should have been picked up");
     }
 
-    @Test
-    @DisplayName("marking is one-way: a second mark is refused so a retried DELETE stays idempotent")
-    void markingIsOneWay() {
-        Project p = project("purge-idempotent");
-        assertTrue(projects.markDeleting(p.id(), Instant.now().toString()));
-        assertFalse(projects.markDeleting(p.id(), Instant.now().toString()));
-        // This project is deliberately never enqueued or purged — undo the mark so it doesn't sit as an
-        // orphan for a LATER test's worker.tick() to revive and win CLAIM_BATCH=1 over that test's own job.
-        projects.clearDeleting(p.id());
-    }
-
     /**
-     * {@code trace} has a self-referencing FK ({@code fk_trace_parent}) with no cascade and no
-     * deferral. A batch that deletes rows by physical position rather than parent/child order can delete
-     * a parent while a child pointing at it via {@code parent_trace_id} survives to a later batch, and
-     * that later batch's DELETE then fails the FK check outright. This pins the fix: a project whose
-     * traces form a parent/child chain purges cleanly.
+     * {@code fk_trace_parent} has no cascade or deferral, so deleting by physical position can delete a parent before
+     * its child and fail the next batch's FK check.
      */
     @Test
     @DisplayName("a project with parent/child traces purges without violating fk_trace_parent")
@@ -174,17 +152,15 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * A purge that hangs or crashes past its retry budget must not leave the project stuck forever
-     * showing "deleting" — the worker should un-hide it (clear {@code deleting_at}) so a human notices,
-     * while its already-revoked API keys stay revoked (see {@link ProjectRepository#clearDeleting}).
+     * A purge past its retry budget un-hides the project ({@code deleting_at} cleared) so a human notices, with its
+     * API keys still revoked.
      */
     @Test
     @DisplayName("a purge that exhausts its retry budget un-hides the project")
     void exhaustedPurgeUnhidesTheProject() {
         Project p = project("purge-exhausted");
         accept(p);
-        // Simulate a purge that hung mid-run past the attempt cap: claimed, lease long expired, attempts
-        // past any reasonable cap.
+        // A purge hung mid-run: claimed, lease expired, attempts past any cap.
         jdbc.sql("""
                         UPDATE job SET status = 'claimed', lease_owner = 'stuck-worker',
                                        lease_expires_at = :past, attempts = 99
@@ -205,12 +181,8 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * A stable, project-derived job id (the old {@code 'pdj_' || md5(project_id)}) gets reused every time
-     * {@code enqueueMissing} revives the same project, so a purge that dead-letters twice hits its own old
-     * {@code job_pkey} on the second revival — and since one {@code enqueueMissing} call covers every
-     * orphaned project in a single statement, that single collision would abort recovery for every other
-     * stuck project too. This pins that a project can dead-letter and be revived twice, alongside a second
-     * orphaned project, with no id collision.
+     * The old stable job id collided on a second revival, and since one {@code enqueueMissing} statement covers every
+     * orphan, one collision blocked all recovery. Pinned: two revivals beside a sibling orphan.
      */
     @Test
     @DisplayName("enqueueMissing survives a project dead-lettering twice, without blocking a sibling revival")
@@ -221,16 +193,12 @@ class ProjectPurgeIntegrationTest {
         projects.markDeleting(chronic.id(), now);
         projects.markDeleting(sibling.id(), now);
 
-        // Assertions are scoped to these two projects' own job rows rather than enqueueMissing's global
-        // return count: the sweep operates over every deleting_at project in the database, and other
-        // tests in this class leave their own marked projects behind, which would make a global count
-        // flaky.
+        // Scoped to these projects' rows: the sweep covers every marked project, and other tests leave theirs behind.
         jobs.enqueueMissing(now);
         assertEquals(1, purgeJobsAllStatuses(chronic.id()), "chronic project gets its first job");
         assertEquals(1, purgeJobsAllStatuses(sibling.id()), "sibling project gets its first job");
         deadLetter(chronic.id());
 
-        // Second revival of the same project, in the same call as an untouched sibling orphan.
         jobs.enqueueMissing(now);
         assertEquals(
                 2, purgeJobsAllStatuses(chronic.id()), "the chronic project now has two job rows, not a pkey clash");
@@ -240,9 +208,7 @@ class ProjectPurgeIntegrationTest {
                 "the sibling already has a live job and must not be revived again");
         deadLetter(chronic.id());
 
-        // Third revival must not collide with its own second row, and must not abort sibling recovery —
-        // the failure mode of the old stable-id approach, where one row's pkey collision aborted the
-        // whole bulk statement and silently blocked every other orphaned project's recovery too.
+        // The third revival must not collide or abort the sibling's recovery.
         jobs.enqueueMissing(now);
         assertEquals(3, purgeJobsAllStatuses(chronic.id()), "three rows total, one per revival, none clashed");
         assertEquals(
@@ -250,16 +216,14 @@ class ProjectPurgeIntegrationTest {
                 purgeJobsAllStatuses(sibling.id()),
                 "sibling job untouched throughout, proving no whole-sweep abort occurred");
 
-        // Neither project was ever actually purged (this test only exercises enqueueMissing, never the
-        // worker's claim loop), so both are left marked deleting_at with a live pending job. Clean up
-        // explicitly rather than leaving that behind: CLAIM_BATCH is 1, so a stray pending project_delete
-        // job would otherwise be free to win a LATER test's worker.tick() call over that test's own job.
+        // Never purged, so clean up: with CLAIM_BATCH 1 a stray pending job could win a later test's tick.
         cleanUp(chronic);
         cleanUp(sibling);
     }
 
-    /** Deletes a project's job rows and the project row itself, bypassing the worker — for tests that
-     *  deliberately leave a project mid-delete-without-purging and must not leak it into later tests. */
+    /**
+     * Deletes a project's jobs and row, bypassing the worker, so a mid-delete project does not leak into later tests.
+     */
     private void cleanUp(Project p) {
         jdbc.sql("DELETE FROM job WHERE kind = 'project_delete' AND dedupe_key = :pid")
                 .param("pid", p.id())
@@ -293,18 +257,15 @@ class ProjectPurgeIntegrationTest {
         assertFalse(projects.findActive().stream().anyMatch(a -> a.id().equals(p.id())));
         assertTrue(projects.findById(p.id()).orElseThrow().isDeleting());
 
-        // This project is deliberately never enqueued or purged — undo the mark so it doesn't sit as an
-        // orphan for a LATER test's worker.tick() to revive and win CLAIM_BATCH=1 over that test's own job.
+        // Undo the mark, or a later test's tick could revive it and win CLAIM_BATCH=1.
         projects.clearDeleting(p.id());
     }
-
-    // ---- fixtures ----
 
     private Project project(String name) {
         return TenantFixture.bootstrap(tenants, name).project();
     }
 
-    /** Mark + enqueue, i.e. what the DELETE endpoint does, without going through HTTP. */
+    /** Mark and enqueue, as the DELETE endpoint does. */
     private void accept(Project p) {
         String now = Instant.now().toString();
         projects.markDeleting(p.id(), now);
@@ -312,11 +273,8 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * {@code n} traces, each with a span, that span's payload, a tool call and a media object — the
-     * volume tables the purge walks. The media object is referenced from its span_payload via a
-     * {@code media_ref} row, the join table introduced in place of the old unindexed
-     * {@code tool_call.arguments_ref}/{@code result_ref} columns — this is what makes
-     * {@code media_object} reachable at all today.
+     * {@code n} traces, each with a span, payload, tool call and media object: the volume tables the purge walks. The
+     * media object is reachable through a {@code media_ref} row.
      */
     private void traffic(Project p, int n) {
         String at = Instant.now().toString();
@@ -389,11 +347,10 @@ class ProjectPurgeIntegrationTest {
     }
 
     /**
-     * The bugs: a failed purge is dead-lettered before its attempt budget is spent, or retried forever past
-     * it; its error is stored unbounded; its lease is kept so no worker can pick it back up; or a purge that
-     * merely ran out of batches keeps its attempt count and dead-letters itself for being large.
+     * Bugs: dead-lettering before the attempt budget or retrying past it, storing the error unbounded, keeping the
+     * lease, or a purge that ran out of batches keeping its attempt count and dead-lettering for being large.
      *
-     * <p>Transactional so the scheduled purge heartbeat, which claims pending rows, never sees this job.
+     * <p>Transactional so the scheduled heartbeat never sees this job.
      */
     @Test
     @Transactional

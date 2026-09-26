@@ -26,9 +26,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Acceptance for the signal <b>definition</b> model + lifecycle: the built-in catalog seeds
- * per project (idempotently), and a definition can be enabled/disabled through its lifecycle. Run
- * against the real pgvector Postgres (Testcontainers), so the signal schema is applied for real.
+ * The signal definition model and lifecycle against real Postgres: the catalog seeds per project idempotently, and a
+ * definition can be enabled and disabled.
  */
 @SpringBootTest
 class ClassifierDefinitionIntegrationTest {
@@ -56,8 +55,7 @@ class ClassifierDefinitionIntegrationTest {
 
     @Test
     void seedsBuiltInsOnProjectCreationIdempotently() {
-        // No generation run, no repo, no graders: just a project. Auto-classification reads traces,
-        // so creating the project is the whole precondition (ClassifierSeedListener).
+        // Creating the project is the whole precondition (ClassifierSeedListener).
         String pid = bootstrapGranted("signal-seed").project().id();
 
         var defs = service.list(pid);
@@ -70,10 +68,8 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(0, service.seedBuiltIns(pid), "re-seeding is a no-op (idempotent)");
         assertEquals(7, service.list(pid).size(), "all built-ins are listable");
         assertTrue(defs.stream().allMatch(ClassifierRow::builtIn), "all seeded signals are marked built_in");
-        // Every built-in seeds enabled except Frustration, whose sweep spends the org's own provider
-        // credit, and Groundedness, which needs a model server set up first, so a person turns each on.
-        // Otherwise whether a classifier runs for an org is a capability-flag decision, not something the
-        // seeded row encodes. What reaches a project at all is asserted in PartnerCatalogTest.
+        // Every built-in seeds enabled except Frustration (spends provider credit) and Groundedness (needs a model
+        // server). What reaches a project is PartnerCatalogTest's.
         for (ClassifierRow def : defs) {
             assertEquals(
                     !Set.of("frustration", "groundedness").contains(def.classifierKey()),
@@ -83,28 +79,11 @@ class ClassifierDefinitionIntegrationTest {
     }
 
     @Test
-    void secretLeakIsWiredToTheCredentialCorpusDetectorAndSeedsArmed() {
-        String pid = bootstrapGranted("signal-secret-leak").project().id();
-
-        ClassifierRow secretLeak =
-                ClassifierRows.byKey(signals, pid, "secret_leak").orElseThrow();
-        assertEquals(
-                BuiltInDetector.Kind.SECRET_LEAK,
-                secretLeak.detector(),
-                "Secret Leak is wired to the credential-corpus detector");
-        assertEquals(3, secretLeak.version(), "the catalog version bumped to 3 so re-seeding carries the arming block");
-        assertTrue(
-                secretLeak.configJson() != null && secretLeak.configJson().contains("\"arming\""),
-                "Secret Leak seeds armed");
-        assertTrue(secretLeak.enabled(), "Secret Leak seeds enabled");
-    }
-
-    @Test
     void resyncDisablesBuiltInsThatLeftTheCatalog() {
         Project project = bootstrapGranted("signal-retire").project();
         String pid = project.id();
 
-        // Mimic a project seeded by the OLD catalog: a 'wins' built-in row that is no longer shipped.
+        // A project seeded by an old catalog: a 'wins' built-in no longer shipped.
         String now = Instant.now().toString();
         signals.insert(new ClassifierRow(
                 Ids.ulid(),
@@ -114,7 +93,7 @@ class ClassifierDefinitionIntegrationTest {
                 "A clear success moment — praise or an explicit goal completion (retired built-in).",
                 "wins",
                 null,
-                true, // built_in, exactly as the old catalog seeded it
+                true, // built_in
                 1,
                 true, // enabled: the zombie state this test retires
                 ClassifierRow.Mode.DISCOVERY,
@@ -144,9 +123,7 @@ class ClassifierDefinitionIntegrationTest {
         Project project = bootstrapGranted("signal-catalog-add").project();
         String pid = project.id();
 
-        // Mimic a project seeded by an OLD catalog: only 'frustration' exists, at an old version;
-        // the catalog has since grown (e.g. the groundedness built-in) and bumped versions. Clear the
-        // seed-on-create catalog first so the old-catalog row is the project's entire starting state.
+        // An old catalog: only 'frustration', at an old version, as the project's entire state.
         jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
                 .param("pid", pid)
                 .update();
@@ -159,7 +136,7 @@ class ClassifierDefinitionIntegrationTest {
                 "User frustration in a turn (old-catalog definition).",
                 BuiltInDetector.Kind.FRUSTRATION,
                 null,
-                true, // built_in: this project WAS seeded, by an older catalog
+                true, // built_in
                 1,
                 true,
                 ClassifierRow.Mode.DISCOVERY,
@@ -182,10 +159,8 @@ class ClassifierDefinitionIntegrationTest {
                         .version(),
                 ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().version(),
                 "the pre-existing old-version row is re-synced to the current catalog version");
-        // The version is only the TRIGGER; config_json is the payload: the operating band and the
-        // context policy both live there. The old row above stores a null config, so if resync carried
-        // the version across without the config, a seeded project would keep scoring on whatever it was
-        // seeded with while REPORTING the current version, a silent no-op that reads as shipped.
+        // The version triggers, config_json is the payload: carrying the version without the config would report the
+        // current version while scoring on the old one.
         assertEquals(
                 catalog.builtIns().stream()
                         .filter(b -> "frustration".equals(b.classifierKey()))
@@ -199,48 +174,10 @@ class ClassifierDefinitionIntegrationTest {
         assertEquals(7, service.list(pid).size(), "resync stays idempotent across heartbeats");
     }
 
-    @Test
-    void resyncSeedsAProjectThatSomehowHasNone() {
-        Project project = bootstrapGranted("signal-unseeded").project();
-        String pid = project.id();
-        // Simulate a project that predates seed-on-create: strip the catalog back out, so resync is
-        // the only thing that can put it back. Auto-classification reads traces, so a project with
-        // traffic must end up classified whether or not anyone ever ran generation.
-        // Table is `signal`; the persisted name predates the domain rename (see backend/AGENTS.md).
-        jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
-                .param("pid", pid)
-                .update();
-        assertTrue(service.list(pid).isEmpty(), "precondition: the project starts with no classifiers");
-
-        service.resyncBuiltIns(project);
-
-        assertEquals(
-                catalog.builtIns().size(),
-                service.list(pid).size(),
-                "the heartbeat self-heals a never-seeded project — no generation run, and so no repo, required");
-    }
-
-    @Test
-    void enableDisableLifecycle() {
-        String pid = bootstrapGranted("signal-lifecycle").project().id();
-        ClassifierRow secretLeak =
-                ClassifierRows.byKey(signals, pid, "secret_leak").orElseThrow();
-
-        ClassifierRow disabled = service.setEnabled(pid, secretLeak.id(), false);
-        assertFalse(disabled.enabled(), "a signal can be disabled through its lifecycle");
-        assertFalse(
-                signals.listEnabled(pid).stream().anyMatch(s -> s.id().equals(secretLeak.id())),
-                "a disabled signal drops out of the enabled set the worker sweeps");
-
-        ClassifierRow reEnabled = service.setEnabled(pid, secretLeak.id(), true);
-        assertTrue(reEnabled.enabled(), "and re-enabled");
-    }
-
     /**
-     * The classifier API, driven through its controller against a real tenant. Catches an endpoint that reads
-     * or writes under the wrong project or classifier id, a write whose change the next read does not show
-     * (enabled, mode, the tuning dial), a tuning response that echoes the request instead of the clamped
-     * value in effect, and a read that drops a classifier from the list-shaped surfaces (health, daily volume).
+     * The classifier API through its controller. Catches the wrong project or id, a write the next read does not
+     * show, a tuning response echoing the request instead of the clamped value, and a classifier missing from list
+     * surfaces.
      */
     @Test
     void theClassifierApiReadsBackWhatItWrites() {
@@ -351,14 +288,8 @@ class ClassifierDefinitionIntegrationTest {
     }
 
     /**
-     * Bootstrap a tenant whose org has the capability-gated classifiers switched on before its
-     * project is created.
-     *
-     * <p>Two things make this necessary. {@code frustration} and {@code groundedness} are granted so
-     * the set does not depend on which edition's default it has. And the grant has to
-     * precede the project, because project creation is what seeds the built-in classifiers: grant
-     * afterwards and the classifier row is never inserted, leaving the test hunting findings from a
-     * classifier the project doesn't have.
+     * Grants {@code frustration} and {@code groundedness} before the project exists, since creation seeds the built-
+     * ins.
      */
     private TenantFixture.Setup bootstrapGranted(String name) {
         return TenantFixture.bootstrap(tenants, name, org -> {

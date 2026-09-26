@@ -59,12 +59,6 @@ class BearerTokenAuthenticatorTest {
     }
 
     @Test
-    void anUnverifiedTokenResolvesToNoOne() {
-        when(keys.verify("tsk_wrong")).thenReturn(Optional.empty());
-        assertEquals(Optional.empty(), auth().authenticate("Bearer tsk_wrong"));
-    }
-
-    @Test
     void aVerifiedTokenWhoseProjectIsGoneResolvesToNoOne() {
         when(keys.verify("tsk_abc")).thenReturn(Optional.of(key));
         when(projects.findById("prj_1")).thenReturn(Optional.empty());

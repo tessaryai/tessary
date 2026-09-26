@@ -37,10 +37,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The alert-rule API against the real schema. A rule's anchors and switches are what stop a partner being
- * re-paged about everything since the rule was made, so the bugs are a reconfigure that resets them, a
- * rule saved that the worker cannot evaluate, a policy that reads back differently from how it was saved,
- * and a fired-alert filter that returns the wrong rule's or the wrong project's firings.
+ * The alert-rule API against the real schema. Anchors and switches stop a partner being re-paged about everything
+ * since the rule was made, so the bugs are a reconfigure resetting them, a rule the worker cannot evaluate, a policy
+ * reading back differently, and a fired-alert filter leaking another rule's or project's firings.
  */
 @SpringBootTest
 class AlertControllerTest {
@@ -73,9 +72,8 @@ class AlertControllerTest {
     com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     /**
-     * Project creation seeds the case-opened rule. Deleting it and making it again must anchor the new one
-     * at creation, and reconfiguring it must keep that anchor, the enabled flag and the snooze: a reset
-     * anchor re-fires every case opened since the rule was made.
+     * Recreating the seeded case-opened rule anchors it at creation, and reconfiguring keeps the anchor, enabled
+     * flag, and snooze; a reset anchor re-fires every case since.
      */
     @Test
     void aCaseOpenedRuleIsReconfiguredWithoutLosingItsAnchorSwitchOrSnooze() {
@@ -208,10 +206,7 @@ class AlertControllerTest {
                 Arguments.of("brief with a blank cron", "brief", null, null, "  ", AlertError.MISSING_CRON));
     }
 
-    /**
-     * Threshold and roll-up rules take their defaults on create and are reconfigured in place on a second
-     * upsert: same id, same creation time, every configurable field replaced.
-     */
+    /** Defaults on create; a second upsert reconfigures in place with the same id and creation time. */
     @Test
     void thresholdAndRollupRulesTakeDefaultsAndAreReconfiguredInPlace() {
         var fix = TenantFixture.bootstrap(tenants, "alert-upsert");
@@ -354,10 +349,7 @@ class AlertControllerTest {
                         .toList());
     }
 
-    /**
-     * Two deletes of one rule race: both read it, and the loser's delete finds nothing. The loser must get a
-     * 404 rather than a 200 carrying a rule it did not delete.
-     */
+    /** Two racing deletes: the loser gets a 404, not a 200 for a rule it did not delete. */
     @Test
     void theLoserOfTwoConcurrentDeletesIsNotFound() {
         var fix = TenantFixture.bootstrap(tenants, "alert-delete-race");
@@ -396,8 +388,8 @@ class AlertControllerTest {
     }
 
     /**
-     * Fired alerts filtered by rule, by classifier, or not at all, newest first and capped. The bug: a
-     * filter that leaks another rule's firings, or a limit of zero that returns nothing.
+     * Filtered by rule, by classifier, or not at all, newest first and capped; no leaked firings, and a zero limit
+     * still returns rows.
      */
     @Test
     void firedAlertsAreReadByRuleByClassifierOrForTheWholeProjectNewestFirst() {

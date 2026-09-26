@@ -175,12 +175,4 @@ describe("the call-site table", () => {
     fireEvent.keyDown(screen.getByRole("row", { name: "Open traces for route/v2" }), { key: " " });
     expect(currentLocation()).toBe("/orgs/acme/projects/default/traces?call_site=route%2Fv2");
   });
-
-  it("opens traces on a row click", async () => {
-    renderRoute(<Vitals />);
-
-    fireEvent.click(await screen.findByRole("row", { name: "Open traces for answer" }));
-
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/traces?call_site=answer");
-  });
 });

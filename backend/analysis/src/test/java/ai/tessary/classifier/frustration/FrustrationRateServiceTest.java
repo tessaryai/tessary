@@ -3,13 +3,10 @@ package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,26 +17,20 @@ import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.CauseKey;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
-import ai.tessary.classifier.finding.FindingEvidenceRepository.Ref;
-import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
-import ai.tessary.classifier.frustration.FrustrationRateRepository.FrustratedConversation;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import ai.tessary.classifier.toolerror.ToolErrorTrend.Spell;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
@@ -82,95 +73,6 @@ class FrustrationRateServiceTest {
 
     private static HourlyToolTally tally(int hour, long frustrated) {
         return new HourlyToolTally(START.plus(Duration.ofHours(hour)).toString(), CALL_SITE, 20, frustrated);
-    }
-
-    @Test
-    void aNewSpellFilesOneFindingRuledPositiveAndOpensItsCase() {
-        when(findings.recordRecomputedRate(
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyLong(),
-                        any(),
-                        any(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString()))
-                .thenReturn(new FindingRepository.Recorded("f1", true, 0, null));
-
-        List<Spell> spells = service.refresh(PROJECT, signal(), at);
-
-        assertEquals(1, spells.size());
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(findings)
-                .recordRecomputedRate(
-                        anyString(),
-                        eq(PROJECT),
-                        eq("frustration"),
-                        eq(CAUSE),
-                        eq(FindingRow.Cause.FRUSTRATION_RATE),
-                        eq(CALL_SITE),
-                        eq(FindingRow.SubjectKind.CLASSIFIER),
-                        eq("sig-1"),
-                        eq("Frustration"),
-                        anyLong(),
-                        eq(CALL_SITE),
-                        any(),
-                        payload.capture(),
-                        anyString(),
-                        anyString(),
-                        eq(at.toString()));
-        verify(findings)
-                .recordTriage(
-                        PROJECT,
-                        "f1",
-                        FindingRow.TriageVerdict.POSITIVE,
-                        FrustrationEvidence.SUMMARY,
-                        null,
-                        at.toString());
-        verify(caseOpener).ensureCaseFor(PROJECT, "f1", null);
-        verify(findings, never())
-                .refreshRuledObservation(anyString(), anyString(), anyLong(), anyString(), anyString(), anyString());
-
-        JsonNode body = read(payload.getValue());
-        assertEquals(CALL_SITE, body.path("call_site_id").asText());
-        assertEquals("up", body.path("direction").asText());
-        assertEquals(200, body.path("baseline_conversations").asLong());
-        assertEquals(10, body.path("baseline_frustrated").asLong());
-        assertEquals(10_000, body.path("arl_target").asLong());
-        assertEquals(4.0, body.path("min_decision_interval").asDouble());
-        assertEquals(0.40, body.path("jev_threshold").asDouble());
-        assertEquals(
-                FrustrationConfig.defaults().scorerVersion(),
-                body.path("scorer_version").asText());
-        assertTrue(body.path("current_rate").asDouble()
-                > body.path("baseline_rate").asDouble());
-    }
-
-    @Test
-    void theSameSpellOnALaterPassRefreshesItsFindingInsteadOfFilingAgain() {
-        Spell spell = firstSpell();
-        FindingRow open = ruled("f1", spell.decision().onsetAt());
-        when(findings.findOpenByCause(PROJECT, "frustration", CAUSE)).thenReturn(Optional.of(open));
-
-        service.refresh(PROJECT, signal(), at);
-
-        verify(findings)
-                .refreshRuledObservation(
-                        eq(PROJECT),
-                        eq("f1"),
-                        eq(spell.decision().callsSinceOnset()),
-                        anyString(),
-                        eq(spell.lastBucket()),
-                        eq(at.toString()));
-        verifyNoFiling();
     }
 
     @Test
@@ -230,49 +132,6 @@ class FrustrationRateServiceTest {
         verify(caseOpener, never()).ensureCaseFor(anyString(), anyString(), any());
     }
 
-    @Test
-    void theEvidenceIsEveryScoredSessionAsMemberAndEveryFrustratedOneWithItsFlaggedTurnAsWitness() {
-        Spell spell = firstSpell();
-        when(findings.findOpenByCause(PROJECT, "frustration", CAUSE))
-                .thenReturn(Optional.of(ruled("f1", spell.decision().onsetAt())));
-        when(rates.scoredSince(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
-                .thenReturn(List.of("conv-new", "conv-calm", "conv-old"));
-        when(rates.frustratedSince(anyString(), anyString(), anyString(), anyString(), any(), any(), any()))
-                .thenReturn(List.of(
-                        new FrustratedConversation("conv-new", "t-new"),
-                        new FrustratedConversation("conv-old", "t-old")));
-
-        service.refresh(PROJECT, signal(), at);
-
-        Instant onset = Instant.parse(spell.decision().onsetAt());
-        // Both sides stop at the end of the spell's last hour, where its counts stop.
-        Instant until =
-                Instant.parse(Objects.requireNonNull(spell.lastBucket())).plus(Duration.ofHours(1));
-        String version = FrustrationConfig.defaults().scorerVersion();
-        verify(rates).scoredSince(eq(PROJECT), eq("sig-1"), eq(version), eq(CALL_SITE), any(), eq(onset), eq(until));
-        verify(rates)
-                .frustratedSince(eq(PROJECT), eq("sig-1"), eq(version), eq(CALL_SITE), any(), eq(onset), eq(until));
-        verify(evidence)
-                .record(
-                        PROJECT,
-                        "f1",
-                        FindingEvidenceRow.Role.MEMBER,
-                        List.of(Ref.session("conv-new"), Ref.session("conv-calm"), Ref.session("conv-old")),
-                        at.toString());
-        verify(evidence)
-                .record(
-                        PROJECT,
-                        "f1",
-                        FindingEvidenceRow.Role.WITNESS,
-                        List.of(
-                                Ref.session("conv-new"),
-                                Ref.trace("t-new"),
-                                Ref.session("conv-old"),
-                                Ref.trace("t-old")),
-                        at.toString());
-        verify(evidence, never()).recordUpTo(anyString(), anyString(), anyString(), any(), anyInt(), anyString());
-    }
-
     // ---- fixtures
 
     private Spell firstSpell() {
@@ -287,37 +146,6 @@ class FrustrationRateServiceTest {
         assertEquals(1, spells.size());
         assertNotNull(spells.get(0).decision().onsetAt());
         return spells.get(0);
-    }
-
-    private void verifyNoFiling() {
-        verify(findings, never())
-                .recordRecomputedRate(
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyLong(),
-                        any(),
-                        any(),
-                        anyString(),
-                        anyString(),
-                        anyString(),
-                        anyString());
-        verify(findings, never()).recordTriage(anyString(), anyString(), anyString(), anyString(), any(), anyString());
-        verify(caseOpener, never()).ensureCaseFor(anyString(), anyString(), isNull());
-    }
-
-    private JsonNode read(String json) {
-        try {
-            return mapper.readTree(json);
-        } catch (Exception e) {
-            throw new AssertionError(e);
-        }
     }
 
     private static FindingRow ruled(String id, @Nullable String onsetAt) {

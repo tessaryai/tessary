@@ -45,15 +45,12 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * The groundedness model being down pauses its sweep and never costs it an attempt, against real
- * Postgres and a loopback stand-in for {@code serve.py}: nothing is enqueued while the model is down;
- * a job claimed before it went down is handed back with its attempt count unchanged; a refused
- * connection mid-sweep does the same, so any number of them in a row never dead-letter; and a 500 is
- * still a fault that counts. Production mode sleeps after a caught-up sweep; dev mode never does.
+ * A down groundedness model pauses its sweep without costing attempts, against Postgres and a loopback {@code
+ * serve.py}: nothing enqueues while down, a pre-claimed job is handed back unchanged, refused connections never dead-
+ * letter, and a 500 still counts. Production sleeps after a caught-up sweep; dev never does.
  *
- * <p>Own context, with the heartbeat and the health probe pushed out of reach: this class moves the
- * encoder's URL and the mode on shared beans, and drives each sweep itself, so neither a background
- * tick nor a background probe may run in between.
+ * <p>Own context with the heartbeat and probe out of reach: this class moves shared beans' URL and mode and drives
+ * each sweep itself.
  */
 @SpringBootTest
 @TestPropertySource(
@@ -162,8 +159,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
         String refusing = "http://127.0.0.1:" + closedPort();
 
         for (int i = 0; i < 7; i++) {
-            // Up at the last probe, gone by the time the sweep connects: a GPU instance that stopped
-            // between the two.
+            // Up at the probe, gone at connect.
             modelUp();
             observer.getEncoder().setUrl(refusing);
             worker.sweepForTest(claim(s));
@@ -237,14 +233,9 @@ class ClassifierWorkerEncoderGateIntegrationTest {
         assertEquals(ClassifierJobRow.PENDING, job(s).status(), "dev sweeps whenever the model answers");
     }
 
-    // ---- fixtures ----------------------------------------------------------------------------
-
     private record Setup(String pid, String classifierId) {}
 
-    /**
-     * A project whose only enabled classifier is groundedness, with one answer it will score: a
-     * {@code summarize} call site, so the prompt is the premise, and an answer with checkable claims.
-     */
+    /** Groundedness is the only enabled classifier, with one checkable answer on a {@code summarize} call site. */
     private Setup setup(String name) {
         String pid = TenantFixture.bootstrap(tenants, name).project().id();
         jdbc.sql("UPDATE classifier SET enabled = FALSE WHERE project_id = :pid")
@@ -288,7 +279,7 @@ class ClassifierWorkerEncoderGateIntegrationTest {
         return new Setup(pid, classifierId);
     }
 
-    /** Claim this classifier's job as the worker would, without sweeping anyone else's. */
+    /** Claim only this classifier's job. */
     private ClassifierJobRow claim(Setup s) {
         jdbc.sql("""
             UPDATE job SET status = 'claimed', lease_owner = :owner, lease_expires_at = :expires,
@@ -337,8 +328,8 @@ class ClassifierWorkerEncoderGateIntegrationTest {
     }
 
     /**
-     * {@code serve.py}'s two routes on a loopback socket: {@code /healthz} lists the groundedness head,
-     * and {@code /classify} answers {@link #classifyStatus}, with one clean score per answer on a 200.
+     * {@code serve.py}'s {@code /healthz} and {@code /classify} (answering {@link #classifyStatus}) on a loopback
+     * socket.
      */
     private static final class StubModel {
         volatile int classifyStatus = 200;

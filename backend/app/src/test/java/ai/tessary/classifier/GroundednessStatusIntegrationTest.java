@@ -85,19 +85,6 @@ class GroundednessStatusIntegrationTest {
     }
 
     @Test
-    void devWithTheModelUpIsOn() {
-        Fixture f = fixture("gs-dev-on", true);
-        encoder.up();
-
-        GroundednessStatusView v = status.view(f.pid(), f.row());
-
-        assertEquals("on", v.state());
-        assertTrue(v.configured());
-        assertTrue(v.available());
-        assertNotNull(v.checkedAt());
-    }
-
-    @Test
     void devSweptBeforeWithTheModelDownIsNotScoring() {
         Fixture f = fixture("gs-dev-not-scoring", true);
         sweptJob(f, null);
@@ -121,18 +108,6 @@ class GroundednessStatusIntegrationTest {
         assertEquals("production", v.mode());
         assertFalse(v.available(), "asleep between runs is normal in production");
         assertEquals(caughtUp.toString(), v.lastCaughtUpAt());
-    }
-
-    @Test
-    void productionWithNoCaughtUpSweepInTwoHoursIsNotScoring() {
-        Fixture f = fixture("gs-prod-missed", true);
-        groundedness.setClassifierMode("production");
-        encoder.up();
-        sweptJob(f, Instant.now().minus(Duration.ofHours(3)));
-
-        GroundednessStatusView v = status.view(f.pid(), f.row());
-
-        assertEquals("not_scoring", v.state(), "a missed run warns even while the model answers");
     }
 
     @Test

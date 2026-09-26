@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,22 +24,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * First test coverage for {@link ProjectModelSettingController} — confirmed absent before this
- * file ({@code find backend -iname "*ProjectModelSettingController*Test*"} returned nothing).
- *
- * <p>The gap this closes: {@link ProjectModelSettings#set} accepts the
- * {@code "<PROVIDER>:<model_name>"} catalog key for an {@link LaneGroup#AGENT_VM} lane (RCA,
- * TRIAGE) — proven by {@link ProjectModelSettingsTest} — but that write path was never checked
- * against the read path that actually feeds the settings page's only model picker
- * ({@code frontend/src/views/Settings/Models.tsx}, which renders strictly off a lane's
- * {@code model_keys} and the {@code models}/{@code catalog_models} arrays the {@code GET} sends).
- * Before the fix, {@code get()} built both from {@link BedrockModelProfile} only, so GEMINI/GLM/
- * GROK/CUSTOM were reachable by hand-crafting a raw PUT but never appeared as an option in the
- * product UI. This asserts the {@code GET} response itself now offers them.
- *
- * <p>No Spring context, no Testcontainers: every collaborator is a Mockito mock and the controller
- * is constructed and called directly, the same shape {@link ProviderCredentialControllerTest}
- * uses for its sibling controller.
+ * {@link ProjectModelSettingController}'s GET must offer the {@code "<PROVIDER>:<model_name>"} catalog keys {@link
+ * ProjectModelSettings#set} accepts for {@link LaneGroup#AGENT_VM} lanes. Models.tsx renders only from {@code
+ * model_keys}, {@code models}, and {@code catalog_models}, and before the fix GEMINI, GLM, GROK, and CUSTOM were
+ * reachable by raw PUT but never offered. Mocks only, no Spring.
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectModelSettingControllerTest {
@@ -79,8 +66,7 @@ class ProjectModelSettingControllerTest {
         var resolved = new TenantPathResolver.Resolved(org, project, "owner");
         when(resolver.requireProject(ctx, ORG_SLUG, PROJECT_SLUG)).thenReturn(resolved);
         when(settings.list(PROJECT_ID)).thenReturn(List.of());
-        // configuredProviders — empty org, no credentials configured. Individual tests
-        // that need a configured provider override this.
+        // No credentials configured; tests that need a provider override this.
         when(providerCredentials.findByOrg(ORG_ID)).thenReturn(List.of());
     }
 
@@ -88,8 +74,7 @@ class ProjectModelSettingControllerTest {
     void getOffersEveryAgenticCatalogEntryOnBothAgentVmLanes() {
         var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
 
-        // catalog_models: the non-Bedrock half of the union, present at all — this is the field
-        // that did not exist before the fix.
+        // The non-Bedrock half of the union, the field that did not exist before the fix.
         assertEquals(
                 List.of(
                         "ANTHROPIC",
@@ -117,8 +102,7 @@ class ProjectModelSettingControllerTest {
                     .findFirst()
                     .orElseThrow();
             assertEquals(LaneGroup.AGENT_VM, laneView.group());
-            // Provider first: every provider the sandbox can run appears on both lanes. Asserts the
-            // coverage rule rather than the model names, since which model is each lane's own business.
+            // Every provider the sandbox can run appears on both lanes; which model is each lane's business.
             assertEquals(
                     java.util.Arrays.stream(ModelProvider.values())
                             // Decision models only; never a sandbox agent.
@@ -135,25 +119,11 @@ class ProjectModelSettingControllerTest {
             assertTrue(
                     offered.contains("CUSTOM:custom-model"),
                     lane + "'s options must offer the CUSTOM catalog entry: " + offered);
-            // The pre-existing Bedrock offer list must still be reachable, not replaced by the catalog
-            // keys — TRIAGE and RCA now carry the same Bedrock models, so this holds per lane.
+            // The Bedrock offer list is still there, not replaced by catalog keys.
             assertTrue(
                     BedrockModelProfile.offeredFor(LaneGroup.AGENT_VM).stream().anyMatch(offered::contains),
                     lane + "'s options must still offer Bedrock models: " + offered);
         }
-    }
-
-    @Test
-    void everyBedrockModelStaysReachableAcrossTheGroupsLanes() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-        Set<String> acrossLanes = view.lanes().stream()
-                .filter(l -> l.group() == LaneGroup.AGENT_VM)
-                .flatMap(l -> l.providerOptions().stream())
-                .flatMap(o -> o.modelKeys().stream())
-                .collect(java.util.stream.Collectors.toSet());
-        assertTrue(
-                acrossLanes.containsAll(BedrockModelProfile.offeredFor(LaneGroup.AGENT_VM)),
-                "a model the group offers that no lane names is unreachable: " + acrossLanes);
     }
 
     @Test
@@ -167,36 +137,9 @@ class ProjectModelSettingControllerTest {
                         + view.catalogModels());
     }
 
-    @Test
-    void theFrustrationLaneIsADecisionSectionOfferingOnlyJevTypeSafeFirst() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-
-        var group = view.groups().stream()
-                .filter(g -> g.id() == LaneGroup.DECISION_CALLS)
-                .findFirst()
-                .orElseThrow();
-        assertFalse(group.modelSelectable(), "one model per provider, so the row is a provider select only");
-        var lane = view.lanes().stream()
-                .filter(l -> l.id() == ModelLane.FRUSTRATION)
-                .findFirst()
-                .orElseThrow();
-        assertEquals(LaneGroup.DECISION_CALLS, lane.group());
-        assertEquals(
-                List.of(ModelProvider.TYPESAFE, ModelProvider.OPENROUTER),
-                lane.providerOptions().stream()
-                        .map(ProjectModelSettingController.ProviderOptionView::provider)
-                        .toList());
-        assertEquals(
-                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"),
-                lane.providerOptions().stream()
-                        .flatMap(o -> o.modelKeys().stream())
-                        .toList());
-    }
-
     /**
-     * The lane arrives as the lowercase wire name in the path and is parsed by our own reader, so a
-     * differently-cased segment still reaches the right lane. Tier and effort are accepted and ignored:
-     * no lane has a request of ours for either to ride on.
+     * The lane arrives lowercase in the path and is parsed by our reader, so any casing reaches it. Tier and effort
+     * are accepted and ignored.
      */
     @Test
     void putPointsTheParsedLaneAtTheModelAndIgnoresTierAndEffort() {

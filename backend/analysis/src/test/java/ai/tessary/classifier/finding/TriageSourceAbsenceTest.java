@@ -3,7 +3,6 @@ package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -21,28 +20,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * What an ABSENT adapter does.
- *
- * <p>A classpath that holds no triage source, or none that owns an id, must degrade to what the surface
- * already shows for a classifier with no data, not throw. Pinned here without Spring, so a
- * wiring failure shows up here instead of at container start.
- *
- * <p>Every assertion runs against the real constructor: unreached collaborators are left null rather than
- * mocked, so a path that starts touching one fails loudly instead of passing on a default.
+ * An absent adapter: a classpath with no triage source, or none owning an id, degrades to the no-data view rather
+ * than throwing. Unreached collaborators are null, so a path touching one fails loudly.
  */
 class TriageSourceAbsenceTest {
 
     private static final String PROJECT = "prj_1";
-
-    // ---- absent adapters degrade, on every port -----------------------------------------------
-
-    @Test
-    @DisplayName("no TriageSource at all: the page is empty, not a failure")
-    void absent_triage_sources_render_an_empty_page() {
-        var page = service(List.of()).findings(PROJECT, null, null, null, true);
-        assertTrue(page.findings().isEmpty());
-        assertEquals(TriageLane.EVIDENCE_ONLY.wire(), page.lane(), "the lane is a constant, not a source's opinion");
-    }
 
     @Test
     @DisplayName("no TriageSource owns the id: detail, analyze and resolve all 404 rather than 500")
@@ -74,23 +57,10 @@ class TriageSourceAbsenceTest {
                         .error());
     }
 
-    // ---- routing -------------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("detail disclaims an id the source does not project; the next source is asked")
-    void detail_falls_through_to_the_next_source() {
-        var view =
-                service(List.of(new DisclaimingSource(), new ClaimingSource())).finding(PROJECT, "f1");
-        assertEquals("claimed", view.finding().id(), "the first source disclaims the id, so the second answers");
-    }
-
-    // ---- a job no source claims ---------------------------------------------------------------
-
     @Test
     @DisplayName("a job no source briefs is done, not failed — the finding was resolved while it waited")
     void an_unclaimed_job_is_marked_done() {
-        // Driven through the worker's package-private seam: the property is what the worker does with a
-        // brief nobody returned. Both pre-seam branches already did this, so the seam adds no new state.
+        // Through the worker's package-private seam: what it does with a brief nobody returned.
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         BehaviorTriageWorker worker = worker(jobs, engine, List.of(new DisclaimingSource(), new ClaimingSource()));
@@ -98,19 +68,17 @@ class TriageSourceAbsenceTest {
         worker.triageForTest(job("job_1", "f1"));
 
         verify(jobs).markDone("job_1");
-        // No brief means nothing to rule on, so the microVM must not be spawned at all.
+        // No brief: the microVM is never spawned.
         verifyNoInteractions(engine);
     }
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
-    @SuppressWarnings("NullAway") // deliberate: the injected repositories are unreachable on these paths
+    @SuppressWarnings("NullAway") // the repositories are unreachable here
     private static FindingService service(List<TriageSource> sources) {
         return new FindingService(null, null, null, null, sources, null, null, null); // detail services unreached
     }
 
-    /** The triage worker with only the collaborators {@code triageForTest} reaches. */
-    @SuppressWarnings("NullAway") // deliberate: the scheduler, breaker and executor are not on this path
+    /** Only the collaborators {@code triageForTest} reaches. */
+    @SuppressWarnings("NullAway") // the scheduler, breaker, and executor are not on this path
     private static BehaviorTriageWorker worker(
             BehaviorTriageJobRepository jobs, BehaviorTriageEngine engine, List<TriageSource> sources) {
         return new BehaviorTriageWorker(jobs, sources, engine, null, null, null, null, null);

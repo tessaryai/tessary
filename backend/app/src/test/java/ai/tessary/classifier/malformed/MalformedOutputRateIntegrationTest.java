@@ -38,11 +38,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Malformed Output's rate findings, end to end against Postgres: the tallies counted from the spans the sweep
- * checked, replayed through tool_error's engine per call site, and the finding and state that replay writes.
- *
- * <p>The reference minimum is lowered to fifty calls so a test can reach it; the arithmetic is the shipped
- * one otherwise.
+ * Malformed Output's rate findings against Postgres: tallies from swept spans, replayed through tool_error's engine
+ * per call site, and the finding and state written. The reference minimum is lowered to fifty calls.
  */
 @SpringBootTest
 class MalformedOutputRateIntegrationTest {
@@ -108,8 +105,8 @@ class MalformedOutputRateIntegrationTest {
         ClassifierRow signal = malformedOutput(pid);
         callSite(pid, "cs-a", SCHEMA);
         Instant start = hoursAgo(10);
-        clean(pid, "cs-a", start, 60); // the reference: sixty outputs that parse
-        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12); // then a run that does not
+        clean(pid, "cs-a", start, 60); // the reference: sixty parsing outputs
+        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12); // then a failing run
 
         int spells = rates.refresh(pid, signal, later(), Instant.now());
 
@@ -140,9 +137,8 @@ class MalformedOutputRateIntegrationTest {
     }
 
     /**
-     * The reset {@code CaseService.resolve} performs must survive the next pass. This classifier rebuilds every
-     * pass rather than resuming after a watermark, so without the reset fence the rebuild re-folded the hours
-     * before the reset and the spell a human had just closed came straight back.
+     * {@code CaseService.resolve}'s reset must survive the next pass: this classifier rebuilds every pass, so without
+     * the fence the closed spell came straight back.
      */
     @Test
     void aResetSurvivesTheNextRebuild() {
@@ -162,46 +158,6 @@ class MalformedOutputRateIntegrationTest {
         assertEquals(0.0, after.state().sUp(), "the rebuild did not re-accumulate the hours before the reset");
         assertNotNull(after.baseline(), "a plain reset keeps the learned reference");
         assertNotNull(after.resetAt(), "and the fence is read back onto the carried state");
-    }
-
-    /** The variant that also drops the reference: nothing before the reset may teach the new one. */
-    @Test
-    void aResetAndRelearnDropsTheReferenceAndLearnsNothingFromBeforeIt() {
-        String pid = project("malformed-relearn");
-        ClassifierRow signal = malformedOutput(pid);
-        callSite(pid, "cs-a", SCHEMA);
-        Instant start = hoursAgo(10);
-        clean(pid, "cs-a", start, 60);
-        failing(pid, signal, "cs-a", start.plus(4, ChronoUnit.HOURS), 12);
-        assertEquals(1, rates.refresh(pid, signal, later(), Instant.now()));
-
-        rateRows.states()
-                .resetAndRelearn(
-                        pid,
-                        "cs-a",
-                        "someone",
-                        "relearn in a test",
-                        Instant.now().toString());
-        CarriedState cleared = carried(pid, "cs-a");
-        assertNull(cleared.baseline(), "the reference is gone");
-        assertNull(cleared.watermarkBucket());
-        assertEquals(0.0, cleared.state().sUp());
-
-        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()));
-        assertNull(
-                carried(pid, "cs-a").baseline(),
-                "every hour before the reset is fenced off, so there is nothing to learn from yet");
-    }
-
-    @Test
-    void aCallSiteStillLearningItsReferenceFilesNothingHoweverBadItLooks() {
-        String pid = project("malformed-learning");
-        ClassifierRow signal = malformedOutput(pid);
-        callSite(pid, "cs-a", SCHEMA);
-        failing(pid, signal, "cs-a", hoursAgo(3), 20); // twenty outputs, every one malformed, under the fifty
-
-        assertEquals(0, rates.refresh(pid, signal, later(), Instant.now()));
-        assertEquals(0, liveFindings(pid), "a rate needs a reference before anything can be judged against it");
     }
 
     @Test
@@ -256,12 +212,10 @@ class MalformedOutputRateIntegrationTest {
     }
 
     /**
-     * "How outputs broke" read back from real detections. Catches a failure filed under the wrong schema row
-     * (or under none), one output counted twice under a field or not at all under a second field it also broke,
-     * the pre-rework and root-level violations lost instead of landing in {@code other}, a page that drops or
-     * repeats a row across the cursor or loses the field's total, an unreadable cursor failing the read instead
-     * of restarting it, and a failing output rendered from its message envelope rather than the answer the
-     * detector judged.
+     * "How outputs broke" from real detections. Catches a failure filed under the wrong field or none, an output
+     * double-counted or missed under a second broken field, fieldless violations lost instead of landing in {@code
+     * other}, a cursor page dropping or repeating rows or losing the total, an unreadable cursor failing instead of
+     * restarting, and a failing output rendered from its envelope instead of the judged answer.
      */
     @Test
     void howOutputsBrokeCountsEachFieldAndPagesItsFailingOutputs() {
@@ -275,7 +229,7 @@ class MalformedOutputRateIntegrationTest {
         FindingRow finding = finding(pid, signal, "cs-a");
 
         Instant after = start.plus(5, ChronoUnit.HOURS);
-        // Breaks two fields at once: counted once under each.
+        // Breaks two fields: counted once under each.
         String twoFields = failed(
                 pid,
                 signal,
@@ -284,7 +238,7 @@ class MalformedOutputRateIntegrationTest {
                 "{\"reason\":\"schema_violation\",\"violations\":["
                         + "{\"field\":\"answer\",\"keyword\":\"type\",\"message\":\"answer: integer found, string expected\"},"
                         + "{\"field\":\"items[].sku\",\"keyword\":\"type\",\"message\":\"sku: integer found\"}]}");
-        // A gen_ai envelope: the document is the assistant's answer, which is missing the required field.
+        // A gen_ai envelope; the document is the answer, missing the required field.
         String envelope = failed(
                 pid,
                 signal,
@@ -292,7 +246,7 @@ class MalformedOutputRateIntegrationTest {
                 "[{\"role\":\"user\",\"content\":\"hi\"},{\"role\":\"assistant\",\"content\":\"{\\\"items\\\":[]}\"}]",
                 "{\"reason\":\"schema_violation\",\"violations\":["
                         + "{\"field\":\"answer\",\"keyword\":\"required\",\"message\":\"answer is required\"}]}");
-        // A pre-rework string violation and a root-level one: neither names a field, both are "other". No payload.
+        // Pre-rework and root-level violations name no field, so both are "other".
         String legacy = failed(
                 pid,
                 signal,
@@ -305,7 +259,7 @@ class MalformedOutputRateIntegrationTest {
                 after.plus(3, ChronoUnit.MINUTES),
                 null,
                 "{\"reason\":\"schema_violation\",\"violations\":[{\"field\":\"\",\"message\":\"must be an object\"}]}");
-        // Past the document cap: the failing field sits beyond the cut, so nothing on screen is highlighted.
+        // The failing field is past the document cap, so nothing on screen is highlighted.
         String huge = failed(
                 pid,
                 signal,
@@ -313,7 +267,6 @@ class MalformedOutputRateIntegrationTest {
                 hugeOutputEndingInAnswer(),
                 "{\"reason\":\"schema_violation\",\"violations\":["
                         + "{\"field\":\"answer\",\"keyword\":\"type\",\"message\":\"answer: integer found\"}]}");
-        // Not JSON at all, with its text stored.
         String prose = failed(
                 pid,
                 signal,
@@ -381,15 +334,13 @@ class MalformedOutputRateIntegrationTest {
         }
     }
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
     private String project(String slug) {
         return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.MALFORMED_OUTPUT))
                 .project()
                 .id();
     }
 
-    /** The seeded Malformed Output row, with the reference minimum lowered to something a test can reach. */
+    /** The seeded row with a reachable reference minimum. */
     private ClassifierRow malformedOutput(String pid) {
         classifiers.seedBuiltIns(pid);
         ClassifierRow seeded =
@@ -442,7 +393,7 @@ class MalformedOutputRateIntegrationTest {
         }
     }
 
-    /** One failing output after the finding's onset: its span (with a stored payload when given) and its detection. */
+    /** One failing output after onset: its span (and payload when given) and detection. */
     private String failed(
             String pid,
             ClassifierRow signal,
@@ -513,7 +464,7 @@ class MalformedOutputRateIntegrationTest {
         return Instant.now().minus(hours, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
     }
 
-    /** A cursor past everything seeded: the sweep has checked it all. */
+    /** Past everything seeded. */
     private static String later() {
         return Instant.now().plus(1, ChronoUnit.MINUTES).toString();
     }

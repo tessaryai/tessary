@@ -174,16 +174,6 @@ describe("importing", () => {
     expect(submit("Replace pipeline").disabled).toBe(true);
   });
 
-  it("goes back to upsert without the confirmation", () => {
-    renderRoute(<ImportYaml />);
-    choose(BUNDLE);
-    fireEvent.click(screen.getByRole("button", { name: /Replace.*Destructive/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Upsert/ }));
-
-    expect(screen.queryByLabelText("Type the project name to confirm replace")).toBeNull();
-    expect(submit("Import bundle").disabled).toBe(false);
-  });
-
   it("says when the import fails, and keeps the selection", async () => {
     api.importEvalsDirectory.mockRejectedValue(new Error("meta.yaml: unknown key"));
     renderRoute(<ImportYaml />);

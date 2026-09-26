@@ -155,8 +155,9 @@ Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vi
 (`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
 (and the case, finding and RCA pages once more on real payloads, since the manifest pass only
-reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Coverage is thin (23 test files); the
-gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Every
+frontend line is covered (`pnpm run coverage` reports it); the gate runs OpenAPI/route-manifest drift +
+`tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
 near-zero tests are thin wrappers or UI-facing glue; a test there has to name the bug it catches

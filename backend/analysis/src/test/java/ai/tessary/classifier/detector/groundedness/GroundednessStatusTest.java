@@ -17,22 +17,12 @@ class GroundednessStatusTest {
     private static final Duration MISSED_RUN = Duration.ofMinutes(120);
 
     @Test
-    void aDisabledRowIsOffWhateverElseIsTrue() {
-        assertEquals(State.OFF, state(false, Mode.DEV, true, true, NOW));
-        assertEquals(State.OFF, state(false, Mode.PRODUCTION, true, true, NOW));
-    }
-
-    @Test
     void devFollowsTheModelAndTheCursor() {
         assertEquals(State.ON, state(true, Mode.DEV, true, false, null));
         assertEquals(State.ON, state(true, Mode.DEV, true, true, null));
+        assertEquals(State.ON, state(true, Mode.DEV, true, true, NOW.minus(Duration.ofDays(2))), "a stale catch-up");
         assertEquals(State.NOT_SCORING, state(true, Mode.DEV, false, true, null));
         assertEquals(State.NOT_SET_UP, state(true, Mode.DEV, false, false, null));
-    }
-
-    @Test
-    void devIgnoresHowLongAgoTheLastCatchUpWas() {
-        assertEquals(State.ON, state(true, Mode.DEV, true, true, NOW.minus(Duration.ofDays(2))));
     }
 
     @Test
@@ -52,12 +42,6 @@ class GroundednessStatusTest {
     void productionBeforeTheFirstSweepFollowsTheModel() {
         assertEquals(State.NOT_SET_UP, state(true, Mode.PRODUCTION, false, false, null));
         assertEquals(State.ON, state(true, Mode.PRODUCTION, true, false, null), "set up, first run under way");
-    }
-
-    @Test
-    void theWireNamesAreSnakeCase() {
-        assertEquals("not_set_up", State.NOT_SET_UP.wire());
-        assertEquals("not_scoring", State.NOT_SCORING.wire());
     }
 
     private static State state(

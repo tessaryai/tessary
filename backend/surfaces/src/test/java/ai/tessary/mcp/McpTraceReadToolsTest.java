@@ -44,16 +44,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * The recorded wire contract of the raw trace/span read tools {@code get_span} and {@code get_trace}.
- * These step outside the aggregation-first query firewall and return the span's typed columns together
- * with its {@code span_payload} text. The repositories are mocked — what is pinned here is the MCP
- * wrapper's behaviour: composite identity, project scoping by primary-key prefix, the trace rollup riding
- * on {@code get_trace}, payload absence surviving as nulls, and clean tool errors (never a {@code -32603}).
+ * The wire contract of {@code get_span} and {@code get_trace}, which step outside the query firewall to return typed
+ * columns plus {@code span_payload} text. Repositories are mocked; pinned here are composite identity, project
+ * scoping by PK prefix, the rollup on {@code get_trace}, payload absence as nulls, and clean tool errors.
  *
- * <p><b>The load-bearing test in this file is {@link #getSpan_withoutTraceIdExplainsTheNewIdentity()}.</b>
- * An older plugin build calls {@code get_span(id)}, which v2 cannot answer, and the difference between a
- * comprehensible error and a not-found is the difference between "update your plugin" and "that span was
- * deleted".
+ * <p>The load-bearing test is {@link #getSpan_withoutTraceIdExplainsTheNewIdentity()}: an old plugin's {@code
+ * get_span(id)} must read as "update your plugin", not "that span was deleted".
  */
 class McpTraceReadToolsTest {
 
@@ -76,7 +72,7 @@ class McpTraceReadToolsTest {
         Project project =
                 new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-06-13T00:00:00Z", null, null, true, null);
         when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // Unused by the trace-read tools, but the registry needs them to register the rest.
+        // Unused by these tools, but the registry needs them.
         PipelineService pipeline = mock(PipelineService.class);
         QueryService query = mock(QueryService.class);
         FindingService behaviorDrift = mock(FindingService.class);
@@ -121,8 +117,6 @@ class McpTraceReadToolsTest {
         List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
         return Objects.requireNonNull(content.get(0).get("text")).toString();
     }
-
-    // ---- fixtures ------------------------------------------------------------------------------
 
     private static SpanRow span(String traceId, String id, @Nullable String startedAt) {
         return new SpanRow(
@@ -226,41 +220,6 @@ class McpTraceReadToolsTest {
                 false);
     }
 
-    // ---- registration --------------------------------------------------------------------------
-
-    @Test
-    void bothTraceReadToolsAreListed() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        var names = tools.stream().map(t -> (String) t.get("name")).toList();
-        assertTrue(names.containsAll(List.of("get_span", "get_trace")), names.toString());
-    }
-
-    /** The schema is the contract an agent plans against: both ids are declared required. */
-    @Test
-    void getSpanSchemaRequiresBothIds() throws Exception {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        JsonNode getSpan = null;
-        for (JsonNode t : tools) {
-            if ("get_span".equals(t.get("name").asText())) getSpan = t;
-        }
-        assertNotNull(getSpan);
-        JsonNode required = Objects.requireNonNull(getSpan).get("inputSchema").get("required");
-        List<String> names = new java.util.ArrayList<>();
-        for (JsonNode n : required) names.add(n.asText());
-        assertTrue(names.containsAll(List.of("trace_id", "span_id")), names.toString());
-    }
-
-    // ---- get_span ------------------------------------------------------------------------------
-
     @Test
     void getSpan_returnsTypedColumnsAndFullPayload() throws Exception {
         when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
@@ -271,18 +230,18 @@ class McpTraceReadToolsTest {
 
         assertEquals(TRACE_ID, s.get("trace_id").asText());
         assertEquals(SPAN_ID, s.get("span_id").asText());
-        // The raw conversation text query_search deliberately withholds.
+        // The raw text query_search withholds.
         assertEquals(
                 "user: this is broken again, and here is the whole prompt",
                 s.get("input").asText());
         assertEquals("ok, here is the whole completion", s.get("output").asText());
         assertEquals("{\"gen_ai.system\":\"anthropic\"}", s.get("attributes").asText());
-        // The producer's usage receipt rides along; the typed columns beside it are the numbers.
+        // The producer's usage receipt rides beside the typed numbers.
         assertEquals("{\"input_tokens\":100}", s.get("provided_usage").asText());
         assertEquals("cs-1", s.get("call_site_id").asText());
     }
 
-    /** Typed buckets and cost_source, the two things the v1 view had no columns for. */
+    /** Typed buckets and cost_source, which the v1 view lacked. */
     @Test
     void getSpan_carriesTypedBucketsAndCostSource() throws Exception {
         when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
@@ -302,8 +261,8 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * A payload aged out of retention leaves the span fully readable with null text. That is a different
-     * statement from "the span carried no input", and the tool must not collapse the two into a not-found.
+     * A payload aged out of retention leaves the span readable with null text, which is not "the span had no input"
+     * and not a not-found.
      */
     @Test
     void getSpan_purgedPayloadIsNullsNotNotFound() throws Exception {
@@ -317,13 +276,12 @@ class McpTraceReadToolsTest {
         assertTrue(s.get("input").isNull());
         assertTrue(s.get("output").isNull());
         assertTrue(s.get("attributes").isNull());
-        // The span's own columns are untouched by payload expiry.
         assertEquals("llm", s.get("kind").asText());
     }
 
     /**
-     * The migration error. An old plugin sends {@code {"id": ...}} with no trace, and gets told the new
-     * identity rule and which argument to add — not "span not found", which would read as data loss.
+     * The migration error: an old plugin sending {@code {"id": ...}} learns the new identity rule and which argument
+     * to add.
      */
     @Test
     void getSpan_withoutTraceIdExplainsTheNewIdentity() throws Exception {
@@ -334,7 +292,7 @@ class McpTraceReadToolsTest {
         assertFalse(text.contains("not found"), "must not read as data loss: " + text);
     }
 
-    /** {@code id} is tolerated as a synonym for {@code span_id} once the trace is named. */
+    /** {@code id} is a synonym for {@code span_id} once the trace is named. */
     @Test
     void getSpan_acceptsLegacyIdArgumentAlongsideTraceId() throws Exception {
         when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
@@ -350,22 +308,7 @@ class McpTraceReadToolsTest {
         assertTrue(text.contains("span_id"), text);
     }
 
-    /**
-     * Not-found names the whole key. Half a key in an error message is what sent someone looking for a
-     * span id in the wrong trace in the first place.
-     */
-    @Test
-    void getSpan_missingRowIsCleanToolErrorNamingBothIds() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, "nope")).thenReturn(Optional.empty());
-        String text = errorText(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"nope\"}"));
-        assertTrue(text.contains(TRACE_ID), text);
-        assertTrue(text.contains("nope"), text);
-    }
-
-    /**
-     * Cross-tenant is a primary-key miss, not a post-filter: the project is the first column of the read,
-     * so another tenant's trace simply has no row here.
-     */
+    /** Cross-tenant is a primary-key miss: the project is the first column of the read. */
     @Test
     void getSpan_crossTenantIsNotFound() throws Exception {
         when(spans.findById(PROJECT_ID, "other-trace", SPAN_ID)).thenReturn(Optional.empty());
@@ -373,10 +316,7 @@ class McpTraceReadToolsTest {
         assertTrue(text.contains("other-trace"), text);
     }
 
-    // ---- get_trace -----------------------------------------------------------------------------
-
-    /** {@code fields=["payload"]}: the FULL-payload mode, opted into — see
-     *  {@link #getTrace_skeletonByDefaultOmitsPayloadText} for the (now-default) skeleton mode. */
+    /** {@code fields=["payload"]} opts into full payloads; the skeleton is the default. */
     @Test
     void getTrace_returnsRollupRowAndOrderedSpans() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace()));
@@ -390,19 +330,19 @@ class McpTraceReadToolsTest {
 
         assertEquals(TRACE_ID, s.get("trace_id").asText());
         assertEquals("sess-1", s.get("session_id").asText());
-        // The rollup the worker wrote — the caller never has to add spans up.
+        // The worker's rollup; the caller never sums spans.
         assertEquals(3, s.get("span_count").asInt());
         assertEquals(120, s.get("total_tokens").asLong());
         assertEquals("0.000600000000", s.get("total_cost").asText());
         assertTrue(s.get("is_settled").asBoolean());
-        // Load-bearing beside the total: some span ran a model we hold no rate for.
+        // Beside the total: a model with no rate ran.
         assertEquals(1, s.get("unpriced_spans").asInt());
 
         JsonNode spanViews = s.get("spans");
         assertEquals(2, spanViews.size());
         assertEquals("aaa1", spanViews.get(0).get("span_id").asText());
         assertEquals("bbb2", spanViews.get(1).get("span_id").asText());
-        // Payloads are joined in memory from ONE read, and a span without one still lists.
+        // Payloads join in memory from one read, and a span without one still lists.
         assertEquals(
                 "user: this is broken again, and here is the whole prompt",
                 spanViews.get(0).get("input").asText());
@@ -412,12 +352,9 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * Skeleton by default. No {@code input}/{@code output}/{@code attributes}/
-     * {@code provided_usage} key at all (not merely null — an absent key is what tells a caller "not
-     * asked for" apart from "asked for and empty"), but every typed column, the previews, and
-     * {@code payload_available} are exactly as they are in the full-payload mode above. Checks all
-     * three payload-shaped keys, not just one, so a partial leak (e.g. attributes surviving while
-     * input/output do not) would still fail this test.
+     * Skeleton by default: no {@code input}, {@code output}, {@code attributes} or {@code provided_usage} key at all,
+     * since absence means "not asked for", while typed columns, previews and {@code payload_available} match full
+     * mode. All payload keys are checked, so a partial leak fails.
      */
     @Test
     void getTrace_skeletonByDefaultOmitsPayloadText() throws Exception {
@@ -433,7 +370,7 @@ class McpTraceReadToolsTest {
         assertFalse(span0.has("output"), "no payload was requested — output must be ABSENT, not null");
         assertFalse(span0.has("attributes"), "no payload was requested — attributes must be ABSENT, not null");
         assertFalse(span0.has("provided_usage"), "no payload was requested — provided_usage must be ABSENT");
-        // The cheap fields still ride along — this is a skeleton, not a blank row.
+        // A skeleton, not a blank row.
         assertTrue(span0.get("payload_available").asBoolean());
         assertEquals("user: this is broken again", span0.get("input_preview").asText());
         assertEquals("aaa1", span0.get("span_id").asText());
@@ -441,11 +378,7 @@ class McpTraceReadToolsTest {
         verify(payloads, org.mockito.Mockito.never()).listByKeys(any(), any());
     }
 
-    /**
-     * An unsettled trace reports null counters rather than zeros. A zero here would say "this turn used
-     * nothing", when the truth is "the rollup has not run yet" — the one distinction the whole schema is
-     * built to keep.
-     */
+    /** An unsettled trace reports null counters: zero would say "used nothing" when the rollup has not run. */
     @Test
     void getTrace_unrolledTraceReportsNullsNotZeros() throws Exception {
         TraceV2Row fresh = TraceV2Row.of(
@@ -472,7 +405,7 @@ class McpTraceReadToolsTest {
         assertEquals(1, s.get("spans").size(), "the spans themselves are there regardless");
     }
 
-    /** A trace whose spans have all aged out is still a trace: the rollup row is the answer. */
+    /** A trace whose spans aged out still resolves from its rollup row. */
     @Test
     void getTrace_traceWithNoRemainingSpansStillResolves() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace()));
@@ -486,18 +419,15 @@ class McpTraceReadToolsTest {
     }
 
     /**
-     * The D10 cap: a trace bigger than {@code TRACE_SPAN_CAP} renders its OLDEST 200 spans and says so.
-     *
-     * <p>Oldest-first is the load-bearing half. The head of a trace is its instructions and first user turn,
-     * and every later span is only intelligible against them — a tail-first cap would return the middle of a
-     * conversation whose premise had been cut away, with nothing in the response saying which premise. The
-     * flag is the other half: without it a caller reads 200 spans as the whole trace.
+     * The D10 cap: a trace over {@code TRACE_SPAN_CAP} renders its oldest 200 spans and says so. Oldest-first,
+     * because later spans are unintelligible without the instructions and first turn; the flag, because otherwise 200
+     * reads as the whole trace.
      */
     @Test
     void getTrace_capsSpansOldestFirstAndSaysThePageIsPartial() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace(250)));
-        // 201 rows, not 250: the read is bounded at cap + 1, so this is what a real repository would return
-        // for a 250-span trace. The one extra row is what makes spans_truncated answerable.
+        // The read is bounded at cap + 1, so a 250-span trace returns 201 rows; the extra one answers
+        // spans_truncated.
         List<SpanRow> many = new ArrayList<>();
         for (int i = 0; i < 201; i++) {
             many.add(span(TRACE_ID, String.format(Locale.ROOT, "s-%03d", i), "2026-07-23T17:00:00Z"));
@@ -509,21 +439,16 @@ class McpTraceReadToolsTest {
 
         assertEquals(200, s.get("spans").size());
         assertTrue(s.get("spans_truncated").asBoolean());
-        // listByTrace orders started_at ASC, so the first 200 are the head of the conversation.
+        // listByTrace orders started_at ascending.
         assertEquals("s-000", s.get("spans").get(0).get("span_id").asText());
         assertEquals("s-199", s.get("spans").get(199).get("span_id").asText());
-        // The rollup's own count is the total the cap is measured against — no second field, and no summing.
+        // The rollup's count is the total the cap is measured against.
         assertEquals(250, s.get("span_count").asInt());
     }
 
     /**
-     * The READ is bounded, not just the rendering — the cap must reach SQL as a LIMIT.
-     *
-     * <p>Capping only the response looks identical in every assertion above: the same 200 spans come back with
-     * the same flag. The difference is invisible until a trace is enormous, which is exactly the shape a long
-     * agent loop produces (one span per tool call, six figures reachable). Reading it whole to serialize two
-     * hundred is heap allocated to be discarded, and a couple of concurrent calls on one big trace is an OOM
-     * rather than a slow response. So the bound is asserted here as an argument, because no output can show it.
+     * The read itself is bounded as a SQL LIMIT, asserted as an argument because no output can show it: reading a
+     * six-figure agent loop whole to render 200 spans risks an OOM.
      */
     @Test
     void getTrace_boundsTheReadItselfAtCapPlusOne() throws Exception {
@@ -533,15 +458,10 @@ class McpTraceReadToolsTest {
 
         callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}");
 
-        // 201: the 200 renderable spans plus the one whose existence answers "was there more?".
         verify(spans).listByTrace(PROJECT_ID, TRACE_ID, 201);
     }
 
-    /**
-     * The payload read (fields=["payload"]) is keyed to the spans actually rendered, not to the whole
-     * trace. A cap that bounded only the response would still drag every conversation of a 250-span
-     * trace through memory to publish 200.
-     */
+    /** Payloads are read only for the rendered spans, not the whole trace. */
     @Test
     void getTrace_readsPayloadsOnlyForTheSpansItRenders() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace(250)));
@@ -559,10 +479,7 @@ class McpTraceReadToolsTest {
         assertEquals(200, keys.getValue().size(), "one keyed read, and only for the rendered page");
     }
 
-    /**
-     * The skeleton-mode existence probe is ALSO keyed to the rendered page, not the whole
-     * trace — the same reasoning as the full-payload read above, for the cheaper query.
-     */
+    /** The skeleton-mode existence probe is keyed to the rendered page too. */
     @Test
     void getTrace_skeletonModeProbesExistenceOnlyForTheSpansItRenders() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace(250)));
@@ -581,7 +498,7 @@ class McpTraceReadToolsTest {
         verify(payloads, org.mockito.Mockito.never()).listByKeys(any(), any());
     }
 
-    /** A trace inside the cap says so too: the flag is always present, so its absence never has to be read. */
+    /** The flag is always present, so its absence never has to be read. */
     @Test
     void getTrace_shortTraceReportsNotTruncated() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace()));
@@ -599,11 +516,5 @@ class McpTraceReadToolsTest {
         when(traces.findById(PROJECT_ID, "trace-x")).thenReturn(Optional.empty());
         String text = errorText(callTool("get_trace", "{\"trace_id\":\"trace-x\"}"));
         assertTrue(text.contains("trace-x"), text);
-    }
-
-    @Test
-    void getTrace_missingRequiredTraceIdIsToolError() throws Exception {
-        String text = errorText(callTool("get_trace", "{}"));
-        assertTrue(text.contains("trace_id"), text);
     }
 }

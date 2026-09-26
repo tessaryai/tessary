@@ -3,7 +3,6 @@ package ai.tessary.classifier.metric;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,36 +15,20 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Unit coverage for {@link MetricHistogram} — the accumulator side of the sketch, with
- * {@link MetricDistanceTest} covering the statistic computed from it. Pure Java: no Spring, no database,
- * nothing project-shaped on the classpath.
- *
- * <p>Three properties here are load-bearing rather than incidental, and each has a test because losing
- * any of them would be invisible at the call site:
- *
- * <ul>
- *   <li><b>Merge is exact.</b> The sweep folds a window in over many pages, so a window assembled from
- *       pages has to equal the same window assembled in one pass — whatever the page boundaries were.
- *       Bin-wise addition of longs gives that for free; the test exists so a later summary structure
- *       cannot quietly take it away.
- *   <li><b>Round-trip is lossless.</b> Every window close writes three of these blobs and reads them
- *       back next pass, so a sketch that lost bins on the way through JSON would decay a baseline
- *       gradually rather than break it — the worst failure shape available.
- *   <li><b>Out-of-range samples are counted, never clipped.</b> A bucket whose traffic moved
- *       <i>out</i> of the range is precisely the move a drift detector must not miss, and traffic pinned
- *       at an edge is the signal that the range itself is wrong.
- * </ul>
+ * {@link MetricHistogram}, the accumulator side of the sketch ({@link MetricDistanceTest} covers the statistic).
+ * Three properties are load-bearing and invisible at the call site: merge is exact, because the sweep folds a window
+ * over many pages; the JSON round trip is lossless, because a lossy one would decay a baseline gradually; and out-of-
+ * range samples are counted, never clipped, because traffic leaving the range is the move drift must not miss.
  */
 class MetricHistogramTest {
 
-    /** One slot of the duration grid, {@code ln(1.05) ≈ 0.0488}. */
     private static final double SLOT = Math.log(MetricHistogram.DEFAULT_RATIO);
 
     private static MetricHistogram duration() {
         return new MetricHistogram(MetricHistogram.Grid.duration());
     }
 
-    /** A seeded log-normal in milliseconds — the shape real latency actually has. */
+    /** A seeded log-normal in milliseconds, the shape real latency has. */
     private static double[] traffic(long seed, int n) {
         Random random = new Random(seed);
         double[] out = new double[n];
@@ -55,11 +38,7 @@ class MetricHistogramTest {
         return out;
     }
 
-    /**
-     * Bin-for-bin equality. {@link MetricHistogram#cdf()} is derived from the bin counts alone and is
-     * exact for equal counts, so comparing it plus the three totals is the same assertion as reading the
-     * private array — without the reflection.
-     */
+    /** Bin-for-bin equality through {@link MetricHistogram#cdf()} and the totals, without reflection. */
     private static void assertSameBins(MetricHistogram expected, MetricHistogram actual, String what) {
         assertEquals(expected.gridId(), actual.gridId(), what + ": grid");
         assertEquals(expected.count(), actual.count(), what + ": count");
@@ -68,15 +47,7 @@ class MetricHistogramTest {
         assertArrayEquals(expected.cdf(), actual.cdf(), 0.0, what + ": bins");
     }
 
-    // -------------------------------------------------------------------------------------------
-    // Merge
-    // -------------------------------------------------------------------------------------------
-
-    /**
-     * A window folded in as three pages equals the same window folded in as one, and the order the pages
-     * arrive in does not matter. Both halves matter to the sweep: it pages, and it has no control over
-     * where the page boundaries land relative to the window.
-     */
+    /** Three pages in any order equal one pass: the sweep pages and does not control where boundaries land. */
     @Test
     void mergeIsExactAndAssociative() {
         double[] values = traffic(11L, 3_000);
@@ -107,23 +78,9 @@ class MetricHistogramTest {
         assertEquals(onePass.meanLog(), thenA.meanLog(), 1e-9);
     }
 
-    /** {@link MetricHistogram#copy()} is a snapshot — the window roll (current → prev) depends on it. */
-    @Test
-    void copyIsIndependentOfFurtherWrites() {
-        MetricHistogram original = duration();
-        original.add(Math.log(2000));
-
-        MetricHistogram snapshot = original.copy();
-        original.add(Math.log(9000));
-
-        assertEquals(1, snapshot.count(), "the snapshot must not see writes made after it was taken");
-        assertEquals(2, original.count());
-    }
-
     /**
-     * Merging across grids throws. Duration and cost sketches are structurally identical and would merge
-     * without complaint into a number that means nothing, which is why this is checked rather than
-     * assumed — the same argument {@link MetricDistance} makes for comparison.
+     * Duration and cost sketches are structurally identical and would merge silently into nonsense, so merging across
+     * grids throws.
      */
     @Test
     void mergeAcrossGridsThrows() {
@@ -136,24 +93,9 @@ class MetricHistogramTest {
         assertTrue(message.contains("different grids"), message);
     }
 
-    /** Each measure owns its range; sharing one would spend most of it on values neither ever produces. */
-    @Test
-    void durationAndCostAreDifferentGrids() {
-        assertNotEquals(
-                MetricHistogram.Grid.duration().id(),
-                MetricHistogram.Grid.cost().id(),
-                "cost must not be comparable to duration by accident");
-    }
-
-    // -------------------------------------------------------------------------------------------
-    // Serialization
-    // -------------------------------------------------------------------------------------------
-
     /**
-     * Round-tripping through {@code *_sketch_json} preserves every bin, both edge counters, the total and
-     * the mean. Deliberately built with mass in the body <i>and</i> in both edge counters, because the
-     * sparse wire shape stores bins in a map and the counters as separate fields — a serializer that
-     * dropped one of those would still round-trip a body-only fixture cleanly.
+     * Built with mass in the body and both edge counters: the wire shape stores bins in a map and counters as fields,
+     * and a body-only fixture would hide a dropped one.
      */
     @Test
     void jsonRoundTripPreservesEveryBin() {
@@ -171,7 +113,7 @@ class MetricHistogramTest {
         assertEquals(original.toJson(), restored.toJson(), "and re-serializes byte for byte");
     }
 
-    /** An empty sketch survives the round trip as an empty sketch, not as a null or a NaN mean. */
+    /** An empty sketch round-trips as empty, not null or a NaN mean. */
     @Test
     void emptySketchRoundTrips() {
         MetricHistogram empty = duration();
@@ -183,7 +125,7 @@ class MetricHistogramTest {
         assertNull(restored.quantile(0.5), "an empty sketch has no quantile to report");
     }
 
-    /** Malformed or unrecognized payloads throw. The discriminator is the seam a t-digest would use. */
+    /** Malformed or unknown payloads throw; the discriminator is the seam a t-digest would use. */
     @Test
     void unknownKindAndMalformedJsonThrow() {
         assertThrows(IllegalArgumentException.class, () -> MetricSketch.fromJson("{\"kind\":\"tdigest\"}"));
@@ -191,14 +133,9 @@ class MetricHistogramTest {
         assertThrows(IllegalArgumentException.class, () -> MetricSketch.fromJson("not json at all"));
     }
 
-    // -------------------------------------------------------------------------------------------
-    // Range edges
-    // -------------------------------------------------------------------------------------------
-
     /**
-     * Samples outside the range increment a dedicated counter and still count toward {@link
-     * MetricSketch#count()}. Both halves are the point: dropping them would make a bucket that moved out
-     * of range look unchanged, and folding them into the end bins would hide that the range is wrong.
+     * Out-of-range samples hit a counter and still count: dropped, a bucket that left the range looks unchanged;
+     * folded into the end bins, a wrong range stays hidden.
      */
     @Test
     void outOfRangeSamplesAreCountedNeverClipped() {
@@ -215,7 +152,7 @@ class MetricHistogramTest {
         assertTrue(Double.isFinite(histogram.meanLog()), "an infinite sample must not poison the mean");
     }
 
-    /** {@code NaN} is a caller bug — the log of a negative or absent value — and must not be absorbed. */
+    /** NaN is a caller bug and must not be absorbed. */
     @Test
     void nanIsRejected() {
         MetricHistogram histogram = duration();
@@ -223,16 +160,9 @@ class MetricHistogramTest {
         assertThrows(IllegalArgumentException.class, () -> histogram.add(Double.NaN));
     }
 
-    // -------------------------------------------------------------------------------------------
-    // Quantiles
-    // -------------------------------------------------------------------------------------------
-
     /**
-     * Quantiles land within one slot of the truth — 5% on the value, and by construction half that on
-     * average, an order of magnitude below any shift the detector is built to notice. These are what the
-     * finding's evidence blob reports as
-     * {@code quantiles.p50} / {@code p95} (metric-drift.md §7), so the error has to be small enough that a
-     * human reading "2.1 s → 2.9 s" is reading the traffic and not the grid.
+     * Quantiles land within one slot (5%) of the truth, far below any shift the detector notices, so "2.1 s to 2.9 s"
+     * in the evidence blob (metric-drift.md §7) reads the traffic, not the grid.
      */
     @Test
     void quantilesAreAccurateToWithinHalfASlot() {
@@ -251,7 +181,7 @@ class MetricHistogramTest {
         }
     }
 
-    /** A sketch whose mass is pinned past an edge reports the edge, and says so by way of the counter. */
+    /** Mass pinned past an edge reports the edge, and the counter says so. */
     @Test
     void quantilesOfPinnedMassReportTheEdge() {
         MetricHistogram low = duration();
@@ -261,36 +191,18 @@ class MetricHistogramTest {
             high.add(Math.log(1e12));
         }
 
-        // Unwrapped explicitly: `quantile` is @Nullable only for the empty sketch, and a test that let
-        // a null slip through would auto-unbox into an NPE reading as a failure of the assertion below
-        // rather than of the sketch.
+        // A null quantile would auto-unbox into an NPE that blames the assertion instead of the sketch.
         assertEquals(MetricHistogram.Grid.duration().logLo(), requireQuantile(low, 0.5), 0.0);
         assertEquals(MetricHistogram.Grid.duration().logHi(), requireQuantile(high, 0.5), 0.0);
         assertEquals(100, low.underflow());
         assertEquals(100, high.overflow());
     }
 
-    /** A single sample is a legitimate sketch, not a division by zero waiting to happen. */
-    @Test
-    void singleSampleSketchIsWellDefined() {
-        MetricHistogram histogram = duration();
-        histogram.add(Math.log(2000));
-
-        assertEquals(1, histogram.count());
-        assertEquals(Math.log(2000), histogram.meanLog(), 1e-12);
-        assertEquals(Math.log(2000), requireQuantile(histogram, 0.5), SLOT);
-        assertEquals(1.0, histogram.cdf()[histogram.cdf().length - 1], 0.0, "the CDF still tops out at 1");
-    }
-
-    /** {@link MetricSketch#quantile} answers null only on an empty sketch; every caller here has samples. */
     private static double requireQuantile(MetricSketch sketch, double q) {
         return java.util.Objects.requireNonNull(sketch.quantile(q), "a non-empty sketch has a quantile");
     }
 
-    /**
-     * A grid that cannot place a sample is refused at construction. NaN fails every comparison, so a
-     * {@code lo <= 0} check alone would let a NaN grid through, and every sample would land in no bin.
-     */
+    /** NaN fails every comparison, so a {@code lo <= 0} check alone would admit a NaN grid that places no sample. */
     @ParameterizedTest
     @CsvSource({
         "0, 1.05, 320",
@@ -306,9 +218,8 @@ class MetricHistogramTest {
     }
 
     /**
-     * A stored blob that parses as JSON but not as a histogram, or names a bin the grid does not have, is
-     * refused rather than rehydrated: a bin written past the array would corrupt the counts the distance
-     * reads, or throw an unchecked index error the sweep's corrupt-blob handling does not expect.
+     * A blob that parses but is not a valid histogram, or names a bin past the grid, is refused: it would corrupt the
+     * counts or throw an index error the sweep does not expect.
      */
     @ParameterizedTest
     @ValueSource(

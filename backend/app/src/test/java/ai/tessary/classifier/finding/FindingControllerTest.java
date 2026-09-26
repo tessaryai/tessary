@@ -83,9 +83,8 @@ class FindingControllerTest {
     BehaviorBaselineEventRepository baselineEvents;
 
     /**
-     * An unruled finding is listed only when the caller asks for every finding; its page, its evidence page
-     * and the other detectors' evidence tabs read through the path's project, and a person's "real deviation"
-     * rules it positive. Another project's path does not reach it.
+     * An unruled finding lists only when every finding is asked for; its pages read through the path's project, and
+     * "real deviation" rules it positive.
      */
     @Test
     void aFindingIsReadAndRuledThroughItsOwnProjectsPathOnly() {
@@ -153,9 +152,8 @@ class FindingControllerTest {
     }
 
     /**
-     * A frustration finding's sessions tab counts every conversation the finding cites, and narrows to an RCA
-     * cause's share when the caller names one: a cause no report holds cites none. Dropping the cause would
-     * show a cause's panel the whole population as if that one cause explained all of it.
+     * A frustration finding's sessions tab counts every cited conversation, or a named RCA cause's share; dropping
+     * the cause would credit one cause with the whole population.
      */
     @Test
     void aFrustrationFindingsSessionsNarrowToTheNamedCause() {
@@ -183,10 +181,7 @@ class FindingControllerTest {
                 .data());
     }
 
-    /**
-     * A finding of a classifier the org no longer holds is not found through its evidence tabs either, so
-     * hiding a detector cannot leave its claims readable one tab over.
-     */
+    /** A withheld classifier's finding is not found through its evidence tabs either. */
     @Test
     void aWithheldClassifiersFindingIsNotFoundThroughItsEvidenceTabs() {
         var fix = TenantFixture.bootstrap(tenants, "finding-api-withheld");
@@ -240,7 +235,7 @@ class FindingControllerTest {
                 true, findings.findById(fix.project().id(), id).orElseThrow().escalatedAt() != null);
     }
 
-    /** The baseline changelog lists the project's own re-pins, newest first, as they were written. */
+    /** The project's own re-pins, newest first. */
     @Test
     void theBaselineChangelogListsTheProjectsRepins() {
         var fix = TenantFixture.bootstrap(tenants, "finding-api-changelog");
@@ -302,8 +297,6 @@ class FindingControllerTest {
                         .data());
     }
 
-    // ---- helpers -----------------------------------------------------------------------------
-
     private static TenantContext owner(TenantFixture.Setup fix) {
         return new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
     }
@@ -312,7 +305,7 @@ class FindingControllerTest {
         return views.stream().map(BehaviorFindingView::id).toList();
     }
 
-    /** One open, unruled finding of {@code classifierKey} with one span of evidence behind it. */
+    /** One open, unruled finding with one span of evidence. */
     private String finding(TenantFixture.Setup fix, String classifierKey, String payload) {
         String now = Instant.now().toString();
         String id = Objects.requireNonNull(findings.recordArmedWindow(

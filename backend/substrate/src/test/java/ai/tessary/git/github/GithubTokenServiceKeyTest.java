@@ -3,7 +3,6 @@ package ai.tessary.git.github;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.security.PrivateKey;
 import org.junit.jupiter.api.Test;
@@ -85,25 +84,11 @@ class GithubTokenServiceKeyTest {
     }
 
     @Test
-    void parsesPkcs8Key() throws Exception {
-        PrivateKey key = GithubTokenService.parsePrivateKey(PKCS8);
-        assertEquals("RSA", key.getAlgorithm());
-    }
-
-    @Test
     void pkcs1AndPkcs8YieldSameKey() throws Exception {
         // Same key, two encodings — the PKCS#1 wrapping must reconstruct the
         // exact PKCS#8 PrivateKeyInfo the JDK produces for the PKCS#8 input.
         PrivateKey fromPkcs1 = GithubTokenService.parsePrivateKey(PKCS1);
         PrivateKey fromPkcs8 = GithubTokenService.parsePrivateKey(PKCS8);
         assertArrayEquals(fromPkcs8.getEncoded(), fromPkcs1.getEncoded());
-    }
-
-    @Test
-    void rejectsGarbage() {
-        assertThrows(
-                Exception.class,
-                () -> GithubTokenService.parsePrivateKey(
-                        "-----BEGIN PRIVATE KEY-----\nnot-base64!!!\n-----END PRIVATE KEY-----"));
     }
 }

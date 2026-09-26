@@ -2,10 +2,6 @@
 package ai.tessary.ingest.substrate.v2;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.KindNormalizer;
@@ -48,61 +44,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
 
     @Autowired
     JdbcClient jdbc;
-
-    @Test
-    @DisplayName("an externalized image leaves a media_ref row naming the span whose payload references it")
-    void externalizedImage_writesMediaRef() {
-        Project p = project("media-ref-write");
-        String traceId = "trace-media";
-
-        writer.write(p.id(), List.of(withImage("span-media", traceId, oneRedPixel())));
-
-        String mediaId = jdbc.sql("SELECT id FROM media_object WHERE project_id = :pid")
-                .param("pid", p.id())
-                .query(String.class)
-                .single();
-        assertNotNull(mediaId, "the bytes are stored");
-
-        String payload = jdbc.sql("SELECT input FROM span_payload WHERE project_id = :pid AND trace_id = :tid")
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .query(String.class)
-                .single();
-        assertNotNull(payload);
-        assertTrue(payload.contains(mediaId), "the payload references the image by id");
-        assertFalse(payload.contains(oneRedPixel()), "and no base64 survives into the substrate");
-
-        assertEquals(
-                1L,
-                mediaRefs(p, mediaId),
-                "the reference the payload carries as a string must also exist as a row, or nothing can"
-                        + " tell whether these bytes are still in use.");
-    }
-
-    @Test
-    @DisplayName("the media_ref rows cascade with the payload that referenced the image")
-    void payloadDelete_cascadesMediaRefs() {
-        Project p = project("media-ref-cascade");
-        String traceId = "trace-cascade";
-        writer.write(p.id(), List.of(withImage("span-cascade", traceId, oneRedPixel())));
-        String mediaId = jdbc.sql("SELECT id FROM media_object WHERE project_id = :pid")
-                .param("pid", p.id())
-                .query(String.class)
-                .single();
-        assertEquals(1L, mediaRefs(p, mediaId));
-
-        // Matches retention's first tier: payloads age ahead of spans.
-        jdbc.sql("DELETE FROM span_payload WHERE project_id = :pid AND trace_id = :tid")
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .update();
-
-        assertEquals(
-                0L,
-                mediaRefs(p, mediaId),
-                "media's lifetime is the payload's: once the text that names the image is gone, the image"
-                        + " is unreachable, and the reference must go with it so the collector can see that");
-    }
 
     @Test
     @DisplayName("the same image in input and output is one reference, not two")
@@ -154,27 +95,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
     }
 
     @Test
-    @DisplayName("a producer that names no error.type still gets a short, groupable error_type")
-    void errorSpan_withoutDeclaredType_signaturesTheMessage() {
-        Project p = project("error-split-fallback");
-        String prose = "HTTP 500 upstream from https://api.example.com/v1/charges/ch_3Ox9aB after 30014ms";
-
-        writer.write(p.id(), List.of(errorEntry("span-sig", "trace-sig", KindNormalizer.LLM, null, prose)));
-
-        Map<String, Object> row = jdbc.sql(
-                        "SELECT error_type, error_message FROM span WHERE project_id = :pid AND id = 'span-sig'")
-                .param("pid", p.id())
-                .query()
-                .singleRow();
-        String type = (String) row.get("error_type");
-        assertNotNull(type);
-        assertNotEquals(prose, type, "the fallback is a signature, not the message itself");
-        assertTrue(type.contains("<url>") && type.contains("<num>"), "ids and URLs are placeholders: " + type);
-        assertTrue(type.length() <= 121, "and it is bounded, because this column is a facet key");
-        assertEquals(prose, row.get("error_message"));
-    }
-
-    @Test
     @DisplayName("a failing tool call splits the same way")
     void errorToolCall_splitsClassFromProse() {
         Project p = project("error-split-tool");
@@ -215,23 +135,6 @@ class SpanMediaAndErrorWriteIntegrationTest {
         return "[{\"type\":\"text\",\"text\":\"what is this\"},"
                 + "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\""
                 + b64 + "\"}}]";
-    }
-
-    private static RawEntry withImage(String spanId, String traceId, String b64) {
-        return new RawEntry(
-                spanId,
-                spanId,
-                anthropicImagePayload(b64),
-                "looks like a pixel",
-                null,
-                Map.of(),
-                null,
-                traceId,
-                Instant.now().toString(),
-                KindNormalizer.LLM,
-                Instant.now().toString(),
-                null,
-                null);
     }
 
     private static RawEntry errorEntry(

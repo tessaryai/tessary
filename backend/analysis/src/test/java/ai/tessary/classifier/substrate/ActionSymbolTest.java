@@ -4,19 +4,11 @@ package ai.tessary.classifier.substrate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /** The alphabet keeps a kind's name, normalized, and buckets a retrieval name to its corpus. */
 class ActionSymbolTest {
-
-    @Test
-    void everyOtherKindKeepsItsName() {
-        assertEquals("tool:verify_member", ActionSymbol.of("tool", "verify_member"));
-        assertEquals("agent:policy_gpt", ActionSymbol.of("agent", "policy-gpt"));
-        assertEquals("retrieval:policy_docs", ActionSymbol.of("retrieval", "policy_docs/2024/s4.pdf"));
-    }
 
     /**
      * One tool is one symbol however its calls are named: case, separators, a per-call id or uuid and edge
@@ -35,7 +27,10 @@ class ActionSymbolTest {
                 "tool      | NONE                                              | tool:unnamed",
                 "retrieval | kb#section-4                                      | retrieval:kb",
                 "embedding | NONE                                              | embedding:unnamed",
-                "NONE      | NONE                                              | :unnamed"
+                "NONE      | NONE                                              | :unnamed",
+                "tool      | verify_member                                     | tool:verify_member",
+                "agent     | policy-gpt                                        | agent:policy_gpt",
+                "retrieval | policy_docs/2024/s4.pdf                           | retrieval:policy_docs"
             })
     void aNameFoldsToOneSymbolPerAction(@Nullable String kind, @Nullable String name, String symbol) {
         assertEquals(symbol, ActionSymbol.of(kind, name));

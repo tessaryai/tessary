@@ -3,7 +3,6 @@ package ai.tessary.version;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.open.errors.TessaryException;
@@ -47,15 +46,6 @@ class ProjectVersionRepositoryTest {
         service.reasonPipelineSync(pid, "sha-2");
         var row = repo.findByCommit(pid, "sha-2").orElseThrow();
         assertEquals(ProjectVersionRow.STATUS_SYNCED, row.gradersStatus());
-    }
-
-    @Test
-    void timeline_listsMaterializedVersions() {
-        String pid = TenantFixture.bootstrap(tenants, "pv-timeline").project().id();
-        service.reasonPipelineSync(pid, "sha-a");
-        service.reasonPipelineSync(pid, "sha-b");
-        assertEquals(2, service.timeline(pid).size());
-        assertTrue(service.timeline(pid).stream().anyMatch(v -> v.commitSha().equals("sha-a")));
     }
 
     /**

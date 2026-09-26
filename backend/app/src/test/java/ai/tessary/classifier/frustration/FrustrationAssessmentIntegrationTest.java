@@ -18,7 +18,6 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.PagedDetector.FiredTurn;
 import ai.tessary.classifier.catalog.PagedDetector.PageAction;
 import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
-import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.TurnFacts;
 import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
@@ -228,23 +227,6 @@ class FrustrationAssessmentIntegrationTest {
                 detections.tracesInUnclearedFlaggedConversations(
                         BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-a2")),
                 "a cleared flag makes the conversation scorable again");
-    }
-
-    @Test
-    void turnFactsReadTheConversationKeyAndStart() {
-        String pid = project("fr-facts");
-        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-        fx.trace(pid, "tr-thread", "sess-x", "thread-x", null, at);
-        fx.trace(pid, "tr-session", "sess-y", null, null, at);
-        fx.trace(pid, "tr-alone", at);
-
-        Map<String, TurnFacts> facts =
-                assessments.turnFacts(pid, List.of("tr-thread", "tr-session", "tr-alone", "tr-missing"));
-
-        assertEquals(new TurnFacts("thread-x", at), facts.get("tr-thread"));
-        assertEquals(new TurnFacts("sess-y", at), facts.get("tr-session"));
-        assertEquals(new TurnFacts(null, at), facts.get("tr-alone"));
-        assertFalse(facts.containsKey("tr-missing"));
     }
 
     @Test

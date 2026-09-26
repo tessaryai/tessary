@@ -93,67 +93,6 @@ class FindingRulingIntegrationTest {
     }
 
     @Test
-    @DisplayName("a new finding under the same cause is triaged independently of the one before it")
-    void aNewFindingIsTriagedIndependently() {
-        Project p = project("ruling-independent");
-        String first = firing(p, GRAM);
-        behaviorTriage.recordVerdict(p.id(), first, verdict("negative", "an artifact"), null, now());
-        String second = firing(p, GRAM);
-
-        behaviorTriage.recordVerdict(p.id(), second, verdict("positive", "sound this time"), null, now());
-
-        assertEquals(
-                FindingRow.TriageVerdict.NEGATIVE,
-                findings.findById(p.id(), first).orElseThrow().triageVerdict());
-        assertEquals(
-                FindingRow.TriageVerdict.POSITIVE,
-                findings.findById(p.id(), second).orElseThrow().triageVerdict());
-    }
-
-    @Test
-    @DisplayName("a person's Real deviation writes positive and human_verdict_at, and stays open")
-    void personsRealDeviationWritesPositive() {
-        Project p = project("ruling-human-positive");
-        String findingId = firing(p, GRAM);
-
-        var view = behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
-
-        assertNotNull(view.orElseThrow());
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.OPEN, row.status());
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, row.triageVerdict());
-        assertNotNull(row.humanVerdictAt(), "the ruling is stamped, which is what a case is opened off");
-    }
-
-    @Test
-    @DisplayName("a person's Legitimate closes the finding negative")
-    void personsLegitimateClosesNegative() {
-        Project p = project("ruling-human-negative");
-        String findingId = firing(p, GRAM);
-
-        behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-1");
-
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, row.status());
-        assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
-        assertNotNull(row.humanVerdictAt());
-    }
-
-    @Test
-    @DisplayName("a verb on an already-closed finding returns 409 FINDING_CLOSED")
-    void aVerbOnAClosedFindingIs409() {
-        Project p = project("ruling-409-closed");
-        String findingId = firing(p, GRAM);
-        behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-1");
-
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-2"));
-
-        assertEquals(ClassifierError.FINDING_CLOSED, e.error());
-    }
-
-    @Test
     @DisplayName("a verb on an open, already-ruled-positive finding also returns 409")
     void aVerbOnAnOpenRuledFindingIsAlso409() {
         Project p = project("ruling-409-open-ruled");

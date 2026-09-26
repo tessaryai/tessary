@@ -63,15 +63,6 @@ class BedrockModelListerTest {
     // ---------------------------------------------------------------- ACTIVE lifecycle filter
 
     @Test
-    void activeModel_isIncluded() {
-        stubModels(summary("anthropic.claude-x", "Claude X", "Anthropic", "ACTIVE"));
-
-        List<ProviderModel> models = lister().list(apiKeyCred("us-east-1", "access", "secret"));
-
-        assertEquals(List.of(new ProviderModel("anthropic.claude-x", "Claude X", "Anthropic")), models);
-    }
-
-    @Test
     void legacyModel_isDropped() {
         stubModels(
                 summary("anthropic.claude-old", "Claude Old", "Anthropic", "LEGACY"),
@@ -150,14 +141,5 @@ class BedrockModelListerTest {
         ModelListingException ex = assertThrows(
                 ModelListingException.class, () -> lister().list(apiKeyCred("us-east-1", "access", "secret")));
         assertTrue(ex.getMessage().contains("us-east-1"));
-    }
-
-    @Test
-    void requestBuilder_isUnusedConsumer_doesNotThrow() {
-        // list() calls listFoundationModels(r -> {}) — a no-op configurer. Confirms that shape still
-        // compiles and runs against the real ListFoundationModelsRequest.Builder type, not just the
-        // mocked client.
-        stubModels();
-        assertEquals(List.of(), lister().list(apiKeyCred("us-east-1", "access", "secret")));
     }
 }

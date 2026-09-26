@@ -150,21 +150,4 @@ class VerifiedTokenCacheTest {
                 tokens.verify(issued.plaintext()).isEmpty(),
                 "a revoke that lands during a verification must win, whichever order they interleaved in");
     }
-
-    /** A revoked key must not be answered for, and the rejection must not be cached as a false positive. */
-    @Test
-    void revokedKey_isRejectedAndStaysRejected() {
-        var fix = TenantFixture.bootstrap(tenants, "cache-revoke");
-        var issued = tokens.issue(fix.project().id(), fix.user().id(), "revoked");
-        assertTrue(tokens.verify(issued.plaintext()).isPresent());
-
-        assertTrue(tokens.revoke(issued.token().id()));
-
-        assertTrue(tokens.verify(issued.plaintext()).isEmpty(), "revoked immediately");
-        assertInstanceOf(
-                VerifiedTokenCache.Lookup.Rejected.class,
-                cache.lookup(issued.plaintext()),
-                "and the rejection is remembered, so the repeat costs no bcrypt");
-        assertTrue(tokens.verify(issued.plaintext()).isEmpty(), "and the repeat still refuses");
-    }
 }

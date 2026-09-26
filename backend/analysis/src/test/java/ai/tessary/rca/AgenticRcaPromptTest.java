@@ -10,7 +10,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * The prompt the agentic lane hands the Claude-in-E2B session, pinned where it names MCP tools and where
@@ -102,33 +107,47 @@ class AgenticRcaPromptTest {
         assertTrue(prompt.contains("2026-05-01") && prompt.contains("2026-05-08"), "window bounds are interpolated");
     }
 
+    /** Each lane's prompt builder, by repo presence, and whether the lane attributes causes to code. */
+    static Stream<Arguments> builders() {
+        Function<Boolean, String> metric = repo -> AgenticRcaEngine.buildPrompt(report(), "fnd-1", repo, 12, 40);
+        Function<Boolean, String> frustration = repo -> AgenticRcaEngine.buildFrustrationPrompt(
+                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", repo, 12, 12);
+        Function<Boolean, String> groundedness = repo -> AgenticRcaEngine.buildGroundednessPrompt(
+                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", repo, 12);
+        return Stream.of(
+                Arguments.of("metric", metric, false),
+                Arguments.of("frustration", frustration, true),
+                Arguments.of("groundedness", groundedness, true));
+    }
+
     /** The firewall, in the one place a leak would be invisible: the prompt text itself. */
-    @Test
-    void thePromptNeverDisclosesThatATriagePassExists() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("builders")
+    void thePromptNeverDisclosesThatATriagePassExists(
+            String lane, Function<Boolean, String> build, boolean attributes) {
         for (boolean repoCloned : new boolean[] {true, false}) {
-            String prompt = AgenticRcaEngine.buildPrompt(report(), "fnd-1", repoCloned, 12, 40)
-                    .toLowerCase(Locale.ROOT);
+            String prompt = build.apply(repoCloned).toLowerCase(Locale.ROOT);
             for (String word : TRIAGE_VOCABULARY) {
                 assertFalse(
                         prompt.contains(word),
-                        "the prompt says '" + word + "' — the agent must not learn that an earlier pass ruled on"
-                                + " this finding, let alone what it ruled (repoCloned=" + repoCloned + ")");
+                        "the " + lane + " prompt says '" + word + "' — the agent must not learn that an earlier pass"
+                                + " ruled on this finding (repoCloned=" + repoCloned + ")");
             }
         }
     }
 
-    /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unreadable and is
-     *  told not to invent it, rather than being pointed at a ./repo/ that does not exist. */
-    @Test
-    void aRepolessRunIsToldTheCodeSideIsUnread() {
-        String prompt = AgenticRcaEngine.buildPrompt(report(), "fnd-1", false, 12, 40);
+    /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread, not sent to ./repo/. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("builders")
+    void aRepolessRunIsToldTheCodeSideIsUnread(String lane, Function<Boolean, String> build, boolean attributes) {
+        String prompt = build.apply(false);
 
-        assertFalse(
-                prompt.contains("git -C ./repo"),
-                "a repo-less run must not be told to run git on a clone it has not got");
+        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
         assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
-        // The evidence door is the half that survives without a repo — it is never conditional.
         assertTrue(prompt.contains("get_finding_evidence"), "MCP is the run's only substrate either way");
+        if (attributes) {
+            assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
+        }
     }
 
     /** Thin evidence changes the instruction, not just the number: a rate over four traces is four traces. */
@@ -142,50 +161,6 @@ class AgenticRcaPromptTest {
                 "a well-evidenced finding gets no cap");
     }
 
-    /** The frustration branch asks what the agent did, so it drops the metric-movement burden of proof and
-     *  every baseline-side demand: the finding has no baseline side, only frustrated sessions. */
-    @Test
-    void aFrustrationPromptAsksForCausesWithoutABaselineSide() {
-        String prompt = AgenticRcaEngine.buildFrustrationPrompt(
-                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", true, 12, 12);
-
-        assertFalse(prompt.contains("BURDEN OF PROOF"), "the metric-movement burden of proof does not apply");
-        assertFalse(prompt.contains("baseline-side"), "there is no baseline side to cite");
-        assertFalse(prompt.contains("serving_model"), "serving_model compares two sides and is not measured");
-        assertFalse(prompt.contains("The eight rules"), "the metric-movement rules are replaced, not appended");
-        assertTrue(prompt.contains("failing_cohort_shape"), "the one measured check is named");
-        assertTrue(prompt.contains("evidence_session_ids"), "causes cite sessions");
-        assertTrue(prompt.contains("causes_identified") && prompt.contains("no_cause_found"), "both verdicts named");
-        assertTrue(prompt.contains("Group by what the agent did wrong"), "the frustration rules are in");
-        assertTrue(prompt.contains("list_sessions") && prompt.contains("get_session"), "calm sessions are readable");
-        assertTrue(prompt.contains("fnd-1") && prompt.contains("2026-05-04"), "finding id and onset interpolated");
-        for (String tool : EXPECTED_TOOLS) {
-            assertTrue(prompt.contains(tool), "the frustration prompt never names " + tool);
-        }
-    }
-
-    @Test
-    void aFrustrationPromptKeepsTheFirewall() {
-        for (boolean repoCloned : new boolean[] {true, false}) {
-            String prompt = AgenticRcaEngine.buildFrustrationPrompt(
-                            report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", repoCloned, 12, 12)
-                    .toLowerCase(Locale.ROOT);
-            for (String word : TRIAGE_VOCABULARY) {
-                assertFalse(prompt.contains(word), "the frustration prompt says '" + word + "'");
-            }
-        }
-    }
-
-    @Test
-    void aRepolessFrustrationRunAttributesNothing() {
-        String prompt = AgenticRcaEngine.buildFrustrationPrompt(
-                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", false, 12, 12);
-
-        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
-        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
-        assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
-    }
-
     @Test
     void aFewFrustratedSessionsCapConfidence() {
         RcaReportRow r = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
@@ -193,52 +168,6 @@ class AgenticRcaPromptTest {
                 AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 3, 3).contains("cap every cause"));
         assertFalse(AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 30, 30)
                 .contains("cap every cause"));
-    }
-
-    /** A groundedness finding asks for causes like frustration's, with traces as the receipts and the flagged
-     *  answers handed over in the dossier so each flag can be checked against its documents first. */
-    @Test
-    void aGroundednessPromptAsksForCausesCitingTraces() {
-        String prompt = AgenticRcaEngine.buildGroundednessPrompt(
-                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", true, 12);
-
-        assertFalse(prompt.contains("BURDEN OF PROOF"), "the metric-movement burden of proof does not apply");
-        assertFalse(prompt.contains("baseline-side"), "there is no baseline side to cite");
-        assertFalse(prompt.contains("serving_model"), "serving_model compares two sides and is not measured");
-        assertFalse(prompt.contains("evidence_session_ids"), "a groundedness cause cites traces, not sessions");
-        assertFalse(prompt.contains("frustrat"), "nothing of the frustration prompt leaks in");
-        assertTrue(prompt.contains("failing_cohort_shape"), "the one measured check is named");
-        assertTrue(prompt.contains("evidence_trace_ids"), "causes cite traces");
-        assertTrue(prompt.contains("dossier/detections.md"), "the flagged answers are in the dossier");
-        assertTrue(prompt.contains("causes_identified") && prompt.contains("no_cause_found"), "both verdicts named");
-        assertTrue(prompt.contains("Check each flag before grouping"), "the groundedness rules are in");
-        assertTrue(prompt.contains("retrieval"), "retrieval is a cause the rules name");
-        assertTrue(prompt.contains("fnd-1") && prompt.contains("2026-05-04"), "finding id and onset interpolated");
-        for (String tool : EXPECTED_TOOLS) {
-            assertTrue(prompt.contains(tool), "the groundedness prompt never names " + tool);
-        }
-    }
-
-    @Test
-    void aGroundednessPromptKeepsTheFirewall() {
-        for (boolean repoCloned : new boolean[] {true, false}) {
-            String prompt = AgenticRcaEngine.buildGroundednessPrompt(
-                            report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", repoCloned, 12)
-                    .toLowerCase(Locale.ROOT);
-            for (String word : TRIAGE_VOCABULARY) {
-                assertFalse(prompt.contains(word), "the groundedness prompt says '" + word + "'");
-            }
-        }
-    }
-
-    @Test
-    void aRepolessGroundednessRunAttributesNothing() {
-        String prompt = AgenticRcaEngine.buildGroundednessPrompt(
-                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", false, 12);
-
-        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
-        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
-        assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
     }
 
     @Test

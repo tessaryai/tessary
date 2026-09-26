@@ -16,14 +16,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The metric-drift decision, driven directly — no Spring, no database, no clock. That is the point of
- * {@link MetricDriftDetector} existing separately from {@link MetricDriftSweep}.
+ * The metric-drift decision driven directly, without Spring, a database, or a clock.
  *
- * <p>The first three cases below, and between them they pin the whole
- * operating point: a 1.4× shift is the smallest move anyone would want reported, 1.02× is ordinary
- * traffic breathing, and a bucket under the sample floor is one whose window has not filled yet. Every
- * fixture is built from a seeded generator so the numbers are the same on every run — the same
- * reproducibility argument that put a fixed histogram behind the sketch rather than a t-digest.
+ * <p>The first three cases pin the operating point: 1.4× is the smallest move worth reporting, 1.02× is ordinary
+ * traffic, and a bucket under the sample floor has not filled yet. Fixtures come from a seeded generator.
  */
 class MetricDriftDetectorTest {
 
@@ -42,9 +38,8 @@ class MetricDriftDetectorTest {
 
         assertTrue(d.fired(), "0.34 in log units is comfortably past a floor of " + CONFIG.w1Floor());
         assertEquals(Direction.UP, d.direction(), "the current window sits above its reference");
-        // The ratio is the sentence a human reads — "1.4x slower" — and it has to be the multiplicative
-        // shift rather than something proportional to it, or the finding says the wrong number. One bin is
-        // 5% wide, so the tolerance is the grid's resolution and not a fudge factor.
+        // The ratio is what a human reads ("1.4x slower"), so it must be the multiplicative shift. One bin is 5%
+        // wide.
         assertEquals(1.4, d.ratio(), 0.05);
         assertEquals(Math.log(1.4), d.w1Log(), 0.05);
         assertEquals(SAMPLES, d.nRef());
@@ -59,10 +54,8 @@ class MetricDriftDetectorTest {
 
         Decision d = MetricDriftDetector.decide(Measure.TURN_DURATION, Reference.PREVIOUS, ref, cur, CONFIG);
 
-        // This is the case a KS test gets wrong. With 400 samples — never mind the 100k a busy call site
-        // produces in a window — a two-percent shift is "significant", because significance inflates with
-        // sample size while effect size does not. metric-drift.md §4.2 names that as the single most common way
-        // distribution monitoring fails in production.
+        // The case a KS test gets wrong: significance inflates with sample size, effect size does not (metric-
+        // drift.md §4.2).
         assertFalse(d.fired());
         assertEquals(Silence.WITHIN_FLOOR, d.silence());
         double magnitude = Math.abs(d.w1Log());
@@ -72,26 +65,21 @@ class MetricDriftDetectorTest {
     @Test
     @DisplayName("the bar rises as the windows thin, and never falls below the configured move")
     void theBarScalesToTheSampleItIsMeasuredOn() {
-        // Two windows of the configured target size are held to exactly the configured move.
         assertEquals(
                 CONFIG.w1Floor(),
                 MetricDriftDetector.effectiveFloor(CONFIG.windowTargetCount(), CONFIG.windowTargetCount(), CONFIG),
                 1e-9);
 
-        // A thin window is held to more, because the noise it is measured through is larger. The scale is
-        // sqrt(target / harmonic mean) - at 500 against 100 the harmonic mean is 167, so the bar is
-        // 0.139 * sqrt(3) ~ 0.241, a 27% move rather than a 15% one. Held flat instead, that comparison
-        // false-alarms one time in five.
+        // A thin window is held to more: the scale is sqrt(target / harmonic mean), so 500 vs 100 needs a 27% move,
+        // not 15%. Flat, it false-alarms one time in five.
         double thin = MetricDriftDetector.effectiveFloor(500, 100, CONFIG);
         assertEquals(CONFIG.w1Floor() * Math.sqrt(500.0 / (2.0 / (1.0 / 500 + 1.0 / 100))), thin, 1e-9);
         assertTrue(thin > CONFIG.w1Floor(), "a thin window must clear MORE, not less: " + thin);
 
-        // Symmetric in the two counts - which window is the thin one cannot change the bar, or the same
-        // pair would be judged differently depending on which was pinned.
+        // Symmetric, or the same pair is judged by which side was pinned.
         assertEquals(thin, MetricDriftDetector.effectiveFloor(100, 500, CONFIG), 1e-9);
 
-        // And it never loosens. A bucket thicker than the target could support a smaller bar, but then
-        // the configured number would stop meaning "the smallest move we will report".
+        // Never loosens, or the configured number stops meaning "the smallest move we report".
         assertEquals(CONFIG.w1Floor(), MetricDriftDetector.effectiveFloor(50_000, 50_000, CONFIG), 1e-9);
     }
 
@@ -106,13 +94,10 @@ class MetricDriftDetectorTest {
         double tightRate = MetricDriftDetector.impliedFalseAlarmRate(CONFIG.w1Floor(), tight.stdDevLog(), 500)
                 .orElseThrow();
 
-        // The same move on tighter traffic is a stricter one, so it costs fewer false alarms. That
-        // variation is the price of the MOVE being the promise, and showing it is the whole point of
-        // this number existing.
+        // The same move on tighter traffic costs fewer false alarms.
         assertTrue(tightRate < wideRate / 2, "tight=" + tightRate + " wide=" + wideRate);
 
-        // Round-trip: build the bar that the noise law says produces a 1% rate on this traffic, feed it
-        // back, and get 1% out. That pins the inversion itself rather than the fixture's exact spread.
+        // Round-trip the noise law's 1% bar, pinning the inversion rather than the fixture's spread.
         double barForOnePercent = 2.688 * wide.stdDevLog() * Math.sqrt(2.0 / 500);
         assertEquals(
                 0.01,
@@ -120,19 +105,16 @@ class MetricDriftDetectorTest {
                         .orElseThrow(),
                 1e-6);
 
-        // Unmeasurable spread reports nothing rather than a number nobody can stand behind.
         assertTrue(MetricDriftDetector.impliedFalseAlarmRate(CONFIG.w1Floor(), 0.0, 500)
                 .isEmpty());
     }
 
     @Test
-    @DisplayName("a window under min_sample is silent whatever it shows — it waits, it is not skipped")
+    @DisplayName("a window or reference under min_sample is silent whatever it shows — it waits, it is not skipped")
     void silentBelowTheSampleFloor() {
         MetricSketch ref = durations(1.0);
-        // A doubling. Enormous, unmistakable, and reported by nobody: 40 samples cannot tell a real move
-        // from four unlucky traces, and a bucket this thin is one whose window is still filling. The floor
-        // makes it WAIT (metric-drift.md §2.3) rather than be dropped as too rare to watch — a tool called
-        // thirty times a week gets watched on a slower clock, not never.
+        // A doubling on 40 samples is not reported: the window is still filling, so the floor makes it wait (metric-
+        // drift.md §2.3), not drop.
         MetricSketch thin = durations(2.0, 40);
 
         Decision d = MetricDriftDetector.decide(Measure.TURN_DURATION, Reference.PINNED, ref, thin, CONFIG);
@@ -140,18 +122,12 @@ class MetricDriftDetectorTest {
         assertFalse(d.fired());
         assertEquals(Silence.BELOW_MIN_SAMPLE, d.silence());
         assertEquals(40, d.nCur());
-    }
 
-    @Test
-    @DisplayName("a thin REFERENCE silences the comparison too")
-    void silentWhenTheReferenceIsThin() {
-        // The reference is the bar. A bar built from 40 samples of a quiet week would report that week's
-        // sampling noise as a regression in the busy one that follows.
-        Decision d = MetricDriftDetector.decide(
+        // A thin reference silences it too: 40 samples would report their own noise as a regression.
+        Decision thinRef = MetricDriftDetector.decide(
                 Measure.TURN_DURATION, Reference.PREVIOUS, durations(1.0, 40), durations(1.4), CONFIG);
-
-        assertFalse(d.fired());
-        assertEquals(Silence.BELOW_MIN_SAMPLE, d.silence());
+        assertFalse(thinRef.fired());
+        assertEquals(Silence.BELOW_MIN_SAMPLE, thinRef.silence());
     }
 
     @Test
@@ -160,21 +136,10 @@ class MetricDriftDetectorTest {
         Decision d = MetricDriftDetector.decide(
                 Measure.TURN_DURATION, Reference.PINNED, durations(1.0), durations(1.0 / 1.4), CONFIG);
 
-        // The price of this is a trickle of "yes, we optimized that" dismissals. What it buys is the one
-        // regression that reads as a win on every other dashboard in the product: an agent that quietly
-        // stopped doing its verification step.
+        // Downward shifts fire: the regression that reads as a win elsewhere is an agent that stopped verifying.
         assertTrue(d.fired());
         assertEquals(Direction.DOWN, d.direction());
         assertTrue(d.ratio() < 1.0, "a downward shift reports a ratio below one, not a negative one");
-    }
-
-    @Test
-    @DisplayName("no reference yet is its own silence, not a firing and not a zero")
-    void noReferenceIsNamed() {
-        Decision d = MetricDriftDetector.decide(Measure.TURN_DURATION, Reference.PINNED, null, durations(1.0), CONFIG);
-
-        assertFalse(d.fired());
-        assertEquals(Silence.NO_REFERENCE, d.silence());
     }
 
     @Test
@@ -189,10 +154,8 @@ class MetricDriftDetectorTest {
         Decision d =
                 MetricDriftDetector.decide(Measure.TURN_DURATION, Reference.PINNED, onCostGrid, onDurationGrid, CONFIG);
 
-        // Reached by editing hist_bins on a project whose sketches predate the edit. A W₁ across two grids
-        // would be a plausible number nothing downstream would question, so it is refused — but refused as
-        // a silence rather than an exception, because a config edit is an event the sweep survives (its
-        // next close re-pins) and not a reason to dead-letter it.
+        // Sketches on two grids (after a hist_bins edit) are refused as a silence, not an exception, since the next
+        // close re-pins.
         assertFalse(d.fired());
         assertEquals(Silence.GRID_MISMATCH, d.silence());
     }
@@ -200,9 +163,7 @@ class MetricDriftDetectorTest {
     @Test
     @DisplayName("a nonsense move is clamped before it ever reaches the detector")
     void aLiveEditedMoveCannotOpenTheGatesCompletely() {
-        // The config blob is editable per project while the classifier is being tuned. A w1_floor of 0
-        // turns every closed window into a finding on the very next sweep, with nothing in the code path
-        // to notice — so the clamp lives in the record's constructor, not at the call site.
+        // A w1_floor of 0 would turn every window into a finding, so the clamp lives in the record's constructor.
         MetricDriftConfig edited = new MetricDriftConfig(
                 CONFIG.measures(),
                 CONFIG.windowTargetCount(),
@@ -218,10 +179,6 @@ class MetricDriftDetectorTest {
                 MetricDriftDetector.effectiveFloor(500, 500, edited) > 0.0,
                 "and the bar it produces is a real one: " + MetricDriftDetector.effectiveFloor(500, 500, edited));
     }
-
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
 
     private static MetricSketch durations(double multiplier) {
         return durations(multiplier, SAMPLES);

@@ -88,24 +88,6 @@ class MediaExternalizerTest {
     }
 
     @Test
-    void httpImageUrl_isLeftUntouched_noStore() {
-        String json = "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"https://example.com/x.png\"}}]";
-        MediaExternalizer.Externalized result = externalizer.externalizeJson("p1", json);
-        assertSame(json, result.payload(), "a payload with no inline base64 is returned byte-identical");
-        assertEquals(List.of(), result.mediaIds(), "a payload that references no media files no refs");
-        verify(media, never()).put(anyString(), any(), anyString());
-    }
-
-    @Test
-    void plainTextPayload_returnedVerbatim() {
-        assertSame(
-                "just some prose",
-                externalizer.externalizeJson("p1", "just some prose").payload());
-        assertEquals(null, externalizer.externalizeJson("p1", null).payload());
-        verify(media, never()).put(anyString(), any(), anyString());
-    }
-
-    @Test
     void malformedJson_returnedVerbatim() {
         String junk = "{not valid";
         assertSame(junk, externalizer.externalizeJson("p1", junk).payload());

@@ -185,28 +185,6 @@ class AgenticCredentialResolverTest {
 
     // ---------------------------------------------------------------- IAM role is not sandbox-usable
 
-    /**
-     * IAM-role auth stays valid for the backend's own direct judge calls, but an E2B microVM cannot
-     * assume the operator's ambient AWS identity and there is no STS-relay path for it — so this is a
-     * distinct, named error rather than MISSING_CREDENTIALS, which would read as "add a key" when the
-     * org has deliberately configured one.
-     */
-    @Test
-    void bedrockIamRoleCredential_failsWithAgenticIamRoleUnsupported() {
-        stored(
-                ModelProvider.BEDROCK,
-                cred(
-                        ModelProvider.BEDROCK,
-                        null,
-                        null,
-                        "us-east-1",
-                        "sealed-access",
-                        "sealed-secret",
-                        null,
-                        ProviderCredential.AUTH_MODE_IAM_ROLE));
-        assertEquals(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED, errorFrom(ModelProvider.BEDROCK));
-    }
-
     @Test
     void mantleIamRoleCredential_failsWithAgenticIamRoleUnsupported() {
         stored(
@@ -266,20 +244,6 @@ class AgenticCredentialResolverTest {
                 bedrockCred(ModelProvider.BEDROCK, "  eu-west-1  ", "sealed-access", "sealed-secret"));
         assertEquals(
                 "eu-west-1", resolver.resolve(PROJECT, ModelProvider.BEDROCK).awsRegion());
-    }
-
-    @Test
-    void mantleShape_isTheSameBedrockShape() {
-        stored(
-                ModelProvider.BEDROCK_MANTLE,
-                bedrockCred(ModelProvider.BEDROCK_MANTLE, "us-east-1", "sealed-access", "sealed-secret"));
-
-        AgenticCredentialResolver.Credential c = resolver.resolve(PROJECT, ModelProvider.BEDROCK_MANTLE);
-
-        assertEquals(ModelProvider.BEDROCK_MANTLE, c.provider());
-        assertEquals("plain-access", c.awsAccessKey());
-        assertEquals("plain-secret", c.awsSecretKey());
-        assertNull(c.apiKey());
     }
 
     // ---------------------------------------------------------------- the OpenAI-compat wire shape

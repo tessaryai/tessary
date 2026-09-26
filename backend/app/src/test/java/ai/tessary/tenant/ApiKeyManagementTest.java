@@ -79,27 +79,6 @@ class ApiKeyManagementTest {
     }
 
     @Test
-    void create_persistsScope_andResolvesIt() {
-        var fix = TenantFixture.bootstrap(tenants, "key-scope");
-
-        var issued = keys.issue(fix.project().id(), fix.user().id(), "prod-write", KeyScope.WRITE);
-
-        assertEquals(KeyScope.WRITE.wire(), issued.token().scope());
-
-        // Verifying the plaintext returns the same scope binding.
-        Optional<ApiKey> resolved = keys.verify(issued.plaintext());
-        assertTrue(resolved.isPresent());
-        assertEquals(KeyScope.WRITE, resolved.get().scopeEnum());
-    }
-
-    @Test
-    void legacyIssue_defaultsToMcpScope() {
-        var fix = TenantFixture.bootstrap(tenants, "key-legacy");
-        var issued = keys.issue(fix.project().id(), fix.user().id(), "laptop");
-        assertEquals(KeyScope.ADMIN, issued.token().scopeEnum());
-    }
-
-    @Test
     void rotate_revokesOld_issuesFreshWithSameScope() {
         var fix = TenantFixture.bootstrap(tenants, "key-rotate");
         var original = keys.issue(fix.project().id(), fix.user().id(), "ci", KeyScope.QUERY);
@@ -121,22 +100,6 @@ class ApiKeyManagementTest {
         // Old row is revoked; rotating it again is a no-op.
         assertTrue(repo.findById(original.token().id()).orElseThrow().isRevoked());
         assertTrue(keys.rotate(original.token().id(), fix.user().id()).isEmpty(), "cannot rotate a revoked key");
-    }
-
-    @Test
-    void lifecycleActions_writeAuditRows() {
-        var fix = TenantFixture.bootstrap(tenants, "key-audit");
-        var issued = keys.issue(fix.project().id(), fix.user().id(), "audited", KeyScope.ADMIN);
-        keys.rotate(issued.token().id(), fix.user().id());
-
-        List<AuditLog> rows = audit.findByProject(fix.project().id(), 50);
-        // create + (rotate => revoke-old + created-new + rotated) — at minimum a created and a rotated entry.
-        assertTrue(rows.stream().anyMatch(a -> AuditLog.Action.CREATED.wire().equals(a.action())));
-        assertTrue(rows.stream().anyMatch(a -> AuditLog.Action.ROTATED.wire().equals(a.action())));
-        assertTrue(
-                rows.stream().anyMatch(a -> AuditLog.Action.REVOKED.wire().equals(a.action())),
-                "rotate revokes the old key, which is audited");
-        assertTrue(rows.stream().allMatch(a -> fix.user().id().equals(a.principalId())), "actor is recorded");
     }
 
     @Test

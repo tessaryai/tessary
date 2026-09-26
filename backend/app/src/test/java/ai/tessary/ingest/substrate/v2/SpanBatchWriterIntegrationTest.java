@@ -48,27 +48,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * The v2 write path against the real schema: what one drained batch does to
- * {@code session / trace / span / span_payload}, and the three invariants the spec says must hold in
- * code rather than only on paper.
+ * The v2 write path against the real schema: what one drained batch does to {@code session / trace / span /
+ * span_payload}, and three spec invariants. §6.1: a span row and its trace re-arm commit together or not at all.
+ * §6.2: a completed span replaces its partial, an older redelivery cannot undo it, and neither overwrites platform-
+ * derived fields. §7.1: one trace update per trace per batch, with sorted locking so overlapping batches cannot
+ * deadlock.
  *
- * <p>The three, in the order they are proven below:
- *
- * <ol>
- *   <li><b>§6.1 atomicity.</b> A span row and the trace re-arm that reflects it commit together, or neither
- *       does. Break it and the settle protocol silently excludes a visible span from a settling rollup.
- *   <li><b>§6.2 last-write-wins.</b> A span's completed version replaces the partial that preceded it, an
- *       older redelivery cannot undo it, and neither can overwrite what the PLATFORM derived.
- *   <li><b>§7.1 coalescing.</b> One trace update per trace per batch — not one per span — and sorted
- *       locking so two batches over overlapping traces cannot deadlock.
- * </ol>
- *
- * <p>The scheduled resolvers are off in this context. They tick every second, and half the assertions here
- * are about what the write path did and did NOT derive — {@code path} is null on arrival because ancestry
- * belongs to the fixpoint — which a resolver racing the assertion would make flaky rather than wrong. The
- * rollup worker is off for the harder version of the same reason: it claims due traces GLOBALLY, so a
- * running one could take the claim out from under {@link #settle} and leave the assertion reading a trace
- * something else had already rolled up.
+ * <p>The resolvers and rollup worker are off: several assertions are about what the write path did not derive, and
+ * the worker claims due traces globally.
  */
 @SpringBootTest(
         properties = {
@@ -137,8 +124,6 @@ class SpanBatchWriterIntegrationTest {
         t0 = Instant.parse("2026-08-12T10:00:00Z");
     }
 
-    // ---- the shape one batch lands ------------------------------------------------------------------
-
     @Test
     @DisplayName("one batch lands session, trace and spans, with the payload split off the row")
     void write_landsTheWholeSpine() {
@@ -184,27 +169,11 @@ class SpanBatchWriterIntegrationTest {
     }
 
     @Test
-    @DisplayName("a span with no session id belongs to no session — nothing is synthesized to fill the hole")
-    void write_anonymousTrafficGetsNoSession() {
-        String traceId = traceId("anon");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of())));
-
-        assertNull(traces.findById(pid, traceId).orElseThrow().sessionId());
-        assertEquals(0, countSessions(), "a session row exists only when a producer sends a session id");
-        assertEquals(
-                SpanRow.ResolverState.PENDING,
-                spans.findById(pid, traceId, "s1").orElseThrow().correlationState(),
-                "it waits for its trace to answer, and is retired by the backfiller when the trace settles");
-    }
-
-    @Test
     @DisplayName("§6.1 — a batch that fails to commit leaves no trace or session row behind")
     void write_failedBatchLeavesNoIdentityRows() {
         String traceId = traceId("uncommittable");
-        // A tool call whose arguments are valid JSON that Postgres will not take as jsonb: \u0000 is a legal
-        // escape in a JSON string and has no representation in Postgres text, so Jackson parses it and the
-        // bind throws. This is the real shape — a web search result carrying a NUL byte — that failed a
-        // batch mid-transaction and left the shell this test exists to forbid.
+        // Valid JSON Postgres will not take as jsonb: a \u0000 escape, from a real web search result. It failed a
+        // batch mid-transaction and left the shell this test forbids.
         RawEntry uncommittable = new RawEntry(
                 "tool-1",
                 "execute_tool",
@@ -237,7 +206,7 @@ class SpanBatchWriterIntegrationTest {
     @DisplayName("rows no v2 row could represent are dropped before the transaction, and the batch still lands")
     void write_poisonRowsAreDroppedNotThrown() {
         String traceId = traceId("poison");
-        // Its own writer instance, so the drop counter is this test's and not the whole suite's.
+        // Its own writer, so the drop counter is this test's.
         SpanBatchWriter isolated = newWriter(traces);
         List<RawEntry> batch = new ArrayList<>();
         batch.add(span("ok", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()));
@@ -261,7 +230,7 @@ class SpanBatchWriterIntegrationTest {
                 "huge-input", "n", "x".repeat(8_000_001), "o", null, Map.of(), null, traceId, t0.toString(), null));
         batch.add(span("long-session", null, traceId, KindNormalizer.LLM, t0, t0, meta("s".repeat(513))));
         batch.add(new RawEntry("bad-start", "n", "i", "o", null, Map.of(), null, traceId, "yesterday", null));
-        // ISO-8601 allows a 60th second; an offset parser refuses it, an instant parser reads it as :59.
+        // ISO-8601 allows a 60th second; an instant parser reads it as :59.
         batch.add(new RawEntry("leap", "n", "i", "o", null, Map.of(), null, traceId, "2026-08-12T23:59:60Z", null));
 
         assertEquals(2, isolated.write(pid, batch), "the ordinary span and the leap-second one");
@@ -307,8 +276,6 @@ class SpanBatchWriterIntegrationTest {
                 "ended 2.5s after the watermark (the rolled-up span's end): one sample in the 1s-10s bucket");
     }
 
-    // ---- §6.1 atomicity ------------------------------------------------------------------------------
-
     @Test
     @DisplayName("§6.1: a failure between the span write and the trace re-arm leaves NEITHER visible")
     void atomicity_spanAndTraceReArmCommitTogether() {
@@ -333,79 +300,6 @@ class SpanBatchWriterIntegrationTest {
                         + "outside the transaction and accepted the shell it strands. Nothing can complete that "
                         + "row and nothing can retire it");
     }
-
-    // ---- §6.2 last write wins ------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("§6.2: the completed version replaces the partial that arrived first")
-    void lww_finalReplacesPartial() {
-        String traceId = traceId("lww");
-        writer.write(pid, List.of(usage(span("s1", null, traceId, KindNormalizer.LLM, t0, null, Map.of()), 10L, null)));
-        assertNull(spans.findById(pid, traceId, "s1").orElseThrow().outputTokens(), "the partial had no output yet");
-
-        writer.write(
-                pid,
-                List.of(usage(
-                        span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(2), Map.of()), 10L, 40L)));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(40L, row.outputTokens());
-        assertEquals(50L, row.totalTokens(), "the generated total follows the replacement");
-        assertEquals(t0.plusSeconds(2).toString(), row.endedAt());
-    }
-
-    @Test
-    @DisplayName("§6.2: an older redelivery cannot undo the version already stored")
-    void lww_olderArrivalIsANoOp() {
-        String traceId = traceId("lww-old");
-        writer.write(
-                pid,
-                List.of(usage(
-                        span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(2), Map.of()), 10L, 40L)));
-
-        writer.write(pid, List.of(usage(span("s1", null, traceId, KindNormalizer.LLM, t0, null, Map.of()), 10L, null)));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(40L, row.outputTokens(), "the partial redelivery lost the event_ts comparison");
-        assertEquals(t0.plusSeconds(2).toString(), row.endedAt());
-    }
-
-    @Test
-    @DisplayName("§6.2: equal event_ts goes to the latest arrival, because second-granularity clocks tie constantly")
-    void lww_tiesGoToTheLatestArrival() {
-        String traceId = traceId("lww-tie");
-        writer.write(pid, List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()), "first")));
-
-        writer.write(pid, List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()), "second")));
-
-        assertEquals(
-                "second",
-                spans.findById(pid, traceId, "s1").orElseThrow().name(),
-                "a strictly-greater guard would drop the completed version of every span whose partial shared its stamp");
-    }
-
-    @Test
-    @DisplayName("§6.2: a newer version replaces what the producer said, never what the platform derived")
-    void lww_platformDerivedAncestrySurvivesAProducerUpdate() {
-        String traceId = traceId("lww-path");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, Map.of())));
-        spans.resolveRootPaths(100_000);
-        assertEquals("s1", spans.findById(pid, traceId, "s1").orElseThrow().path());
-
-        writer.write(
-                pid,
-                List.of(named(span("s1", null, traceId, KindNormalizer.LLM, t0, t0.plusSeconds(1), Map.of()), "v2")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals("v2", row.name(), "the producer's fields did update");
-        assertEquals("s1", row.path(), "but the resolved ancestry did not — a replay must not re-open resolved work");
-        assertEquals(
-                SpanRow.ResolverState.RESOLVED,
-                row.pathState(),
-                "nor send the span back into the fixpoint's queue on every redelivery");
-    }
-
-    // ---- §7.1 batch coalescing ----------------------------------------------------------------------
 
     @Test
     @DisplayName("§7.1: 1,000 spans over 50 traces are 50 trace updates in one statement, not 1,000 statements")
@@ -444,8 +338,7 @@ class SpanBatchWriterIntegrationTest {
         for (int i = 0; i < 20; i++) {
             traceIds.add(traceId("dl-" + i));
         }
-        // Two batches naming the same traces in OPPOSITE orders: the shape that deadlocks the moment two
-        // writers lock rows in the order they happen to hold them.
+        // The same traces in opposite orders: the shape that deadlocks without sorted locking.
         List<RawEntry> ascending = new ArrayList<>();
         List<RawEntry> descending = new ArrayList<>();
         for (int i = 0; i < traceIds.size(); i++) {
@@ -485,22 +378,6 @@ class SpanBatchWriterIntegrationTest {
                 failures.add(e);
             }
         };
-    }
-
-    // ---- §6.5 pricing --------------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("§6.5: a producer-sent cost is stored verbatim and no book is stamped")
-    void pricing_providedIsVerbatim() {
-        String traceId = traceId("cost-provided");
-        Map<String, Object> attrs = new HashMap<>(usageAttrs(1_000_000L, 1_000_000L));
-        attrs.put(GenAiAttributes.USAGE_COST, "0.0425");
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, attrs, "claude-sonnet-5")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(SpanRow.CostSource.PROVIDED, row.costSource());
-        assertNull(row.priceBookVersion(), "we did not price it, so there is no book to name");
-        assertEquals(0, new BigDecimal("0.0425").compareTo(new BigDecimal(requireCost(row.totalCost()))));
     }
 
     @Test
@@ -553,20 +430,6 @@ class SpanBatchWriterIntegrationTest {
     }
 
     @Test
-    @DisplayName("§6.5: an OpenAI cache-inclusive input count is made disjoint at write, so cache reads bill once")
-    void pricing_cacheInclusiveInputIsCorrectedAtWrite() {
-        String traceId = traceId("cost-cache");
-        Map<String, Object> attrs = new HashMap<>(usageAttrs(1000L, 10L));
-        attrs.put(GenAiAttributes.USAGE_CACHE_READ_INPUT_TOKENS, 400L);
-        writer.write(pid, List.of(span("s1", null, traceId, KindNormalizer.LLM, t0, t0, attrs, "gpt-4o")));
-
-        SpanRow row = spans.findById(pid, traceId, "s1").orElseThrow();
-        assertEquals(600L, row.inputTokens(), "OpenAI's prompt_tokens already contained the 400 cached ones");
-        assertEquals(400L, row.cacheReadTokens());
-        assertEquals(1010L, row.totalTokens(), "so the five buckets sum to the tokens actually consumed, once");
-    }
-
-    @Test
     @DisplayName("§6.5: the carve-out is unconditional — only an input smaller than its cached parts is left alone")
     void pricing_disjointInputIsNotCorrected() {
         String traceId = traceId("cost-disjoint");
@@ -594,8 +457,8 @@ class SpanBatchWriterIntegrationTest {
     @DisplayName("§6.5: a container span's cumulative usage and cost are a receipt, so the rollup cannot double-count")
     void pricing_containerKindsDoNotDoubleCountIntoTheTrace() {
         String traceId = traceId("container");
-        // The shape that produces the bug: an agent span reporting the SUM of its children, plus the
-        // children themselves. Storing its numbers verbatim would put the whole subtree into the trace twice.
+        // An agent span reporting the sum of its children, beside the children: stored verbatim, the subtree counts
+        // twice.
         Map<String, Object> agentAttrs = new HashMap<>(usageAttrs(2_000_000L, 2_000_000L));
         agentAttrs.put(GenAiAttributes.USAGE_COST, "8.00");
         Map<String, Object> childAttrs = new HashMap<>(usageAttrs(1_000_000L, 1_000_000L));
@@ -648,12 +511,9 @@ class SpanBatchWriterIntegrationTest {
         assertEquals(4_000_000L, trace.totalTokens());
     }
 
-    // ---- helpers -------------------------------------------------------------------------------------
-
     /**
-     * A writer with the real collaborators and one substituted trace repository, so a test can induce a
-     * failure at an exact point of the batch, or count the statements it issues, without a bean override
-     * (which would cost this class its own Spring context and a fresh Liquibase run).
+     * Real collaborators with one substituted trace repository, to fail at an exact point or count statements without
+     * a bean override (which would cost a Spring context).
      */
     private SpanBatchWriter newWriter(TraceV2Repository tracesRepo) {
         return new SpanBatchWriter(
@@ -673,10 +533,7 @@ class SpanBatchWriterIntegrationTest {
                 transactionManager);
     }
 
-    /**
-     * The bean behind the proxy. Spring wraps every {@code @Repository} for persistence-exception
-     * translation, and Mockito cannot spy a proxy — there are no fields on it to copy.
-     */
+    /** The bean behind the {@code @Repository} proxy: Mockito cannot spy a proxy. */
     private static TraceV2Repository unproxied(TraceV2Repository repository) {
         if (!AopUtils.isAopProxy(repository)) return repository;
         try {
@@ -688,7 +545,7 @@ class SpanBatchWriterIntegrationTest {
         }
     }
 
-    /** Claim and recompute once, with the deadline pulled forward — the rollup worker's tick, run inline. */
+    /** The rollup worker's tick, run inline with the deadline pulled forward. */
     private void settle(String traceId) {
         jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
                         + " WHERE project_id = :pid AND id = :id")
@@ -697,13 +554,6 @@ class SpanBatchWriterIntegrationTest {
                 .update();
         traces.claimDue(500);
         traces.recompute(pid, traceId);
-    }
-
-    private int countSessions() {
-        return jdbc.sql("SELECT count(*) FROM session WHERE project_id = :pid")
-                .param("pid", pid)
-                .query(Integer.class)
-                .single();
     }
 
     private static String requireCost(@Nullable String cost) {

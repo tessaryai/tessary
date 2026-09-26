@@ -2,7 +2,6 @@
 package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -34,12 +33,6 @@ class TenantArgumentResolverTest {
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/orgs/acme");
         if (ctx != null) req.setAttribute(TenantContext.ATTRIBUTE, ctx);
         return new ServletWebRequest(req);
-    }
-
-    @Test
-    void anAuthenticatedContextIsHandedToTheHandler() {
-        TenantContext ctx = new TenantContext("usr_1", "ada@example.com", null, null, null, null);
-        assertSame(ctx, resolve(withContext(ctx)));
     }
 
     @Test

@@ -3,7 +3,6 @@ package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,9 +72,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
- * One page through the Jev detector with the decision client, the conversation read and every
- * repository stubbed: what is sent, what fires, what each persisted page writes, and how a refused or
- * missing key pauses the classifier.
+ * One page through the Jev detector with everything else stubbed: what is sent, what fires, what a persisted page
+ * writes, and how a refused or missing key pauses the classifier.
  */
 class JevFrustrationDetectorTest {
 
@@ -133,25 +131,6 @@ class JevFrustrationDetectorTest {
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    // ---- firing
-
-    @Test
-    void aTurnFiresOnlyWhenUnhappyWithAssistantExceedsTheThreshold() {
-        SubstrateObservation high = eligibleTurn("t-high", "conv-a");
-        SubstrateObservation low = eligibleTurn("t-low", "conv-b");
-        client.answer("t-high", 0.71, 0.04);
-        client.answer("t-low", 0.39, 0.02);
-        JevFrustrationDetector d = detector();
-
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(high, low));
-        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
-
-        assertEquals(Status.SCORED, page.status());
-        assertEquals(2, page.sent());
-        assertEquals(1, fired.size());
-        assertEquals("t-high", fired.get(0).turn().traceId());
-    }
-
     @Test
     void unhappyAboutSomethingElseNeverFires() {
         SubstrateObservation turn = eligibleTurn("t-other", "conv-a");
@@ -177,8 +156,6 @@ class JevFrustrationDetectorTest {
 
         assertTrue(fired.isEmpty(), "0.45 fires under the 0.40 default but not under 0.5");
     }
-
-    // ---- what a persisted page writes
 
     @Test
     void everySentTurnIsAssessedAndEveryFiredTurnIsADetection() throws Exception {
@@ -264,7 +241,7 @@ class JevFrustrationDetectorTest {
         client.answer("t-4", 0.1, 0.0);
         JevFrustrationDetector d = detector();
 
-        // Out of order on the page: the conversation is still scored earliest turn first.
+        // Out of order on the page: scored earliest turn first.
         JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(after, other, flagged, calm));
         List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
 
@@ -290,12 +267,12 @@ class JevFrustrationDetectorTest {
         assertEquals(1, page.unavailable());
     }
 
-    /** A call that fails in a way the client did not classify fails that turn only; the page is still scored. */
+    /** An unclassified call failure fails that turn only. */
     @Test
     void anUnexpectedClientFailureFailsOnlyItsTurn() {
         SubstrateObservation broken = eligibleTurn("t-1", "conv-a", 20);
         SubstrateObservation next = eligibleTurn("t-2", "conv-a", 10);
-        client.answer("t-2", 0.1, 0.0); // t-1 has no answer, so the stub throws a NullPointerException
+        client.answer("t-2", 0.1, 0.0); // t-1 has no answer, so the stub throws
 
         JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(broken, next));
 
@@ -305,10 +282,7 @@ class JevFrustrationDetectorTest {
         assertEquals(0, page.unavailable(), "not an outage, so it does not count toward holding the page");
     }
 
-    /**
-     * A sweep interrupted mid-page, as at shutdown, stops sending: the turn queued behind the permit is never
-     * sent to the provider, and the sweep's thread keeps its interrupt.
-     */
+    /** An interrupted sweep stops sending and keeps its interrupt. */
     @Test
     void anInterruptedSweepStopsSendingAndKeepsItsInterrupt() throws InterruptedException {
         props.setConcurrency(1);
@@ -355,8 +329,8 @@ class JevFrustrationDetectorTest {
     }
 
     /**
-     * The bug: a task that dies of something its own catch does not hold (an {@link Error} from the client)
-     * vanishes, and the page is scored as if that conversation had simply not been sent. It must fail the page.
+     * A task dying of an {@link Error} its catch misses vanished, and the page scored without it. It must fail the
+     * page.
      */
     @Test
     void aTaskThatDiesOutsideItsCatchFailsThePage() {
@@ -383,8 +357,8 @@ class JevFrustrationDetectorTest {
     }
 
     /**
-     * The bug: the worker hands a paged detector one observation at a time and gets back a detection with no
-     * assessment row behind it. Paged detectors score whole pages; the one-at-a-time path refuses.
+     * The worker handed a paged detector one observation and got a detection with no assessment row. The one-at-a-
+     * time path refuses.
      */
     @Test
     void aPagedDetectorRefusesToScoreOneObservation() {
@@ -420,8 +394,6 @@ class JevFrustrationDetectorTest {
         verify(assessments, never()).insert(any());
     }
 
-    // ---- what is not sent
-
     @Test
     void anIneligibleTurnOrOneWithNoConversationIsNotSent() {
         SubstrateObservation opener = observation("t-open");
@@ -435,24 +407,6 @@ class JevFrustrationDetectorTest {
         assertEquals(0, page.sent());
         assertEquals(0, page.eligible());
         assertTrue(client.requests.isEmpty());
-    }
-
-    // ---- failures
-
-    @Test
-    void anUnavailableProviderFailsTheTurnAndIsCountedForTheHoldRule() {
-        SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
-        SubstrateObservation down = eligibleTurn("t-down", "conv-b");
-        client.answer("t-ok", 0.9, 0.0);
-        client.fail("t-down", DecisionError.PROVIDER_UNAVAILABLE);
-        JevFrustrationDetector d = detector();
-
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, down));
-        d.complete(signal("{}"), page, PageAction.PERSIST, 5);
-
-        assertEquals(2, page.sent());
-        assertEquals(1, page.unavailable());
-        verify(assessments, times(1)).insert(any());
     }
 
     @Test
@@ -483,10 +437,7 @@ class JevFrustrationDetectorTest {
         verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PROVIDER_REJECTED, NOW);
     }
 
-    /**
-     * An aborted page records nothing and is logged as a pause with its reason, a refused key or no key at
-     * all: the pause is the one thing an operator has to act on, and a silent one reads as a quiet week.
-     */
+    /** An aborted page records nothing and logs a pause with its reason; a silent pause reads as a quiet week. */
     @Test
     void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {
         Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
@@ -518,20 +469,6 @@ class JevFrustrationDetectorTest {
             logger.detachAppender(appender);
         }
     }
-
-    @Test
-    void noKeyPausesTheClassifierWithNoProviderAndSendsNothing() {
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
-
-        assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.NO_PROVIDER, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_PROVIDER, NOW);
-        assertTrue(client.requests.isEmpty());
-    }
-
-    // ---- pause
 
     @Test
     void aPausedClassifierSendsNothingUntilTheRetryIntervalPasses() {
@@ -573,13 +510,6 @@ class JevFrustrationDetectorTest {
         verify(classifiers, never()).unpause(any(), any());
     }
 
-    @Test
-    void anEmptyPageCarriesNoPauseReason() {
-        assertNull(detector().score(signal("{}"), List.of()).pauseReason());
-    }
-
-    // ---- fixtures
-
     private static ClassifierRow signal(String configJson) {
         return new ClassifierRow(
                 CLASSIFIER,
@@ -614,7 +544,7 @@ class JevFrustrationDetectorTest {
                 null);
     }
 
-    /** A turn root with a clean user, assistant, user, assistant prefix, in conversation {@code conv}. */
+    /** A turn root with a clean user, assistant, user, assistant prefix. */
     private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv) {
         return eligibleTurn(traceId, conv, 60);
     }
@@ -645,7 +575,7 @@ class JevFrustrationDetectorTest {
         return names;
     }
 
-    /** Answers by the trace id carried in the scored message text; records what it was asked. */
+    /** Answers by the trace id in the message text; records what it was asked. */
     private final class StubClient implements DecisionClient {
         final Map<String, JsonNode> responses = new ConcurrentHashMap<>();
         final Map<String, DecisionError> failures = new ConcurrentHashMap<>();

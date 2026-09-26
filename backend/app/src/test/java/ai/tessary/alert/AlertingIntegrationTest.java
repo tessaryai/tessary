@@ -25,12 +25,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Acceptance for alerting: the roll-ups and case notifications that are all alerting still decides.
- * Exercised against the real pgvector Postgres (Testcontainers) so the alert schema applies for real.
- * Detections are seeded straight into a per-classifier detection table — the production alert path is
- * strictly read-only over {@code classifier} and the DetectionTableRegistry-stitched union — and the
- * {@link AlertWorker} is driven to the behavior that survived the threshold path's removal: a daily
- * digest roll-up is produced when its cron is due, exactly once per period.
+ * Alerting against real Postgres: roll-ups and case notifications. Detections are seeded straight into a per-
+ * classifier detection table, and {@link AlertWorker} produces a daily digest when its cron is due, once per period.
  */
 @SpringBootTest
 class AlertingIntegrationTest {
@@ -78,10 +74,8 @@ class AlertingIntegrationTest {
     @Autowired
     AlertRuleRepository rules;
 
-    // The three threshold tests that stood here are gone with the path they exercised. A classifier's
-    // window no longer becomes an alert_event: it opens a FINDING inside the classifier's own sweep
-    // (ClassifierArming), and a case_opened rule carries that to the same channels. What remains here is
-    // the delivery machinery — roll-ups and case notifications — which is all alerting still decides.
+    // Classifier windows open findings now (ClassifierArming), not alert_events; what remains here is the delivery
+    // machinery.
 
     @Test
     void digestRollupProducedWhenCronDue() {
@@ -90,8 +84,7 @@ class AlertingIntegrationTest {
         String sigA = seedSignal(pid, "frustration");
         String sigB = seedSignal(pid, "task_failure");
 
-        // Create the schedule FIRST: the first digest's window is [rule.created_at, now), so the rolled-up
-        // detections must land AFTER the rule exists (an every-second cron is due after a >1s wait).
+        // Rule first: the digest window starts at rule.created_at, so detections must land after it.
         AlertRuleRow digestRule = alertService.upsertRule(pid, digestReq("* * * * * *"));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
@@ -100,7 +93,6 @@ class AlertingIntegrationTest {
         worker.tick();
 
         List<AlertEventRow> fired = alertEvents.listByProject(pid, 100);
-        // The threshold path didn't run (no per-signal rules), so the only firing is the digest roll-up.
         assertEquals(1, fired.size(), "a due digest produces exactly one roll-up");
         AlertEventRow digest = fired.get(0);
         assertEquals(AlertRuleRow.RuleType.DIGEST, digest.ruleType());
@@ -108,15 +100,12 @@ class AlertingIntegrationTest {
         assertEquals(3, digest.value(), "the digest rolls up all 3 detections in the window");
         assertTrue(digest.classifierId() == null, "a roll-up spans all signals");
 
-        // The cron anchor advanced, so an immediate re-tick within the same second is not due again.
+        // The cron anchor advanced, so a re-tick in the same second is not due.
         worker.tick();
         assertEquals(1, alertEvents.listByProject(pid, 100).size(), "the anchor advanced — no duplicate digest");
     }
 
-    /**
-     * A due period with nothing in it fires nothing (an empty digest is noise) but still advances the
-     * anchor, so the next digest covers the next period rather than re-reading this one forever.
-     */
+    /** A due period with nothing in it fires nothing but advances the anchor. */
     @Test
     void aDueDigestWithNoActivityAdvancesItsAnchorWithoutFiring() {
         String pid =
@@ -155,8 +144,6 @@ class AlertingIntegrationTest {
                 "the empty period is consumed, not re-read next tick");
     }
 
-    // ---- request builders -------------------------------------------------------------------------
-
     private static AlertDtos.UpsertAlertRuleRequest digestReq(String cron) {
         return new AlertDtos.UpsertAlertRuleRequest(
                 AlertRuleRow.RuleType.DIGEST,
@@ -173,8 +160,6 @@ class AlertingIntegrationTest {
                 null,
                 null);
     }
-
-    // ---- seeding helpers (the production alert path never writes these tables) ---------------------
 
     private String seedSignal(String pid, String key) {
         String now = Instant.now().toString();
@@ -197,11 +182,8 @@ class AlertingIntegrationTest {
     }
 
     /**
-     * Mint a producer session id (the "user" grain the distinct_users basis counts).
-     *
-     * <p>No row is written here. In v2 the count is {@code COUNT(DISTINCT span.session_id)} — the span
-     * carries the session as a column — so what makes a session countable is a SPAN naming it, not the
-     * existence of a session row. {@link #spanIn} writes both.
+     * A producer session id. No row is written: v2 counts {@code COUNT(DISTINCT span.session_id)}, so a span naming
+     * it is what counts.
      */
     private String newSession(String pid) {
         return SubstrateV2Fixtures.sessionId();
@@ -210,7 +192,7 @@ class AlertingIntegrationTest {
     /** The typed subject ancestry of a span-grain detection: its session, trace, and span. */
     private record Subject(String sessionId, String traceId, String spanId) {}
 
-    /** One trace with a root llm span under an existing session; returns the detection's subject ancestry. */
+    /** One trace with a root llm span; returns the detection's subject. */
     private Subject spanIn(String pid, String sessionId) {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRef span = fx.spanSeed(pid)
@@ -226,17 +208,9 @@ class AlertingIntegrationTest {
     }
 
     /**
-     * A classifier detection in its own table — what the digest roll-up now counts. Its {@code classifier_key}
-     * is how the roll-up query resolves the signal row, with the detector's confidence band and coarse
-     * severity on their own columns rather than borrowed ones.
-     *
-     * <p><b>{@code created_at} is passed explicitly rather than left to the column's {@code DEFAULT
-     * now()}</b>, because the roll-up window's lower bound is {@code alert_rule.created_at} — a JVM
-     * instant. Letting the row default to the DATABASE clock would put the two ends of one predicate on
-     * two clocks separated by a few milliseconds, and the digest window this test opens is only a few
-     * milliseconds wide at its start: a detection stamped by a Postgres clock even slightly behind the
-     * JVM's lands before {@code windowStart} and the roll-up finds nothing. Both ends read one clock here,
-     * so the assertion is about the query and not about container clock drift.
+     * A classifier detection in its own table, what the digest counts. {@code created_at} is passed explicitly: the
+     * window's lower bound is a JVM instant, and a Postgres clock slightly behind would land the row before {@code
+     * windowStart}.
      */
     private void seedDetection(String pid, String classifierId, Subject subject) {
         String classifierKey = signals.findById(pid, classifierId).orElseThrow().classifierKey();

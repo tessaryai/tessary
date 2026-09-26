@@ -24,13 +24,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * DB-backed proof that {@link ConversationThreadAssembler} walks a whole conversation, not just the
- * scored row: user and assistant messages oldest first, the scored user message as the current turn,
- * system messages excluded. Runs against the real pgvector Postgres (Testcontainers) so the
- * conversation grouping and keyset ordering execute for real.
- *
- * <p>A turn is one trace, and the conversation is {@code COALESCE(trace.thread_id, trace.session_id)},
- * so a turn's position in the thread is its keyset position.
+ * {@link ConversationThreadAssembler} walks the whole conversation against real Postgres: user and assistant messages
+ * oldest first, the scored message as the current turn, system messages excluded. The conversation is {@code
+ * COALESCE(trace.thread_id, trace.session_id)}, one trace per turn.
  */
 @SpringBootTest
 class ConversationThreadAssemblerIntegrationTest {
@@ -74,15 +70,14 @@ class ConversationThreadAssemblerIntegrationTest {
         Instant base = Instant.now();
         String sessionId = SubstrateV2Fixtures.sessionId();
 
-        // Turn 0: input carries a SYSTEM message alongside the user turn; assistant replies.
+        // Turn 0 input carries a system message beside the user turn.
         String withSystem = "[{\"role\":\"system\",\"content\":\"You are a helpful export bot.\"},"
                 + "{\"role\":\"user\",\"content\":\"can you export this?\"}]";
         seedTurn(pid, sessionId, base.plusMillis(1_000), withSystem, assistant("Sure, running the export now."));
 
-        // Turn 1: plain user + assistant.
         seedTurn(pid, sessionId, base.plusMillis(2_000), user("still broken"), assistant("Let me retry."));
 
-        // Turn 2 (scored): the user's terse latest message, no assistant reply yet.
+        // Turn 2 (scored): no assistant reply yet.
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
 
         SubstrateObservation scored = substrate
@@ -104,9 +99,7 @@ class ConversationThreadAssemblerIntegrationTest {
                 TenantFixture.bootstrap(tenants, "thread-conv-grain").project().id();
         Instant base = Instant.now();
 
-        // One session carrying two conversations. In v2 that is two thread_ids on the traces, not two
-        // tiers of a tree: the thread must be scoped to the scored turn's conversation (c1), and c2 —
-        // a sibling under the SAME session — must not bleed in.
+        // One session, two thread_ids: the thread is scoped to c1, and sibling c2 must not bleed in.
         String sessionId = SubstrateV2Fixtures.sessionId();
         String c1 = "conv-1";
         String c2 = "conv-2";
@@ -120,8 +113,7 @@ class ConversationThreadAssemblerIntegrationTest {
                 assistant("ok"),
                 null);
 
-        // c1: each turn carries BOTH an agent and an llm span bearing the same delta (must render ONCE),
-        // turn 0 also has a tool span, which leaves no text.
+        // Each c1 turn has agent and llm twins with the same delta (rendered once); turn 0 adds a textless tool span.
         seedTwinTurn(pid, sessionId, c1, base.plusMillis(1_000), user("deploy the app"), assistant("On it."), "search");
         seedTwinTurn(pid, sessionId, c1, base.plusMillis(2_000), user("still failing"), assistant("Retrying."), null);
         SpanRef scoredRef = seedTwinTurn(pid, sessionId, c1, base.plusMillis(3_000), user("nevermind"), null, null);
@@ -140,7 +132,7 @@ class ConversationThreadAssemblerIntegrationTest {
         assertEquals("nevermind", thread.current().text());
     }
 
-    /** One turn = one trace with a single root llm span carrying the dialogue. Returns the span. */
+    /** One turn: one trace with a root llm span. Returns the span. */
     @Test
     void ordersByWhenTheTurnHappenedNotWhenItWasStored() {
         String pid =
@@ -148,7 +140,7 @@ class ConversationThreadAssemblerIntegrationTest {
         Instant base = Instant.now();
         String sessionId = SubstrateV2Fixtures.sessionId();
 
-        // Stored latest-first, as an upload or a batched exporter can deliver them.
+        // Stored latest-first, as an upload or batched exporter can deliver.
         seedTurn(pid, sessionId, base.plusMillis(4_000), user("a later question"), assistant("A later answer."));
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
         seedTurn(pid, sessionId, base.plusMillis(2_000), user("still broken"), assistant("Let me retry."));
@@ -266,12 +258,8 @@ class ConversationThreadAssemblerIntegrationTest {
     }
 
     /**
-     * One turn of conversation {@code threadId} carrying agent+llm twins (and an optional tool span),
-     * all spans of ONE trace so they share the turn. Returns the llm span — the scored subject.
-     *
-     * <p>The spans are written agent-then-llm-then-tool, in that order, because the thread window orders
-     * by {@code (started_at, created_at, trace_id, id)}, the spans share a start, and {@code created_at}
-     * is the row's own insert time.
+     * One turn of {@code threadId} with agent and llm twins (and an optional tool span) on one trace; returns the llm
+     * span. Written in that order since the spans share a start and ties break on insert time.
      */
     private SpanRef seedTwinTurn(
             String pid,

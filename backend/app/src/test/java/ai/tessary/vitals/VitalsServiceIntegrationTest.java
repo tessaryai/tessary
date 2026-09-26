@@ -29,21 +29,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The vitals aggregations against the real Postgres, because every one of them is SQL and the
- * interesting failures are SQL failures.
+ * The vitals aggregations against real Postgres: every one is SQL. Cost sums {@code span.total_cost} priced on
+ * arrival; completeness is {@code trace.is_settled}; duration is {@code trace.latency_ms}.
  *
- * <p><b>What changed under these tests.</b> Cost is no longer computed here at all: spans are priced on
- * arrival and this slice sums {@code span.total_cost}. Completeness is no longer guessed at with a
- * 300-second window: it is {@code trace.is_settled}, which means "nothing has arrived since the last
- * rollup" and is a fact the rollup worker wrote rather than an age threshold each consumer picked for
- * itself. Duration is no longer reconstructed from a min/max envelope over spans: it is
- * {@code trace.latency_ms}, the turn's own start→end.
- *
- * <p>The behaviours the old suite pinned are all still pinned, because they were never really about
- * where the arithmetic happened: a container span's cumulative usage must not double the bill, an
- * unpriced model must be counted rather than valued at zero, a stuck turn must be reported rather than
- * dropped, so the card
- * reconciles with its drill-down.
+ * <p>Still pinned: a container span's cumulative usage must not double the bill, an unpriced model is counted rather
+ * than valued at zero, and a stuck turn is reported rather than dropped, so the card reconciles with its drill-down.
  */
 @SpringBootTest(
         properties = {
@@ -78,7 +68,7 @@ class VitalsServiceIntegrationTest {
 
     private SubstrateV2Fixtures fx;
 
-    /** Comfortably inside the default 7-day window, and far from any boundary. */
+    /** Inside the default 7-day window, far from any boundary. */
     private static final Instant RAN = Instant.now().minus(2, ChronoUnit.HOURS);
 
     @BeforeEach
@@ -92,19 +82,16 @@ class VitalsServiceIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "vitals-cost").project().id();
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // The container. Producers that report cumulative usage on an agent span report cumulative cost
-        // on it too — measured on production as 4,015 agent rows carrying 5.2B tokens over their llm
-        // children. Ingest keeps typed usage and cost off container kinds for exactly this reason; the
-        // scope here is the second line of defence.
+        // The container. Producers report cumulative usage and cost on agent spans (4,015 production rows carried
+        // 5.2B tokens over their children); ingest drops them, and this scope is the second defence.
         SpanRow agent = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", RAN, RAN.plusSeconds(5));
         agent = fx.withPreviews(agent, null, null, "cs-checkout");
-        agent = fx.withUsage(agent, 1_000_000L, 0L, null, null, null);
+        agent = fx.withUsage(agent, 1_000_000L, 0L);
         fx.withCost(agent, "2.00", "0", null, null, "provided");
 
-        // The llm leaf that actually made the call.
         SpanRow leaf = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), agent.id(), "llm", RAN, RAN.plusSeconds(4));
         leaf = fx.withPreviews(leaf, null, null, "cs-checkout");
-        leaf = fx.withUsage(leaf, 1_000_000L, 0L, null, null, null);
+        leaf = fx.withUsage(leaf, 1_000_000L, 0L);
         fx.withCost(leaf, "2.00", "0", null, null, "inferred");
 
         settle(pid, traceId, RAN, RAN.plusSeconds(5));
@@ -127,8 +114,8 @@ class VitalsServiceIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow span = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(2));
         span = fx.withPreviews(span, null, null, "cs-a");
-        // Usage known, rate unknown. The cost columns stay null and cost_source says why.
-        fx.withUsage(span, 500_000L, 500_000L, null, null, null);
+        // Usage known, rate unknown: cost stays null and cost_source says why.
+        fx.withUsage(span, 500_000L, 500_000L);
         settle(pid, traceId, RAN, RAN.plusSeconds(2));
 
         Group total = compute(pid).total();
@@ -145,10 +132,10 @@ class VitalsServiceIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", RAN, RAN.plusSeconds(10));
         fx.withPreviews(root, null, null, "cs-x");
-        // An async child outliving the root by 50s. A min/max envelope would call this turn 60 seconds;
-        // on production that artifact inflated p95 by ~10%.
+        // An async child outliving the root by 50s: a min/max envelope would call this 60 seconds (~10% p95 inflation
+        // in production).
         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "tool", RAN.plusSeconds(1), RAN.plusSeconds(60));
-        // The trace's own end is the root's, which is what the §7.1 timer folds in.
+        // The trace's own end is the root's.
         settle(pid, traceId, RAN, RAN.plusSeconds(10));
 
         Group total = compute(pid).total();
@@ -178,10 +165,9 @@ class VitalsServiceIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", RAN, RAN.plusSeconds(1));
         root = fx.withPreviews(root, null, null, "cs-z");
-        root = fx.withUsage(root, 1_000_000L, 0L, null, null, null);
+        root = fx.withUsage(root, 1_000_000L, 0L);
         fx.withCost(root, "2.00", "0", null, null, "inferred");
-        // Timers only: the trace has an end (so a latency) but has never been rolled up, which is
-        // precisely what is_settled = false says.
+        // An end (so a latency) but never rolled up: is_settled = false.
         traces.applyBatchTimers(
                 pid,
                 List.of(new TraceV2Repository.TimerUpdate(
@@ -221,8 +207,7 @@ class VitalsServiceIntegrationTest {
 
         Vitals v = compute(pid);
         assertEquals(2, v.total().duration().unterminated(), "the total counts them");
-        // The regression this guards: reporting 0 on every row would let a call site whose turns
-        // increasingly hang show a shrinking sample and a flattering p95, with nothing to say why.
+        // Reporting 0 here would let hanging turns show a shrinking sample and a flattering p95.
         assertEquals(
                 2,
                 groupFor(v, "cs-hanging").duration().unterminated(),
@@ -231,8 +216,7 @@ class VitalsServiceIntegrationTest {
     }
 
     /**
-     * The dashboard read groups by the dimension asked for, in any case, falls back to call sites for one
-     * it does not know rather than failing, and keeps its window between one day and the maximum.
+     * Groups by the asked dimension in any case, falls back to call sites for an unknown one, and clamps the window.
      */
     @Test
     void theVitalsReadGroupsByTheAskedDimensionAndClampsItsWindow() {
@@ -264,18 +248,11 @@ class VitalsServiceIntegrationTest {
         assertEquals(VitalsService.MAX_WINDOW_DAYS, fallback.window().days());
     }
 
-    // ---- fixtures -----------------------------------------------------------------------------
-
     private Vitals compute(String projectId) {
         return service.compute(projectId, 7, VitalsRepository.Dimension.CALL_SITE);
     }
 
-    /**
-     * Fold the trace's timers in and roll it up synchronously.
-     *
-     * <p>The scheduler is off in this context, so the only rollup that ever runs is the one a test asks
-     * for — which is what lets these assertions talk about {@code is_settled} at all.
-     */
+    /** Fold the timers in and roll up synchronously; the scheduler is off, so this is the only rollup. */
     private void settle(String pid, String traceId, Instant startedAt, @Nullable Instant endedAt) {
         traces.applyBatchTimers(
                 pid,
@@ -300,7 +277,7 @@ class VitalsServiceIntegrationTest {
         return g;
     }
 
-    /** Kept honest: an empty project reports nothing rather than throwing. */
+    /** An empty project reports nothing rather than throwing. */
     @Test
     void anEmptyProjectComputesCleanly() {
         String pid = TenantFixture.bootstrap(tenants, "vitals-empty").project().id();

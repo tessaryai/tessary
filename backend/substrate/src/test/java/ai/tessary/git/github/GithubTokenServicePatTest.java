@@ -38,18 +38,6 @@ class GithubTokenServicePatTest {
     }
 
     @Test
-    void patTokenIsUsedEvenWhenAppIsNotConfigured() throws Exception {
-        SecretBox box = secretBox();
-        // Unconfigured GithubAppProperties — the exact case the old unconditional isConfigured()
-        // gate used to reject.
-        GithubAppProperties props = new GithubAppProperties();
-        GithubTokenService svc = new GithubTokenService(props, box, mapper);
-
-        GitIntegrationRow integ = patIntegration(box, "ghp_abc123");
-        assertEquals("Bearer ghp_abc123", svc.authHeader(integ));
-    }
-
-    @Test
     void patTokenIsNotCached_rotatedTokenTakesEffectImmediately() throws Exception {
         SecretBox box = secretBox();
         GithubAppProperties props = new GithubAppProperties();

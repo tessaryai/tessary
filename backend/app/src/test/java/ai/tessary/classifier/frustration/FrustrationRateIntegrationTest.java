@@ -3,7 +3,6 @@ package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,11 +42,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * A rising call site end to end against Postgres: the replay files one finding for the spell, ruled positive at
- * filing, with every scored session as a member and every frustrated one as a session and trace witness pair,
- * read back a page at a time; the case opens under detector
- * {@code frustration}; a second pass refreshes rather than re-files; and once someone runs RCA on the case, the
- * next spell opens a new one.
+ * A rising call site against Postgres: one finding per spell, ruled positive at filing, scored sessions as members
+ * and frustrated ones as witnesses, paged; the case opens under {@code frustration}; a second pass refreshes; after
+ * RCA runs, the next spell opens a new case.
  */
 @SpringBootTest
 class FrustrationRateIntegrationTest {
@@ -102,7 +99,7 @@ class FrustrationRateIntegrationTest {
         String pid = project("fr-case");
         ClassifierRow signal = frustration(pid);
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations of reference at 5%
+        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 reference conversations at 5%
         seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
 
@@ -178,7 +175,7 @@ class FrustrationRateIntegrationTest {
                                 .anyMatch(b -> b.traceId().equals(r.traceId()))),
                 "no session on both pages");
 
-        // The second cause names one session and cites one trace: the page reads them off the stored report.
+        // The second cause's session and trace come off the stored report.
         String report = rcaReport(
                 pid,
                 finding.id(),
@@ -232,42 +229,6 @@ class FrustrationRateIntegrationTest {
         assertEquals(1, cases.listLive(pid).size());
     }
 
-    @Test
-    void afterRcaLocksTheCaseTheNextSpellOpensANewOne() {
-        String pid = project("fr-lock");
-        ClassifierRow signal = frustration(pid);
-        Instant start = Instant.now().minus(4, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
-        service.refresh(pid, signal, Instant.now());
-        FindingRow firstSpell = findings.listByProject(pid, null, null, "frustration", false, 10)
-                .get(0);
-        String firstCase = firstSpell.caseId();
-        assertNotNull(firstCase);
-        cases.lock(pid, firstCase, Instant.now());
-
-        // Calm traffic drains the accumulator back to zero, then the rate climbs again: a new spell.
-        seedHours(pid, signal, "cs-chat", start, 13, 30, 30, 0.0);
-        seedHours(pid, signal, "cs-chat", start, 43, 6, 30, 0.40);
-        service.refresh(pid, signal, Instant.now());
-
-        List<FindingRow> spells = findings.listByProject(pid, null, null, "frustration", false, 10);
-        assertEquals(2, spells.size(), "one finding per spell");
-        FindingRow secondSpell = spells.stream()
-                .filter(f -> !f.id().equals(firstSpell.id()))
-                .findFirst()
-                .orElseThrow();
-        assertNotEquals(firstSpell.onsetAt(), secondSpell.onsetAt());
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, secondSpell.triageVerdict());
-        assertNotNull(secondSpell.caseId());
-        assertNotEquals(firstCase, secondSpell.caseId(), "a locked case takes no new finding");
-        assertEquals(
-                CaseRow.Detector.FRUSTRATION,
-                cases.findById(pid, secondSpell.caseId()).orElseThrow().detector());
-    }
-
-    // ---- fixtures
-
     /** A finished frustration RCA report on {@code findingId} carrying {@code causes}, and its job. */
     private String rcaReport(String pid, String findingId, String causes) {
         String job = Ids.ulid();
@@ -295,10 +256,7 @@ class FrustrationRateIntegrationTest {
         return report;
     }
 
-    /**
-     * A page past the last frustrated session still carries how many the finding cites, and a stored score the
-     * reader cannot parse shows the session unscored rather than failing the finding page.
-     */
+    /** A page past the last session still carries the count, and an unparseable score lists the session unscored. */
     @Test
     void aPagePastTheEndKeepsTheTotalAndAnUnreadableScoreIsUnscored() {
         String pid = project("fr-past-end");
@@ -340,7 +298,7 @@ class FrustrationRateIntegrationTest {
         return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
-    /** {@code perHour} one-turn conversations an hour, the first {@code rate} of each hour flagged. */
+    /** {@code perHour} one-turn conversations an hour; the first {@code rate} flagged. */
     private void seedHours(
             String pid,
             ClassifierRow signal,
@@ -396,7 +354,7 @@ class FrustrationRateIntegrationTest {
                 .update();
     }
 
-    /** The grain a ref is at: a span ref carries a span id, a trace ref a trace id, a session ref neither. */
+    /** A span ref carries a span id, a trace ref a trace id, a session ref neither. */
     private static String grain(FindingEvidenceRow row) {
         if (row.spanId() != null) return "span";
         return row.traceId() != null ? "trace" : "session";

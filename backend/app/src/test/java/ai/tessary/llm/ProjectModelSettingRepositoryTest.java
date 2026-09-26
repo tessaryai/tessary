@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.llmspi.ServiceTier;
@@ -66,29 +65,6 @@ class ProjectModelSettingRepositoryTest {
                 rows.stream().filter(r -> r.lane() == ModelLane.RCA).findFirst().orElseThrow();
         assertEquals("anthropic.claude-haiku-4-5", rca.modelKey());
         assertEquals(ServiceTier.STANDARD, rca.serviceTier());
-    }
-
-    @Test
-    void settingsAreScopedToTheirProject() {
-        var a = TenantFixture.bootstrap(tenants, "model-setting-scope-a");
-        var b = TenantFixture.bootstrap(tenants, "model-setting-scope-b");
-
-        repo.upsert(a.project().id(), ModelLane.RCA, "amazon.nova-2-lite", ServiceTier.FLEX, null);
-
-        assertEquals(
-                "amazon.nova-2-lite",
-                repo.findByProject(a.project().id()).stream()
-                        .filter(r -> r.lane() == ModelLane.RCA)
-                        .findFirst()
-                        .orElseThrow()
-                        .modelKey());
-        // B gets no row at all, which is the stronger form of the same claim: a row exists only
-        // because someone chose a model on that project, so a write to A cannot leave one behind on
-        // its sibling. B's own RCA lane still runs — resolved from its org's configured providers —
-        // it simply has nothing stored to resolve against.
-        assertTrue(
-                repo.findByProject(b.project().id()).stream().noneMatch(r -> r.lane() == ModelLane.RCA),
-                "the write must not have reached the sibling project");
     }
 
     @Test

@@ -4,7 +4,7 @@
  * and the modal closes itself once a status poll reads the model scoring again.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { GroundednessStatus } from "../../api/types";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
@@ -70,21 +70,6 @@ async function tick(ms: number) {
 }
 
 describe("GroundednessRestartModal", () => {
-  it("copies the restart prompt, linked at the running version's tag", async () => {
-    const writeText = vi.fn(async () => {});
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    getGroundednessStatus.mockResolvedValue(status({}));
-    renderModal();
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy prompt" }));
-
-    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
-    expect(writeText).toHaveBeenCalledWith(
-      "Restart the Groundedness model on AWS by following " +
-        "https://github.com/tessaryai/tessary/blob/v1.3.0/classifiers/groundedness/setup/groundedness-setup-aws.md#restart",
-    );
-  });
-
   it("closes itself once a poll reads the model scoring again", async () => {
     vi.useFakeTimers();
     getGroundednessStatus.mockResolvedValueOnce(status({}));

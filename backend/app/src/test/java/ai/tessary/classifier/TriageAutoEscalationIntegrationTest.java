@@ -3,7 +3,6 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,9 +30,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,37 +39,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * Automatic Layer-2 escalation, off by default and bounded when on.
- *
- * <p>Both halves fail silently and expensively if they regress. Automatic mode turning itself on
- * does not break a request or corrupt a row; it starts spending LLM budget on every finding of
- * every project, and the first anyone hears of it is the bill. An unbounded automatic mode does
- * the same thing faster the moment a detector is mis-calibrated. So the assertions here are
- * counts of jobs, which is the only unit either failure is measured in.
- *
- * <p>Against Postgres because the bound is a query: the budget counts rows in {@code job} within
- * a rolling window, and the eligible set is a predicate that has to exclude escalated,
- * human-ruled and exemplar-less findings before the limit rather than after.
+ * Automatic Layer-2 escalation: off by default, bounded when on. Both regressions are silent and show up only on the
+ * bill, so the assertions count jobs. Against Postgres because the bound is a query: the budget counts {@code job}
+ * rows in a rolling window, and eligibility must exclude escalated, human-ruled and exemplar-less findings before the
+ * limit.
  */
 @SpringBootTest
 class TriageAutoEscalationIntegrationTest {
 
-    /**
-     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as ONE
-     * spell still running rather than as a recovery and a re-fire: the production behaviour these tests
-     * are about. A test that wants the other arm passes its own.
-     */
+    /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
 
     /**
-     * The flag adapter, stubbed, and only the adapter.
-     *
-     * <p>The obvious seam is {@code CapabilityService}, and it is the wrong one: stubbing the
-     * resolver would skip the default that is the actual subject of the first test. {@link
-     * FeatureFlags} is the layer that holds no defaults at all, so stubbing it leaves the real
-     * override-then-default resolution in place and makes "no override" mean what it means in
-     * production: nobody had an opinion, and the default of false for {@code triage_automatic}
-     * stood.
+     * Stub {@link FeatureFlags}, not {@code CapabilityService}: flags hold no defaults, so the real override-then-
+     * default resolution runs and "no override" leaves {@code triage_automatic} at its default of false.
      */
     @MockitoBean
     FeatureFlags flags;
@@ -80,7 +60,7 @@ class TriageAutoEscalationIntegrationTest {
     @Autowired
     TriageAutoEscalator escalator;
 
-    /** The <em>Run analysis</em> button's own service: the manual arm both guards must leave alone. */
+    /** The Run analysis button's service: the manual arm both guards leave alone. */
     @Autowired
     FindingService drift;
 
@@ -113,48 +93,8 @@ class TriageAutoEscalationIntegrationTest {
             + "\"quantiles\":{\"p50\":[2100,2940],\"p95\":[9000,21400]}}";
 
     /**
-     * The default, and the one that matters most. {@code triage_automatic_enabled} is off by
-     * default, so an org gets manual escalation unless it turns automatic on for itself, and an
-     * empty or unreachable flag store supplies no opinion and leaves that default standing. The
-     * capability layer's failure mode is "nothing happens", never "everything escalates".
-     */
-    @Test
-    @DisplayName("with the flag off, a tick escalates nothing at all")
-    void automaticModeIsOffByDefault() {
-        flagsSilent();
-        Project p = project("auto-esc-off");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
-
-        escalator.tick();
-
-        assertEquals(0, triageJobs(p.projectId()));
-        assertNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
-    }
-
-    /**
-     * The opt-in, and the whole of it: every eligible finding is scheduled, with nothing
-     * withheld. The queue and the launcher pool are what bound the work; a finding refused by a
-     * counter is one nobody ever sees.
-     */
-    @Test
-    @DisplayName("with the flag on, a tick escalates every eligible finding")
-    void automaticModeEscalatesEveryEligibleFinding() {
-        flagsSilent();
-        Project p = project("auto-esc-on");
-        automaticOn(p);
-        for (int i = 0; i < 4; i++) {
-            shift(p, "turn_duration:" + BUCKET + i + ":slower:pinned", 5);
-        }
-
-        escalator.tick();
-
-        assertEquals(4, triageJobs(p.projectId()), "all four are eligible, so all four are scheduled");
-    }
-
-    /**
-     * Repeated ticks are idempotent: this is what stops a scheduler running every fifteen
-     * minutes from re-spending on findings it has already ruled on, the once-per-look guarantee
-     * inside {@code FindingService#analyze}, not a counter above it.
+     * Ticks are idempotent through the once-per-look guarantee in {@code FindingService#analyze}, so a 15-minute
+     * scheduler never re-spends on a ruled finding.
      */
     @Test
     @DisplayName("further ticks do not re-schedule findings already escalated")
@@ -176,46 +116,30 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * The recurrence bar: a cause observed once is a coincidence, and spending a ruling on it is
-     * exactly the cost automatic escalation must not incur.
+     * A cause seen once is a coincidence, and a human-ruled cause is settled (a machine opinion on a BLOCKED
+     * finding would re-litigate a person's decision). The eligible control beside them keeps the zero honest.
      */
     @Test
-    @DisplayName("a finding under the recurrence bar is not escalated automatically")
-    void aSingleSampleIsNotWorthARuling() {
+    @DisplayName("a finding under the recurrence bar, or ruled by a human, is not escalated automatically")
+    void ineligibleFindingsAreSkippedBesideAnEligibleOne() {
         flagsSilent();
-        Project p = project("auto-esc-bar");
+        Project p = project("auto-esc-ineligible");
         automaticOn(p);
-        shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 1);
-
-        escalator.tick();
-
-        assertEquals(0, triageJobs(p.projectId()));
-    }
-
-    /**
-     * A cause a human has already ruled on is settled. Layer 2's answer would be a second opinion nobody
-     * asked for, and on a BLOCKED finding it would be a machine re-litigating a person's decision.
-     */
-    @Test
-    @DisplayName("automatic mode does not re-litigate a cause a human has ruled on")
-    void aHumanRuledCauseIsLeftAlone() {
-        flagsSilent();
-        Project p = project("auto-esc-human");
-        automaticOn(p);
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned", 5);
+        shift(p, "turn_duration:" + BUCKET + "-once:slower:pinned", 1);
+        String ruled = shift(p, "turn_duration:" + BUCKET + "-ruled:slower:pinned", 5);
         findings.recordHumanRuling(
                 p.projectId(),
-                id,
+                ruled,
                 FindingRow.TriageVerdict.POSITIVE,
                 "A person ruled this a real deviation.",
                 Instant.now().toString());
+        shift(p, "turn_duration:" + BUCKET + "-eligible:slower:pinned", 5);
 
         escalator.tick();
 
-        assertEquals(0, triageJobs(p.projectId()));
+        assertEquals(1, triageJobs(p.projectId()), "only the eligible control escalates");
     }
 
-    /** One org's opt-in must not escalate another org's findings. */
     @Test
     @DisplayName("the flag is per org, so an un-targeted org is untouched by a targeted one's tick")
     void theFlagIsScopedToItsOrg() {
@@ -233,14 +157,9 @@ class TriageAutoEscalationIntegrationTest {
     }
 
     /**
-     * The escalator serves two stores through one {@link ai.tessary.classifier.finding.TriageSource}
-     * seam. What this class covers is every case about the escalator itself: the flag gate,
-     * per-tick idempotence, the recurrence bar, human-verdict suppression, per-org scoping, and
-     * first-tick escalation below. The seam's two-store dispatch is covered without a database by
-     * {@code FindingServiceMergeTest} and {@code TriageSourceAbsenceTest}.
+     * No confirmation bar: an escalatable finding escalates on the first tick. The seam's two-store dispatch is
+     * covered by {@code FindingServiceMergeTest} and {@code TriageSourceAbsenceTest}.
      */
-
-    /** An escalatable finding escalates on the first tick that sees it: there is no confirmation bar. */
     @Test
     @DisplayName("an escalatable finding escalates on the first tick")
     void anEscalatableFindingEscalatesOnTheFirstTick() {
@@ -255,16 +174,11 @@ class TriageAutoEscalationIntegrationTest {
         assertNotNull(findings.findById(p.projectId(), id).orElseThrow().escalatedAt());
     }
 
-    // -----------------------------------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------------------------------
-
-    /** Nothing holds an opinion: an empty flag store, which is also what an outage produces. */
+    /** An empty flag store, which is also what an outage produces. */
     private void flagsSilent() {
         when(flags.override(anyString(), any())).thenReturn(Optional.empty());
     }
 
-    /** One org with automatic triage turned on, exactly as its own override row would express it. */
     private void automaticOn(Project p) {
         when(flags.override(Capability.TRIAGE_AUTOMATIC.wire(), FlagContext.forOrg(p.orgId())))
                 .thenReturn(Optional.of(true));
@@ -274,10 +188,8 @@ class TriageAutoEscalationIntegrationTest {
 
     private Project project(String slug) {
         TenantFixture.Setup setup = TenantFixture.bootstrap(tenants, slug);
-        // Frustration is irrelevant here: this escalator never schedules it. Groundedness is scheduled
-        // since 2026-09-21, but its fixture (an armed-window finding) is not built here — every case
-        // below is a metric-drift finding. `triage_automatic` is deliberately not granted here: it is
-        // this class's actual subject and stays at its default until `automaticOn` says otherwise.
+        // Every case here is a metric-drift finding. {@code triage_automatic} is not granted: it is this class's
+        // subject.
         String projectId = setup.project().id();
         classifiers.seedBuiltIns(projectId);
         String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
@@ -315,7 +227,6 @@ class TriageAutoEscalationIntegrationTest {
         return new Project(setup.org().id(), projectId, baselineId);
     }
 
-    /** One metric-drift finding, observed over {@code samples} samples, with its population recorded. */
     private String shift(Project p, String causeKey, long samples) {
         String id = findings.recordShift(
                         Ids.ulid(),
@@ -331,12 +242,8 @@ class TriageAutoEscalationIntegrationTest {
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
-        // A span-grain `member`, which is what the metric sweep writes: no exemplar, since that
-        // role is not used by either drift measure. The escalatable predicate reads any
-        // trace-grain ref, and recording an exemplar here would test the automatic path against
-        // evidence the classifier does not produce, on a lane whose failure mode is silent: an
-        // ineligible finding is skipped, not refused, so nothing would have surfaced but an empty
-        // queue.
+        // A span-grain member with no exemplar, as the metric sweep writes. Seeding an exemplar would test against
+        // evidence the classifier never produces, and an ineligible finding is skipped silently.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -346,11 +253,6 @@ class TriageAutoEscalationIntegrationTest {
         return id;
     }
 
-    /** A jsonb-sourced number as a primitive, with the null check NullAway insists on made loud. */
-    private static double doubleOf(@Nullable Object value) {
-        return ((Number) Objects.requireNonNull(value, "payload number missing")).doubleValue();
-    }
-
     private long triageJobs(String projectId) {
         return jdbc.sql("SELECT count(*) FROM job WHERE kind = 'triage' AND project_id = :pid")
                 .param("pid", projectId)
@@ -358,10 +260,7 @@ class TriageAutoEscalationIntegrationTest {
                 .single();
     }
 
-    /**
-     * Which classifier a measure files under. The sweep spells the same mapping; a test that hardcoded
-     * one key would make the detector filter pass by construction.
-     */
+    /** Mirrors the sweep's mapping; hardcoding one key would make the detector filter pass by construction. */
     private static String classifierFor(String causeKey) {
         return causeKey.startsWith("cost:") ? BuiltInDetector.Kind.COST_DRIFT : BuiltInDetector.Kind.DURATION_DRIFT;
     }

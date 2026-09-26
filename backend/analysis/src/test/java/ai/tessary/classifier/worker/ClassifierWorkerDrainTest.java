@@ -49,10 +49,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
- * The observation sweep's page loop: a kind in the drain set keeps taking pages inside one claim until
- * the stream runs out, recording each page before reading the next; every other kind takes one page a
- * claim, as it always has; and a drain that loses its lease stops rather than moving a cursor it no
- * longer owns.
+ * The observation sweep's page loop: a drain-set kind takes pages until the stream runs out, recording each before
+ * the next; other kinds take one page a claim; a drain that loses its lease stops.
  */
 @ExtendWith(MockitoExtension.class)
 class ClassifierWorkerDrainTest {
@@ -181,9 +179,8 @@ class ClassifierWorkerDrainTest {
     }
 
     /**
-     * The tick is the only thing that moves every project's sweeps, so no one step's failure may stop the
-     * rest: a dead-letter sweep that fails (or that dead-lettered some jobs) still enqueues and claims, and
-     * one project whose enqueue throws still leaves the next project enqueued.
+     * No step's failure stops the tick: a failing dead-letter sweep still enqueues and claims, and one project's
+     * throwing enqueue still leaves the next enqueued.
      */
     @Test
     void aTickSurvivesAFailedDeadLetterSweepAndOneProjectsFailedEnqueue() {
@@ -202,7 +199,7 @@ class ClassifierWorkerDrainTest {
         verify(jobs, times(2)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
     }
 
-    /** A project scan or a claim that fails ends the tick: no sweep runs off a list it could not read. */
+    /** A failed project scan or claim ends the tick. */
     @Test
     void aFailedProjectScanOrClaimRunsNoSweep() {
         when(substrate.projectsWithObservations()).thenThrow(new IllegalStateException("db down"));
@@ -219,8 +216,8 @@ class ClassifierWorkerDrainTest {
     }
 
     /**
-     * A job whose classifier was deleted or switched off finishes without moving its cursor. Leaving it
-     * claimed re-runs it every tick; moving the cursor would skip traffic if the classifier comes back.
+     * A deleted or disabled classifier's job finishes without moving its cursor: left claimed it re-runs every tick,
+     * and moving the cursor would skip traffic if it returns.
      */
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
@@ -251,10 +248,8 @@ class ClassifierWorkerDrainTest {
     }
 
     /**
-     * Everything after the detections are scored is fail-soft: a detection row that will not write, an
-     * arming gate that throws, a pre-deploy registration that throws and a catch-up that throws each cost
-     * only their own work. None may stop the cursor, or the sweep re-scores the same page forever. The other
-     * fired detection still writes.
+     * After scoring, everything is fail-soft: a failed detection write, arming gate, pre-deploy registration, or
+     * catch-up costs only itself. None may stop the cursor, or the page is re-scored forever.
      */
     @Test
     void failuresAfterScoringNeverStopTheCursor() {
@@ -313,8 +308,6 @@ class ClassifierWorkerDrainTest {
         verify(jobs, never()).markFailed(anyString(), any(), anyInt());
     }
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
     private ClassifierWorker worker() {
         return worker(PAGE);
     }
@@ -355,7 +348,7 @@ class ClassifierWorkerDrainTest {
                 "now");
     }
 
-    /** An enabled classifier of {@code kind} at observation grain, whose detector fires on nothing. */
+    /** An enabled observation-grain classifier whose detector fires on nothing. */
     private void armSignal(String kind) {
         when(signals.findById(PROJECT, CLASSIFIER))
                 .thenReturn(Optional.of(new ClassifierRow(
@@ -433,8 +426,8 @@ class ClassifierWorkerDrainTest {
     }
 
     /**
-     * The bug: on a machine whose own host name does not resolve, building the lease owner throws and the
-     * worker bean never constructs, so nothing is ever swept there. It falls back to a fixed name instead.
+     * On a host whose name does not resolve, building the lease owner threw and the worker never constructed. It
+     * falls back to a fixed name.
      */
     @Test
     void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {

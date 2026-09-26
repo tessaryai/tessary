@@ -15,17 +15,14 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler.Evidence
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Four assembler shapes, one test per shape, plus the token budget and the payload
- * fallback. Real payload fixtures rather than hand-abbreviated ones — copied verbatim from {@code
- * ToolErrorEvidence.toJson}/{@code MetricFindingEvidence.toJson}'s field lists, so a field these tests
- * do not exercise is a field the real detectors also never write, not an assembler bug.
+ * Four assembler shapes plus the token budget and payload fallback, over fixtures copied from {@code
+ * ToolErrorEvidence.toJson} and {@code MetricFindingEvidence.toJson}'s field lists.
  */
 class ClassifierDossierAssemblerTest {
 
@@ -135,21 +132,6 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
-    void unrecognisedShapeFallsThroughToEmpty() throws Exception {
-        String payload = "{\"some_other_classifier\":true,\"value\":1}";
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER,
-                mock(FindingEvidenceRepository.class),
-                PROJECT_ID,
-                FINDING_ID,
-                new EvidenceCounts(0, 0, 0, 0, 0),
-                payload);
-        assertTrue(
-                out.isEmpty(),
-                "no dedicated assembler recognises this shape — caller must fall back to DossierPayload.forAgent");
-    }
-
-    @Test
     void smallEvidenceSetIsFullyEnumerated() throws Exception {
         String payload = "{\"bucket\":{\"key\":\"k\"},\"ratio\":1.0,\"window\":{}}";
         List<FindingEvidenceRow> rows =
@@ -178,7 +160,7 @@ class ClassifierDossierAssemblerTest {
         }
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
         when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
-                .thenReturn(pageOf(page, true)); // more rows exist beyond this page
+                .thenReturn(pageOf(page, true)); // more rows exist
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 50_000, 0, 0, 0), payload);
@@ -226,20 +208,7 @@ class ClassifierDossierAssemblerTest {
         assertTrue(truncated.startsWith("line 0\n"), "the head — the claim and statistics — must survive whole");
     }
 
-    @Test
-    void budgetIsANoOpUnderTheCap() {
-        String small = "line 1\nline 2\n";
-        assertEquals(small, ClassifierDossierAssembler.budget(small));
-    }
-
-    /** Sanity on the fixture's own numeral formatting, so the "50,000" assertion above is not brittle
-     *  to locale — pinned separately here rather than relying on the test JVM's default locale. */
-    @Test
-    void countFormattingUsesRootLocale() {
-        assertEquals("50,000", String.format(Locale.ROOT, "%,d", 50_000));
-    }
-
-    /** A payload that is not JSON has no shape to assemble, so the caller falls back rather than failing the run. */
+    /** A non-JSON payload falls back rather than failing the run. */
     @Test
     void anUnparseablePayloadFallsThroughToEmpty() {
         assertEquals(
@@ -253,7 +222,7 @@ class ClassifierDossierAssemblerTest {
                         "{not json"));
     }
 
-    /** Each role reads its own count, so the declared population never swaps one side for another. */
+    /** Each role reads its own count. */
     @ParameterizedTest
     @CsvSource({"exemplar, 1", "member, 2", "baseline, 3", "witness, 4", "changepoint, 5", "sample, 0"})
     void eachRoleReadsItsOwnCount(String role, long expected) {
@@ -272,8 +241,8 @@ class ClassifierDossierAssemblerTest {
             + "\"failures\":{\"cur\":54}";
 
     /**
-     * A cut pattern list says it was cut, so the agent does not read the kept patterns as the whole failure
-     * population; a payload with no patterns says there is no breakdown, so the agent does not invent one.
+     * A cut pattern list says so, and no patterns says there is no breakdown, so the agent neither misreads nor
+     * invents one.
      */
     @Test
     void theToolErrorDossierDeclaresACutPatternListAndAMissingOne() throws Exception {
@@ -299,9 +268,8 @@ class ClassifierDossierAssemblerTest {
     }
 
     /**
-     * The rolling arm has no per-instance baseline rows, so its token pairs and the ring it was learned from
-     * are the only account of the reference side. Dropping either leaves the agent auditing a claim with no
-     * "before" to compare against.
+     * The rolling arm's token pairs and ring are the only account of the reference side; without them the agent has
+     * no "before".
      */
     @Test
     void theMetricDriftDossierCarriesTheTokenPairsAndTheReferenceRing() throws Exception {

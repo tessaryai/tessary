@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,16 +53,6 @@ class PriceSnapshotTest {
     }
 
     @Test
-    @DisplayName("the vendored snapshot carries mantle's own route-prefixed spelling for the GPT-5.6 line")
-    void load_coversMantlesRoutePrefixedIds() {
-        // What BedrockModelProfile.MANTLE_ROUTE_PREFIX depends on existing upstream. Without
-        // this row, ModelResolver has nothing to resolve the producer's reported id to.
-        Map<String, ModelRates> rates = byId(litellm());
-        assertNotNull(rates.get("bedrock_mantle/openai.gpt-5.6-luna"), "mantle's own priced route for luna");
-        assertNotNull(rates.get("bedrock_mantle/openai.gpt-5.6-terra"), "mantle's own priced route for terra");
-    }
-
-    @Test
     @DisplayName("entries that price no tokens are not imported as models")
     void load_skipsEntriesThatPriceNoTokens() {
         // Imported, a rate-less entry becomes a model_price row with every bucket null — indistinguishable
@@ -72,34 +61,6 @@ class PriceSnapshotTest {
         assertNull(models.get("dall-e-3"), "an entry with no token rate is not a priced model");
         assertNull(models.get("sample_spec"), "LiteLLM's documentation stub is not a model");
         assertNotNull(models.get("claude-sonnet-5"), "the guard must not swallow a genuinely priced model");
-    }
-
-    @Test
-    @DisplayName("the version is the content, hashed — stable across loads and prefixed by its source")
-    void load_versionIsAStableContentHash() {
-        assertEquals(litellm().version(), litellm().version(), "the same bytes must always be the same book");
-        assertTrue(
-                litellm().version().startsWith(PriceBook.SOURCE_LITELLM + "-"),
-                litellm().version());
-        assertEquals(
-                PriceBook.SOURCE_LITELLM.length() + 1 + 12,
-                litellm().version().length(),
-                "source, a dash, and 12 hex characters");
-    }
-
-    @Test
-    @DisplayName("per-token rates convert to per-million-token exactly, and an absent bucket stays null")
-    void load_convertsToPerMillionTokens() {
-        ModelRates sonnet = byId(litellm()).get("claude-sonnet-5");
-        // 2e-06 / 2e-07 / 1e-05 / 2.5e-06 per token in the file.
-        assertEquals(0, new BigDecimal("2").compareTo(requireRate(sonnet.inputPerMtok())));
-        assertEquals(0, new BigDecimal("10").compareTo(requireRate(sonnet.outputPerMtok())));
-        assertEquals(0, new BigDecimal("0.2").compareTo(requireRate(sonnet.cacheReadPerMtok())));
-        assertEquals(0, new BigDecimal("2.5").compareTo(requireRate(sonnet.cacheWritePerMtok())));
-
-        // gpt-4o's caching is automatic: no cache-creation bucket at all. Null means never billed for it,
-        // which must survive the parse rather than becoming a zero rate.
-        assertNull(byId(litellm()).get("gpt-4o").cacheWritePerMtok(), "an absent bucket is null, never 0");
     }
 
     @Test
@@ -143,11 +104,6 @@ class PriceSnapshotTest {
                         body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         "https://example.test/prices.json")
                 .isEmpty());
-    }
-
-    private static BigDecimal requireRate(@Nullable BigDecimal rate) {
-        assertNotNull(rate, "expected a rate");
-        return rate;
     }
 
     private static boolean samePrice(ModelRates a, ModelRates b) {

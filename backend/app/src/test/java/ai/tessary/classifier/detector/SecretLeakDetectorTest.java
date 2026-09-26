@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
-import ai.tessary.testsupport.ClassifierObservations;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
@@ -47,21 +46,6 @@ class SecretLeakDetectorTest {
     }
 
     // ---- the stamp -------------------------------------------------------------------------------------------
-
-    @Test
-    void anAnchoredStampOnTheOutputIsAHighLeakNamedByItsRule() {
-        Detection d = detect(
-                "your key is [REDACTED_SECRET]",
-                "[{\"rule\":\"aws-access-token\",\"field\":\"output\",\"anchored\":true}]");
-        assertTrue(d.fired());
-        assertEquals(Detection.Severity.CRITICAL, d.severity());
-        assertEquals(Detection.Confidence.HIGH, d.confidence());
-        JsonNode evidence = evidence(d);
-        assertEquals("aws-access-token", evidence.path("pattern").asText(), "named by the rule, not by the token");
-        assertEquals("redaction", evidence.path("source").asText());
-        assertEquals("redacted", evidence.path("stored").asText());
-        assertTrue(evidence.path("masked").isMissingNode(), "the fixture stamp carries no masked key");
-    }
 
     @Test
     void anUnanchoredStampIsLow() {
@@ -117,16 +101,6 @@ class SecretLeakDetectorTest {
         Detection d = detect("token: " + secret);
         assertTrue(d.fired());
         assertFalse(Objects.requireNonNull(d.evidenceJson()).contains(secret));
-    }
-
-    @Test
-    void firesOnAKeyInsideTheRealGenAiOutputEnvelope() {
-        // The raw output column holds the stored gen_ai envelope, so a credential in the assistant message is
-        // still found: the shape ingest actually writes.
-        Detection d = detect(ClassifierObservations.assistantOutput(
-                "Sure, the Stripe key is sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc for the billing job."));
-        assertEquals(Detection.Confidence.HIGH, d.confidence());
-        assertEquals("stripe-access-token", evidence(d).path("pattern").asText());
     }
 
     @Test

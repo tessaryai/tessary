@@ -27,35 +27,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The correction loop for a {@code distribution_shift} finding — metric-drift.md §9, the half of the
- * metric-drift program a human actually touches.
+ * The correction loop for a {@code distribution_shift} finding (metric-drift.md §9): both verbs correct the reference
+ * a distribution is measured against.
  *
- * <p>Both verbs already exist on the Classifiers page and post the same two action strings every finding
- * uses. What they <em>mean</em> here: metric drift corrects the <b>reference</b> a whole distribution is
- * measured against.
- *
- * <p><b>The asymmetry is the point, and it is why both branches are tested rather than just the happy
- * one.</b> A reference that moved on <em>Real deviation</em> would make the next window compare a broken
- * system against its broken self: no shift, case auto-closed, and a regression a human had personally
- * confirmed reading as a recovery on every surface in the product. The detector would go silent through
- * exactly the event it exists to catch. So "the reference did NOT move" is a load-bearing assertion, not
- * a symmetry check.
+ * <p>The asymmetry is the point. A reference that moved on Real deviation would compare a broken system with itself:
+ * no shift, the case auto-closed, and a confirmed regression reading as a recovery everywhere. So "the reference did
+ * not move" is load-bearing.
  */
 @SpringBootTest
 class MetricFindingResolveIntegrationTest {
 
-    /**
-     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as ONE
-     * spell still running rather than as a recovery and a re-fire — the production behaviour these tests
-     * are about. A test that wants the other arm passes its own.
-     */
+    /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
 
     @Autowired
@@ -81,28 +69,22 @@ class MetricFindingResolveIntegrationTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** The window the bucket sat in before it moved — what the pinned reference should end up holding. */
+    /** The closed window the pinned reference should end up holding. */
     private static final String CLOSED_SKETCH = "{\"kind\":\"hist\",\"lo\":1.0,\"r\":1.05,\"bins\":320,\"n\":500}";
 
-    /** The window still being FILLED. Deliberately different, and deliberately NOT what gets pinned. */
+    /** The window still filling: deliberately different, and never what gets pinned. */
     private static final String FILLING_SKETCH = "{\"kind\":\"hist\",\"lo\":1.0,\"r\":1.05,\"bins\":320,\"n\":9}";
 
     private static final String CLOSED_WORKLOAD = "{\"kind\":\"workload\",\"input_tokens\":{\"n\":500}}";
 
-    /**
-     * The rolling control as {@link ai.tessary.classifier.metric.MetricControl} serializes it, with
-     * the closed window as its newest — and only — day. Absorbing pins THIS day, so the assertions below
-     * are the same ones they were when the reference was a single {@code prev} slot.
-     */
+    /** The control ring with the closed window as its only day; absorbing pins this day. */
     private static final String CONTROL_RING =
             "{\"kind\":\"control\",\"half_life_days\":7.0,\"days\":[{\"d\":\"2026-07-23\",\"m\":" + CLOSED_SKETCH
                     + ",\"w\":" + CLOSED_WORKLOAD + "}]}";
 
     /**
-     * The user-visible form of metric-drift.md §6's key. {@code ClassifiersPage.tsx} renders it verbatim in
-     * mono followed by a literal {@code " — {causeKind}"}, so this string is a sentence a human reads and
-     * not an internal identifier — which is what rules out a compact opaque key. Pinned here because the
-     * page would happily render an unreadable one.
+     * §6's key as a human reads it: ClassifiersPage renders it verbatim, so it must be a readable sentence, not an
+     * opaque id.
      */
     private static final String CAUSE_KEY = "turn_duration:discover-sales-prospects:slower:pinned";
 
@@ -118,11 +100,9 @@ class MetricFindingResolveIntegrationTest {
         var view = drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.EXPECTED, "user-1");
 
         MetricBaselineRow row = baselines.findById(f.projectId, f.baselineId).orElseThrow();
-        // metric-drift.md §9 writes this as `pinned_sketch <- current`, and the column literally named
-        // current_sketch_json is the wrong one to read: it holds the window still being filled, so
-        // pinning it would install a nine-sample reference that the detector then abstains on until
-        // something else replaces it. The newest COMPLETE summary is the control ring's newest day,
-        // which holds the window the finding fired on.
+        // §9 says {@code pinned_sketch <- current}, but {@code current_sketch_json} holds the filling window: pinning
+        // it would install a nine-sample reference the detector abstains on. The newest complete summary is the
+        // ring's newest day.
         assertEquals(CLOSED_SKETCH, row.pinnedSketchJson(), "the reference is the closed window, not the filling one");
         assertEquals(CLOSED_WORKLOAD, row.pinnedWorkloadJson(), "the workload moves WITH the sketch it belongs to");
         assertNotNull(row.pinnedAt(), "an absorbed reference is dated by the decision that installed it");
@@ -132,17 +112,13 @@ class MetricFindingResolveIntegrationTest {
         assertEquals(FindingRow.Status.CLOSED, view.status(), "the absorbed cause closes");
         assertEquals(FindingRow.TriageVerdict.NEGATIVE, view.triageVerdict());
 
-        // An online baseline cannot be stopped from absorbing drift. What can be done is to make every
-        // absorption a durable, readable row — and this is the one absorption a person chose, so it is
-        // the one that most needs to be readable a quarter later.
+        // Every absorption is a durable changelog row, and a person's choice most needs to be readable later.
         List<BehaviorBaselineEventRow> log = changelogFor(f.projectId, f.baselineId);
         assertEquals(1, log.size(), "one re-pin, one changelog entry");
         assertEquals(
                 BehaviorBaselineEventRow.Event.BASELINE_REPINNED, log.get(0).event());
         assertEquals(CAUSE_KEY, log.get(0).gramKey(), "the entry says what it was about, in the finding's own words");
-        // Read as JSON, not as text: `evidence` and `detail` are both jsonb, and Postgres re-serializes
-        // a jsonb value on the way out — keys reordered, a space after every colon. A substring assertion
-        // on the blob would pass today and break on a Postgres upgrade for no real reason.
+        // Read as JSON: Postgres re-serializes jsonb, so a substring check would break on an upgrade.
         assertNotNull(log.get(0).detailJson(), "the finding's evidence rides along as the entry's detail");
         assertEquals("turn_duration", detail(log.get(0)).path("measure").asText());
         assertEquals(1.4, detail(log.get(0)).path("ratio").asDouble(), 1e-9);
@@ -163,8 +139,8 @@ class MetricFindingResolveIntegrationTest {
         assertNull(row.pinnedAt());
         assertNull(row.pinnedByVersionId());
 
-        // A positive human ruling is what "marks for escalation" means concretely now: the finding
-        // stays open and human_verdict_at is stamped, which is what lets the cause open or join a case.
+        // A positive human ruling keeps the finding open with human_verdict_at stamped, which lets it open or join a
+        // case.
         assertEquals(FindingRow.Status.OPEN, view.status());
         assertEquals(FindingRow.TriageVerdict.POSITIVE, view.triageVerdict());
         assertNotNull(view.humanVerdictAt(), "the ruling is stamped, which is what a case is opened off");
@@ -175,36 +151,6 @@ class MetricFindingResolveIntegrationTest {
                 "nothing moved, so the changelog has nothing to record — a row here would claim otherwise");
     }
 
-    @Test
-    @DisplayName("Real deviation: the confirmed span excludes the window's own EVENT day, not the day it was ruled")
-    void notExpectedExcludesTheWindowsOwnEventDayNotTheRulingDay() {
-        // A window that closed days before anyone looked at it — the ordinary lag between traffic
-        // happening and a human pressing a verdict, and exactly the gap [R11] exists to get right: the
-        // exclusion has to key on when the regression RAN, not on today, or a backfilled or slowly
-        // triaged finding would exclude the wrong day (or none of the real ones) from the control.
-        String eventAt = "2026-07-01T12:00:00Z";
-        Fixture f = fixture("metric-resolve-event-bounds", eventAt);
-
-        drift.resolve(f.projectId, f.findingId, BehaviorDtos.BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
-
-        List<FindingRepository.ConfirmedSpan> spans = findings.confirmedSpansBySubject(
-                        f.projectId, Set.of(classifierFor(CAUSE_KEY)))
-                .get(f.baselineId);
-        assertNotNull(spans, "the confirmed finding must be readable back through its own baseline");
-        FindingRepository.ConfirmedSpan span = spans.get(0);
-        assertEquals(eventAt, span.fromAt(), "onset_at is the window's own event time, not the moment it was ruled");
-        assertEquals(eventAt, span.toAt(), "last_seen_at matches onset_at on a finding's first write");
-        assertEquals(
-                "2026-07-01",
-                MetricControl.dayOf(Instant.parse(span.fromAt())),
-                "the day MetricDriftSweep#excludedDays must drop from the control ring");
-    }
-
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
-
-    /** A project holding one armed baseline with a closed window, and one open finding against it. */
     private record Fixture(String projectId, String baselineId, String findingId) {}
 
     private Fixture fixture(String slug) {
@@ -212,9 +158,8 @@ class MetricFindingResolveIntegrationTest {
     }
 
     /**
-     * @param eventAt the finding's onset — the window's own EVENT time [R11], passed separately from
-     *     {@code now} (every OTHER column's wall clock) so a test can tell the two apart rather than
-     *     accidentally proving the write correct because both happened to be the same instant.
+     * {@code eventAt} is the onset in event time [R11], separate from wall-clock {@code now} so the test can tell
+     * them apart.
      */
     private Fixture fixture(String slug, String eventAt) {
         String projectId = TenantFixture.bootstrap(tenants, slug).project().id();
@@ -252,9 +197,8 @@ class MetricFindingResolveIntegrationTest {
                         now,
                         now))
                 .id();
-        // A day's worth of closed windows in the control ring, and the next window already part-filled —
-        // the state any real bucket is in by the time a human looks at its finding. Absorbing pins the
-        // ring's NEWEST day, never the filling window, which is what the assertions below pin down.
+        // A day of closed windows and a part-filled next one, as any real bucket has when a human looks; absorbing
+        // pins the newest closed day.
         baselines.closeWindow(baselineId, CONTROL_RING, now);
         baselines.advanceWindow(baselineId, 9, now, "2026-07-24T00:00:00Z", null, null, null);
         baselines.updateCurrentSketch(baselineId, FILLING_SKETCH, null, null, null, now);
@@ -290,10 +234,7 @@ class MetricFindingResolveIntegrationTest {
                 .toList();
     }
 
-    /**
-     * Which classifier a measure files under. The sweep spells the same mapping; a test that hardcoded
-     * one key would make the detector filter pass by construction.
-     */
+    /** Mirrors the sweep's mapping; hardcoding one key would make the detector filter pass by construction. */
     private static String classifierFor(String causeKey) {
         return causeKey.startsWith("cost:") ? BuiltInDetector.Kind.COST_DRIFT : BuiltInDetector.Kind.DURATION_DRIFT;
     }

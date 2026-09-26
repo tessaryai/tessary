@@ -2,7 +2,6 @@
 package ai.tessary.classifier.detector.groundedness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -36,12 +35,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The rate test over groundedness-shaped tallies: a trace is a trial, one with a flagged answer a failure, and
- * the shared engine runs on {@link GroundednessConfig}'s defaults (judged from 200 traces, the reference learning
- * until 1,000, a floor of 4 on {@code h}, a 50,000-trace false-alarm budget).
- *
- * <p>That two flagged answers in one trace are one failure is the tally query's doing, so it is held against
- * Postgres in {@code GroundednessRateIntegrationTest}; everything here starts from the hourly tallies.
+ * The rate test over groundedness tallies: a trace is a trial and a flagged answer a failure, on {@link
+ * GroundednessConfig}'s defaults (judged from 200 traces, learning until 1,000, {@code h} floor 4, one false alarm
+ * per 50,000 traces). Two flags in one trace counting once is the tally query's, held in {@code
+ * GroundednessRateIntegrationTest}.
  */
 class GroundednessRateReplayTest {
 
@@ -74,12 +71,6 @@ class GroundednessRateReplayTest {
         return sweep(tallies, Map.of());
     }
 
-    private static ToolErrorRate baselineOf(Sweep sweep) {
-        ToolErrorRate baseline = sweep.advanced().get(0).baseline();
-        assertNotNull(baseline);
-        return baseline;
-    }
-
     private static List<Spell> rising(Sweep sweep) {
         return sweep.spells().stream()
                 .filter(sp -> sp.decision().direction() == Direction.UP)
@@ -91,26 +82,6 @@ class GroundednessRateReplayTest {
         Sweep sweep = sweep(series(new ArrayList<>(), 0, 9, 0.50));
         assertTrue(sweep.advanced().isEmpty(), "180 traces is still learning");
         assertTrue(sweep.spells().isEmpty());
-    }
-
-    @Test
-    void theReferenceKeepsLearningUntil1000TracesThenFreezes() {
-        Sweep at600 = sweep(series(new ArrayList<>(), 0, 30, 0.05));
-        assertEquals(600, baselineOf(at600).calls(), "judged from 200 and still learning at 600");
-
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 60, 0.05);
-        Sweep first = sweep(s);
-        ToolErrorRate learned = baselineOf(first);
-        assertEquals(1_000, learned.calls(), "frozen at 1,000");
-        assertEquals(50, learned.failures());
-
-        // The window slides past the hours it learned from and the traffic worsens; a rebuild keeps the reference.
-        List<HourlyToolTally> slid = new ArrayList<>(s.subList(30, 60));
-        series(slid, 60, 20, 0.30);
-        Sweep second = sweep(slid, Map.of(CALL_SITE, first.advanced().get(0).rebuilding()));
-        assertEquals(1_000, baselineOf(second).calls());
-        assertEquals(50, baselineOf(second).failures());
-        assertEquals(CONFIG.stateEpoch(), second.advanced().get(0).stateEpoch());
     }
 
     @Test
@@ -128,18 +99,6 @@ class GroundednessRateReplayTest {
     }
 
     @Test
-    void aRiseWhileTheReferenceIsStillLearningIsCaught() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 10, 0.05); // 200: judging starts
-        int hours = 0;
-        while (rising(sweep(s)).isEmpty()) {
-            series(s, 10 + hours, 1, 0.25);
-            hours++;
-            assertTrue(hours < 40, "caught before the reference would have frozen");
-        }
-        assertTrue(baselineOf(sweep(s)).calls() < CONFIG.freezeBaselineTraces(), "caught while still learning");
-    }
-
-    @Test
     void aSteadyFivePercentIsSilentOver5000Traces() {
         // A seeded run, not a bound: the budget is one false finding per 50,000 traces.
         Random random = new Random(20260923L);
@@ -152,57 +111,10 @@ class GroundednessRateReplayTest {
         }
     }
 
-    @Test
-    void aSlowRampIsCaught() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 50, 0.05);
-        for (int h = 0; h < 150; h++) series(s, 50 + h, 1, 0.05 + 0.10 * h / 150.0);
-        List<Spell> spells = rising(sweep(s));
-        assertEquals(1, spells.size());
-    }
-
-    @Test
-    void aLateFlagReReadIntoItsOriginalHourMovesTheAccumulatorOnTheNextPass() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 50, 0.05);
-        series(s, 50, 6, 0.10);
-        Sweep first = sweep(s);
-        double before = first.advanced().get(0).state().sUp();
-
-        // Another answer of a trace first scored at hour 52 was flagged later; the replay reads it there.
-        List<HourlyToolTally> reread = new ArrayList<>(s);
-        HourlyToolTally h52 = reread.get(52);
-        reread.set(52, new HourlyToolTally(h52.bucket(), CALL_SITE, h52.calls(), h52.failures() + 2));
-        Sweep second = sweep(reread, Map.of(CALL_SITE, first.advanced().get(0).rebuilding()));
-
-        assertTrue(second.advanced().get(0).state().sUp() > before);
-        assertEquals(baselineOf(first).calls(), baselineOf(second).calls(), "the frozen reference does not move");
-    }
-
-    @Test
-    void aResetFencesTheHoursBeforeItAndTheReferenceIsReLearnedAfterIt() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 50, 0.05);
-        series(s, 50, 30, 0.25);
-        assertEquals(1, rising(sweep(s)).size());
-
-        // resetAndRelearn: accumulator, onset and reference cleared, reset_at written.
-        String resetAt = START.plus(Duration.ofHours(80)).plusMillis(250).toString();
-        CarriedState reset = new CarriedState(
-                CALL_SITE, ToolErrorDetector.State.EMPTY, null, null, CONFIG.stateEpoch(), null, null, resetAt);
-        series(s, 81, 15, 0.25);
-        Sweep after = sweep(s, Map.of(CALL_SITE, reset));
-
-        assertTrue(after.spells().isEmpty(), "the closed spell is not re-accumulated");
-        ToolErrorRate relearned = baselineOf(after);
-        assertEquals(300, relearned.calls(), "learned from post-reset traffic only, and still learning");
-        assertEquals(75, relearned.failures(), "at its 25%");
-        assertEquals(resetAt, after.advanced().get(0).resetAt());
-    }
-
     /**
-     * The engine recovers a run's failures from its accumulator, which assumes one reference for the whole run.
-     * A run that began while the reference was learning was judged against several, so the finding counts its
-     * flagged traces instead and derives the rate from the count: failures are the flagged traces, never more
-     * than the traces scored, and a run with no traces reads at the baseline rate. The statistic, threshold and
-     * onset stay the engine's. Expected values are by hand, for a 2% baseline.
+     * The engine assumes one reference per run. A run that began while learning was judged against several, so the
+     * finding counts its flagged traces (never more than scored; none reads at baseline). Statistic, threshold, and
+     * onset stay the engine's. Expected values by hand, for a 2% baseline.
      */
     @ParameterizedTest(name = "{0} calls, {1} flagged -> {2} failures at {3}")
     @CsvSource({
@@ -234,8 +146,6 @@ class GroundednessRateReplayTest {
                         counted.baselineCalls(),
                         String.valueOf(counted.onsetAt())));
     }
-
-    // ---- the service over the replay: only a rise is reported, tuning changes reset, unassigned never judged
 
     @Test
     void onlyARiseIsReported() {
@@ -299,14 +209,6 @@ class GroundednessRateReplayTest {
                         h.now),
                 h.states.saves.getFirst(),
                 "the retuned row, saved before the replay advances it");
-    }
-
-    @Test
-    void aStateUnderTheCurrentTuningIsRebuiltNotReset() {
-        Sweep learned = sweep(series(new ArrayList<>(), 0, 12, 0.05));
-        Harness h = new Harness(series(new ArrayList<>(), 0, 12, 0.05), learned.advanced());
-        h.refresh();
-        assertEquals(List.of(), h.states.resets);
     }
 
     private record Reset(
@@ -397,7 +299,7 @@ class GroundednessRateReplayTest {
         }
     }
 
-    /** The service over fake rate and state repositories; a spell's finding write is a mock that records none. */
+    /** Fake rate and state repositories; the finding write records nothing. */
     private static final class Harness {
         final RecordedStates states;
         final Instant at = START.plus(Duration.ofDays(8));

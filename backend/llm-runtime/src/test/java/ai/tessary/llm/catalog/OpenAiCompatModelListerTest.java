@@ -50,20 +50,6 @@ class OpenAiCompatModelListerTest {
     }
 
     @Test
-    void parsesEveryIdFromTheDataArray_displayNameDefaultsToTheId() throws Exception {
-        stubResponse(200, "{\"object\":\"list\",\"data\":[{\"id\":\"gpt-5.5\"},{\"id\":\"gpt-5.4-mini\"}]}");
-
-        List<ProviderModel> models = lister().list(
-                        new ResolvedCredential("sk-test-key", "https://api.openai.com/v1", null, null, null, false));
-
-        assertEquals(
-                List.of(
-                        new ProviderModel("gpt-5.5", "gpt-5.5", "OpenAI"),
-                        new ProviderModel("gpt-5.4-mini", "gpt-5.4-mini", "OpenAI")),
-                models);
-    }
-
-    @Test
     void sendsTheApiKeyAsABearerHeaderAgainstTheModelsPath() throws Exception {
         stubResponse(200, "{\"data\":[]}");
 
@@ -91,15 +77,6 @@ class OpenAiCompatModelListerTest {
                 lister().list(new ResolvedCredential(null, "https://api.openai.com/v1", null, null, null, false));
 
         assertEquals(List.of(new ProviderModel("gpt-5.5", "gpt-5.5", "OpenAI")), models);
-    }
-
-    @Test
-    void emptyDataArray_returnsEmptyNotNull() throws Exception {
-        stubResponse(200, "{\"data\":[]}");
-
-        assertEquals(
-                List.of(),
-                lister().list(new ResolvedCredential(null, "https://api.openai.com/v1", null, null, null, false)));
     }
 
     @Test

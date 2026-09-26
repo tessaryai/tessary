@@ -14,20 +14,17 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * {@link ContentExtractor}'s text and block views of a stored gen_ai payload: the per-message thread view
- * ({@link ContentExtractor#columnMessages}), the single-role text view ({@link ContentExtractor#columnText})
- * and the typed block view ({@link ContentExtractor#blocksFromContent}). {@code partPlaceholder} has its
- * own class, {@link ContentExtractorPartPlaceholderTest}.
+ * {@link ContentExtractor}'s views of a stored gen_ai payload: {@link ContentExtractor#columnMessages}, {@link
+ * ContentExtractor#columnText}, and {@link ContentExtractor#blocksFromContent}. {@code partPlaceholder} is {@link
+ * ContentExtractorPartPlaceholderTest}'s.
  */
 class ContentExtractorTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
-     * The bugs: the system prompt leaks into a {user, assistant} thread; an attachment silently vanishes
-     * from the rendered turn instead of showing as a placeholder; a stray non-message element, a message
-     * with no content, a scalar content node or a successful tool_result (no signal beyond the paired
-     * call) adds an empty turn.
+     * The system prompt leaking into the thread; an attachment vanishing instead of a placeholder; a stray element,
+     * contentless message, scalar content, or successful tool_result adding an empty turn.
      */
     @Test
     void columnMessages_keepsListedRolesInOrderWithPlaceholdersAndDropsEmptyTurns() {
@@ -74,7 +71,7 @@ class ContentExtractorTest {
                 Arguments.of("an empty array adds no phantom turn", "[]", List.of()));
     }
 
-    /** The bugs, one per row: a payload that is not a message envelope loses its text, or adds an empty turn. */
+    /** One bug per row: a non-envelope payload losing its text or adding an empty turn. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("nonEnvelopeCases")
     void columnMessages_readsAPayloadThatIsNotAnEnvelope(String bug, String raw, List<RoleMessage> expected) {
@@ -211,10 +208,7 @@ class ContentExtractorTest {
                         List.of(new ContentBlock("document_ref", null, null, "m1", "application/pdf"))));
     }
 
-    /**
-     * The bugs, one per row: an image or document part lost from the trace viewer and the judge, or
-     * stored with an empty content type that the media serve endpoint then answers with.
-     */
+    /** One bug per row: an image or document part lost, or stored with an empty content type. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("blockCases")
     void blocksFromContent_typesEachPartShape(String bug, String json, List<ContentBlock> expected) throws Exception {

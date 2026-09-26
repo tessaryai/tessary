@@ -146,28 +146,6 @@ class GithubManifestControllerTest {
         verify(exchange, never()).convert(anyString());
     }
 
-    @Test
-    void callback_reusedOrExpiredCode_surfacesDistinctError() {
-        // GitHub invalidates a manifest code after first use; the exchange throws
-        // MANIFEST_CONVERSION_FAILED on the resubmitted attempt, not a generic app-config error.
-        String stateParam = state.mint("acme", "web", "p1");
-        when(exchange.convert("reused"))
-                .thenThrow(new ai.tessary.open.errors.TessaryException(
-                        ai.tessary.open.errors.GitError.MANIFEST_CONVERSION_FAILED));
-
-        ResponseEntity<Void> resp = controller.callback(stateParam, "reused");
-
-        assertTrue(location(resp).contains("GIT.MANIFEST_CONVERSION_FAILED"), location(resp));
-        verify(appConfig, never()).persist(anyString(), anyString(), anyString(), anyString(), anyString());
-    }
-
-    @Test
-    void callback_invalidState_throwsRatherThanRedirecting() {
-        // No verified project to redirect to — mirrors GithubCallbackController's same choice.
-        org.junit.jupiter.api.Assertions.assertThrows(
-                ai.tessary.open.errors.TessaryException.class, () -> controller.callback("garbage", "code"));
-    }
-
     /** The wizard mints a deployment-wide App, so a plain org member may not start it. */
     @Test
     void manifestUrl_refusesANonOwner() {

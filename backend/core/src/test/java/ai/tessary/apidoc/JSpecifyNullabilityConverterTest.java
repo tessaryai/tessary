@@ -23,9 +23,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.ETag;
 
 /**
- * {@link JSpecifyNullabilityConverter} post-processing the schema the rest of the converter chain
- * produced for a DTO record: response fields required, {@code @Nullable} fields nullable, request DTOs
- * and {@code NON_NULL} omissions optional, and anything it cannot process left exactly as it came.
+ * {@link JSpecifyNullabilityConverter} on a DTO record's schema: response fields required, {@code @Nullable} ones
+ * nullable, request DTOs and {@code NON_NULL} omissions optional, and anything unprocessable left as it came.
  */
 class JSpecifyNullabilityConverterTest {
 
@@ -66,10 +65,9 @@ class JSpecifyNullabilityConverterTest {
     }
 
     /**
-     * The bugs: a response field the server always sends is typed optional in the generated client, and
-     * a {@code @Nullable} one is typed non-null, so the client crashes on a null the server sent. Covers
-     * the {@code $ref} the chain returns for a model, a legacy single {@code type}, a nested {@code $ref}
-     * property and a {@code @JsonProperty} rename.
+     * A response field the server always sends typed optional, or a {@code @Nullable} one typed non-null so the
+     * client crashes on null. Covers a model {@code $ref}, a legacy {@code type}, a nested {@code $ref}, and a {@code
+     * @JsonProperty} rename.
      */
     @Test
     void responseRecord_everyFieldRequired_nullableFieldsAcceptNull() {
@@ -96,8 +94,8 @@ class JSpecifyNullabilityConverterTest {
     }
 
     /**
-     * The bugs: a {@code @Nullable} field of a {@code NON_NULL} class, omitted from the JSON when null, is
-     * typed required; a request DTO's fields are typed required, forcing callers to send every one.
+     * A {@code @Nullable} field of a {@code NON_NULL} class typed required, and a request DTO's fields typed
+     * required.
      */
     @Test
     void omittedWhenNullAndRequestFields_areOptional() {
@@ -115,9 +113,8 @@ class JSpecifyNullabilityConverterTest {
     }
 
     /**
-     * The bug: a record from a library (here Spring's {@code ETag}) gets required and
-     * nullability marks from annotations its authors never meant as a wire contract. Only ai.tessary
-     * records are post-processed.
+     * A library record (Spring's {@code ETag}) given marks its authors never meant; only ai.tessary records are
+     * processed.
      */
     @Test
     void aRecordOutsideTessary_isLeftAsTheChainProducedIt() {
@@ -134,10 +131,7 @@ class JSpecifyNullabilityConverterTest {
                 Arguments.of("a $ref to a model the context never defined", new AnnotatedType(Widget.class)));
     }
 
-    /**
-     * The bug: a reflection edge case in this best-effort pass throws out of the converter and fails
-     * the whole OpenAPI generation. The schema must come back as the chain produced it.
-     */
+    /** A reflection edge case must not fail OpenAPI generation; the schema comes back as produced. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("unprocessable")
     void anUnprocessableSchema_isReturnedUntouched(String edge, AnnotatedType type) {

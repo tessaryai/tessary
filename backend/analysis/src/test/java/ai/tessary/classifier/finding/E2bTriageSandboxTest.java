@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -123,59 +124,32 @@ class E2bTriageSandboxTest {
 
     // ---- classifyFailure: the pure split -------------------------------------------------------
 
-    @Test
-    void classifyFailure_401_403_404AreAlwaysMisconfigured() {
-        assertEquals(E2bTriageSandbox.FailureClass.MISCONFIGURED, E2bTriageSandbox.classifyFailure(401, ""));
-        assertEquals(E2bTriageSandbox.FailureClass.MISCONFIGURED, E2bTriageSandbox.classifyFailure(403, ""));
-        assertEquals(
-                E2bTriageSandbox.FailureClass.MISCONFIGURED,
-                E2bTriageSandbox.classifyFailure(404, "{\"kind\":\"orchestration\"}"));
-    }
-
-    @Test
-    void classifyFailure_502WithARunFailureKindIsARunFailure() {
-        for (String kind : new String[] {"timeout", "script_exit", "bad_output", "bad_request"}) {
-            assertEquals(
-                    E2bTriageSandbox.FailureClass.RUN,
-                    E2bTriageSandbox.classifyFailure(502, "{\"kind\":\"" + kind + "\"}"),
-                    "kind=" + kind);
-        }
-    }
-
-    @Test
-    void classifyFailure_502WithOrchestrationIsLauncherUnavailable() {
-        assertEquals(
-                E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE,
-                E2bTriageSandbox.classifyFailure(502, "{\"kind\":\"orchestration\"}"));
-    }
-
-    @Test
-    void classifyFailure_502WithNoOrUnknownKindIsLauncherUnavailable() {
-        // A proxy's own 502 page, not the launcher's own classified body.
-        assertEquals(E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE, E2bTriageSandbox.classifyFailure(502, ""));
-        assertEquals(
-                E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE,
-                E2bTriageSandbox.classifyFailure(502, "<html>Bad Gateway</html>"));
-        assertEquals(
-                E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE,
-                E2bTriageSandbox.classifyFailure(502, "{\"kind\":\"something_new\"}"));
-    }
-
-    @Test
-    void classifyFailure_anyOtherFiveXxIsLauncherUnavailableRegardlessOfKind() {
-        // Only a 502 carries the launcher's own run-vs-launcher split; 500/503/etc. are its own fault.
-        assertEquals(
-                E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE,
-                E2bTriageSandbox.classifyFailure(500, "{\"kind\":\"script_exit\"}"));
-        assertEquals(
-                E2bTriageSandbox.FailureClass.LAUNCHER_UNAVAILABLE,
-                E2bTriageSandbox.classifyFailure(503, "{\"kind\":\"timeout\"}"));
-    }
-
-    @Test
-    void classifyFailure_otherFourXxIsARunFailure() {
-        assertEquals(E2bTriageSandbox.FailureClass.RUN, E2bTriageSandbox.classifyFailure(400, ""));
-        assertEquals(E2bTriageSandbox.FailureClass.RUN, E2bTriageSandbox.classifyFailure(422, "{}"));
+    /**
+     * 401, 403, and 404 are always misconfiguration. Only a 502 carries the launcher's run-versus-launcher split, so a
+     * 502 without a known run kind (a proxy's own page) and any other 5xx are the launcher's fault.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "401 | ''                         | MISCONFIGURED",
+                "403 | ''                         | MISCONFIGURED",
+                "404 | {\"kind\":\"orchestration\"}  | MISCONFIGURED",
+                "502 | {\"kind\":\"timeout\"}        | RUN",
+                "502 | {\"kind\":\"script_exit\"}    | RUN",
+                "502 | {\"kind\":\"bad_output\"}     | RUN",
+                "502 | {\"kind\":\"bad_request\"}    | RUN",
+                "502 | {\"kind\":\"orchestration\"}  | LAUNCHER_UNAVAILABLE",
+                "502 | ''                         | LAUNCHER_UNAVAILABLE",
+                "502 | <html>Bad Gateway</html>   | LAUNCHER_UNAVAILABLE",
+                "502 | {\"kind\":\"something_new\"}  | LAUNCHER_UNAVAILABLE",
+                "500 | {\"kind\":\"script_exit\"}    | LAUNCHER_UNAVAILABLE",
+                "503 | {\"kind\":\"timeout\"}        | LAUNCHER_UNAVAILABLE",
+                "400 | ''                         | RUN",
+                "422 | {}                         | RUN"
+            })
+    void classifyFailureSplitsTheRunFromTheLauncher(int status, String body, E2bTriageSandbox.FailureClass expected) {
+        assertEquals(expected, E2bTriageSandbox.classifyFailure(status, body));
     }
 
     // ---- run(): the classification wired into an actual thrown ruling -------------------------

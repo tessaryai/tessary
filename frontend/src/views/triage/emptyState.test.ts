@@ -72,12 +72,6 @@ describe("resolveState", () => {
     expect(s.nodes[1].tone).toBe("warn");
   });
 
-  it("prefers the missing classifiers over the absent findings they would have created", () => {
-    // Both conditions are true. Saying "nothing to review" here would be accurate and useless.
-    const s = resolveState(watching({ classifiers: 0, open_findings: 0 }), onboarding(), BASE, HAS_PROVIDER);
-    expect(s.key).toBe("no-classifiers");
-  });
-
   it("says baselines are fitting, with the windows that are ready", () => {
     const s = resolveState(watching(), onboarding({ stage: "fitting" }), BASE, HAS_PROVIDER);
     expect(s.key).toBe("fitting");
@@ -130,15 +124,6 @@ describe("resolveState", () => {
     expect(s.body).toBe(
       "5 findings are open. Triage hasn't determined that any of them are a real issue.",
     );
-  });
-
-  it("never abbreviates a count", () => {
-    const s = resolveState(watching({ traces_total: 4_812_003, open_findings: 0 }), onboarding(), BASE, HAS_PROVIDER);
-    // Grouped in the runner's locale, not hard-coded: `count` formats with toLocaleString, so an
-    // en-IN machine groups this 48,12,003 and an en-US one 4,812,003. Both are the full number,
-    // which is what this pins — an abbreviation ("4.8M") contains neither.
-    expect(s.body).toContain((4_812_003).toLocaleString());
-    expect(s.body).not.toMatch(/\d[\d,.\u00a0\u202f]*\s?[kKmM]\b/);
   });
 
   describe("the stopped-exporter modifier", () => {

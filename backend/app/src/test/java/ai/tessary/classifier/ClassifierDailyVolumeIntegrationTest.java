@@ -23,11 +23,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Acceptance for the per-classifier daily trace-volume read behind
- * {@code GET /classifiers/metrics/daily}: UTC-day buckets, DISTINCT-trace counting (a classifier
- * firing twice on one trace flags one trace), deleted traces excluded from the % denominator,
- * zero-filled aligned arrays including an entry for a classifier that never fired, and the
- * {@code days} clamp. Runs against the real pgvector Postgres (Testcontainers).
+ * The per-classifier daily trace-volume read behind {@code GET /classifiers/metrics/daily}, against real Postgres:
+ * UTC-day buckets, distinct-trace counting, deleted traces out of the denominator, zero-filled aligned arrays
+ * (including a classifier that never fired), and the {@code days} clamp.
  */
 @SpringBootTest
 class ClassifierDailyVolumeIntegrationTest {
@@ -65,12 +63,11 @@ class ClassifierDailyVolumeIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "classifier-daily-volume")
                 .project()
                 .id();
-        // The built-in catalog seeds on project creation, and this test asserts on the EXACT set of
-        // definitions the volume read returns — so it owns the project's classifier list outright.
+        // Project creation seeds the catalog, and this asserts the exact definition set, so it owns the list.
         jdbc.sql("DELETE FROM classifier WHERE project_id = :pid")
                 .param("pid", pid)
                 .update();
-        // Midday instants keep every insert well inside its UTC day even if the test straddles midnight.
+        // Midday instants stay inside their UTC day even across midnight.
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate yesterday = today.minusDays(1);
         Instant todayMid = today.atTime(12, 0).toInstant(ZoneOffset.UTC);
@@ -79,9 +76,8 @@ class ClassifierDailyVolumeIntegrationTest {
 
         String sessionId = SubstrateV2Fixtures.sessionId();
 
-        // Yesterday: traces A + B, plus a deleted trace that must not count toward the denominator.
-        // Buckets are on the trace's EVENT time now — trace has no ingest clock at all — so the day a
-        // trace lands in is the day it RAN, and a backfill no longer piles a month into one bucket.
+        // Yesterday: A and B, plus a deleted trace outside the denominator. Buckets use event time, so a backfill
+        // lands on the days it ran.
         String traceA = seedTrace(pid, sessionId, yesterdayMid);
         String traceB = seedTrace(pid, sessionId, yesterdayMid);
         String deleted = seedTrace(pid, sessionId, yesterdayMid);
@@ -89,14 +85,12 @@ class ClassifierDailyVolumeIntegrationTest {
                 .param("pid", pid)
                 .param("id", deleted)
                 .update();
-        // Today: trace C.
         String traceC = seedTrace(pid, sessionId, todayMid);
 
         String fired = insertClassifier(pid, "secret_leak", "Secret leak");
         String silent = insertClassifier(pid, "quiet", "Quiet");
 
-        // Two detections on different spans of trace A in one day → ONE flagged trace (distinct), plus
-        // one on each of traces B and C.
+        // Two detections on trace A are one flagged trace.
         insertDetection(pid, fired, "secret_leak", sessionId, traceA, SubstrateV2Fixtures.spanId(), yesterdayMid);
         insertDetection(
                 pid,
@@ -108,7 +102,7 @@ class ClassifierDailyVolumeIntegrationTest {
                 yesterdayMid.plusSeconds(60));
         insertDetection(pid, fired, "secret_leak", sessionId, traceB, SubstrateV2Fixtures.spanId(), yesterdayMid);
         insertDetection(pid, fired, "secret_leak", sessionId, traceC, SubstrateV2Fixtures.spanId(), todayMid);
-        // Outside the 7-day window — invisible to the volume read.
+        // Outside the 7-day window.
         insertDetection(pid, fired, "secret_leak", sessionId, traceA, SubstrateV2Fixtures.spanId(), outsideWindow);
 
         ClassifierService.DailyVolume v = service.dailyVolume(pid, 7);
@@ -121,7 +115,7 @@ class ClassifierDailyVolumeIntegrationTest {
 
         long[] expectedTotals = new long[7];
         expectedTotals[yIdx] = 2; // A + B; the deleted trace is excluded
-        expectedTotals[tIdx] = 1; // C
+        expectedTotals[tIdx] = 1;
         assertArrayEquals(expectedTotals, v.traceTotals(), "denominator counts non-deleted traces per STARTED day");
 
         assertEquals(2, v.classifiers().size(), "every definition gets an entry, silent ones included");
@@ -149,8 +143,7 @@ class ClassifierDailyVolumeIntegrationTest {
         String traceA = seedTrace(pid, sessionId, backfillMid);
         String classifierId = insertClassifier(pid, "secret_leak", "Secret leak");
 
-        // A backfill sweep: checked today (created_at = sweepNow), over a span that ran three days ago
-        // (subject_started_at = backfillMid). It must chart on the day it ran, not the day it was checked.
+        // A backfill: checked today, ran three days ago; it charts on the day it ran.
         insertDetection(
                 pid,
                 classifierId,
@@ -160,8 +153,8 @@ class ClassifierDailyVolumeIntegrationTest {
                 SubstrateV2Fixtures.spanId(),
                 backfillMid,
                 sweepNow);
-        // A row whose subject_started_at is NULL (its span and trace have both since been deleted): it
-        // falls out of every day bucket rather than being guessed onto the sweep day.
+        // A null subject_started_at (span and trace deleted) falls out of every bucket rather than onto the sweep
+        // day.
         insertDetection(
                 pid, classifierId, "secret_leak", sessionId, traceA, SubstrateV2Fixtures.spanId(), null, sweepNow);
 
@@ -185,7 +178,7 @@ class ClassifierDailyVolumeIntegrationTest {
         assertEquals(30, service.dailyVolume(pid, 365).days().size(), "days is clamped down to 30");
     }
 
-    /** One trace with a root llm span, started at {@code startedAt} — the bucket the read counts on. */
+    /** One trace with a root llm span at {@code startedAt}. */
     private String seedTrace(String pid, String sessionId, Instant startedAt) {
         String id = SubstrateV2Fixtures.traceId();
         fx.spanSeed(pid)
@@ -213,28 +206,16 @@ class ClassifierDailyVolumeIntegrationTest {
     }
 
     /**
-     * A detection is a row in its classifier's own table. Seeded directly rather than through the writer
-     * because this test is about DAY BUCKETS, and the writer stamps {@code now()} — a row dated
-     * yesterday is not something a live sweep can produce.
-     *
-     * <p>Every detection here is span-grain: several spans of one trace is exactly how a trace collects
-     * more than one detection of the same classifier, which is what the distinct-trace count exists to
-     * collapse.
-     *
-     * <p>{@code subject_started_at} is set to {@code at}: the daily read now buckets on it (migration
-     * {@code 0012}, decision 8b), not on the sweep-time {@code created_at} this same {@code at} also
-     * backdates for determinism.
+     * A span-grain detection in its classifier's table, seeded directly because the writer stamps {@code now()}.
+     * Several spans of one trace are what the distinct count collapses. {@code subject_started_at} (migration 0012,
+     * decision 8b) is what the read buckets on.
      */
     private void insertDetection(
             String pid, String classifierId, String key, String sessionId, String traceId, String spanId, Instant at) {
         insertDetection(pid, classifierId, key, sessionId, traceId, spanId, at, at);
     }
 
-    /**
-     * As above, with the event clock ({@code subject_started_at}) and the sweep clock ({@code created_at})
-     * independently controllable — for {@code subjectStartedAt == null}, the row a span or trace deletion
-     * has already stripped its event time from.
-     */
+    /** As above, with the event and sweep clocks set independently; null is a row whose span or trace was deleted. */
     private void insertDetection(
             String pid,
             String classifierId,

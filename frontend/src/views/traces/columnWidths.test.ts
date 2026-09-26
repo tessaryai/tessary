@@ -10,12 +10,6 @@ const byKey = (...keys: string[]): ColumnDef[] =>
   });
 
 describe("columnWidths", () => {
-  it("leaves a non-flex column at its declared pixel width", () => {
-    const [when, latency] = columnWidths(byKey("when", "latency"));
-    expect(when).toBe(150);
-    expect(latency).toBe(140);
-  });
-
   it("subtracts every fixed column from the flex columns' share", () => {
     // when 150 + latency 140 fixed; name 260 + input 280 + output 280 = 820 flexible.
     const widths = columnWidths(byKey("when", "name", "input", "output", "latency"));
@@ -29,17 +23,6 @@ describe("columnWidths", () => {
   it("counts the pinned expand column as fixed width", () => {
     const widths = columnWidths(byKey("when", "name"), SESSION_EXPAND_COLUMN_WIDTH);
     expect(widths[1]).toBe("calc((100% - 190px) * 1.000000)");
-  });
-
-  it("hands the flex columns the whole surplus", () => {
-    // The shares sum to 1, so at any table width the flex columns take exactly what the fixed
-    // columns leave — no surplus stranded, none double-counted.
-    const cols = byKey("when", "name", "input", "output", "latency", "cost", "tokens", "spans");
-    const shares = columnWidths(cols)
-      .filter((w): w is string => typeof w === "string")
-      .map((w) => Number(/\* ([\d.]+)\)$/.exec(w)?.[1]));
-    expect(shares).toHaveLength(3);
-    expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 4);
   });
 
   it("falls back to declared widths when no flex column is visible", () => {

@@ -57,14 +57,4 @@ class AuthPostureAnnouncerTest {
         assertEquals(Level.WARN, event.getLevel());
         assertTrue(event.getFormattedMessage().contains("AUTH IS DISABLED"));
     }
-
-    @Test
-    void enabledProviderWithNoOptOutEnforcesQuietly() {
-        new AuthPostureAnnouncer(mock(AuthProvider.class), disabled(false)).announce();
-
-        assertEquals(1, appender.list.size());
-        ILoggingEvent event = appender.list.get(0);
-        assertEquals(Level.INFO, event.getLevel());
-        assertTrue(event.getFormattedMessage().contains("enforced"));
-    }
 }

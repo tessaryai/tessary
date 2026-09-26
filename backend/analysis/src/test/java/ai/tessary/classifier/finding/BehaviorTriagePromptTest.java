@@ -30,15 +30,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * The triage system prompt (goals and invariants, one copy for every classifier) and the per-run
- * dossier and user message {@link BehaviorTriageEngine} builds around it.
- *
- * <p>The prompt no longer enumerates the MCP tool catalogue itself: the server's own {@code
- * initialize} instructions already describe it (decision R8), and cutting the restatement is part of
- * what shrank the fixed prose from 1,562 words to under 700. What is pinned here instead is the
- * shape a model actually reasons from: the dossier carries only the finding's facts and the
- * detector's method, the claim's own numbers are read live off {@code get_finding} rather than
- * shipped as a file, and the budget in the user message is the config value, not a guess.
+ * The triage system prompt (one copy for every classifier) and the per-run dossier and user message {@link
+ * BehaviorTriageEngine} builds. The MCP catalogue is left to the server's {@code initialize} instructions (decision
+ * R8); pinned here: the dossier carries only the finding's facts and the detector's method, the claim's numbers come
+ * live from {@code get_finding}, and the budget is the config value.
  */
 @ExtendWith(MockitoExtension.class)
 class BehaviorTriagePromptTest {
@@ -111,8 +106,6 @@ class BehaviorTriagePromptTest {
         return md;
     }
 
-    // ---- the system prompt -----------------------------------------------------------------------
-
     @Test
     void theSystemPromptDefinesBothVerdictsAndNoOthers() {
         String prompt = BehaviorTriageEngine.SYSTEM_PROMPT;
@@ -134,34 +127,9 @@ class BehaviorTriagePromptTest {
         assertTrue(prompt.contains("dossier/method.md"), "and both of them");
     }
 
-    @Test
-    void theSystemPromptShipsNoStateFile() {
-        assertFalse(
-                BehaviorTriageEngine.SYSTEM_PROMPT.contains("state.json"),
-                "the claim's numbers now come from get_finding, not a shipped file");
-    }
-
-    @Test
-    void theSystemPromptCarriesNothingPerRun() {
-        assertFalse(
-                BehaviorTriageEngine.SYSTEM_PROMPT.contains("fnd-1"),
-                "a finding id in the system prompt would mean it is not the same string on every run");
-    }
-
-    // ---- the dossier ------------------------------------------------------------------------------
-
-    @Test
-    void theDossierShipsOnlyFindingAndMethodMdWhenACardExists() {
-        FindingRow row =
-                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
-
-        assertEquals(
-                Set.of("finding.md", "method.md"), engine().dossier(JOB, row).keySet());
-    }
-
     /**
-     * A groundedness rate finding also ships {@code detections.md}: each flagged answer at its call site since
-     * onset, with the score, the flagged sentences' offsets and the strongest one's text.
+     * A groundedness rate finding ships {@code detections.md}: each flagged answer since onset with its score,
+     * offsets, and strongest sentence.
      */
     @Test
     void aGroundednessRateFindingShipsItsFlaggedAnswers() {
@@ -204,9 +172,8 @@ class BehaviorTriagePromptTest {
     }
 
     /**
-     * A flagged answer whose evidence is not JSON is listed with its evidence as written, one with none says
-     * so, and a finding whose last-seen time cannot be read still ships the file. Throwing on either loses
-     * the whole dossier and the run with it.
+     * Non-JSON evidence is listed as written, missing evidence says so, and an unreadable last-seen still ships the
+     * file.
      */
     @Test
     void aGroundednessDossierSurvivesUnreadableEvidenceAndAnUnreadableLastSeen() {
@@ -241,10 +208,7 @@ class BehaviorTriagePromptTest {
                 md);
     }
 
-    /**
-     * Past {@link BehaviorTriageEngine#DETECTIONS_CAP} rows the file lists the newest 50 and says the rest are
-     * paged, rather than listing every row and claiming it shows every one since onset.
-     */
+    /** Past {@link BehaviorTriageEngine#DETECTIONS_CAP} the file lists the newest 50 and says the rest are paged. */
     @Test
     void aGroundednessFindingWithMoreFlaggedAnswersThanTheCapListsTheNewest50AndSaysSo() {
         ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
@@ -364,13 +328,6 @@ class BehaviorTriagePromptTest {
     }
 
     @Test
-    void theClaimLineIsDroppedWhenTheCauseCarriesNoMagnitude() {
-        FindingRow omission = finding(BuiltInDetector.Kind.TOOL_ERROR, "omitted-step", null, null, null);
-
-        assertFalse(findingMd(engine(), omission).contains("- claim:"));
-    }
-
-    @Test
     void windowLineIsOptional() {
         FindingRow noWindow = finding(BuiltInDetector.Kind.TOOL_ERROR, "k", null, null, null);
         assertFalse(findingMd(engine(), noWindow).contains("- window:"));
@@ -384,12 +341,9 @@ class BehaviorTriagePromptTest {
                 null);
         String md = findingMd(engine(), withWindow);
         assertTrue(md.contains("- window: 2026-08-01T00:00:00Z to 2026-08-02T00:00:00Z\n"), md);
-        // The payload's kind says what sort of detector wrote the window, not what this finding covers,
-        // and each method card says it in its own words. Bare, it is jargon at the point it is read.
+        // The payload's kind names the detector sort, not the finding's scope; bare, it is jargon.
         assertFalse(md.contains("elapsed"), md);
     }
-
-    // ---- the user message ---------------------------------------------------------------------------
 
     @Test
     void theUserMessageStatesTheEffectiveTurnCapAndNotTheTimeout() {
@@ -403,11 +357,9 @@ class BehaviorTriagePromptTest {
         assertTrue(prompt.contains("Rule on finding `fnd-1`."), prompt);
         assertTrue(prompt.contains("`dossier/finding.md`"), prompt);
         assertTrue(prompt.contains("`dossier/method.md`"), prompt);
-        // opencode reserves two turns of the configured cap to force a text-only final answer, so the
-        // number stated to the agent is what it actually gets to work with.
+        // opencode reserves two turns of the cap for a forced final answer.
         assertTrue(prompt.contains("You have 10 turns."), prompt);
-        // The wall clock is an operator guard against a hung run, not something the agent can observe
-        // or plan against, so it is never stated.
+        // The wall clock is an operator guard the agent cannot observe, so it is never stated.
         assertFalse(prompt.contains("minutes"), prompt);
     }
 

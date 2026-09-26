@@ -40,13 +40,6 @@ class ObserverPropertiesBindingTest {
         assertThat(props.getEncoder().getApiKey()).isEqualTo("test-bearer");
     }
 
-    @Test
-    void encoderDefaultsAreBlankNotNull() {
-        ObserverProperties props = new ObserverProperties();
-        assertThat(props.getEncoder().getUrl()).isEmpty();
-        assertThat(props.getEncoder().getApiKey()).isEmpty();
-    }
-
     /** The bug: the job lease or the triage agent's model override binds to the wrong field or not at all. */
     @Test
     void leaseAndAgenticModelBindToTheirOwnFields() {

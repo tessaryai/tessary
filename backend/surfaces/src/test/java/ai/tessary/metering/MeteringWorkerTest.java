@@ -31,10 +31,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * The metering heartbeat's failure isolation. Each tick schedules the closed buckets, then claims and meters a
- * batch; a failure in one step must cost only that step, since the next heartbeat is the only retry there is.
- * The repositories are mocked: the aggregation SQL itself is {@code MeteringIntegrationTest}'s. Marking a job
- * done is the outcome asserted, because a job left undone is exactly what the lease-and-reclaim retry relies on.
+ * The metering heartbeat's failure isolation: each step's failure costs only that step, since the next heartbeat is
+ * the only retry. The SQL is {@code MeteringIntegrationTest}'s; "marked done" is asserted because an undone job is
+ * what lease-and-reclaim relies on.
  */
 @ExtendWith(MockitoExtension.class)
 class MeteringWorkerTest {
@@ -53,7 +52,7 @@ class MeteringWorkerTest {
         return new MetricRollupJobRow(id, "org-1", projectId, "2026-09-01T10:00:00Z", MeteringWorker.BUCKET_HOUR);
     }
 
-    /** A scheduling failure skips only the scheduling: jobs already queued are still claimed and metered. */
+    /** A scheduling failure still claims and meters queued jobs. */
     @Test
     void aSchedulingFailureStillMetersTheJobsAlreadyQueued() {
         when(jobs.scheduleDueBuckets(anyString(), anyString())).thenThrow(new IllegalStateException("db blip"));
@@ -64,7 +63,7 @@ class MeteringWorkerTest {
         verify(jobs).markDone("job-1");
     }
 
-    /** A claim failure ends the tick quietly: nothing is metered, and nothing escapes into the scheduler. */
+    /** A claim failure ends the tick quietly. */
     @Test
     void aClaimFailureEndsTheTickWithoutMeteringOrThrowing() {
         when(jobs.scheduleDueBuckets(anyString(), anyString())).thenReturn(1);
@@ -76,10 +75,7 @@ class MeteringWorkerTest {
         verifyNoInteractions(rollups);
     }
 
-    /**
-     * One job whose aggregation fails stays claimed (not done, so its lease expires and a later heartbeat
-     * re-meters it) and does not stop the next job in the batch from being metered.
-     */
+    /** A failed job stays claimed (its lease expires for a later re-meter) and the next job still meters. */
     @Test
     void aFailedAggregationLeavesThatJobClaimedAndMetersTheRest() {
         when(jobs.scheduleDueBuckets(anyString(), anyString())).thenReturn(0);
@@ -95,9 +91,8 @@ class MeteringWorkerTest {
     }
 
     /**
-     * {@link UsageUnit#metered()} is the list other code reads to learn what metering produces. A unit the
-     * worker writes but that list omits is billed nowhere, and one the list names but the worker never
-     * writes reads as a permanent zero.
+     * {@link UsageUnit#metered()} must match what the worker writes: an omitted unit is billed nowhere, and an
+     * unwritten one reads as a permanent zero.
      */
     @Test
     void theWorkerWritesExactlyTheMeteredUnits() {

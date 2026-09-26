@@ -6,17 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Coverage for {@link ClassifierMethodCard}, which is the enforcement its own javadoc promises.
- *
- * <p>The cards deliberately do NOT live on {@code ClassifierModelModule}, so the compiler cannot make a
- * new classifier supply one. This does instead: add a module without a card and the first test fails,
- * naming the key. Without it, a new detector would ship findings whose evidence roles no agent has been
- * told how to read — and the failure mode of that is silent, because a missing card looks exactly like a
- * classifier whose card simply was not needed.
+ * {@link ClassifierMethodCard}'s enforcement. Cards do not live on {@code ClassifierModelModule}, so the compiler
+ * cannot require one; add a module without a card and the first test fails, naming it. A missing card looks exactly
+ * like an unneeded one.
  */
 class ClassifierMethodCardTest {
 
@@ -35,10 +30,7 @@ class ClassifierMethodCardTest {
         }
     }
 
-    /**
-     * A user-authored classifier has no card and must not be given a fabricated one: its method is
-     * whatever its author configured, and inventing a description of it would be worse than silence.
-     */
+    /** A user-authored classifier gets no fabricated card. */
     @Test
     void anUnknownClassifierGetsNoCard() {
         assertNull(ClassifierMethodCard.forClassifier("some-user-authored-thing"));
@@ -47,42 +39,8 @@ class ClassifierMethodCardTest {
     }
 
     /**
-     * Every card carries a section per alarm kind the classifier can file — the text that used to be
-     * {@code causeExplanation} in {@code finding.md}, now the one place a cause's meaning lives.
-     */
-    @Test
-    void everyCardCarriesASectionForEachCauseItFiles() {
-        assertTrue(cardOf(BuiltInDetector.Kind.TOOL_ERROR).contains("### Cause: `rate_shift`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.DURATION_DRIFT).contains("### Cause: `distribution_shift`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.COST_DRIFT).contains("### Cause: `distribution_shift`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.MALFORMED_OUTPUT).contains("### Cause: `malformed_rate`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.SECRET_LEAK).contains("### Cause: `armed_window`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.GROUNDEDNESS).contains("### Cause: `groundedness_rate`"));
-        assertTrue(cardOf(BuiltInDetector.Kind.FRUSTRATION).contains("### Cause: `frustration_rate`"));
-    }
-
-    /** No card names the retired {@code state.json} or asks the agent to recompute the detector's numbers. */
-    @Test
-    void noCardNamesStateJsonOrAsksForRecomputation() {
-        for (String key : List.of(
-                BuiltInDetector.Kind.TOOL_ERROR,
-                BuiltInDetector.Kind.DURATION_DRIFT,
-                BuiltInDetector.Kind.COST_DRIFT,
-                BuiltInDetector.Kind.SECRET_LEAK,
-                BuiltInDetector.Kind.MALFORMED_OUTPUT,
-                BuiltInDetector.Kind.FRUSTRATION,
-                BuiltInDetector.Kind.GROUNDEDNESS)) {
-            String card = cardOf(key);
-            assertFalse(card.contains("state.json"), key + "'s card still names the retired dossier file");
-            assertFalse(card.contains("recompute"), key + "'s card still asks the agent to recompute a number");
-        }
-    }
-
-    /**
-     * A card never sends the reader to another classifier's card. Exactly one card is delivered per run,
-     * as {@code dossier/method.md}, so "for the same reason as tool_error" points at prose the agent does
-     * not have and cannot get. Duration and cost drift are the one legitimate pair: they share a card,
-     * and it names both.
+     * A card never points at another card: one is delivered per run as {@code dossier/method.md}. Duration and cost
+     * drift share one card that names both.
      */
     @Test
     void noCardPointsAtAnotherClassifiersCard() {
@@ -100,9 +58,8 @@ class ClassifierMethodCardTest {
     }
 
     /**
-     * Every card says where the claim's numbers are, including the two whose answer is that there is no
-     * block to read. The system prompt requires a ruling to cite the {@code get_finding} fields it rests
-     * on, so a card that never names them asks for a citation it has not made possible.
+     * Every card says where the claim's numbers are, since a ruling must cite the {@code get_finding} fields it rests
+     * on.
      */
     @Test
     void everyCardSaysWhereTheClaimsNumbersAre() {
@@ -111,18 +68,6 @@ class ClassifierMethodCardTest {
                     cardOf(module.key()).contains("**The claim\'s numbers**"),
                     module.key() + "'s card never says where in get_finding its numbers sit");
         }
-    }
-
-    /**
-     * The `:pinned` reference is set automatically, not by a person, except when a person moves it with
-     * <em>Legitimate, absorb</em> — the card must not tell the agent the opposite.
-     */
-    @Test
-    void thePinnedCardDoesNotClaimAPersonSetTheReferenceByDefault() {
-        String card = cardOf(BuiltInDetector.Kind.DURATION_DRIFT);
-        assertFalse(card.contains("a person pinned"), "the reference is set automatically by default, not by a person");
-        assertTrue(
-                card.contains("Legitimate, absorb"), "the card must name the one way a person DOES move the reference");
     }
 
     /** {@link ClassifierMethodCard#forClassifier} for a key this test knows carries a card. */

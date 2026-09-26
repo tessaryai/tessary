@@ -45,9 +45,8 @@ class MalformedOutputHighlightTest {
             }""";
 
     /**
-     * Catches a highlight that marks only the first array element's {@code sku} when every element broke it,
-     * that marks one line of an object that spans several, or that marks nothing for a {@code required}
-     * violation (the property is missing, so the object that should hold it is what to point at).
+     * Catches marking only the first element's {@code sku} when every element broke it, one line of a multi-line
+     * object, or nothing for a {@code required} violation (point at the object that should hold it).
      */
     @ParameterizedTest(name = "{0} -> {1}")
     @CsvSource(
@@ -67,9 +66,8 @@ class MalformedOutputHighlightTest {
     }
 
     /**
-     * Catches a root-level array keying its elements with a leading dot ({@code .sku} or {@code [].}),
-     * a spelling the detector never writes; and a document that is empty or does not parse throwing out of
-     * the page instead of rendering without a highlight.
+     * Catches a root-level array keyed with a leading dot, which the detector never writes, and an empty or
+     * unparseable document throwing instead of rendering unhighlighted.
      */
     @ParameterizedTest(name = "{0} / {1} -> {2}")
     @CsvSource(

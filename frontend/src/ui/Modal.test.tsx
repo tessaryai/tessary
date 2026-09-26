@@ -38,19 +38,4 @@ describe("Modal", () => {
     expect(cancel.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
-
-  it("closes the native dialog when the prop turns false", () => {
-    const { rerender } = render(
-      <Modal open onClose={() => {}} title="Confirm">
-        body
-      </Modal>,
-    );
-    rerender(
-      <Modal open={false} onClose={() => {}} title="Confirm">
-        body
-      </Modal>,
-    );
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
 });

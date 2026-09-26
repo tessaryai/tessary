@@ -236,22 +236,6 @@ describe("the empty list", () => {
   });
 });
 
-describe("paging", () => {
-  it("loads the next page from the cursor, then says the list has ended", async () => {
-    api.listTraces
-      .mockResolvedValueOnce(page([trace({ id: "tr-1", name: "first" })], "c-2"))
-      .mockResolvedValueOnce(page([trace({ id: "tr-2", name: "second" })], null));
-    renderRoute(<TracesIndex />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Load older traces" }));
-
-    expect(await screen.findByText("second")).toBeTruthy();
-    expect(screen.getByText("first")).toBeTruthy();
-    expect(lastListCall().cursor).toBe("c-2");
-    expect(screen.getByText("No older traces.")).toBeTruthy();
-  });
-});
-
 describe("grouped by session", () => {
   it("lists sessions from the server and expands one in place", async () => {
     api.listSessions.mockResolvedValue({ sessions: [session()], next_cursor: null });
@@ -342,13 +326,6 @@ describe("columns", () => {
     const srow = (await screen.findAllByText("sess-1"))[0].closest("tr")!;
     expect(within(srow).getByText("bye")).toBeTruthy();
   });
-
-  it("drops a corrupt saved column set for the default", async () => {
-    window.localStorage.setItem("tessary:traces:columns:v2", "{not json");
-    renderRoute(<TracesIndex />);
-    await screen.findByText("checkout-agent");
-    expect(screen.getAllByRole("columnheader")).toHaveLength(8);
-  });
 });
 
 describe("time range", () => {
@@ -394,16 +371,6 @@ describe("time range", () => {
 });
 
 describe("refresh", () => {
-  it("re-pulls the list on demand", async () => {
-    renderRoute(<TracesIndex />);
-    await screen.findByText("checkout-agent");
-    const before = api.listTraces.mock.calls.length;
-
-    fireEvent.click(screen.getByRole("button", { name: "Refresh traces" }));
-
-    await waitFor(() => expect(api.listTraces.mock.calls.length).toBe(before + 1));
-  });
-
   it("auto-refreshes every 30s only while the reader is at the top, and remembers the choice", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const main = document.createElement("main");

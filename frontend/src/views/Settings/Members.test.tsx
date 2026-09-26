@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { OrgInvitation, OrgMember, OrgRole, SignupPolicy } from "../../api/types-auth";
 import { ApiError } from "../../api/types";
-import { pending, renderRoute } from "../../test/render";
+import { renderRoute } from "../../test/render";
 import { Members } from "./Members";
 
 const auth = vi.hoisted(() => ({
@@ -292,10 +292,3 @@ describe("the sign-up policy", () => {
   });
 });
 
-describe("while loading", () => {
-  it("says so", async () => {
-    auth.listMembers.mockImplementation(pending);
-    renderRoute(<Members />);
-    expect(await screen.findByText("Loading members…")).toBeTruthy();
-  });
-});

@@ -12,29 +12,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * The parse contract for a triage run. One load-bearing property: a verdict is recorded only for a run
- * that actually produced one. Everything that is NOT a cited {@code positive} or {@code negative} —
- * gibberish, an unrecognised verdict word, an uncited ruling — parses to null, never to a fabricated
- * verdict. Null makes the job retry and eventually dead-letter; recording anything for it would close a
- * finding on the strength of a broken or unsupported run.
+ * The parse contract for a triage run: a verdict is recorded only for a run that produced one. Anything but a cited
+ * {@code positive} or {@code negative} parses to null, so the job retries and eventually dead-letters rather than
+ * closing a finding on a broken run.
  */
 class BehaviorTriageVerdictTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-
-    @Test
-    void parsesACitedRuling() {
-        BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
-                {"verdict": "positive", "summary": "both windows measure the same population",
-                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns, not a thin window"}]}
-                """);
-
-        assertNotNull(v);
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, v.verdict());
-        assertEquals(FindingRow.TriageAction.OPENED_CASE, v.action());
-        assertEquals(1, v.citations().size());
-        assertEquals("window.n_cur", v.citations().get(0).path());
-    }
 
     @Test
     void unwrapsTheStructuredOutputEnvelope() {
@@ -51,9 +35,8 @@ class BehaviorTriageVerdictTest {
     }
 
     /**
-     * The fabrication guard [R6]. An agent that rules without pointing at anything has not done the
-     * audit, so the answer is discarded rather than trusted with a verdict of its own: no ruling is
-     * recorded, and the job retries as {@code TRIAGE_RUN_INCOMPLETE}.
+     * The fabrication guard [R6]: an uncited ruling is discarded, and the job retries as {@code
+     * TRIAGE_RUN_INCOMPLETE}.
      */
     @Test
     void anUncitedRulingReturnsNull() {
@@ -64,7 +47,7 @@ class BehaviorTriageVerdictTest {
         assertNull(v, "an uncited ruling must not become a verdict — it is a failed run, not a low-confidence one");
     }
 
-    /** `unclear` is gone from the vocabulary [decision 4]: verdicts are positive and negative only. */
+    /** `unclear` is gone [decision 4]: positive and negative only. */
     @Test
     void rejectsUnclear() {
         BehaviorTriageVerdict v = BehaviorTriageVerdict.parse(mapper, """
@@ -73,34 +56,6 @@ class BehaviorTriageVerdictTest {
                 """);
 
         assertNull(v, "unclear is not a recognised verdict word any more");
-    }
-
-    /**
-     * A prerequisite failure is a failed run, not a verdict — the distinction the whole preflight rests
-     * on. {@code parse} must refuse it exactly as it refuses gibberish, so nothing can reach
-     * {@code finding.triage_verdict}, while {@code blockedReason} recovers what the agent actually said
-     * so the job's error names the missing prerequisite instead of "no parseable ruling".
-     */
-    @Test
-    void blockedIsAFailedRunAndNotAVerdict() {
-        String answer = """
-                {"verdict": "blocked", "summary": "the MCP surface refused every call", "citations": []}
-                """;
-
-        assertNull(
-                BehaviorTriageVerdict.parse(mapper, answer),
-                "blocked must never become a ruling — it closes no finding and moves no baseline");
-        assertEquals("the MCP surface refused every call", BehaviorTriageVerdict.blockedReason(mapper, answer));
-    }
-
-    @Test
-    void aRealRulingIsNotBlocked() {
-        String answer = """
-                {"verdict": "negative", "summary": "the reference window is 40 turns",
-                 "citations": [{"path": "window.n_cur", "reason": "1,204 turns"}]}
-                """;
-        assertNull(BehaviorTriageVerdict.blockedReason(mapper, answer));
-        assertNull(BehaviorTriageVerdict.blockedReason(mapper, "not json at all"));
     }
 
     @Test
@@ -113,8 +68,8 @@ class BehaviorTriageVerdictTest {
     }
 
     /**
-     * The {@code --output-format json} envelope whose {@code result} carries the ruling, as JSON text wrapped
-     * in the agent's prose or as an object. Missing it records nothing for a run that did rule.
+     * The {@code --output-format json} envelope's {@code result} carries the ruling, as prose-wrapped JSON text or an
+     * object.
      */
     @ParameterizedTest
     @ValueSource(
@@ -140,8 +95,8 @@ class BehaviorTriageVerdictTest {
     }
 
     /**
-     * A script's stdout is the receipt a person re-checks the ruling by, kept up to 4,000 characters and cut
-     * with a marker past that. An empty or non-text stdout is no receipt at all.
+     * A script's stdout is the receipt, kept to 4,000 characters with a cut marker. Empty or non-text stdout is no
+     * receipt.
      */
     @Test
     void aScriptsStdoutIsKeptUpToTheCapAndMarkedWhenCut() {

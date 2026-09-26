@@ -98,8 +98,7 @@ public class ArchitectureRulesTest {
                     BASE + ".model..",
                     "java..",
                     "com.fasterxml.jackson..",
-                    // Annotation-only: JSpecify nullability and the OpenAPI @Schema descriptors, no
-                    // framework coupling.
+                    // Annotation-only: JSpecify and OpenAPI @Schema.
                     "org.jspecify..",
                     "io.swagger.v3.oas.annotations..")
             .because("model/ is the pure synth-schema record graph — no Spring, no feature-slice dependencies");
@@ -130,10 +129,7 @@ public class ArchitectureRulesTest {
             .haveFullyQualifiedName("org.springframework.jdbc.core.simple.JdbcClient")
             .because("raw JdbcClient access belongs in *Repository classes; everything else goes through them");
 
-    /**
-     * The pipeline definition store, pinned for {@link #definition_repositories_accessed_only_within_their_feature}
-     * and listed in {@link #PINNED_CLASS_NAMES} so a rename does not silently empty the rule.
-     */
+    /** Pinned for the definition-repository rule and listed in {@link #PINNED_CLASS_NAMES}. */
     private static final String PIPELINE_REPOSITORY = BASE + ".pipeline.PipelineRepository";
 
     @ArchTest
@@ -147,38 +143,23 @@ public class ArchitectureRulesTest {
                     + "(PipelineService); a cross-feature caller must not reach into the repository");
 
     /**
-     * Every Layer-2 lane, by name: the sandbox triage lane ({@code BehaviorTriageEngine} /
-     * {@code Worker}) and RCA ({@code RcaAnalysisService}). Both are injected the finding
-     * repository because both legitimately read a finding and record a ruling on it, which is
-     * exactly what makes the one-line edit that resolves the finding compile.
-     *
-     * <p>This is a regex over simple names, not a fully-qualified pin, so it is not covered by
-     * {@link #PINNED_CLASS_NAMES}; check it by hand if a lane is renamed or removed.
+     * Every Layer-2 lane (sandbox triage and RCA); both hold the finding repository legitimately, which is what makes
+     * a resolving edit compile. A regex over simple names, so not in {@link #PINNED_CLASS_NAMES}: check it by hand on
+     * a rename.
      */
     private static final String LAYER_2_LANES = ".*(BehaviorTriage(Engine|Worker)|RcaAnalysisService)";
 
-    /** Pinned so {@link #a_sweep_is_reached_only_from_its_own_classifier} tracks the current class name. */
     private static final String METRIC_SWEEP = BASE + ".classifier.metric.MetricDriftSweep";
 
     private static final String TOOL_ERROR_SWEEP = BASE + ".classifier.toolerror.ToolErrorSweep";
 
     /**
-     * Every fully-qualified {@code ai.tessary} name this file pins, so
-     * {@link #every_pinned_class_name_resolves} can prove they all still name a class. Add to this list
-     * whenever a rule below anchors on a new one; third-party names like {@code JdbcClient} are out of
-     * scope since the scan only imports our own packages, and their owners break the build on rename.
-     *
-     * <p>This list exists because a pinned rule has silently gone vacuous before: a package move left
-     * the string matching nothing, so the rule passed green while guarding nothing.
+     * Every {@code ai.tessary} name this file pins, so {@link #every_pinned_class_name_resolves} can prove each still
+     * names a class. A package move once left a pinned rule matching nothing and passing green.
      */
     private static final List<String> PINNED_CLASS_NAMES = List.of(METRIC_SWEEP, TOOL_ERROR_SWEEP, PIPELINE_REPOSITORY);
 
-    /**
-     * Every fully-qualified name pinned in this file still names a class that exists.
-     *
-     * <p>A rule that names nothing is not a weak rule, it is no rule, and it looks identical to a
-     * passing one from the build output. This is the guard for that.
-     */
+    /** A rule naming nothing is no rule, and looks identical to a passing one. */
     @ArchTest
     static final ArchRule every_pinned_class_name_resolves = classes()
             .that()
@@ -188,12 +169,8 @@ public class ArchitectureRulesTest {
                     + "so a package move empties it silently and it keeps passing");
 
     /**
-     * A classifier's sweep is reached through the seam or not at all: sweeps are discovered as
-     * {@code ClassifierSweep} beans, and this rule stops an {@code if} on detector kind plus one
-     * injected sweep from quietly re-coupling the engine to a classifier it must not name.
-     *
-     * <p>The names are pinned as strings, so {@link #every_pinned_class_name_resolves} keeps this
-     * rule from going vacuous when one of them moves. This is the rule a third open sweep would join.
+     * A sweep is reached only through the {@code ClassifierSweep} seam, so an {@code if} on detector kind cannot re-
+     * couple the engine to a classifier it must not name.
      */
     @ArchTest
     static final ArchRule a_sweep_is_reached_only_from_its_own_classifier = noClasses()
@@ -212,11 +189,8 @@ public class ArchitectureRulesTest {
                     + "this rule prevents");
 
     /**
-     * Triage must not resolve a finding. The worker is legitimately injected {@code FindingRepository}
-     * (it reads the finding and records its own machine ruling via {@code recordTriage}), so this is
-     * enforced per method rather than by banning the dependency outright. The banned names are the
-     * human-decision writes: {@code recordHumanRuling} stamps a person's verdict, {@code closeByCase}
-     * closes a finding with no ruling at all.
+     * Triage must not resolve a finding. It may hold {@code FindingRepository} for {@code recordTriage}, so the ban
+     * is per method: {@code recordHumanRuling} and {@code closeByCase} are human-decision writes.
      */
     @ArchTest
     static final ArchRule behaviour_triage_never_resolves_a_finding = noClasses()
@@ -239,14 +213,8 @@ public class ArchitectureRulesTest {
                     + "cross-domain code uniqueness at boot");
 
     /**
-     * Every rule here scans {@code ai.tessary}, which lives mostly in JARs on this module's
-     * classpath rather than in {@code app}'s own sources. A classpath that stopped carrying them
-     * would make each rule above vacuously true and this whole file a green no-op, so the scan
-     * asserts its own reach: the floor sits well under the real count and only trips if a layer
-     * has genuinely dropped off.
-     *
-     * <p>A missing module JAR drops hundreds of classes at once, so the floor stays low enough
-     * that a real, deliberate reduction in class count does not trip it by mistake.
+     * The scan covers {@code ai.tessary} mostly from JARs on the classpath; losing them would make every rule
+     * vacuously green, so the scan asserts its own reach with a floor well under the real count.
      */
     @ArchTest
     static final ArchRule the_scan_reaches_every_module = classes()
@@ -256,9 +224,6 @@ public class ArchitectureRulesTest {
             .because("a rule that scanned nothing would pass, and every rule in this file scans "
                     + "code that now arrives as a module dependency rather than as local sources");
 
-    // ---- helpers ----
-
-    /** Fails unless the whole scanned set is larger than {@code floor}. */
     private static ArchCondition<JavaClass> numberMoreThan(int floor) {
         return new ArchCondition<>("number more than " + floor + " classes in total") {
             private int seen;
@@ -279,10 +244,7 @@ public class ArchitectureRulesTest {
         };
     }
 
-    /**
-     * Fails naming the ones that resolved to nothing, rather than reporting "0 violations" like a rule
-     * whose subject has simply vanished.
-     */
+    /** Names the pins that resolved to nothing, rather than reporting "0 violations". */
     private static ArchCondition<JavaClass> coverEveryPinnedName() {
         return new ArchCondition<>("cover every fully-qualified class name pinned in this file") {
             private final Set<String> unseen = new java.util.LinkedHashSet<>(PINNED_CLASS_NAMES);
@@ -303,7 +265,6 @@ public class ArchitectureRulesTest {
         };
     }
 
-    /** Enum classes listed in {@code ErrorCatalog.REGISTERED}. */
     private static final Set<String> REGISTERED_ERROR_TYPES = registeredErrorTypeNames();
 
     private static ArchCondition<JavaClass> beListedInErrorCatalog() {

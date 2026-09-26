@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,32 +16,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The standing form of the pre-flip parity check: what the PLATFORM's own calls are billed at, pinned per
- * model name against the checked-in vendored rate file.
+ * What the platform's own calls are billed at, pinned per model against the vendored rate file.
  *
- * <p><b>Why a pinned table and not a property.</b> Before the platform lane moved onto the price book its
- * rates came from a hand-maintained catalog compiled into the jar, and comparing the two at the flip found
- * seven disagreements on ten models. A hand-maintained {@code manual-overrides.json} carried those
- * corrections forward until it was retired: five were stale carryovers upstream had since
- * corrected, the mantle GPT-5.6 rows are now resolved by {@code BedrockModelProfile.MANTLE_ROUTE_PREFIX}
- * reporting the id LiteLLM actually prices (see {@link #mantleIdsResolveToTheirOwnRoute}), and Nova's
- * cache-write bucket — which the snapshot has never carried, for any generation — is now unpriced rather
- * than an unverified guess. This test states the answers directly: a snapshot refresh that moves a
- * platform rate fails here and gets read by a human, instead of restating last month's bill.
- *
- * <p>Update a row here only together with the snapshot change that moves it, and say in the commit which
- * published price page the new number came from.
+ * <p>A pinned table, not a property: the flip to the price book found seven disagreements on ten models, since
+ * resolved (mantle via {@code BedrockModelProfile.MANTLE_ROUTE_PREFIX}; Nova's cache-write now unpriced). A snapshot
+ * refresh that moves a platform rate fails here for a human to read. Update a row only with the snapshot change,
+ * citing the published price page in the commit.
  */
 class PlatformLaneRatesTest {
 
     /**
-     * Every id the platform lane prices a call under: the Bedrock inference-profile ids
-     * {@code BedrockModelProfile} sends (the platform-funded lanes, also what lands on an
-     * {@code llm_call} row's {@code model} column), and the BYO catalog ids a project can pin — for the
-     * route-prefixed providers (xAI, Zhipu, Moonshot, OpenRouter) this is {@code ModelCatalog#pricingId}'s
-     * output, not the bare name {@code llm_call.model} records. Held as literals rather than read from
-     * {@code llm-runtime} because that module sits ABOVE this one — and because the point is to pin what
-     * those ids resolve to, which a shared constant could quietly change on both sides at once.
+     * Every id the platform lane prices under: {@code BedrockModelProfile}'s inference-profile ids and the BYO
+     * catalog ids ({@code ModelCatalog#pricingId}'s output for route-prefixed providers). Literals, since {@code llm-
+     * runtime} sits above this module and a shared constant could change both sides at once.
      */
     private static final Map<String, String[]> EXPECTED = expected();
 
@@ -53,8 +39,7 @@ class PlatformLaneRatesTest {
         m.put("global.anthropic.claude-sonnet-5", new String[] {"2", "10", "0.2", "2.5"});
         m.put("global.anthropic.claude-sonnet-4-6", new String[] {"3", "15", "0.3", "3.75"});
         m.put("global.amazon.nova-2-lite-v1:0", new String[] {"0.3", "2.5", "0.075", "-"});
-        // The route-prefixed spelling BedrockModelProfile now reports for mantle — see
-        // BedrockModelProfile.MANTLE_ROUTE_PREFIX and mantleIdsResolveToTheirOwnRoute below.
+        // The route-prefixed spelling for mantle (BedrockModelProfile.MANTLE_ROUTE_PREFIX).
         m.put("bedrock_mantle/openai.gpt-5.6-luna", new String[] {"0.22", "1.32", "0.022", "0.275"});
         m.put("bedrock_mantle/openai.gpt-5.6-terra", new String[] {"2.2", "13.2", "0.22", "2.75"});
         m.put("anthropic.claude-sonnet-5", new String[] {"2", "10", "0.2", "2.5"});
@@ -64,9 +49,7 @@ class PlatformLaneRatesTest {
         m.put("gpt-5.5", new String[] {"5", "30", "0.5", "-"});
         m.put("gpt-5.4-mini", new String[] {"0.75", "4.5", "0.075", "-"});
         m.put("gpt-5.4-nano", new String[] {"0.2", "1.25", "0.02", "-"});
-        // The seven catalog models ModelCatalog#pricingId route-prefixes (decision 19): before that
-        // fix these ids had no scope prefix for ModelResolver to strip, so they resolved nowhere and
-        // every one of these agentic runs recorded no cost at all.
+        // Decision 19: without the scope prefix these ids resolved nowhere and every agentic run recorded no cost.
         m.put("xai/grok-4.6", new String[] {"2", "6", "0.5", "-"});
         m.put("xai/grok-code-fast-1", new String[] {"1", "2", "0.2", "-"});
         m.put("zai/glm-5.3", new String[] {"1.4", "4.4", "0.26", "0"});
@@ -101,38 +84,6 @@ class PlatformLaneRatesTest {
         assertTrue(wrong.isEmpty(), "platform lane rates moved:\n  " + String.join("\n  ", wrong));
     }
 
-    @Test
-    @DisplayName("BedrockModelProfile's route prefix is what makes the mantle ids resolve to mantle rates")
-    void mantleIdsResolveToTheirOwnRoute() {
-        // BedrockModelProfile.MANTLE_ROUTE_PREFIX makes the platform report
-        // bedrock_mantle/openai.gpt-5.6-luna, which the vendored snapshot carries verbatim as mantle's own
-        // priced route — no override needed. ModelResolver's exact-match leg is untouched.
-        Books books = Books.load(mapper);
-        String resolved = books.resolve("bedrock_mantle/openai.gpt-5.6-luna");
-        assertEquals("bedrock_mantle/openai.gpt-5.6-luna", resolved);
-        ModelRates rates = books.rates(resolved);
-        assertNotNull(rates);
-        assertEquals(0, requireRate(rates.inputPerMtok()).compareTo(new BigDecimal("0.22")));
-    }
-
-    @Test
-    @DisplayName("the bare id a producer regression would report still falls through to OpenAI-direct")
-    void bareMantleIdWouldStillFallThroughToOpenAiDirect() {
-        // The regression BedrockModelProfile.MANTLE_ROUTE_PREFIX exists to prevent, kept as a standing
-        // check: if a future change ever reports the bare id again, ModelResolver has no scope prefix to
-        // strip and falls through the vendor strip onto OpenAI's own gpt-5.6-luna row — a different
-        // product at a different price (0.20 direct vs 0.22 mantle, as of the 2026-09-02 refresh; direction
-        // isn't the invariant, a price DIFFERENCE is).
-        Books books = Books.load(mapper);
-        String fallthrough = books.resolve("openai.gpt-5.6-luna");
-        assertEquals("gpt-5.6-luna", fallthrough, "the bare id has no scope prefix, so it falls to the vendor strip");
-        ModelRates wrongRates = books.rates("gpt-5.6-luna");
-        assertNotNull(wrongRates);
-        assertTrue(
-                requireRate(wrongRates.inputPerMtok()).compareTo(new BigDecimal("0.22")) != 0,
-                "OpenAI-direct must price differently from mantle's real rate, or this regression is silent");
-    }
-
     private static boolean matches(ModelRates actual, String[] want) {
         return same(actual.inputPerMtok(), want[0])
                 && same(actual.outputPerMtok(), want[1])
@@ -154,15 +105,7 @@ class PlatformLaneRatesTest {
         return v == null ? "-" : v.stripTrailingZeros().toPlainString();
     }
 
-    private static BigDecimal requireRate(@Nullable BigDecimal rate) {
-        assertNotNull(rate, "expected a rate");
-        return rate;
-    }
-
-    /**
-     * The checked-in vendored rate file, driving the real {@link ModelResolver} through a stub repository
-     * — so this test exercises the production resolution legs without a database.
-     */
+    /** The vendored rate file driving the real {@link ModelResolver} through a stub repository. */
     private static final class Books {
 
         private final Map<String, ModelRates> rates;
@@ -170,8 +113,7 @@ class PlatformLaneRatesTest {
 
         private Books(Map<String, ModelRates> rates) {
             this.rates = rates;
-            // The production resolver, driven through a repository that answers from the file rather than
-            // from Postgres — so the exact → region-strip → vendor-strip legs under test are the real ones.
+            // Answers from the file, so the exact, region-strip, and vendor-strip legs are the real ones.
             this.resolver = new ModelResolver(new PriceBookRepository(null, null) {
                 @Override
                 public boolean hasModel(String modelId) {

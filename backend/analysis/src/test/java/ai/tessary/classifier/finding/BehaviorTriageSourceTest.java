@@ -43,10 +43,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
- * The behaviour findings' triage store: the brief it hands a run, the ruling it records, and the
- * detector-state writes a person's ruling makes. Each of these is a write the next sweep reads, so the bugs
- * are a write that lands on the wrong reference, a missing one that lets the detector re-alarm on traffic a
- * person accepted, and a failed advisory write that throws away a ruling a microVM paid for.
+ * The behaviour findings' triage store: the brief, the ruling, and the detector-state writes a ruling makes. The bugs
+ * are a write on the wrong reference, a missing one that re-alarms on accepted traffic, and a failed advisory write
+ * that throws away a paid ruling.
  */
 @ExtendWith(MockitoExtension.class)
 class BehaviorTriageSourceTest {
@@ -97,10 +96,8 @@ class BehaviorTriageSourceTest {
     Tracer tracer;
 
     /**
-     * A negative ruling on a tool-error window is recorded, folded back into the detector so the arm it
-     * fired on restarts from a reference that holds it, and the job is done. The fold is advisory: when it
-     * fails the ruling still stands, the case gate still runs and the job is still done, rather than the
-     * worker retrying a run that already produced its answer.
+     * A negative tool-error ruling is recorded and folded back so the arm restarts from a reference that holds it.
+     * The fold is advisory: if it fails, the ruling, case gate, and job completion still stand.
      */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -149,9 +146,8 @@ class BehaviorTriageSourceTest {
     }
 
     /**
-     * "Legitimate" on a groundedness finding re-learns its call site's reference from now, so the absorbed
-     * hours stop counting; "real deviation" leaves the reference alone and opens the case. Crossing them
-     * either silences a regression or re-alarms on traffic a person accepted.
+     * "Legitimate" re-learns the call site's reference from now; "real deviation" leaves it and opens the case.
+     * Crossing them silences a regression or re-alarms on accepted traffic.
      */
     @ParameterizedTest
     @ValueSource(strings = {"expected", "not_expected"})
@@ -186,7 +182,7 @@ class BehaviorTriageSourceTest {
         }
     }
 
-    /** A cause kind no branch claims is refused by name, never ruled with no detector-state write. */
+    /** An unclaimed cause kind is refused by name, never ruled without a state write. */
     @Test
     void aCauseKindNoBranchClaimsIsRefused() {
         FindingRow finding = FindingRowBuilder.of(BuiltInDetector.Kind.REGEX)
@@ -204,9 +200,8 @@ class BehaviorTriageSourceTest {
     }
 
     /**
-     * Absorbing a tool-error window with enough calls installs its counts as the tool's reference, clears
-     * any pending pin and restarts the accumulator, so the tool stops alarming on the spell a person
-     * accepted. Absorbing a metric-drift finding re-pins its baseline.
+     * Absorbing a tool-error window installs its counts as the reference, clears any pending pin, and restarts the
+     * accumulator; absorbing a drift finding re-pins its baseline.
      */
     @Test
     void absorbingRepinsTheReferenceTheFindingWasRuledAgainst() {
@@ -230,7 +225,7 @@ class BehaviorTriageSourceTest {
 
         source().repin(PROJECT, "f2", "u1");
 
-        // No day of the rolling control has closed, so the window still filling is what becomes the reference.
+        // No control day has closed, so the filling window becomes the reference.
         verify(baselines)
                 .repin(
                         eq("mbl-1"),
@@ -244,9 +239,8 @@ class BehaviorTriageSourceTest {
     }
 
     /**
-     * An absorb whose reference cannot be located refuses rather than guessing: a tool-error blob with no
-     * onset-run counts (absorbing it would install a lifetime average as the new normal), and a drift
-     * finding that names no metric baseline.
+     * An absorb refuses rather than guesses: a tool-error blob with no onset-run counts (it would install a lifetime
+     * average), or a drift finding naming no baseline.
      */
     @Test
     void anAbsorbWithNoReferenceToMoveIsRefused() {
@@ -276,9 +270,8 @@ class BehaviorTriageSourceTest {
     }
 
     /**
-     * Absorbing a tool-error case folds every spell it holds into one reference: two spells of 300 calls
-     * each clear the 500-call floor together though neither does alone. Pinning only the newest would leave
-     * the reference blind to the earlier spell, and the tool alarms again on it.
+     * Absorbing folds every spell: two 300-call spells clear the 500-call floor together. Pinning only the newest
+     * leaves the earlier one alarming.
      */
     @Test
     void absorbingACaseFoldsEverySpellItHolds() {
@@ -288,7 +281,7 @@ class BehaviorTriageSourceTest {
         verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
     }
 
-    /** One spell the case cannot read refuses the whole absorb rather than under-counting what is accepted. */
+    /** One unreadable spell refuses the whole absorb. */
     @Test
     void aCaseHoldingAnUnreadableSpellIsNotAbsorbed() {
         FindingRow unreadable = FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
@@ -304,10 +297,7 @@ class BehaviorTriageSourceTest {
         verifyNoInteractions(toolErrorReferences, toolErrorStates);
     }
 
-    /**
-     * A finding whose classifier the org does not hold reads as not found through every door: analysis
-     * (no run booted on it) and a person's ruling alike.
-     */
+    /** A withheld classifier's finding is not found through every door: analysis and a person's ruling alike. */
     @Test
     void aFindingOfAWithheldClassifierIsNotReachable() {
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(toolError("f1", 600, 60)));
@@ -320,8 +310,6 @@ class BehaviorTriageSourceTest {
                         .error());
         verifyNoInteractions(jobs);
     }
-
-    // ---- fixtures ---------------------------------------------------------------------------------
 
     private static FindingRow toolError(String id, long nCur, long failures) {
         return FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
@@ -389,7 +377,7 @@ class BehaviorTriageSourceTest {
                 new TriageLauncherBreaker(new ClassifierProperties()));
     }
 
-    /** The collaborators no test here reaches are null, so a new dependency on one fails loudly. */
+    /** Unreached collaborators are null, so a new dependency fails loudly. */
     @SuppressWarnings("NullAway")
     private BehaviorTriageSource source() {
         return new BehaviorTriageSource(

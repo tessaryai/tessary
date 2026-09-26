@@ -41,8 +41,7 @@ import org.springframework.web.server.ResponseStatusException;
  * by someone the org does not let spend a strong model's time.
  */
 @SpringBootTest
-// Same context as CaseServiceTest, for the same reason: batch-size=0 parks RcaWorker's drain so a press
-// here is read back as the request it made, not raced by the real worker.
+// batch-size=0 parks RcaWorker's drain, as in CaseServiceTest.
 @TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
 class CaseControllerTest {
 
@@ -62,9 +61,8 @@ class CaseControllerTest {
     OrgMembershipRepository memberships;
 
     /**
-     * Triage files each case under the bucket its state names: open in the queue, muted beside it, and a
-     * closure in the week's history. Unmuting returns a case to the queue, and a case is read by its stored
-     * id or by the reference a person quotes.
+     * Each case files under its state's bucket: open in the queue, muted beside it, closed in the week's history.
+     * Unmute returns it to the queue; a case is read by stored id or quoted reference.
      */
     @Test
     void triageFilesEachCaseUnderItsStateAndACaseReadsByIdOrReference() {
@@ -169,8 +167,6 @@ class CaseControllerTest {
         assertEquals(CaseRow.Resolution.ABSORBED, absorbed.resolution());
     }
 
-    // ---- helpers -----------------------------------------------------------------------------
-
     private static TenantContext owner(TenantFixture.Setup fix) {
         return new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
     }
@@ -182,7 +178,7 @@ class CaseControllerTest {
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** A classifier case on its own subject, backed by a finding as the forward CHECK requires. */
+    /** A classifier case backed by a finding, as the forward CHECK requires. */
     private CaseRow open(Project p, String subject) {
         String now = Instant.now().toString();
         String findingId = Objects.requireNonNull(findings.recordArmedWindow(

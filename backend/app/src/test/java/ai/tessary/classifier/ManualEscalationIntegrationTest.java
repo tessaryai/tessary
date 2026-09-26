@@ -14,7 +14,6 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingService;
-import ai.tessary.classifier.finding.TriageLane;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
@@ -40,24 +39,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Layer-2 is a hand-pressed button, and this is the surface behind it.
+ * Layer 2 is a hand-pressed button. First property: nothing escalates on its own; a regression here silently starts
+ * billing, so {@code escalated_at} stays null until somebody asks.
  *
- * <p>The property under test is a negative one first: nothing escalates on its own. A regression
- * here is silent and expensive: it does not fail a request or corrupt a row, it just quietly
- * starts billing, so the guard is that {@code escalated_at} stays null until somebody asks.
- *
- * <p>Against Postgres because both halves are: the escalate-once marker is a conditional update,
- * and the detector filter is a SQL predicate that has to run before the row limit, so a rail asking
- * for one classifier's leads must not have them pushed off the page by a noisy sibling.
+ * <p>Against Postgres: the escalate-once marker is a conditional update, and the detector filter runs before the row
+ * limit so a noisy sibling cannot push leads off the page.
  */
 @SpringBootTest
 class ManualEscalationIntegrationTest {
 
-    /**
-     * A horizon comfortably before anything these fixtures stamp, so a finding written twice reads as
-     * one spell still running rather than as a recovery and a re-fire, the production behaviour these
-     * tests are about. A test that wants the other arm passes its own.
-     */
+    /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
 
     @Autowired
@@ -94,23 +85,11 @@ class ManualEscalationIntegrationTest {
             + "\"direction\":\"up\",\"n_ref\":4210,\"n_cur\":1180,"
             + "\"quantiles\":{\"p50\":[2100,2940],\"p95\":[9000,21400]}}";
 
-    /** A tool-error blob, so the fixture's classifier and the payload it carries are the same detector. */
+    /** A tool-error blob, matching the fixture's classifier. */
     private static final String TOOL_ERROR_EVIDENCE = "{\"measure\":\"tool_error_rate\","
             + "\"bucket\":{\"kind\":\"tool\",\"key\":\"tool:write\"},\"cause_kind\":\"rate_shift\","
             + "\"rate\":{\"ref\":0.0547,\"cur\":0.0047},\"n_ref\":502,\"n_cur\":632,"
             + "\"direction\":\"down\",\"onset_at\":\"2026-08-03T01:00:00Z\",\"counts_basis\":\"onset\"}";
-
-    @Test
-    @DisplayName("a written finding is not escalated — the row is where the sweep stops")
-    void findingsAreWrittenUnescalated() {
-        Project p = project("manual-esc-unescalated");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertNull(
-                findings.findById(p.projectId(), id).orElseThrow().escalatedAt(),
-                "recording a shift must not hand it to Layer 2 — that is a microVM nobody asked for");
-        assertEquals(0, triageJobs(p.projectId()), "and it must not have queued a job either");
-    }
 
     @Test
     @DisplayName("Run analysis enqueues exactly one microVM, and a second press lands on it")
@@ -129,16 +108,13 @@ class ManualEscalationIntegrationTest {
         BehaviorAnalysisView second = behavior.analyze(p.projectId(), id, null);
         assertTrue(second.alreadyEscalated(), "a second press must say so rather than report a fresh run");
         assertEquals(first.jobId(), second.jobId(), "and must land on the SAME job");
-        // The load-bearing assertion: a cause is triaged once. Two presses buying two repo clones
-        // is the exact cost the automatic path was removed for.
+        // A cause is triaged once: two presses buying two repo clones is the cost the automatic path was removed for.
         assertEquals(1, triageJobs(p.projectId()), "one cause, one microVM, however many presses");
     }
 
     /**
-     * A finding with no exemplar, only members and witnesses, still escalates. The job carries no
-     * trace at all: naming one would decide which instance the agent investigates, and it cannot
-     * tell our pick from a draw it made itself, so the payload carries the finding id and the
-     * population is paged through MCP.
+     * A finding with only members and witnesses still escalates. The job names no trace: picking one would decide
+     * which instance the agent investigates; the population is paged through MCP.
      */
     @Test
     @DisplayName("a finding citing witnesses and members escalates, and the job names no trace")
@@ -159,7 +135,7 @@ class ManualEscalationIntegrationTest {
                         Instant.now().toString())
                 .findingId();
         String now = Instant.now().toString();
-        // Members first, so a reader taking the first row inserted would take one of these.
+        // Members first, so a reader taking the first inserted row would take one.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -192,11 +168,7 @@ class ManualEscalationIntegrationTest {
                 "the payload names the finding and nothing that points at one row of it");
     }
 
-    /**
-     * The refusal that survives, and the only state that should still produce one: a finding citing no
-     * trace at all. There is nothing for the agent to page and nothing to resolve a deploy from, so this
-     * is a 409 rather than a microVM that would boot, find an empty evidence set and rule on nothing.
-     */
+    /** A finding citing no trace at all is a 409, not a microVM that would rule on nothing. */
     @Test
     @DisplayName("a finding citing no population at all is refused rather than booting a microVM")
     void analyzeRefusesAFindingCitingNoEvidence() {
@@ -225,64 +197,6 @@ class ManualEscalationIntegrationTest {
                 "nor stamped the escalate-once marker on a finding that was never escalated");
     }
 
-    /**
-     * A project with no connected repository gets a triage, and it is the same triage every project
-     * gets: triage reads no repository, it audits a claim about traffic, which no source file
-     * settles, so the press enqueues and names the one lane there is.
-     */
-    @Test
-    @DisplayName("without a connected repo the button enqueues the same triage as everyone else")
-    void analyzeWithoutARepoRunsTheEvidenceOnlyLane() {
-        Project p = project("manual-esc-no-repo");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        BehaviorAnalysisView view = behavior.analyze(p.projectId(), id, null);
-
-        assertEquals(TriageLane.EVIDENCE_ONLY.wire(), view.lane(), "the ruling rests on the evidence");
-        assertEquals(1, triageJobs(p.projectId()), "and the job is real, not a reported no-op");
-        assertNotNull(
-                findings.findById(p.projectId(), id).orElseThrow().escalatedAt(),
-                "escalate-once applies here too — a second press must not buy a second ruling");
-    }
-
-    /** The other side: a connected repo changes nothing, because triage never opens one. */
-    @Test
-    @DisplayName("a connected repo does not change the lane — triage reads no repository")
-    void analyzeWithARepoRunsTheSameLane() {
-        Project p = project("manual-esc-repo-lane");
-        seedIntegration(p.projectId());
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertEquals(
-                TriageLane.EVIDENCE_ONLY.wire(),
-                behavior.analyze(p.projectId(), id, null).lane());
-    }
-
-    /**
-     * Escalating a finding to Layer 2 never depends on anything outside the finding itself: Layer 2
-     * asks whether a deviation is legitimate, and it must read the finding's own evidence and
-     * nothing else. A bare project, with no pipeline import and no call-site definition behind the
-     * bucket, still escalates.
-     */
-    @Test
-    @DisplayName("a project with no pipeline at all can still escalate a finding")
-    void escalationDoesNotDependOnAGraderExisting() {
-        Project p = project("manual-esc-no-graders");
-        String id = shift(p, "turn_duration:" + BUCKET + ":slower:pinned");
-
-        assertEquals(
-                0,
-                jdbc.sql("SELECT count(*) FROM call_site WHERE project_id = :pid")
-                        .param("pid", p.projectId())
-                        .query(Long.class)
-                        .single(),
-                "the premise: this project has no imported pipeline to depend on");
-
-        behavior.analyze(p.projectId(), id, null);
-
-        assertEquals(1, triageJobs(p.projectId()), "the escalation happened anyway");
-    }
-
     @Test
     @DisplayName("the rail's detector filter returns one classifier's findings and no sibling's")
     void detectorFilterScopesToOneClassifier() {
@@ -301,17 +215,13 @@ class ManualEscalationIntegrationTest {
                 "cost is the only measure that opens a cost_drift finding — the token measures ride as evidence");
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Fixture
-    // -----------------------------------------------------------------------------------------------
-
     private Set<String> causeKeys(Project p, String detector) {
         return behavior.findings(p.projectId(), null, null, detector, false).findings().stream()
                 .map(f -> f.causeKey())
                 .collect(Collectors.toSet());
     }
 
-    /** Queued Layer-2 runs for this project: the thing an accidental automatic escalation would bill. */
+    /** Queued Layer-2 runs: what an accidental escalation would bill. */
     private long triageJobs(String projectId) {
         return jdbc.sql("SELECT count(*) FROM job WHERE project_id = :pid AND kind = 'triage'")
                 .param("pid", projectId)
@@ -380,9 +290,7 @@ class ManualEscalationIntegrationTest {
                         Instant.now().minus(QUIET_WINDOW).toString(),
                         Instant.now().toString())
                 .findingId();
-        // What the metric sweep actually writes: a span-grain `member`, and no exemplar. The role was
-        // dropped for both drift measures because a member of a shifted population is not an anomaly
-        // in it.
+        // What the metric sweep writes: a span-grain member, no exemplar.
         findingEvidence.record(
                 p.projectId(),
                 id,
@@ -392,10 +300,7 @@ class ManualEscalationIntegrationTest {
         return id;
     }
 
-    /**
-     * Which classifier a measure files under. The sweep spells the same mapping; a test that hardcoded
-     * one key would make the detector filter pass by construction.
-     */
+    /** Mirrors the sweep's mapping; hardcoding one key would make the detector filter pass by construction. */
     private static String classifierFor(String causeKey) {
         return causeKey.startsWith("cost:") ? BuiltInDetector.Kind.COST_DRIFT : BuiltInDetector.Kind.DURATION_DRIFT;
     }

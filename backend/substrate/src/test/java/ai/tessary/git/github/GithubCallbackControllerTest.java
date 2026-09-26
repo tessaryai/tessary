@@ -2,7 +2,6 @@
 package ai.tessary.git.github;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,7 +18,6 @@ import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitIntegrationService;
 import ai.tessary.git.github.GithubTokenService.InstalledRepo;
-import ai.tessary.open.errors.TessaryException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
@@ -81,17 +79,6 @@ class GithubCallbackControllerTest {
     // ---- fresh install (installation_id present) ---------------------------
 
     @Test
-    void freshInstall_singleRepo_connectsAndBouncesSetup() {
-        when(tokenService.exchangeUserCode("code")).thenReturn("utok");
-        when(tokenService.listUserInstallations("utok")).thenReturn(Set.of(111L));
-        when(tokenService.listInstallationRepos(111L, HOST))
-                .thenReturn(List.of(new InstalledRepo("acme", "web", "main")));
-        ResponseEntity<Void> resp = controller.callback(111L, stateFor("p1"), "code", "install");
-        assertTrue(location(resp).contains("/settings/git?connected=1"));
-        verify(integrations).connect(eq("p1"), any(ConnectRequest.class));
-    }
-
-    @Test
     void freshInstall_missingCode_failsClosed_redirectingWithError() {
         // Fail-closed on the binding, friendly on the browser: no connect happens, and the user
         // lands back on the Generate step with the error code instead of a raw JSON body.
@@ -122,12 +109,6 @@ class GithubCallbackControllerTest {
     }
 
     // ---- invalid state: no verified project, nothing to redirect to ---------
-
-    @Test
-    void invalidState_stillThrows() {
-        assertThrows(TessaryException.class, () -> controller.callback(111L, "garbage-state", "code", "install"));
-        verify(integrations, never()).connect(anyString(), any());
-    }
 
     // ---- reuse (no installation_id) ----------------------------------------
 

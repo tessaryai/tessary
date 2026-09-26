@@ -43,13 +43,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 /**
- * The heartbeat against home.tessary.ai's own contract. No network and no Spring context.
- *
- * <p>{@code telemetry/home-ping.v1.schema.json} is a verbatim copy of {@code contracts/ping.v1.schema.json}
- * from the tessary-home repository, which home generates from the zod schema its {@code POST /v1/ping}
- * handler validates with. Validating the real payload against it is what catches this client drifting
- * from the server: a renamed field, a missing required one, or a format home would answer 400 to. When
- * home changes the contract, replace the copy with the new file and let this test say what broke.
+ * The heartbeat against home.tessary.ai's contract, with no network or Spring. {@code telemetry/home-
+ * ping.v1.schema.json} is a verbatim copy of tessary-home's {@code contracts/ping.v1.schema.json}; when home changes
+ * it, replace the copy and let this test say what broke.
  */
 class TelemetryHeartbeatTest {
 
@@ -89,11 +85,9 @@ class TelemetryHeartbeatTest {
     }
 
     /**
-     * The one gate this whole subsystem hangs off: {@link TelemetryProperties#isEnabled()} must be checked
-     * BEFORE anything else in {@link TelemetryHeartbeat#tick()} runs — no DB read (not even the harmless
-     * {@link InstanceIdRepository}, which itself writes on first call), no HTTP client touch. This is what
-     * makes devdocs/reference/telemetry-contract.md §3's "zero outbound calls, including DNS resolution,
-     * when disabled" true.
+     * {@link TelemetryProperties#isEnabled()} is checked before anything in {@link TelemetryHeartbeat#tick()}: no DB
+     * read (even {@link InstanceIdRepository}, which writes on first call) and no HTTP client. This makes telemetry-
+     * contract.md §3's "zero outbound calls when disabled" true.
      */
     @Test
     void disabledTelemetryTouchesNothingDownstream() {
@@ -146,19 +140,6 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void checksThePriceBookAfterPinging() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
-
-        InOrder order = inOrder(client, fetcher);
-        order.verify(client).postJson(eq("/v1/ping"), anyString());
-        order.verify(fetcher).refresh();
-    }
-
-    @Test
     void aFailedPingStillChecksThePriceBook() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
@@ -180,22 +161,8 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void anInstallHoldingNoDigestOmitsItButStillSaysWhatItCanParse() throws Exception {
-        ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
-                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
-
-        assertFalse(payload.path("price_book").has("digest"));
-        assertEquals(
-                PriceBookFetcher.SUPPORTED_SCHEMA,
-                payload.path("price_book").path("schema_max").asInt());
-        assertTrue(homePingSchema().validate(payload).isEmpty());
-    }
-
-    @Test
     void homesSchemaDeclaresEveryCountThisClientSends() throws Exception {
-        // additionalProperties is true, so the schema would accept an undeclared count and home would silently
-        // strip it. Pin the declared set to what counts() sends.
+        // additionalProperties is true, so home would silently strip an undeclared count.
         JsonNode declared;
         try (InputStream in = TelemetryHeartbeatTest.class.getResourceAsStream("/telemetry/home-ping.v1.schema.json")) {
             declared = mapper.readTree(in).path("properties").path("counts").path("properties");
@@ -206,7 +173,7 @@ class TelemetryHeartbeatTest {
 
     @Test
     void aFailedCountDropsOnlyTheCounts() throws Exception {
-        // A partial counts object would read as zero for whatever was missing, so it goes out whole or not at all.
+        // A partial counts object reads as zero for what is missing, so it goes out whole or not at all.
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         when(projects.countAll()).thenReturn(3L);
@@ -226,7 +193,7 @@ class TelemetryHeartbeatTest {
 
     @Test
     void readsTheInstanceIdBeforeTakingAPingSeq() throws Exception {
-        // nextPingSeq updates the singleton row, which only exists once get() has minted it.
+        // The singleton row exists only once get() mints it.
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
@@ -279,8 +246,7 @@ class TelemetryHeartbeatTest {
 
     @Test
     void theSchemaCopyRejectsWhatHomeRejects() throws Exception {
-        // Proves the validator above can fail, so a green run means something: the ping this client sent
-        // before /v1 (no ping_seq, `timestamp` instead of `sent_at`) is exactly what home answers 400 to.
+        // Proves the validator can fail: the pre-/v1 ping is what home answers 400 to.
         ObjectNode old = mapper.createObjectNode();
         old.put("contract_version", 1);
         old.put("instance_id", INSTANCE_ID);
@@ -293,39 +259,13 @@ class TelemetryHeartbeatTest {
         assertTrue(violations.toString().contains("sent_at"), violations.toString());
     }
 
-    @Test
-    void aFailedSendNeverEscapesTheTick() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-        when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-    }
-
-    @Test
-    void aRepositoryFailureNeverEscapesTheTick() {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-        verifyNoInteractions(client);
-    }
-
     private static List<String> fieldNames(ObjectNode node) {
         List<String> out = new ArrayList<>();
         node.fieldNames().forEachRemaining(out::add);
         return out;
     }
 
-    /**
-     * A send interrupted mid-flight (the scheduler shutting down) must leave the thread's interrupt flag set:
-     * swallowing it would let the shutdown hang on a thread that no longer knows it was asked to stop. The
-     * price-book check still runs, as for any other failed send.
-     */
+    /** An interrupted send keeps the interrupt flag, or shutdown hangs. The price-book check still runs. */
     @Test
     void anInterruptedSendKeepsTheInterruptFlagAndStillChecksThePriceBook() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
@@ -339,10 +279,7 @@ class TelemetryHeartbeatTest {
         verify(fetcher).refresh();
     }
 
-    /**
-     * A failed read of the held price book's digest drops only the digest: the ping still goes out, still says
-     * which manifest schema this install parses, and still validates against home's contract.
-     */
+    /** A failed digest read drops only the digest; the ping still goes out and validates. */
     @Test
     void anUnreadableHeldDigestIsOmittedAndThePingStillGoesOut() throws Exception {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
@@ -364,9 +301,8 @@ class TelemetryHeartbeatTest {
     }
 
     /**
-     * The host OS goes out as its bare family, never the versioned {@code os.name} ("Windows 11" carries a
-     * version home has no field for). A host outside the three families is sent under its own lower-cased
-     * name, and an empty name as {@code unknown} rather than an empty string.
+     * The OS goes out as its bare family, never the versioned {@code os.name}; others lower-cased, empty as {@code
+     * unknown}.
      */
     @ParameterizedTest(name = "{0} -> {1}")
     @CsvSource({

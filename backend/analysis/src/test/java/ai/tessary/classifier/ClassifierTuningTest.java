@@ -33,9 +33,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 /**
- * The metric-drift dial: what {@code GET/PUT .../tuning} reads and writes, and the false-alarm rate it reports
- * beside the dial. The rate is {@link MetricDriftDetector#impliedFalseAlarmRate} at the MEDIAN readable spread
- * of the buckets this classifier watches; these tests pin which spread that is, not the noise law itself.
+ * The metric-drift dial behind {@code GET/PUT .../tuning} and its false-alarm rate, {@link
+ * MetricDriftDetector#impliedFalseAlarmRate} at the median readable bucket spread. Pins which spread, not the noise
+ * law.
  */
 class ClassifierTuningTest {
 
@@ -60,14 +60,12 @@ class ClassifierTuningTest {
             new ai.tessary.config.GroundednessProperties());
 
     /**
-     * Catches the rate being read off the mean spread (one pathological bucket would set it), off the first
-     * bucket, or off nothing once one baseline's sketch is unreadable; and a bucket that has not been pinned
-     * yet being skipped when its newest closed day has a sketch to read.
+     * Catches the rate read off the mean spread, the first bucket, or nothing once one sketch is unreadable, and an
+     * unpinned bucket skipped when its newest closed day has a sketch.
      */
     @Test
     void theImpliedRateReadsTheMedianReadableSpread() {
-        // Spreads of about 0.75, 1.0 and 1.3: all inside the span the noise law interpolates over, so each
-        // implies a different rate and picking the wrong bucket shows.
+        // Spreads of about 0.75, 1.0, and 1.3, each implying a different rate.
         MetricHistogram tight = sketch(4.0, 5.5);
         MetricHistogram middle = sketch(3.5, 5.5);
         MetricHistogram wide = sketch(3.2, 5.8);
@@ -79,7 +77,7 @@ class ClassifierTuningTest {
                         baseline("b-garbage", "{\"kind\":\"histogram\",\"bins\":", null),
                         baseline("b-empty", null, null),
                         baseline("b-flat", sketch(4.6).toJson(), null),
-                        // Not pinned yet: its newest closed day is what it reads.
+                        // Not pinned: its newest closed day is read.
                         baseline("b-middle", null, control(middle.toJson())),
                         baseline("b-tight", tight.toJson(), null)));
 
@@ -110,10 +108,7 @@ class ClassifierTuningTest {
                 view);
     }
 
-    /**
-     * Catches a rate printed when nothing has the traffic to support one (it must read as unknown), and the
-     * dial being served for a classifier that has no window to tune.
-     */
+    /** No supporting traffic reads as unknown, and a classifier with no window has no dial. */
     @Test
     void withNoReadableSpreadTheRateIsUnknownAndOtherDetectorsHaveNoDial() {
         when(signals.findById(PID, "clf-dur"))
@@ -127,11 +122,7 @@ class ClassifierTuningTest {
         assertEquals(ClassifierError.NOT_METRIC_DRIFT, e.error());
     }
 
-    /**
-     * Catches a tuning write that replaces the stored config with the four edited fields (dropping which
-     * measures the classifier watches and the fields nobody edited), and a response that echoes what was
-     * submitted rather than the clamped value actually in effect.
-     */
+    /** A write keeps unedited fields and the watched measures, and the response is the clamped value in effect. */
     @Test
     void aTuningWriteMergesIntoTheStoredConfigAndReportsTheClampedValue() throws Exception {
         when(signals.findById(PID, "clf-cost"))

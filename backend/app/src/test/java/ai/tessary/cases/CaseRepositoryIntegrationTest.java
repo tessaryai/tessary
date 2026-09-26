@@ -2,7 +2,6 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
@@ -25,13 +24,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * The two partial indexes the baseline changeset defines on {@code eval_case}, the display-number
- * allocation that runs against them, and the filtered keyset page that reads them. All three are invisible
- * to a unit test: {@code ux_eval_case_live} is a filtered unique index whose {@code WHERE state &lt;&gt;
- * 'resolved'} predicate is the whole point, the seq allocator is a {@code MAX(seq)+1} whose failure mode only
- * appears when a row it did not expect is already there, and a keyset page is a claim about what Postgres
- * returns for a row-constructor comparison against a real ordering — mocking the query would only assert
- * that the string was assembled.
+ * The two partial indexes on {@code eval_case}, the display-number allocation against them, and the filtered keyset
+ * page, none visible to a unit test: {@code ux_eval_case_live}'s {@code WHERE state &lt;&gt; 'resolved'} predicate is
+ * the point, the {@code MAX(seq)+1} allocator fails only when an unexpected row exists, and a keyset page is a claim
+ * about Postgres row-constructor ordering.
  */
 @SpringBootTest
 @TestPropertySource(properties = "test.context-group=case-repository")
@@ -43,8 +39,7 @@ class CaseRepositoryIntegrationTest {
     @Autowired
     FindingRepository findings;
 
-    /** Memoized per (project, subject): every case needs a finding, and a fresh one per pass would
-     *  make each refresh look like a different cause. */
+    /** Memoized per (project, subject): a fresh finding per pass would make each refresh look like a new cause. */
     private final Map<String, String> findingIds = new HashMap<>();
 
     @Autowired
@@ -73,18 +68,6 @@ class CaseRepositoryIntegrationTest {
     }
 
     @Test
-    void resolvingFreesTheKeyForAFreshCase() {
-        Project p = project("repo-resolved-frees");
-        CaseRow first =
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).orElseThrow();
-        cases.resolve(p.id(), first.id(), CaseRow.Resolution.HUMAN, "done", "priya@example.com", Instant.now());
-
-        CaseRow second =
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).orElseThrow();
-        assertNotEquals(first.id(), second.id());
-    }
-
-    @Test
     void displayNumbersCountUpWithinAProjectAndRestartAcrossProjects() {
         Project a = project("repo-seq-a");
         Project b = project("repo-seq-b");
@@ -106,21 +89,12 @@ class CaseRepositoryIntegrationTest {
                         .seq());
     }
 
-    // Deliberately no concurrent-seq-race test here any more. The old one exercised CaseLedger#apply's
-    // project-wide advisory lock, which existed to serialize a periodic reconciler's batch of opens —
-    // that reconciler is gone (decision 1: a case opens once, from the ruling that qualified it), and
-    // each ruling now opens or joins at most ONE case rather than a whole project's live set at once.
-    // A residual race remains — two DIFFERENT causes ruled positive at the same instant, both mapping
-    // onto the SAME CaseKey (e.g. tool_error's up/down directions on one tool) — but it is now a rare
-    // ux_eval_case_seq collision that fails the ruling's own transaction for a retry, not a silent drop,
-    // and CaseLedger no longer holds a lock to make it deterministic to test.
-
-    // ---- the paged, filtered read ------------------------------------------------------------
+    // No concurrent-seq test: the reconciler whose batch opens needed CaseLedger's lock is gone (decision 1). A
+    // residual race, two causes ruled at once onto one CaseKey, fails the ruling's transaction for a retry rather
+    // than dropping silently.
 
     /**
-     * Each filter narrows on its own column and they compose. Cheap to write, and the bug it catches is the
-     * one a hand-built {@code WHERE} clause always eventually has: a filter that is accepted, appended to the
-     * SQL, and never bound — which returns MORE rows than asked for and reads like a working query.
+     * Each filter narrows on its own column and they compose. Catches a filter appended to the SQL but never bound.
      */
     @Test
     void pageFiltersOnStateDetectorAndCallSiteTogether() {
@@ -149,12 +123,8 @@ class CaseRepositoryIntegrationTest {
     }
 
     /**
-     * Walking the live page with the cursor visits every case exactly once, worst first.
-     *
-     * <p>The seeded set is deliberately degenerate: two cases share a severity, and two of THOSE share an
-     * {@code opened_at}. That is what makes the {@code id} tiebreaker load-bearing — a keyset whose tail is
-     * not unique either skips a row (it lands past a tie) or serves one twice (it lands before it), and both
-     * look like a working page until someone counts.
+     * Walking the live page visits every case once, worst first. Two cases share a severity and two of those an
+     * {@code opened_at}, so the {@code id} tiebreaker is load-bearing: a non-unique tail skips or repeats a row.
      */
     @Test
     void livePageWalksWorstFirstAndTheKeysetNeitherSkipsNorRepeats() {
@@ -189,7 +159,7 @@ class CaseRepositoryIntegrationTest {
                 "inside one severity, the newer spell outranks the older one");
     }
 
-    /** Closed cases are a history, so they rank by when they closed — severity says nothing about recency. */
+    /** Closed cases rank by when they closed. */
     @Test
     void resolvedPageWalksNewestClosureFirst() {
         Project p = project("repo-page-resolved");
@@ -205,8 +175,7 @@ class CaseRepositoryIntegrationTest {
                 "the most recent closure leads, even though it is the milder case");
 
         CaseRow last = firstPage.get(0);
-        // The resolved key carries no severity: this order does not rank by it, and passing one would be
-        // asserting a column the query never reads.
+        // The resolved key carries no severity: this order never reads it.
         List<CaseRow> nextPage = cases.page(
                 p.id(),
                 CaseRow.State.RESOLVED,
@@ -273,7 +242,7 @@ class CaseRepositoryIntegrationTest {
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** Every case points at a finding — the forward CHECK on {@code eval_case} requires one. */
+    /** The forward CHECK on {@code eval_case} requires a finding. */
     private String finding(Project p, String subjectId) {
         String now = Instant.now().toString();
         return Objects.requireNonNull(findings.recordArmedWindow(

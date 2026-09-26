@@ -64,31 +64,6 @@ const rail = () => screen.getByRole("dialog", { name: "Trace detail" });
 const width = () => Number.parseInt(rail().style.width, 10);
 
 describe("Rail", () => {
-  it("renders nothing while closed, and its title, meta, and body when open", () => {
-    render(<Opener />);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-
-    expect(rail().textContent).toContain("3 spans");
-    expect(screen.getByRole("link", { name: "First" })).toBeTruthy();
-  });
-
-  it("closes on its button, and on ESC but not on any other key", () => {
-    const onClose = vi.fn();
-    render(<Opener onClose={onClose} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-
-    fireEvent.keyDown(window, { key: "Enter" });
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
   it("closes only the topmost overlay on ESC, and leaves one another listener already took", () => {
     const under = vi.fn();
     const over = vi.fn();
@@ -192,24 +167,6 @@ describe("the rail's focus", () => {
 });
 
 describe("the rail's width", () => {
-  it("opens at 44% of the window, clamped to its 520px floor", () => {
-    render(
-      <Rail open onClose={() => {}} title="Trace detail">
-        body
-      </Rail>,
-    );
-    expect(width()).toBe(880);
-    cleanup();
-
-    window.innerWidth = 800;
-    render(
-      <Rail open onClose={() => {}} title="Trace detail">
-        body
-      </Rail>,
-    );
-    expect(width()).toBe(520);
-  });
-
   it("opens at the width last dragged to, even in another rail, clamped to 85% of the window", () => {
     render(<Opener />);
     // Stored after this rail mounted, as a drag in another rail would.

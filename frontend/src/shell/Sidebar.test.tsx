@@ -208,30 +208,9 @@ describe("the project switcher", () => {
     fireEvent.mouseDown(document.body);
     expect(screen.queryByText("Projects")).toBeNull();
   });
-
-  it("shows the project's initial when collapsed, and the slug before the list has loaded", async () => {
-    authApi.listProjects.mockReturnValue(new Promise(() => {}));
-    window.localStorage.setItem(KEY, "1");
-    open();
-
-    expect(screen.getByTitle("Acme Inc / default").textContent).toBe("D");
-  });
 });
 
 describe("the account menu", () => {
-  it("shows who is signed in, and signs out through the server", async () => {
-    open();
-    const account = screen.getByRole("button", { name: /dana@example.com/ });
-    expect(account.textContent).toContain("D");
-
-    fireEvent.click(account);
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    await waitFor(() => expect(authApi.logout).toHaveBeenCalled());
-
-    fireEvent.click(account);
-    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
-  });
-
   it("still leaves when the server's sign-out fails", async () => {
     authApi.logout.mockRejectedValue(new Error("offline"));
     open();

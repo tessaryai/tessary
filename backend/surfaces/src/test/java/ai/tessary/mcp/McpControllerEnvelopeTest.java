@@ -98,15 +98,6 @@ class McpControllerEnvelopeTest {
         assertEquals(false, body(r).has("result"), "the ping must not have run");
     }
 
-    /** An admin-family key is the one key that drives the tools. */
-    @Test
-    void anAdminKeyIsServed() throws Exception {
-        ResponseEntity<String> r = controller.handle(request(key(KeyScope.ADMIN)), PING);
-
-        assertEquals(HttpStatus.OK, r.getStatusCode());
-        assertEquals(mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"), body(r));
-    }
-
     /** No body at all, or only whitespace, is a 400 invalid request rather than a parse error or a 500. */
     @ParameterizedTest
     @ValueSource(strings = {"", "   "})

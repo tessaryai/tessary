@@ -6,22 +6,12 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Seeds the conversational PREAMBLE a frustration fixture needs to be scoreable at all.
+ * Seeds the preamble a frustration fixture needs to be scoreable: a user turn is sent only when the four messages
+ * before it are user, assistant, user, assistant, each with text. Without it a fixture asserts on a turn production
+ * never scores, and the failure reads as a cursor or grain bug.
  *
- * <p>The frustration classifier sends a user turn only when the four messages before it are user,
- * assistant, user, assistant, each with text: a conversation's opener and its second user turn are
- * never sent. A fixture that inserts one turn and expects a detection is therefore asserting against a
- * turn production would never score, and the failure reads as a cursor or grain bug rather than the
- * eligibility rule doing its job.
- *
- * <p>Call this before the turn under test, in the same session, so the fixture represents a real
- * conversation. The two preamble turns are stamped EARLIER than the turns they precede so they never
- * disturb a test that depends on a specific timestamp ordering or an identical-timestamp group.
- *
- * <p>A turn is a TRACE, so each preamble turn is one trace with one root {@code llm} span carrying one
- * user message and one assistant reply. They are written FIRST, which matters for more than tidiness:
- * the thread window orders by {@code (created_at, trace_id, id)}, and {@code created_at} is the row's
- * own insert time.
+ * <p>Call before the turn under test, in the same session. Each preamble turn is one trace with a root {@code llm}
+ * span, stamped earlier and written first, since the thread window orders by {@code (created_at, trace_id, id)}.
  */
 public final class ClassifierConversations {
 
@@ -31,10 +21,9 @@ public final class ClassifierConversations {
     private static final int PREAMBLE_LEAD_SECONDS = 120;
 
     /**
-     * Insert two benign exchanges into {@code sessionId} ahead of {@code beforeTs}, so the next turn in
-     * that session has the user, assistant, user, assistant prefix it needs to be sent.
+     * Two benign exchanges in {@code sessionId} ahead of {@code beforeTs}.
      *
-     * @param beforeTs the timestamp of the turn under test; the preamble lands two and one minutes earlier
+     * @param beforeTs the turn under test's timestamp; the preamble lands two and one minutes earlier
      * @return the two preamble spans, oldest first
      */
     public static List<SpanRef> seedPreamble(
@@ -57,8 +46,7 @@ public final class ClassifierConversations {
                         "You are on the standard plan."));
     }
 
-    // Deliberately neutral: the preamble must make the NEXT turn eligible without itself firing any
-    // detector, or it would inflate whatever the test counts.
+    // Neutral, so the preamble fires no detector and inflates no count.
     private static SpanRef exchange(
             SubstrateV2Fixtures fx, String projectId, String sessionId, Instant at, String user, String assistant) {
         return fx.spanSeed(projectId)

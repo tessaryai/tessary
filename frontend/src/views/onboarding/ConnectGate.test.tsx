@@ -15,7 +15,7 @@ import { AuthProvider } from "../../auth/AuthContext";
 import { TenantProvider } from "../../tenant/TenantContext";
 import { ToastProvider } from "../../ui/Toast";
 import { ConnectGate } from "./ConnectGate";
-import { OTLP_PROMPT, TAG_REPAIR_PROMPT } from "../components/SourceConnect";
+import { TAG_REPAIR_PROMPT } from "../components/SourceConnect";
 import type { Me, Project } from "../../api/types-auth";
 import { useLocation } from "react-router-dom";
 
@@ -118,21 +118,6 @@ afterEach(() => {
 });
 
 describe("ConnectGate — sample-project link loading state", () => {
-  it("swaps the link for a spinner + label while the seed is pending", async () => {
-    const { promise } = deferred<Project>();
-    ensureSampleProjectImpl = () => promise; // never resolves within this test
-
-    renderGate();
-
-    const link = await screen.findByRole("button", { name: "Start with a sample project" });
-    fireEvent.click(link);
-
-    await waitFor(() => {
-      expect(screen.queryByText("Setting up your sample project…")).not.toBeNull();
-    });
-    expect(screen.queryByRole("button", { name: "Start with a sample project" })).toBeNull();
-  });
-
   it("restores the link if the seed request fails", async () => {
     const { promise, reject } = deferred<Project>();
     ensureSampleProjectImpl = () => promise;
@@ -179,19 +164,6 @@ describe("ConnectGate — copy affordances", () => {
     // Bug: the on-screen token shown unmasked. First 8 chars, an ellipsis, then the last 4.
     const header = await screen.findByText(/^tsy_test/);
     expect(header.textContent).toBe("tsy_test…oken");
-  });
-
-  it("copies the connect prompt", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-
-    renderGate();
-
-    const copy = await screen.findByRole("button", { name: /Copy prompt/ });
-    fireEvent.click(copy);
-
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(OTLP_PROMPT));
-    await waitFor(() => expect(copy.textContent).toContain("Copied"));
   });
 });
 

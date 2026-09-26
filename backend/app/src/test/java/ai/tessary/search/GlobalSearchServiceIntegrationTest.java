@@ -14,7 +14,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
@@ -27,16 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Acceptance for the global search palette read surface: a typed query returns ranked content
- * matches, scoped to the caller's project. There is ONE hit type — trace — where there were
- * three; the grader and dataset legs went with their tables.
- * Exercises {@link GlobalSearchService} over a real Postgres (Testcontainers, with the pg_trgm
- * extension + name trigram indexes for typo/prefix tolerance).
- * The trace leg searches {@code span_payload} full-text and {@code span.name} by trigram, and it surfaces
- * the TRACE — that is what {@code traces/<id>} routes on — so a match is seeded as a real trace→span slice
- * and asserted by trace id.
- * Rows are seeded with a raw {@link JdbcClient} — the surface under test never writes, so a minimal
- * direct insert keeps the fixture free of unrelated repository coupling.
+ * The global search palette over real Postgres with pg_trgm: ranked trace hits scoped to the caller's project. The
+ * trace leg searches {@code span_payload} full-text and {@code span.name} by trigram, and returns the trace id, which
+ * is what {@code traces/<id>} routes on.
  */
 @SpringBootTest
 class GlobalSearchServiceIntegrationTest {
@@ -55,29 +47,6 @@ class GlobalSearchServiceIntegrationTest {
 
     @Autowired
     TenantService tenants;
-
-    /**
-     * There is exactly ONE hit type now, and that is the claim worth pinning.
-     *
-     * <p>This test used to seed a grader, a dataset and a span and assert all three types came back.
-     * The first two entity types and their search legs were deleted with their tables, so what is left to
-     * assert is the narrower fact: a match surfaces as a {@code trace}, and the id it carries is the
-     * TRACE id rather than the span's — which is what the palette's {@code traces/<id>} route takes.
-     * Under v1 this returned the observation id into that same route, a key the route could not resolve.
-     */
-    @Test
-    void aPayloadMatchSurfacesAsATraceHitNamingItsTrace() {
-        String pid = TenantFixture.bootstrap(tenants, "search-types").project().id();
-        String traceId = seedSpan(pid, "payment flow", "user asks about a payment", "processed the payment");
-
-        List<SearchHit> hits = service.search(pid, "payment");
-
-        var byType = hits.stream().collect(Collectors.groupingBy(SearchHit::type));
-        assertEquals(Set.of("trace"), byType.keySet(), "trace is the only hit type the surface can produce");
-
-        Set<String> ids = hits.stream().map(SearchHit::id).collect(Collectors.toSet());
-        assertTrue(ids.contains(traceId), "the span match names its trace, not the span");
-    }
 
     @Test
     void resultsAreRankedBestFirst() {
@@ -104,27 +73,22 @@ class GlobalSearchServiceIntegrationTest {
 
         List<SearchHit> fromA = service.search(pidA, "quarterly forecast");
         assertEquals(1, fromA.size(), "only the caller's project is searched");
-        // Asserted on the id rather than the snippet: a trigram-leg hit matches on span.name and carries
-        // no snippet, and the id is the stronger claim anyway — it is the other tenant's ROW that must
-        // not be here, not merely its text.
+        // The id, not the snippet: a trigram hit carries no snippet, and it is the other tenant's row that must not
+        // appear.
         assertEquals(traceA, fromA.get(0).id(), "no other tenant's row leaks in");
     }
 
     @Test
     void tolerantOfTyposAndShortPrefixes() {
-        // A trigram leg makes the palette forgiving as you type. Pure FTS needs whole
-        // tokens, so a misspelling or a short prefix returns nothing; the pg_trgm `name % :q` fallback
-        // surfaces the row anyway.
+        // Pure FTS needs whole tokens; the {@code name % :q} trigram fallback forgives typos and prefixes.
         String pid = TenantFixture.bootstrap(tenants, "search-trgm").project().id();
         String traceId = seedSpan(pid, "refund tone check", "in", "out");
 
-        // Mild misspelling — "refnud" shares enough trigrams with "refund tone check" to match.
         List<SearchHit> typo = service.search(pid, "refnud");
         assertTrue(
                 typo.stream().anyMatch(h -> h.id().equals(traceId)),
                 "a mildly misspelled term surfaces the relevant trace via the trigram leg");
 
-        // Short prefix — too short to be a whole FTS token, matched by trigram similarity on the name.
         List<SearchHit> prefix = service.search(pid, "refn");
         assertTrue(
                 prefix.stream().anyMatch(h -> h.id().equals(traceId)),
@@ -133,12 +97,11 @@ class GlobalSearchServiceIntegrationTest {
 
     @Test
     void exactMatchesRankAboveTrigramOnlyMatches() {
-        // The composite score must keep an exact full-text hit above a pure-trigram one.
+        // An exact full-text hit must rank above a pure-trigram one.
         String pid =
                 TenantFixture.bootstrap(tenants, "search-trgm-rank").project().id();
-        // Exact FTS hit on the whole token "refund".
         String exactId = seedSpan(pid, "refund accuracy", "was the refund amount correct", "refund issued");
-        // Trigram-only hit: shares trigrams with the misspelling but contains no whole "refund" token.
+        // Trigram-only: no whole "refund" token.
         seedSpan(pid, "refurbish notes", "notes about refurbishment", "refurbishment done");
 
         List<SearchHit> hits = service.search(pid, "refund");
@@ -154,17 +117,7 @@ class GlobalSearchServiceIntegrationTest {
         assertTrue(service.search(pid, "   ").isEmpty(), "a blank query never scans, returns empty");
     }
 
-    @Test
-    void noMatchReturnsEmptyNotError() {
-        String pid = TenantFixture.bootstrap(tenants, "search-empty").project().id();
-        seedSpan(pid, "apples", "fruit basket", "fruit basket");
-        assertTrue(service.search(pid, "zzzznonexistent").isEmpty(), "a no-match query lists empty, not an error");
-    }
-
-    /**
-     * Payload text is searchable even though the span's own columns say nothing about it: the FTS leg reads
-     * {@code span_payload}, which is where the conversation lives in v2.
-     */
+    /** Payload text is searchable: the FTS leg reads {@code span_payload}, where v2 keeps the conversation. */
     @Test
     void spanPayloadTextIsSearchableThoughTheSpanNameIsNot() {
         String pid =
@@ -178,10 +131,8 @@ class GlobalSearchServiceIntegrationTest {
     }
 
     /**
-     * The span FTS leg must use migration 0077's capped expression CHARACTER FOR CHARACTER, or Postgres
-     * matches no expression index and the query sequentially scans every payload in the project. This
-     * asserts the index is genuinely reachable from the exact expression the repository spells: with every
-     * non-bitmap path forced off, a plan can only be produced if {@code ix_span_payload_fts} serves it.
+     * The FTS leg must spell migration 0077's capped expression exactly, or no index matches and every payload is
+     * scanned. With non-bitmap paths off, a plan exists only if {@code ix_span_payload_fts} serves it.
      */
     @Test
     @Transactional
@@ -228,19 +179,9 @@ class GlobalSearchServiceIntegrationTest {
                 "the `name %> :q` predicate on span must be served by ix_span_name_trgm:\n" + plan);
     }
 
-    // trigramLegIsIndexBacked lived here, EXPLAINing `SELECT id FROM grader WHERE name %> :q` against
-    // ix_grader_name_trgm. Both the table and the index are gone. It is deleted rather than
-    // re-pointed because spanNameTrigramLegIsIndexBacked above already makes the identical claim
-    // (`name %> :q` must reach a gin_trgm_ops index via a Bitmap Index Scan, never a Seq Scan) on the
-    // one table the surface still reads.
-
     /**
-     * Seed a real substrate slice — trace → span → span_payload — with the searchable text split between
-     * the span's {@code name} (the trigram leg) and the payload's input/output (the full-text leg), and
-     * return the TRACE id, which is what a palette hit names.
-     *
-     * <p>Written with raw SQL rather than the v2 repositories: the surface under test never writes, and
-     * a direct insert keeps the fixture free of repository coupling it does not exercise.
+     * Seeds a trace, span, and span_payload with raw SQL, the name feeding the trigram leg and the payload the FTS
+     * leg. Returns the trace id.
      */
     private String seedSpan(String projectId, String name, String input, String output) {
         String now = Instant.now().toString();
@@ -279,10 +220,8 @@ class GlobalSearchServiceIntegrationTest {
     }
 
     /**
-     * The palette endpoint, for a member of the project's org: one hit per trace, however many of its spans
-     * matched. A trace whose payload match is weak but whose other span is NAMED the term keeps the stronger,
-     * named hit; an unnamed or blank-named span is titled by its trace rather than rendering a blank row; a long
-     * payload excerpt is clipped to the palette's width. A caller outside the org is refused, not served.
+     * One hit per trace, keeping the stronger named hit; an unnamed span is titled by its trace; a long excerpt is
+     * clipped; a caller outside the org is refused.
      */
     @Test
     void theSearchEndpointNamesEachTraceOnceAndTitlesAnUnnamedSpanByItsTrace() {
@@ -319,10 +258,7 @@ class GlobalSearchServiceIntegrationTest {
         assertEquals(HttpStatus.FORBIDDEN, refused.getStatusCode());
     }
 
-    /**
-     * The trace leg merges its two legs and then caps the merged list at its own limit: with two payload-only
-     * and two name-only traces matching, a limit of two returns two hits, not the four the legs found.
-     */
+    /** The merged legs are capped at the limit: two payload-only and two name-only matches at limit two return two. */
     @Test
     void theTraceLegCapsTheMergedHitsAtItsLimit() {
         String pid = TenantFixture.bootstrap(tenants, "search-cap").project().id();

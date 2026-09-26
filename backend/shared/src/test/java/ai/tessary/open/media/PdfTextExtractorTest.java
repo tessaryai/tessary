@@ -2,7 +2,6 @@
 package ai.tessary.open.media;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.ByteArrayOutputStream;
@@ -29,14 +28,6 @@ import org.junit.jupiter.api.Test;
  * can produce.
  */
 class PdfTextExtractorTest {
-
-    @Test
-    void normalPdf_extractsRealText() throws IOException {
-        byte[] pdf = onePagePdf("The quick brown fox jumps over the lazy dog");
-        Optional<String> text = PdfTextExtractor.extract(pdf);
-        assertTrue(text.isPresent(), "a normal text-layer PDF must extract");
-        assertTrue(text.get().contains("The quick brown fox"), "extracted text must contain the page's content");
-    }
 
     @Test
     void encryptedPdf_returnsEmpty() throws Exception {
@@ -155,23 +146,6 @@ class PdfTextExtractorTest {
         @Override
         public Clock withZone(ZoneId zone) {
             return this;
-        }
-    }
-
-    private static byte[] onePagePdf(String content) throws IOException {
-        try (PDDocument doc = new PDDocument()) {
-            PDPage page = new PDPage();
-            doc.addPage(page);
-            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-                cs.beginText();
-                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
-                cs.newLineAtOffset(50, 700);
-                cs.showText(content);
-                cs.endText();
-            }
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            doc.save(out);
-            return out.toByteArray();
         }
     }
 

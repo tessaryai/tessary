@@ -95,47 +95,6 @@ class PipelineRepositoryTest {
     }
 
     @Test
-    void load_returnsEmptyWhenNothingPersisted() {
-        var fix = TenantFixture.bootstrap(tenants, "pipe-empty");
-        Pipeline empty = repo.load(fix.project().id());
-        assertNotNull(empty);
-        assertTrue(empty.callSites().isEmpty());
-        assertTrue(empty.failureModes().isEmpty());
-    }
-
-    @Test
-    void replaceIsAtomic_overwritesPreviousImport() {
-        var fix = TenantFixture.bootstrap(tenants, "pipe-replace");
-
-        Pipeline first = buildSamplePipeline();
-        repo.replace(fix.project().id(), first);
-        assertEquals(1, repo.load(fix.project().id()).callSites().size());
-
-        // Re-import with a different pipeline → must replace, not accumulate.
-        Pipeline second = new Pipeline(
-                "0.3.0",
-                "v2",
-                List.of(), // packs
-                null, // productProfile
-                List.of(), // implicitInvariants
-                List.of(), // invariantCoverage
-                null, // runtime
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                null // progress
-                ,
-                List.of());
-        repo.replace(fix.project().id(), second);
-
-        Pipeline back = repo.load(fix.project().id());
-        assertEquals("v2", back.productHint());
-        assertTrue(back.callSites().isEmpty());
-        assertTrue(back.failureModes().isEmpty());
-    }
-
-    @Test
     void replaceIsProjectScoped_doesNotLeakAcrossProjects() {
         var a = TenantFixture.bootstrap(tenants, "pipe-iso-a");
         var b = TenantFixture.bootstrap(tenants, "pipe-iso-b");

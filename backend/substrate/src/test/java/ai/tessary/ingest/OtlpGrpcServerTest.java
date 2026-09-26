@@ -18,6 +18,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * Guards the OTLP/gRPC binding gate: the {@link OtlpGrpcServerConfig.OtlpGrpcServer} {@link
@@ -56,22 +58,13 @@ class OtlpGrpcServerTest {
         assertFalse(s.isRunning(), "start() must be a no-op when the transport excludes gRPC");
     }
 
-    @Test
-    void grpc_autoStartsAndBinds() {
-        OtlpGrpcServerConfig.OtlpGrpcServer s = server(Transport.GRPC);
-        assertTrue(s.isAutoStartup(), "transport=GRPC must auto-start the gRPC server");
-        try {
-            s.start();
-            assertTrue(s.isRunning(), "start() must bind the gRPC server when the transport includes gRPC");
-        } finally {
-            s.stop();
-        }
-    }
-
-    @Test
-    void both_autoStartsAndBinds() {
-        OtlpGrpcServerConfig.OtlpGrpcServer s = server(Transport.BOTH);
-        assertTrue(s.isAutoStartup(), "transport=BOTH must auto-start the gRPC server");
+    @ParameterizedTest
+    @EnumSource(
+            value = Transport.class,
+            names = {"GRPC", "BOTH"})
+    void grpc_autoStartsAndBinds(Transport transport) {
+        OtlpGrpcServerConfig.OtlpGrpcServer s = server(transport);
+        assertTrue(s.isAutoStartup(), "a transport including gRPC must auto-start the gRPC server");
         try {
             s.start();
             assertTrue(s.isRunning(), "start() must bind the gRPC server when the transport includes gRPC");

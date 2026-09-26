@@ -21,17 +21,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Acceptance for the onboarding live-trace detector ({@link SubstrateReadRepository#hasSpans}),
- * against the real pgvector Postgres (Testcontainers). An empty project is not live; once a
- * live trace lands as substrate liveness flips true; liveness is strictly project-scoped (one project's
- * traces never leak into another's). The {@code EXISTS} short-circuit must preserve those exact
- * semantics. This is the signal the cookie-auth {@code /substrate/status} endpoint surfaces to
- * {@code Setup.tsx}.
- *
- * <p>Also covers the connect-gate reads ({@link SubstrateReadRepository#hasTaggedSpan},
- * {@link SubstrateReadRepository#spansReceived}, {@link SubstrateReadRepository#taggedSpans}) —
- * additive, so they ride the same {@code writer.enqueue}/{@code oneTrace} fixtures the untagged-count
- * assertions already use rather than a second test method duplicating the setup.
+ * The onboarding live-trace detector ({@link SubstrateReadRepository#hasSpans}) against real Postgres: an empty
+ * project is not live, a landed trace flips it, it is strictly project-scoped, and the {@code EXISTS} short-circuit
+ * keeps those semantics. Also the connect-gate reads ({@link SubstrateReadRepository#hasTaggedSpan}, {@link
+ * SubstrateReadRepository#spansReceived}, {@link SubstrateReadRepository#taggedSpans}) on the same fixtures.
  */
 @SpringBootTest
 class SubstrateLivenessIntegrationTest {
@@ -74,29 +67,27 @@ class SubstrateLivenessIntegrationTest {
         String pidB =
                 TenantFixture.bootstrap(tenants, "live-detect-b").project().id();
 
-        // Empty project: the onboarding poll sees no live trace yet.
         assertFalse(substrate.hasSpans(pidA));
         assertFalse(substrate.hasSpans(pidB));
 
-        // A live OTLP trace lands as substrate (no graded run) for project A only.
+        // A live trace for project A only.
         writer.enqueue(pidA, oneTrace("tr-live"));
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained");
 
         assertTrue(substrate.hasSpans(pidA), "live trace landed for A");
         assertFalse(substrate.hasSpans(pidB), "B is untouched — liveness is project-scoped");
 
-        // The EXISTS short-circuit must still report true once MORE than one row is present.
+        // Still true with more than one row.
         writer.enqueue(pidA, oneTrace("tr-live-2"));
         assertTrue(writer.awaitIdle(Duration.ofSeconds(30)), "writer drained");
         assertTrue(substrate.hasSpans(pidA), "still live with multiple traces");
 
-        // Untagged count: both traces above carry no tessary.call_site.id, so they are invisible to
-        // grading and the instrument nudge counts them; a tagged trace never inflates the count.
+        // Neither trace carries tessary.call_site.id, so both count as untagged; a tagged trace never inflates the
+        // count.
         assertEquals(2, substrate.untaggedSpans(pidA), "both untagged spans counted");
         assertEquals(0, substrate.untaggedSpans(pidB), "untagged count is project-scoped");
 
-        // hasTaggedSpan/spansReceived/taggedSpans are false/0/0 before this point (both prior
-        // traces above are untagged) and flip only once a call-site-tagged span lands.
+        // False, 0, 0 until a call-site-tagged span lands.
         assertFalse(substrate.hasTaggedSpan(pidA), "no tagged span has landed yet");
         assertEquals(2, substrate.spansReceived(pidA), "two untagged spans received so far");
         assertEquals(0, substrate.taggedSpans(pidA), "none of them tagged");

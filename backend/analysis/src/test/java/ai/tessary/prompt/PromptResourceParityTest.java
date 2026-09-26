@@ -12,17 +12,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the prompt prose that moved out of Java into {@code prompt-craft/} markdown to the exact
- * bytes it had as a Java constant.
- *
- * <p>These strings are sent to a model. A refactor that "tidies" a blank line or a trailing space
- * changes what the model reads, and nothing else in the build would notice — the prompt still
- * compiles, the lane still runs, and the ruling quietly shifts. So the move is verified rather than
- * trusted: the golden files under {@code src/test/resources/prompt-golden/} were captured from the
- * pre-refactor constants by reflection, and this asserts the markdown reproduces them byte for byte.
- *
- * <p>Set {@code -Dprompt.golden.capture=true} to rewrite the goldens. That is for the initial
- * capture only; running it to make a failure go away defeats the test.
+ * Pins the prompt prose moved into {@code prompt-craft/} markdown to its exact bytes as a Java constant. A tidied
+ * blank line changes what the model reads and nothing else notices, so the markdown must reproduce the goldens in
+ * {@code src/test/resources/prompt-golden/} byte for byte. {@code -Dprompt.golden.capture=true} rewrites them, for
+ * the initial capture only.
  */
 class PromptResourceParityTest {
 
@@ -43,12 +36,8 @@ class PromptResourceParityTest {
     }
 
     /**
-     * The pin list is hand-written, so a prompt added without an entry would ship unprotected and
-     * nothing would say so. This counts the prose files this module ships and requires the list to
-     * cover them, which turns "remember to pin it" into a failing build.
-     *
-     * <p>{@code response_schema.json} is excluded deliberately: it is data the prompt carries, not
-     * prose, and it is pinned as a constant like the rest.
+     * The pin list is hand-written, so this counts the shipped prose files and requires the list to cover them.
+     * {@code response_schema.json} is data, pinned as a constant.
      */
     @Test
     void every_prompt_file_this_module_ships_is_pinned() throws Exception {

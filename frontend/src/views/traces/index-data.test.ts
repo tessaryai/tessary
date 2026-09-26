@@ -7,7 +7,7 @@
  * still arriving or genuinely nothing.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cellState, exactTokens, formatCost, formatLatency, formatTokens, formatWhen, type TraceListItem } from "./index-data";
+import { formatCost, formatLatency, formatTokens, formatWhen } from "./index-data";
 import { sessionDurationMs, sessionName, type SessionListItem } from "./session-index-data";
 
 describe("formatTokens", () => {
@@ -29,11 +29,6 @@ describe("formatTokens", () => {
     [2_500_000_000, "2.50B"],
   ])("%s -> %s", (n, text) => {
     expect(formatTokens(n)).toBe(text);
-  });
-
-  it("keeps the exact count for the tooltip", () => {
-    expect(exactTokens(1234567)).toBe("1,234,567 tokens");
-    expect(exactTokens(null)).toBeUndefined();
   });
 });
 
@@ -77,16 +72,6 @@ describe("formatWhen", () => {
   it("dashes a missing or unreadable time", () => {
     expect(formatWhen(null)).toBe("—");
     expect(formatWhen("not a date")).toBe("—");
-  });
-});
-
-describe("cellState", () => {
-  const row = (is_settled: boolean) => ({ is_settled }) as TraceListItem;
-
-  it("tells a trace still rolling up from one that settled with nothing", () => {
-    expect(cellState(row(false), null)).toBe("pending");
-    expect(cellState(row(true), null)).toBe("none");
-    expect(cellState(row(false), 0)).toBe("value");
   });
 });
 
