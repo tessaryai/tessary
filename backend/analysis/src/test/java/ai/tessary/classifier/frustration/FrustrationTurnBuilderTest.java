@@ -21,6 +21,7 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -112,22 +113,21 @@ class FrustrationTurnBuilderTest {
         assertTrue(FrustrationTurnBuilder.format(thread, Caps.DEFAULT).isEmpty(), "slot " + blankSlot);
     }
 
-    @Test
-    void build_refusesATurnWhoseLatestAssistantEndedOnAToolCall() {
-        String toolOnly = "[{\"role\":\"assistant\",\"content\":null,"
-                + "\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\"}}]}]";
-        assertTrue(
-                build(threeTurns(say("assistant", "one"), toolOnly, "hello?")).isEmpty());
-    }
-
-    @Test
-    void build_refusesATurnWhoseAssistantTextIsFollowedByAToolCall() {
-        String textThenTool = "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Checking.\"},"
-                + "{\"type\":\"tool_use\",\"name\":\"lookup\",\"input\":{}}]}]";
-        assertTrue(
-                build(threeTurns(textThenTool, say("assistant", "two"), "hello?"))
-                        .isEmpty(),
-                "the older assistant turn also counts");
+    /** An assistant turn that is a tool call, images only, or text then a tool call refuses the turn, older ones too. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "false | [{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
+                        + "\"function\":{\"name\":\"lookup\"}}]}]",
+                "false | [{\"role\":\"assistant\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"x\"}}]}]",
+                "true  | [{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Checking.\"},"
+                        + "{\"type\":\"tool_use\",\"name\":\"lookup\",\"input\":{}}]}]"
+            })
+    void build_refusesATurnWithAnAssistantThatIsNotPlainText(boolean older, String assistant) {
+        String plain = say("assistant", "one");
+        assertTrue(build(older ? threeTurns(assistant, plain, "hello?") : threeTurns(plain, assistant, "hello?"))
+                .isEmpty());
     }
 
     @Test
@@ -164,14 +164,6 @@ class FrustrationTurnBuilderTest {
         assertEquals(
                 new EarlierMessage("user", "second question"),
                 state.earlierMessages().get(2));
-    }
-
-    @Test
-    void build_refusesAnImagesOnlyAssistantTurn() {
-        String imageOnly =
-                "[{\"role\":\"assistant\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"x\"}}]}]";
-        assertTrue(build(threeTurns(say("assistant", "one"), imageOnly, "where is the text?"))
-                .isEmpty());
     }
 
     @Test

@@ -1,42 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.detector;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.util.regex.Pattern;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Unit acceptance for the deterministic NL→regex compiler: an NL phrase compiles to a
- * case-insensitive, whitespace-flexible, literal-only {@link Pattern} — no metacharacter in the phrase
- * is ever interpreted, and (with word boundaries) the match does not bleed across word edges.
+ * An NL phrase compiles to a case-insensitive, whitespace-flexible, literal-only pattern: no metacharacter in the
+ * phrase is ever interpreted, and with word boundaries the match does not bleed across word edges.
  */
 class DeterministicNlPhraseCompilerTest {
 
     private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
-    @Test
-    void compile_isWhitespaceFlexible() {
-        Pattern p = compiler.compile("thank you", false);
-        assertTrue(p.matcher("thank   you").find(), "collapses internal whitespace runs to \\s+");
-        assertTrue(p.matcher("thank\nyou").find(), "matches across a newline");
-    }
-
-    @Test
-    void compile_treatsRegexMetacharactersAsLiterals() {
-        Pattern p = compiler.compile("a.b(c)", false);
-        assertTrue(p.matcher("a.b(c)").find(), "the literal phrase matches itself");
-        assertFalse(p.matcher("axbXc").find(), "'.' and '(' are literals, not regex metacharacters");
-    }
-
-    @Test
-    void compile_wordBoundaryDoesNotMatchSubstrings() {
-        Pattern bounded = compiler.compile("cat", true);
-        assertFalse(bounded.matcher("category").find(), "word-bounded 'cat' does not match inside 'category'");
-        assertTrue(bounded.matcher("the cat sat").find(), "but matches a standalone word");
-
-        Pattern unbounded = compiler.compile("cat", false);
-        assertTrue(unbounded.matcher("category").find(), "unbounded 'cat' matches the substring");
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "thank you | false | 'thank   you' | true",
+                "thank you | false | 'thank\nyou'  | true",
+                "a.b(c)    | false | a.b(c)        | true",
+                // '.' and '(' are literals, not regex metacharacters.
+                "a.b(c)    | false | axbXc         | false",
+                "cat       | true  | category      | false",
+                "cat       | true  | the cat sat   | true",
+                "cat       | false | category      | true"
+            })
+    void compilesALiteralWhitespaceFlexiblePattern(String phrase, boolean wordBounded, String text, boolean matches) {
+        assertEquals(
+                matches, compiler.compile(phrase, wordBounded).matcher(text).find());
     }
 }

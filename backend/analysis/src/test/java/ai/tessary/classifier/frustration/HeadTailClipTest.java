@@ -4,29 +4,21 @@ package ai.tessary.classifier.frustration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class HeadTailClipTest {
 
-    private static final String WORDS = "alpha beta gamma delta epsilon";
-
-    @Test
-    void clip_leavesTextWithinTheCapAlone() {
-        assertEquals(WORDS, HeadTailClip.clip(WORDS, WORDS.length()));
-    }
-
-    @Test
-    void clip_movesBothCutsOutwardToWhitespace() {
-        assertEquals("alpha ... epsilon", HeadTailClip.clip(WORDS, 14), "neither half may split a word");
-    }
-
-    @Test
-    void clip_keepsACutThatAlreadyFallsOnWhitespace() {
-        assertEquals("alpha beta ... epsilon", HeadTailClip.clip(WORDS, 20));
-    }
-
-    @Test
-    void clip_cutsASingleLongWordWhereItStands() {
-        assertEquals("abc ... hij", HeadTailClip.clip("abcdefghij", 6));
+    /** Neither half may split a word: cuts move outward to whitespace, unless one word is all there is. */
+    @ParameterizedTest
+    @CsvSource({
+        "alpha beta gamma delta epsilon, 30, alpha beta gamma delta epsilon",
+        "alpha beta gamma delta epsilon, 14, alpha ... epsilon",
+        "alpha beta gamma delta epsilon, 20, alpha beta ... epsilon",
+        "abcdefghij, 6, abc ... hij"
+    })
+    void clipKeepsAHeadAndATailOnWordBoundaries(String text, int cap, String clipped) {
+        assertEquals(clipped, HeadTailClip.clip(text, cap));
     }
 
     @Test
