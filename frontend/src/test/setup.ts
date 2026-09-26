@@ -1,31 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// vitest setupFiles entry (wired from vite.config.ts's `test` block). Runs once per test file,
-// before any test in it, and stubs the browser globals jsdom does not implement that real views
-// under the smoke test's routes reach for unconditionally on mount:
-//
-//   - window.IntersectionObserver — TracesIndex.tsx (infinite-scroll paging)
-//   - window.ResizeObserver       — detail-chat.tsx (mounted under CasePage/TraceDetail's chat panel)
-//   - Element.prototype.scrollIntoView — CommandPalette.tsx, mounted under every tenant route via
-//     ShellChrome, so this one is hit by nearly the whole route-manifest smoke test, not just one view.
-//
-// window.matchMedia is deliberately NOT stubbed here — verified zero uses anywhere in frontend/src.
-// Adding an unused stub would just be one more thing to keep in sync with a
-// property nothing reads.
-//
-// Without these three, any view that calls them during its initial render throws
-// "<X> is not a function" in jsdom, which is a false failure of THIS harness, not of the view —
-// exactly the noise the console.error allowlist (in routeManifest.smoke.test.tsx) exists to
-// keep separate from a real regression.
-//
-// ALSO A GOTCHA, discovered running this suite: Node (stable as of the Node 25 on this machine)
-// ships its OWN global `localStorage`/`sessionStorage` — Web Storage backed by an on-disk file via
-// `--localstorage-file`, which nothing here passes. jsdom's environment sets `window.localStorage`
-// to ITS OWN in-memory implementation, but Node's version is defined on `globalThis` first with a
-// getter, and jsdom's assignment loses that race — `window.localStorage.getItem` then silently
-// resolves to `undefined` (not a thrown error) because Node's storage getter refuses to work
-// without a file. `DensityProvider` (density.tsx, mounted for nearly every route)
-// reads `localStorage` on its very first render, so every route smoke-tested here hit this.
-// Overriding both with a plain in-memory polyfill sidesteps the collision entirely.
+// vitest setupFiles entry. Stubs browser globals jsdom lacks that views call on mount: IntersectionObserver
+// (TracesIndex), ResizeObserver (detail-chat), and Element.scrollIntoView (CommandPalette, under every tenant route).
+// matchMedia has no users, so it is not stubbed. Node also defines its own globalThis localStorage, which without
+// --localstorage-file silently returns undefined, and jsdom's assignment loses to it. DensityProvider reads
+// localStorage on first render, so both storages get an in-memory polyfill.
 
 class StubObserver {
   observe(): void {}
@@ -45,8 +23,7 @@ window.ResizeObserver = StubObserver;
 
 Element.prototype.scrollIntoView = () => {};
 
-/** A minimal in-memory Storage — enough for every current caller (`getItem`/`setItem`/`removeItem`),
- * not a full Storage polyfill. See the header note on why Node's own global loses to this. */
+/** A minimal in-memory Storage, enough for getItem, setItem, and removeItem. */
 function inMemoryStorage(): Storage {
   const data = new Map<string, string>();
   return {
@@ -70,8 +47,7 @@ function inMemoryStorage(): Storage {
 Object.defineProperty(window, "localStorage", { value: inMemoryStorage(), configurable: true });
 Object.defineProperty(window, "sessionStorage", { value: inMemoryStorage(), configurable: true });
 
-// jsdom implements <dialog> but not its modal methods, and every Modal and the palette call them on open.
-// Defined only where missing, so a jsdom that gains them keeps its own.
+// jsdom has <dialog> but not its modal methods; defined only where missing.
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
   this.setAttribute("open", "");
 };

@@ -19,24 +19,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The §7.1 rollup timer, whose entire rule is one sentence: <b>the deadline only ever moves earlier,
- * never later.</b>
+ * The §7.1 rollup timer: the deadline only ever moves earlier. So a trace that never goes quiet still fires, is re-
+ * armed, and fires again, refreshing a long turn every ten seconds. Backwards, a busy trace never rolls up, and the
+ * only fix is a cap that makes {@code is_settled} mean "we gave up waiting".
  *
- * <p>That rule is what removes the need for a hard cap. A trace that never goes quiet still fires at its
- * deadline, is re-armed by the next span, and fires again — so a long-running turn is refreshed with
- * current numbers roughly every ten seconds instead of showing nothing at all until it finishes. Get it
- * backwards and each arriving span pushes the rollup further out, a busy trace never rolls up, and the
- * only fix is a cap, at which point {@code is_settled} stops meaning "nothing has arrived since" and
- * starts meaning "we gave up waiting".
- *
- * <p>The claim/settle assertions here are a smoke check that the §7.3/§7.4 statements do what they say;
- * the full worker battery (crash recovery, replacement idempotence, the queue alarm) lives in
- * {@code TraceRollupWorkerIntegrationTest}, which owns the loop around them.
- *
- * <p>The scheduled beans are off in this context, and the property fingerprint is shared verbatim with the
- * write-path test so the two classes reuse one Spring context. The rollup worker claims due traces
- * GLOBALLY — with it running, {@link #expire} followed by {@code claimDue} is a race the test loses about
- * as often as the worker ticks.
+ * <p>Claim and settle are smoke-checked here; the worker battery is {@code TraceRollupWorkerIntegrationTest}'s. The
+ * schedulers are off and the property fingerprint matches the write-path test, so they share a context.
  */
 @SpringBootTest(
         properties = {
@@ -75,10 +63,7 @@ class TraceV2RepositoryTimerTest {
         t0 = Instant.parse("2026-08-12T10:00:00Z");
         traceId = SubstrateV2Fixtures.traceId();
         fx.trace(pid, traceId, t0);
-        // One real span, because §7.2 will not settle a trace that has none. A span-less row is a shell
-        // left behind when the write of its spans was lost, and settling one closes the books on nothing:
-        // nothing re-claims a settled trace, so the spans that were meant to arrive can never complete it.
-        // The timer rules under test are the same either way; this only keeps the fixture a trace.
+        // One real span, since §7.2 will not settle a span-less shell, which would close the books on nothing.
         fx.llmSpan(pid, traceId, t0);
     }
 
@@ -150,7 +135,7 @@ class TraceV2RepositoryTimerTest {
                 pid,
                 List.of(new TraceV2Repository.TimerUpdate(
                         traceId, t0.toString(), t0.plusSeconds(5).toString(), false)));
-        // A span that started before the trace's current start and ended before its current end.
+        // Started before the trace's start, ended before its end.
         traces.applyBatchTimers(
                 pid,
                 List.of(new TraceV2Repository.TimerUpdate(
@@ -179,18 +164,11 @@ class TraceV2RepositoryTimerTest {
                 "GREATEST ignores NULLs — an unfinished span cannot un-finish the trace");
     }
 
-    // ---- the claim/settle protocol these timers feed ------------------------------------------------
-
-    /** One batch's worth of arming for this trace. */
     private void arm(boolean hasRoot) {
         traces.applyBatchTimers(pid, List.of(new TraceV2Repository.TimerUpdate(traceId, t0.toString(), null, hasRoot)));
     }
 
-    /**
-     * Bring this trace's deadline forward so the worker's {@code rollup_due_at <= now()} claim sees it.
-     * Production waits out the real interval; a test that slept two seconds per case would be the slowest
-     * suite in the repo and would still be racing the clock.
-     */
+    /** Backdate the deadline so the claim's {@code rollup_due_at <= now()} sees it, instead of sleeping. */
     private void expire() {
         jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
                         + " WHERE project_id = :pid AND id = :id")
@@ -199,7 +177,7 @@ class TraceV2RepositoryTimerTest {
                 .update();
     }
 
-    /** Claim and recompute once — the worker's tick, run synchronously. */
+    /** The worker's tick, run synchronously. */
     private void settle() {
         expire();
         traces.claimDue(500);

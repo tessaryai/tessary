@@ -42,21 +42,16 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * End-to-end acceptance for the production-signal → pre-deploy loop: with the loop enabled, a
- * genuinely-NEW production signal discovered by the async {@link ClassifierWorker} sweep auto-registers
- * a routed {@code pre_deploy_check} tied to the surfaces the signal definition implicates (its explicit
- * cold-start {@code config_json.surfaces}). Re-discovery is idempotent. Run against the real pgvector
- * Postgres (Testcontainers) so the schema + the UNIQUE/ON-CONFLICT idempotency run for real.
- *
- * <p>{@code classifier} is the only source the loop has. The user-feedback source, and the four cases that
- * covered it, went with the substrate's feedback table.
+ * The production-signal to pre-deploy loop against real Postgres: with it enabled, a new signal found by the {@link
+ * ClassifierWorker} sweep registers a {@code pre_deploy_check} per surface its {@code config_json.surfaces} names,
+ * idempotently.
  */
 @SpringBootTest
 class PreDeploySignalLoopIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.predeploy.enabled", () -> "true"); // activate the loop (write + read)
+        r.add("tessary.predeploy.enabled", () -> "true"); // activate the loop
     }
 
     @Autowired
@@ -111,9 +106,7 @@ class PreDeploySignalLoopIntegrationTest {
                 TenantFixture.bootstrap(tenants, "predeploy-loop").project().id();
         String now = Instant.now().toString();
 
-        // A signal definition that, when it fires, implicates two LLM-product surfaces — the explicit
-        // cold-start mapping (config_json.surfaces). Detector = regex, the seam user-authored signals
-        // actually run on: it fires on the phrase below, independent of any built-in's lifecycle.
+        // Implicates two surfaces. Regex, the detector user-authored signals run on.
         String classifierId = Ids.ulid();
         signals.insert(new ClassifierRow(
                 classifierId,
@@ -130,14 +123,12 @@ class PreDeploySignalLoopIntegrationTest {
                 now,
                 now));
 
-        // Substrate: a session and one turn whose tool span carries the phrase in its payload output.
         SpanRef tool = seedFailingToolSpan(pid, "upstream exploded", "HTTP 500 upstream");
 
-        signalService.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
+        signalService.seedBuiltIns(pid); // idempotent
         worker.tick();
         awaitChecks(pid, 2);
 
-        // The discovery registered one pre-deploy check per implicated surface, status=active.
         List<PreDeployCheckRow> rows = checks.listByProject(pid);
         assertEquals(2, rows.size(), "one check per implicated surface");
         for (PreDeployCheckRow row : rows) {
@@ -151,13 +142,12 @@ class PreDeploySignalLoopIntegrationTest {
                         && surfaces.contains(TouchedSurface.AGENT_LOOP.wire()),
                 "the implicated surfaces are registered: " + surfaces);
 
-        // Idempotency: a second tick over the same substrate registers no new checks.
-        signalService.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
+        // A second tick registers nothing new.
+        signalService.seedBuiltIns(pid); // idempotent
         worker.tick();
         sleep(1_000);
         assertEquals(2, checks.listByProject(pid).size(), "re-discovery of the same signal is a no-op");
 
-        // The dismiss lifecycle retires one check without touching the signal.
         preDeployChecks.dismiss(pid, rows.get(0).id());
         assertEquals(
                 1,
@@ -173,7 +163,7 @@ class PreDeploySignalLoopIntegrationTest {
                 TenantFixture.bootstrap(tenants, "predeploy-noop").project().id();
         String now = Instant.now().toString();
 
-        // A signal with NO explicit surfaces and no learned failure mode → the honest no-op.
+        // No explicit surfaces and no learned failure mode: a no-op.
         signals.insert(new ClassifierRow(
                 Ids.ulid(),
                 pid,
@@ -191,9 +181,9 @@ class PreDeploySignalLoopIntegrationTest {
 
         seedFailingToolSpan(pid, "upstream exploded", "boom");
 
-        signalService.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
+        signalService.seedBuiltIns(pid); // idempotent
         worker.tick();
-        sleep(1_500); // let the async sweep run; nothing should be registered
+        sleep(1_500); // nothing should register
 
         assertTrue(
                 checks.listByProject(pid).isEmpty(),
@@ -201,10 +191,8 @@ class PreDeploySignalLoopIntegrationTest {
     }
 
     /**
-     * Registration straight through the service. Only real surface names register (a typo or a
-     * non-string is dropped, never invented into a surface), the discovery's severity sets the check's
-     * intensity, a second discovery registers nothing new, a config it cannot read registers nothing, and
-     * the dismiss/reinstate lifecycle round-trips on the list read.
+     * Only real surface names register (a typo is dropped, not invented), severity sets intensity, a repeat registers
+     * nothing, an unreadable config registers nothing, and dismiss/reinstate round-trips.
      */
     @Test
     void registrationKeepsOnlyRealSurfacesAtTheSeveritysIntensityAndTheLifecycleRoundTrips() {
@@ -285,10 +273,9 @@ class PreDeploySignalLoopIntegrationTest {
     }
 
     /**
-     * A settled turn whose {@code tool} span carries {@code phrase} in its payload output, with the
-     * {@code tool_call} row hung off it by producer keys — what the async sweep reads to discover a signal.
+     * A settled turn whose {@code tool} span output carries {@code phrase}, with its {@code tool_call} row.
      *
-     * @return the span's producer identity, so a caller can hang more evidence off the same span
+     * @return the span's producer identity
      */
     private SpanRef seedFailingToolSpan(String pid, String phrase, String errorType) {
         Instant at = Instant.now();
@@ -320,11 +307,7 @@ class PreDeploySignalLoopIntegrationTest {
         }
     }
 
-    /**
-     * The checks endpoints list, dismiss and reinstate a project's checks for its org's members, and only while
-     * the org holds the CI-integration entitlement: with it withheld, every endpoint is refused rather than
-     * reading or changing a check the org is not entitled to.
-     */
+    /** The checks endpoints serve org members only while the org holds the CI-integration entitlement. */
     @Test
     void theChecksEndpointsServeOnlyAnOrgHoldingTheCiIntegrationEntitlement() {
         var fix = TenantFixture.bootstrap(tenants, "predeploy-http");

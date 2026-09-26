@@ -17,12 +17,7 @@ import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/**
- * The rolling control: what it remembers, how fast it forgets, and what it refuses to absorb.
- *
- * <p>Every assertion here is about a property the single previously-closed window did NOT have, because
- * those are the properties the replacement exists for.
- */
+/** The rolling control: what it remembers, how fast it forgets, and what it refuses to absorb. */
 class MetricControlTest {
 
     private static final Grid GRID = Grid.duration();
@@ -82,18 +77,17 @@ class MetricControlTest {
     @Test
     @DisplayName("a fortnight-old day counts a quarter of a fresh one, and a three-week-old day nothing")
     void weightHalvesEverySevenDays() {
-        // Same population on both days, so any difference in the resolved count is the weighting alone.
+        // Same population both days, so any difference is the weighting.
         MetricControl control = MetricControl.empty()
                 .fold(GRID, "2026-07-27", window(1000, 1000), workload(), tokens()) // 14 days before EVENT_DAY
-                .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens()); // the judged window's own day
+                .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens()); // the judged window's day
 
         MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of());
         assertNotNull(resolved);
-        // Kish's effective sample size for weights 1 and 0.25 over 1000 samples each:
-        // (1000·1 + 1000·0.25)² / (1000·1² + 1000·0.25²) = 1562500/1062.5 ≈ 1470.
+        // Kish's effective sample size for weights 1 and 0.25 over 1000 each ≈ 1470.
         assertEquals(1470.0, resolved.measure().count(), 5.0, "an old day contributes, but not as a fresh one");
 
-        // Aged past retention it contributes nothing at all — and the ring stops carrying it.
+        // Past retention it contributes nothing and leaves the ring.
         MetricControl aged = MetricControl.empty()
                 .fold(GRID, "2026-07-01", window(1000, 1000), workload(), tokens())
                 .fold(GRID, "2026-08-10", window(1000, 1000), workload(), tokens());
@@ -103,11 +97,10 @@ class MetricControlTest {
     @Test
     @DisplayName("a day exactly RETAIN_DAYS old is the inclusive bound; one day older is not")
     void retentionBoundIsInclusive() {
-        // One slot, isolated from fold's own retention pruning, so only resolve's boundary is on trial.
+        // One slot, so only resolve's boundary is on trial.
         MetricControl control =
                 MetricControl.empty().fold(GRID, "2026-07-20", window(1000, 1000), workload(), tokens());
 
-        // 2026-08-10 is exactly 21 days after 2026-07-20.
         MetricControl.Resolved atBound = control.resolve(GRID, "2026-08-10", Set.of());
         assertNotNull(atBound, "a day exactly three half-lives old still counts");
         assertEquals(1, atBound.daysUsed());
@@ -119,9 +112,8 @@ class MetricControlTest {
     @Test
     @DisplayName("resolve skips days after the judged window's event day")
     void resolveSkipsDaysAfterTheJudgedEventDay() {
-        // The ring holds a day AFTER the window under judgment — the late half of an out-of-order
-        // backfill. Judging an earlier window against it must not pull in traffic that, on the event
-        // clock, had not happened yet.
+        // A day after the judged window (out-of-order backfill) must not count: on the event clock it had not
+        // happened.
         MetricControl control = ringOf("2026-08-05", "2026-08-12");
 
         MetricControl.Resolved resolved = control.resolve(GRID, "2026-08-10", Set.of());
@@ -134,19 +126,16 @@ class MetricControlTest {
     @DisplayName(
             "retention anchors on the newest day the ring holds, so an out-of-order import cannot evict recent days")
     void retentionAnchorsOnTheNewestDayHeld() {
-        // A ring that has already seen a recent day...
         MetricControl control = MetricControl.empty().fold(GRID, "2026-08-10", window(100, 1000), workload(), tokens());
 
-        // ...then an import lands a day nine weeks earlier. Anchoring retention on the day just folded,
-        // rather than on the newest day the ring holds, would read 2026-08-10 as impossibly far in the
-        // future relative to 2026-06-15 and drop it — the eviction this anchor exists to prevent.
+        // An import nine weeks earlier. Anchoring retention on the day just folded would drop 2026-08-10 as far
+        // future.
         MetricControl afterImport = control.fold(GRID, "2026-06-15", window(100, 1000), workload(), tokens());
 
         assertTrue(
                 daysOf(afterImport).contains("2026-08-10"),
                 "the recent day survives an older import instead of being evicted by it");
-        // And retention still means something: the ancient import is itself more than 21 days before the
-        // newest day the ring holds, so it does not linger either.
+        // The ancient import is itself past retention from the newest day.
         assertFalse(
                 daysOf(afterImport).contains("2026-06-15"),
                 "the import is past retention relative to the newest day, so it is not kept either");
@@ -166,8 +155,7 @@ class MetricControlTest {
         assertNotNull(clean);
 
         assertEquals(1, clean.daysUsed(), "only the day before the regression is left");
-        // The whole point: with the regression folded in, the control has already moved most of the way
-        // to the new level and the next window barely looks shifted. Excluded, it stays where it was.
+        // With the regression folded in, the control moves toward it and the next window barely looks shifted.
         assertTrue(
                 clean.measure().meanLog() < all.measure().meanLog() - 0.5,
                 "excluding the regression keeps the reference at the pre-regression level: clean="
@@ -181,8 +169,7 @@ class MetricControlTest {
         MetricControl control = ringOf("2026-08-09", "2026-08-10");
         assertEquals(2, daysOf(control).size(), "the ring records what closed, not what was later ruled on");
 
-        // A verdict landing now takes effect on the next read, with no rewrite of anything stored. That is
-        // the property that makes a triage arriving hours after the window closed able to act.
+        // A verdict applies on the next read with no rewrite, so a late triage can still act.
         MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of("2026-08-10"));
         assertNotNull(resolved);
         assertEquals(1, resolved.daysUsed());
@@ -205,7 +192,7 @@ class MetricControlTest {
         assertEquals(
                 before.measure().count(), after.measure().count(), "a rehydrated ring resolves to the same reference");
 
-        // A bucket that cannot read its own ring waits for a fresh one; it does not take the sweep down.
+        // An unreadable ring waits for a fresh one; it does not take the sweep down.
         assertNull(MetricControl.fromJson("{not json").newest());
         assertNull(MetricControl.fromJson(null).newest());
     }
@@ -215,16 +202,13 @@ class MetricControlTest {
     void aDeadGridDayIsSkipped() {
         MetricControl control = MetricControl.empty().fold(GRID, "2026-08-10", window(200, 1000), workload(), tokens());
 
-        // hist_bins edited under a live project: the same measure, a layout the stored day cannot join.
+        // hist_bins edited under a live project: a layout the stored day cannot join.
         Grid moved = new Grid(GRID.lo(), GRID.ratio(), GRID.bins() - 1);
         assertNull(
                 control.resolve(moved, EVENT_DAY, Set.of()), "a ring of dead days answers nothing rather than wrongly");
     }
 
-    /**
-     * A day slot whose measure, workload or token blob will not parse is dropped from the read rather than
-     * failing it: one unreadable slot must not take the whole bucket's reference, or the sweep, down with it.
-     */
+    /** An unparseable day slot is dropped from the read rather than failing the bucket or the sweep. */
     @Test
     @DisplayName("an unreadable day slot or context blob is left out of the reference, not thrown")
     void anUnreadableSlotIsLeftOutOfTheReference() {
@@ -243,7 +227,7 @@ class MetricControlTest {
         assertNull(resolved.workload(), "an unreadable workload is absent, not a zeroed distribution");
         assertNull(resolved.tokens());
 
-        // Folding a fresh window onto the unreadable day replaces it instead of throwing on the merge.
+        // A fresh window replaces the unreadable day instead of throwing on the merge.
         MetricControl.Resolved refolded = control.fold(GRID, "2026-08-09", window(50, 1000), workload(), tokens())
                 .resolve(GRID, EVENT_DAY, Set.of());
         assertNotNull(refolded);
