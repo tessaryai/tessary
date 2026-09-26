@@ -41,6 +41,7 @@ import { act, cleanup, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
+import { auth as mockedAuth } from "./api/client";
 import { ThemeProvider } from "./ui/ThemeContext";
 import { DensityProvider } from "./ui/density";
 import { ApiError } from "./api/types";
@@ -951,5 +952,45 @@ describe("route manifest render smoke test", () => {
 
     expect(container.textContent).not.toContain("Organizations");
     expect(container.textContent).not.toContain("New organization");
+  });
+});
+
+/*
+ * Where the app sends a visitor before any view mounts. The bugs worth catching: a signed-in user with
+ * no organization left on a blank screen, an organization's only real project confused with its
+ * sample, and a project with no tagged span yet shown the shell instead of the connect gate.
+ */
+describe("app entry redirects", () => {
+  afterEach(() => {
+    cleanup();
+    currentProjectApiOverrides = {};
+  });
+
+  // Not to /login: that sends a signed-in visitor back to the root, which sent them there, forever.
+  it("tells a signed-in user who belongs to no organization so, and lets them sign out", async () => {
+    vi.mocked(mockedAuth.me).mockResolvedValueOnce({ ...FAKE_ME, orgs: [] });
+    const { container } = renderApp("/");
+
+    await waitFor(() => expect(container.textContent).toContain("not a member of any organization"));
+    expect(within(container).getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(mockedAuth.mode).not.toHaveBeenCalled();
+  });
+
+  it("sends an organization whose only project is the sample to create a real one", async () => {
+    vi.mocked(mockedAuth.listProjects).mockResolvedValueOnce([{ ...FAKE_PROJECT, deleting_at: null, settings: '{"sample": true}' }]);
+    const { container } = renderApp("/orgs/fake-orgSlug");
+
+    await waitFor(() => expect(container.textContent).toContain("New project"));
+  });
+
+  it("puts a project with no tagged span behind the connect gate", async () => {
+    currentProjectApiOverrides = {
+      ...SHELL_CHROME_OVERRIDES,
+      substrateStatus: () => Promise.resolve({ ...CONNECTED_SUBSTRATE_STATUS, has_tagged_span: false, tagged_spans: 0 }),
+    };
+    const { container } = renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/triage"));
+
+    await waitFor(() => expect(container.textContent).toContain("Connect your traces"));
+    expect(container.querySelector('button[aria-haspopup="menu"]')).toBeNull();
   });
 });

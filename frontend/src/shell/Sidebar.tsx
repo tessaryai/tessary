@@ -19,6 +19,7 @@ import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { auth as authApi } from "../api/client";
 import { useTenant } from "../tenant/TenantContext";
 import { useAuth } from "../auth/AuthContext";
+import { signOut } from "../auth/signOut";
 import { cn } from "../ui";
 import { SETTINGS_ICON } from "./nav";
 import type { NavItem } from "./nav";
@@ -352,14 +353,6 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
   // Rendered only inside ProtectedRoute, which does not mount its children without a user.
   const user = useAuth().user!;
   const { open, setOpen, ref } = useDropdown();
-  const onSignOut = async () => {
-    try {
-      const { frontendUrl } = await authApi.logout();
-      window.location.assign(frontendUrl);
-    } catch {
-      window.location.assign("/");
-    }
-  };
 
   const initial = (user.email ?? "?").charAt(0).toUpperCase();
   return (
@@ -396,7 +389,7 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
         >
           <button
             type="button"
-            onClick={onSignOut}
+            onClick={() => void signOut()}
             className="w-full text-left px-3 py-1.5 text-small text-fg hover:bg-hover">
             Sign out
           </button>
