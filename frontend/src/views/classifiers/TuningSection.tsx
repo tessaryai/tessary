@@ -67,11 +67,14 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    // A number input reports anything it cannot parse as "", and Number("") is 0: a cleared field would
+    // save as 0 and be clamped to the floor. Blank is no value, so nothing saves until every field has one.
+    const num = (s: string) => (s.trim() === "" ? Number.NaN : Number(s));
     const parsed = {
-      window_target_count: Number(form.windowTargetCount),
-      window_max_hours: Number(form.windowMaxHours),
-      min_sample: Number(form.minSample),
-      w1_floor: Number(form.w1Floor),
+      window_target_count: num(form.windowTargetCount),
+      window_max_hours: num(form.windowMaxHours),
+      min_sample: num(form.minSample),
+      w1_floor: num(form.w1Floor),
     };
     if (Object.values(parsed).some((v) => !Number.isFinite(v))) return;
     saveM.mutate(parsed);

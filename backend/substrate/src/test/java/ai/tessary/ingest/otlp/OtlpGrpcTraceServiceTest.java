@@ -19,10 +19,14 @@ import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
 import ai.tessary.open.errors.CapabilityError;
+import ai.tessary.open.errors.ErrorCode;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.KeyScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.rpc.RetryInfo;
 import io.grpc.Channel;
 import io.grpc.ClientInterceptors;
 import io.grpc.ManagedChannel;
@@ -31,6 +35,7 @@ import io.grpc.Server;
 import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.MetadataUtils;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse;
@@ -281,5 +286,40 @@ class OtlpGrpcTraceServiceTest {
                 io.grpc.Status.Code.UNAUTHENTICATED,
                 io.grpc.Status.fromThrowable(errors.get(0)).getCode());
         verify(substrateWriter, never()).enqueue(anyString(), any());
+    }
+
+    /**
+     * A refusal another build marks {@link Retryable} reaches the exporter as UNAVAILABLE with the delay in
+     * {@code RetryInfo}. Stock exporters retry only that shape, so without it the batch is dropped for good.
+     */
+    @Test
+    void aRetryableRefusal_rejectedUnavailableCarryingTheRetryDelay() throws InvalidProtocolBufferException {
+        when(bearerAuth.authenticate(eq("Bearer " + VALID_TOKEN))).thenReturn(Optional.of(projectToken("proj-grpc")));
+        quotaFailure = new RetryableRefusal(CapabilityError.QUOTA_EXCEEDED, 45);
+
+        StatusRuntimeException ex = assertThrows(
+                StatusRuntimeException.class, () -> stub(VALID_TOKEN).export(request()));
+
+        assertEquals(io.grpc.Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        com.google.rpc.Status status = StatusProto.fromThrowable(ex);
+        assertEquals(1, status.getDetailsCount());
+        assertEquals(
+                45L,
+                status.getDetails(0).unpack(RetryInfo.class).getRetryDelay().getSeconds());
+        verify(substrateWriter, never()).enqueue(anyString(), any());
+    }
+
+    private static final class RetryableRefusal extends TessaryException implements Retryable {
+        private final int retryAfterSeconds;
+
+        RetryableRefusal(ErrorCode error, int retryAfterSeconds) {
+            super(error, "ingested_traces_monthly", 10L, 10L);
+            this.retryAfterSeconds = retryAfterSeconds;
+        }
+
+        @Override
+        public int retryAfterSeconds() {
+            return retryAfterSeconds;
+        }
     }
 }

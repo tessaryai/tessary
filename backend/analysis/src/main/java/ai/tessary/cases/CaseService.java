@@ -671,10 +671,8 @@ public class CaseService {
      * {@code status} and a reader can tell the two apart, and a failed analysis is a fact worth having, not a
      * pending one to wait on.
      *
-     * <p>Fetched through {@link RcaReportService} rather than mapped here, so a case page and the RCA surface
-     * render one report shape; the row's id is enough of a handle, and re-reading it by that id costs one
-     * primary-key lookup. Gone between the two reads reads as absent: a case is not worth failing to render
-     * over a report that was deleted mid-request.
+     * <p>Rendered through {@link RcaReportService} rather than mapped here, so a case page and the RCA surface
+     * render one report shape.
      */
     private @Nullable RcaReportView inlinedRcaReport(String projectId, @Nullable RcaReportRow report) {
         if (report == null
@@ -682,11 +680,7 @@ public class CaseService {
                 || JobRow.Status.CLAIMED.equals(report.status())) {
             return null;
         }
-        try {
-            return rcaReportViews.get(projectId, report.id());
-        } catch (TessaryException e) {
-            return null;
-        }
+        return rcaReportViews.view(report);
     }
 
     // ---- helpers -----------------------------------------------------------------------------

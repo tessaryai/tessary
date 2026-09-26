@@ -30,8 +30,8 @@ export function usePalette(): PaletteApi {
 
 /** True when focus is in a field where ⌘K should defer to normal typing/editing. */
 function isEditableTarget(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null;
-  if (!el) return false;
+  // A keydown always has a target: the focused element, else the body.
+  const el = t as HTMLElement;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 }

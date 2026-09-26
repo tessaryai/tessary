@@ -3,7 +3,6 @@ package ai.tessary.storage;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import org.jspecify.annotations.Nullable;
 
@@ -22,15 +21,5 @@ public final class Timestamps {
     public static @Nullable String iso(ResultSet rs, String column) throws SQLException {
         OffsetDateTime odt = rs.getObject(column, OffsetDateTime.class);
         return odt == null ? null : odt.toInstant().toString();
-    }
-
-    /**
-     * A {@code timestamptz} column as an {@link Instant}, or null when the column is null — for the callers
-     * that compare timestamps rather than serialise them. Goes via {@link OffsetDateTime} because the
-     * Postgres driver refuses {@code getObject(col, Instant.class)} outright.
-     */
-    public static @Nullable Instant instant(ResultSet rs, String column) throws SQLException {
-        OffsetDateTime odt = rs.getObject(column, OffsetDateTime.class);
-        return odt == null ? null : odt.toInstant();
     }
 }

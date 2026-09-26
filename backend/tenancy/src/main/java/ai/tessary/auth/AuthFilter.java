@@ -166,28 +166,17 @@ public class AuthFilter extends OncePerRequestFilter {
         // Actuator sits alongside /api/ here: shouldNotFilter has already released the health
         // probes, so anything actuator-shaped reaching this point is a management endpoint, and
         // without this arm it would reach chain.doFilter with a null context and be served.
-        if (ctx == null && (path.startsWith("/api/") || isActuatorPath(path))) {
-            reject401(res, "unauthorized");
-            return;
-        }
-
-        // Actuator, second gate: having any principal was never the bar here, only closing the
-        // "no credential at all" door. isPublicActuatorPath paths never reach this method
-        // (shouldNotFilter already released them), so the guard below is redundant-but-cheap
-        // symmetry with the 401 arm above, not load-bearing.
-        if (isActuatorPath(path) && !isPublicActuatorPath(path)) {
-            // ctx is guaranteed non-null here — the 401 arm above already returned for a null ctx
-            // on every actuator path — but NullAway can't fold that proof across two separate `if`
-            // conditions, so this re-check is for the type checker, not the runtime: it can never
-            // actually fire.
-            if (ctx == null) {
+        if (ctx == null) {
+            if (path.startsWith("/api/") || isActuatorPath(path)) {
                 reject401(res, "unauthorized");
                 return;
             }
-            if (!platformStaff.isStaff(ctx)) {
-                reject403(res, "actuator.staff_only", "platform staff only");
-                return;
-            }
+        } else if (isActuatorPath(path) && !isPublicActuatorPath(path) && !platformStaff.isStaff(ctx)) {
+            // Actuator, second gate: having any principal was never the bar here, only closing the
+            // "no credential at all" door. isPublicActuatorPath paths never reach this method
+            // (shouldNotFilter already released them), so that term is redundant-but-cheap symmetry.
+            reject403(res, "actuator.staff_only", "platform staff only");
+            return;
         }
 
         // CSRF: any state-changing /api request made with a cookie session must

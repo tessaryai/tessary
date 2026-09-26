@@ -386,7 +386,7 @@ public class ProjectModelSettings {
     private void validate(String orgId, ModelLane lane, String modelKey) {
         Optional<BedrockModelProfile.ModelDescriptor> bedrock = BedrockModelProfile.find(modelKey);
         if (bedrock.isPresent()) {
-            validateBedrock(lane, modelKey);
+            requireServable(lane, modelKey, bedrock.get().agentic());
             return;
         }
         // The non-Bedrock half of the union (see the class javadoc). A miss on both halves is
@@ -396,15 +396,6 @@ public class ProjectModelSettings {
             throw new TessaryException(ModelConfigError.UNKNOWN_PLATFORM_MODEL, modelKey);
         }
         validateCatalog(lane, modelKey, catalog.get());
-    }
-
-    private static void validateBedrock(ModelLane lane, String modelKey) {
-        if (lane.agentic() && !BedrockModelProfile.isAgentic(modelKey)) {
-            throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
-        }
-        if (!isOfferedOn(lane, modelKey)) {
-            throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
-        }
     }
 
     /**
@@ -418,7 +409,12 @@ public class ProjectModelSettings {
         if (lane.decision() != entry.decision() || (!lane.decision() && !lane.agentic())) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, modelKey, lane.label());
         }
-        if (lane.agentic() && !entry.agentic()) {
+        requireServable(lane, modelKey, entry.agentic());
+    }
+
+    /** Steps 2 and 3 of {@link #validate}, shared by the Bedrock and catalog halves. */
+    private static void requireServable(ModelLane lane, String modelKey, boolean agentic) {
+        if (lane.agentic() && !agentic) {
             throw new TessaryException(ModelConfigError.MODEL_NOT_AGENTIC, modelKey, lane.label());
         }
         if (!isOfferedOn(lane, modelKey)) {

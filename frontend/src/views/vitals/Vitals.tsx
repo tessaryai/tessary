@@ -20,14 +20,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, PageHeader, Skeleton, Table, TableSkeleton, TBody, TD, TH, THead, TR, cn } from "../../ui";
 import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
+import { usd } from "../../lib/usd";
 
 /** U+2212 minus — matches the sheet's `−3%` glyph, wider than a hyphen. */
 const MINUS = "−";
 
-function usd(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
-}
 
 function seconds(ms: number | null | undefined): string {
   return ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`;

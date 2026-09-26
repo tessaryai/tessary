@@ -2,10 +2,12 @@
 package ai.tessary.metering;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -16,10 +18,15 @@ import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.usage.MetricRollupJobRepository;
 import ai.tessary.usage.MetricRollupJobRow;
 import ai.tessary.usage.MetricRollupRepository;
+import ai.tessary.usage.MetricRollupRow;
+import ai.tessary.usage.UsageUnit;
 import io.micrometer.tracing.Tracer;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -85,5 +92,22 @@ class MeteringWorkerTest {
 
         verify(jobs, never()).markDone("job-1");
         verify(jobs).markDone("job-2");
+    }
+
+    /**
+     * {@link UsageUnit#metered()} is the list other code reads to learn what metering produces. A unit the
+     * worker writes but that list omits is billed nowhere, and one the list names but the worker never
+     * writes reads as a permanent zero.
+     */
+    @Test
+    void theWorkerWritesExactlyTheMeteredUnits() {
+        worker().meterOne(job("job-1", "p1"));
+
+        ArgumentCaptor<MetricRollupRow> written = ArgumentCaptor.forClass(MetricRollupRow.class);
+        verify(rollups, atLeastOnce()).upsert(written.capture());
+        assertEquals(
+                Arrays.stream(UsageUnit.metered()).map(UsageUnit::wire).collect(Collectors.toSet()),
+                written.getAllValues().stream().map(MetricRollupRow::metric).collect(Collectors.toSet()));
+        assertEquals(UsageUnit.metered().length, written.getAllValues().size(), "one row per unit");
     }
 }

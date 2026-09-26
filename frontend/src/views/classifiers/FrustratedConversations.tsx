@@ -39,18 +39,14 @@ import { useTenant } from "../../tenant/TenantContext";
 import { Button, Skeleton, cn } from "../../ui";
 import { SessionConversationView } from "../traces/detail-views";
 import type { Span } from "../traces/detail-data";
+import { useListPaging } from "./useListPaging";
+import { useSkeletonFlag } from "./useSkeletonFlag";
 
 /** Space left under the flagged message when the pane scrolls to it, in px. */
 const FLAGGED_BOTTOM_GAP = 24;
 
 /** Sessions read per page past the first. */
 const PAGE_SIZE = 50;
-
-/** How long a filter switch waits before swapping the last list for the skeleton, in ms. */
-const SKELETON_DELAY = 200;
-
-/** The shortest time the skeleton stays once drawn, in ms. */
-const SKELETON_HOLD = 400;
 
 /** The list and the session side by side, at a fixed height so the page never moves as they load. */
 const FRAME = "grid rounded-card border border-border overflow-hidden bg-surface";
@@ -82,22 +78,6 @@ function sessionsQuery(api: ProjectApi, findingId: string, filter: SessionFilter
   });
 }
 
-/** True once `active` has held for `delay` ms, and then for at least `hold` ms. */
-function useSettledFlag(active: boolean, delay: number, hold: number) {
-  const [shown, setShown] = useState(false);
-  const shownAt = useRef(0);
-  useEffect(() => {
-    if (active === shown) return;
-    const wait = active ? delay : Math.max(0, hold - (Date.now() - shownAt.current));
-    const timer = setTimeout(() => {
-      shownAt.current = Date.now();
-      setShown(active);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [active, shown, delay, hold]);
-  return shown;
-}
-
 export function FrustratedConversations({
   findingId,
   first,
@@ -121,7 +101,7 @@ export function FrustratedConversations({
     initialData: filter ? undefined : { pages: [first], pageParams: [null] },
     placeholderData: keepPreviousData,
   });
-  const skeleton = useSettledFlag(pages.isPlaceholderData, SKELETON_DELAY, SKELETON_HOLD);
+  const skeleton = useSkeletonFlag(pages.isPlaceholderData);
 
   const queryClient = useQueryClient();
   const readAheadKey = readAhead.map((f) => `${f.rcaReport}:${f.index}`).join(",");
@@ -137,26 +117,8 @@ export function FrustratedConversations({
   const selected = conversations.find((c) => c.traceId === pickedId) ?? conversations[0];
 
   // Read the next page when the end of the list scrolls into view.
-  const list = useRef<HTMLUListElement>(null);
-  const end = useRef<HTMLLIElement>(null);
   const { isFetchingNextPage, fetchNextPage } = pages;
-  const hasNextPage = pages.hasNextPage && !pages.isPlaceholderData;
-  useEffect(() => {
-    if (list.current) list.current.scrollTop = 0;
-  }, [filterKey]);
-  useEffect(() => {
-    const root = list.current;
-    const target = end.current;
-    if (!root || !target || !hasNextPage) return;
-    const seen = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) void fetchNextPage();
-      },
-      { root, rootMargin: "200px" },
-    );
-    seen.observe(target);
-    return () => seen.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const { list, end, hasNextPage } = useListPaging(filterKey, pages);
 
   if (pages.isLoading || skeleton) {
     return <SessionsSkeleton />;

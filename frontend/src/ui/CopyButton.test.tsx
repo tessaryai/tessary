@@ -42,6 +42,23 @@ describe("CopyButton", () => {
     expect(screen.getByRole("button").textContent).toBe("Copy");
   });
 
+  it("restarts the Copied window on a second copy, rather than ending it on the first one's schedule", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+
+    render(<CopyButton value="sk-live-123" />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(screen.getByRole("button").textContent).toContain("Copied"));
+    act(() => void vi.advanceTimersByTime(1000));
+    fireEvent.click(screen.getByRole("button"));
+    await act(async () => {});
+
+    act(() => void vi.advanceTimersByTime(1000));
+    expect(screen.getByRole("button").textContent).toContain("Copied");
+    act(() => void vi.advanceTimersByTime(700));
+    expect(screen.getByRole("button").textContent).toBe("Copy");
+  });
+
   it("resolves a thunk value at click time, not at render time", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });

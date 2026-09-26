@@ -162,7 +162,7 @@ function Message({ message }: { message: ChatMessage }) {
   // base64/data-URI a second time inside the JSON tree is pure noise (and weight).
   // Elide recognised media payloads to a short placeholder for the tree only —
   // the original `message.raw` is untouched, and the Raw toggle still shows it verbatim.
-  const treeValue = useMemo(() => redactMediaData(message.raw), [message.raw]);
+  const treeValue = useMemo(() => redactMediaData(message.raw) as object, [message.raw]);
   // A message that is nothing but media shows the media. The tree earns its
   // place on mixed content, where it carries the text and structure around the
   // media; on its own it is `{"type":"image_ref","data":"01M0…"}` stacked above
@@ -232,18 +232,11 @@ function MediaPart({ media }: { media: MediaView }) {
   );
 }
 
-function JsonTree({ value, collapsed }: { value: unknown; collapsed: number }) {
-  if (value === null || typeof value !== "object") {
-    return (
-      <pre className="font-mono whitespace-pre-wrap text-fg text-small">
-        {typeof value === "string" ? value : String(value)}
-      </pre>
-    );
-  }
+function JsonTree({ value, collapsed }: { value: object; collapsed: number }) {
   return (
     <div className="payload-json">
       <JsonView
-        value={value as object}
+        value={value}
         style={jsonTheme}
         collapsed={collapsed}
         // upstream alpha mistypes this as number; runtime concatenates it as a string
@@ -290,7 +283,7 @@ type ChatMessage = { role: string; raw: unknown };
 
 type Parsed =
   | { kind: "chat"; messages: ChatMessage[] }
-  | { kind: "json"; value: unknown }
+  | { kind: "json"; value: object }
   | { kind: "text"; text: string };
 
 type Obj = Record<string, unknown>;
@@ -318,12 +311,11 @@ function parsePayload(payload: string | null): Parsed {
     }
     return { kind: "json", value: root };
   }
-  if (isObj(root)) {
-    if ("role" in root) return { kind: "chat", messages: [messageFromObj(root)] };
-    if ("type" in root) return { kind: "chat", messages: [{ role: "", raw: root }] };
-    return { kind: "json", value: root };
-  }
-  return { kind: "json", value: root };
+  // Text that opens with `{` and parses is an object: nothing else can be here.
+  const obj = root as Obj;
+  if ("role" in obj) return { kind: "chat", messages: [messageFromObj(obj)] };
+  if ("type" in obj) return { kind: "chat", messages: [{ role: "", raw: obj }] };
+  return { kind: "json", value: obj };
 }
 
 function messageFromObj(m: Obj): ChatMessage {

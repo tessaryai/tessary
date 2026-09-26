@@ -56,10 +56,11 @@ export function FrustrationEnableModal({
   const needsKey = choice != null && !configured.has(choice.provider);
 
   const enableM = useMutation({
+    // Enable is offered only once there is a choice (`canConfirm`).
     mutationFn: async () => {
-      if (!choice) throw new Error("No provider offers the Frustration lane.");
-      if (needsKey) await orgApi.upsertProviderCredential(choice.provider, { api_key: apiKey.trim() });
-      await api.setLaneModel(FRUSTRATION_LANE, { model_key: choice.default_model_key });
+      const c = choice!;
+      if (needsKey) await orgApi.upsertProviderCredential(c.provider, { api_key: apiKey.trim() });
+      await api.setLaneModel(FRUSTRATION_LANE, { model_key: c.default_model_key });
       return api.setClassifierEnabled(classifierId, true);
     },
     onSettled: () => {

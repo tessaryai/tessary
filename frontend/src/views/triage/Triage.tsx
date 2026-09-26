@@ -18,6 +18,7 @@ import type { Case, Vitals } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, PageHeader, TableSkeleton } from "../../ui";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
+import { usd } from "../../lib/usd";
 import { PipelineEmpty } from "./PipelineEmpty";
 import { resolveState } from "./emptyState";
 import { useOnboarding } from "../onboarding/useOnboarding";
@@ -188,11 +189,6 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
 }
 
 /* ------------------------------------------------------------ pulse strip */
-
-function usd(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
-}
 
 function pct(value: number | null | undefined): string {
   if (value == null) return "—";

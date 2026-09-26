@@ -352,8 +352,8 @@ function LaneRow({
     );
   };
 
+  // The model select offers no empty value, and its "No model" placeholder only shows while it is disabled.
   const handleModel = (nextKey: string) => {
-    if (!nextKey || nextKey === NO_PROVIDER) return;
     const next = models.find((m) => m.model_key === nextKey);
     if (next && !configuredProviders.has(next.provider)) return;
     if (crossesPriceGate(nextKey)) {
@@ -365,8 +365,8 @@ function LaneRow({
 
   // Choosing a provider pins that provider's own default model. Choosing Automatic drops the pin
   // entirely, which is a delete rather than a write: there is no default row to put back.
+  // The "No provider" placeholder only shows while the select is disabled, so it is never chosen.
   const handleProvider = (nextProvider: string) => {
-    if (nextProvider === NO_PROVIDER) return;
     if (!nextProvider) {
       onReset();
       return;
@@ -503,8 +503,8 @@ function LaneRow({
               variant="primary"
               loading={busy}
               onClick={() => {
-                if (!pending) return;
-                onChange(pending.key);
+                // This dialog is open only while a change is pending.
+                onChange(pending!.key);
                 setPending(null);
               }}
             >

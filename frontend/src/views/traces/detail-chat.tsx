@@ -415,7 +415,8 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
     if (isOnlyToolResults(message)) return;
     const content = bodyOf(message);
     const split = splitContent(content);
-    const toolUses = Array.isArray(content) ? content.filter((b) => blockType(b) === "tool_use") : [];
+    // `blockType` reads "" off anything that is not an object, so every block this keeps is one.
+    const toolUses = Array.isArray(content) ? content.filter((b): b is Obj => blockType(b) === "tool_use") : [];
     // A tool's request and its answer are both shown as a pill, so neither
     // belongs in the bubble. `isOnlyToolResults` above drops the messages that
     // are nothing but transport; this drops the block from a *mixed* message,
@@ -438,7 +439,6 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
     if (!deriveTools) return;
 
     for (const [ti, block] of toolUses.entries()) {
-      if (!isObj(block)) continue;
       const id = typeof block.id === "string" ? block.id : null;
       items.push({
         kind: "tool",
@@ -582,9 +582,9 @@ function Clamped({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   useLayoutEffect(() => {
-    const box = outer.current;
-    const content = inner.current;
-    if (!box || !content) return;
+    // Both are rendered unconditionally below, so a layout effect always finds them attached.
+    const box = outer.current!;
+    const content = inner.current!;
     const measure = () => {
       const limit = parseFloat(getComputedStyle(box).fontSize) * CLAMP_EM;
       // A hair of tolerance: a message one sub-pixel over the line would

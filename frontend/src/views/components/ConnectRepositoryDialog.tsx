@@ -109,7 +109,8 @@ export function ConnectRepositoryDialog({
 
   // Grey text with an error-colored icon, never red body copy: red passes contrast
   // only in the large-or-bold class (DESIGN_SYSTEM.md § States).
-  const error = connect.error ? (connect.error as ApiError).detail ?? "The request failed. Try again." : null;
+  // `||`, not `??`: a failure whose server message is empty would otherwise render no alert at all.
+  const error = connect.error ? (connect.error as ApiError).detail || "The request failed. Try again." : null;
 
   return (
     <Modal

@@ -526,8 +526,6 @@ function openAiCompatEnvVars(mode, credential) {
       return { MOONSHOT_API_KEY: apiKey };
     case ANTHROPIC_MODE:
       return { ANTHROPIC_API_KEY: apiKey };
-    default:
-      return {};
   }
 }
 
@@ -1060,14 +1058,10 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   // workDir is a path INSIDE this container, under the shared LAUNCHER_WORK_DIR mount — see that
   // constant's comment for why it cannot be os.tmpdir() here.
   let workDir;
+  const cleanupDir = () => { try { if (workDir) fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ } };
   try {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
     workDir = fs.mkdtempSync(path.join(LAUNCHER_WORK_DIR, 'run-'));
-  } catch (e) {
-    throw withMeta(e);
-  }
-  const cleanupDir = () => { try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ } };
-  try {
     fs.writeFileSync(path.join(workDir, 'input.json'), JSON.stringify(payload));
   } catch (e) {
     cleanupDir();
@@ -1243,6 +1237,19 @@ function requireCredential(credential, scriptName) {
   // baseURL of '' reaching the SDK, which throws ERR_INVALID_URL deep inside the agent run.
   if (credential.provider === 'CUSTOM' && !(credential.base_url || '').trim()) {
     bad('CUSTOM credential is missing base_url — there is no default endpoint to assume');
+  }
+}
+
+// The post-mortem the failure path above logs: whether E2B still reports the sandbox running, and
+// the lifetime it was given. A sandbox already gone, or at its endAt, is the deadline rather than
+// the script. Best-effort: a failed lookup is logged and never replaces the run's own error.
+async function logSandboxDiagnostics(sandboxId) {
+  try {
+    const info = await Sandbox().getInfo(sandboxId, { apiKey: E2B_API_KEY });
+    const at = (d) => (d instanceof Date ? d.toISOString() : String(d));
+    console.error(`sandbox ${sandboxId} post-mortem: state=${info.state} started=${at(info.startedAt)} end=${at(info.endAt)}`);
+  } catch (e) {
+    console.error(`sandbox ${sandboxId} post-mortem unavailable: ${(e && e.name) || 'Error'}`);
   }
 }
 

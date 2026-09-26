@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, KeyRound } from "lucide-react";
 import { useProjectApi } from "../../tenant/TenantContext";
+import { ledgerTime } from "../../lib/ledgerTime";
 import { ApiError } from "../../api/types";
 import type { ApiKey, ApiKeyAudit, KeyScope } from "../../api/types-auth";
 import {
@@ -48,21 +49,6 @@ const SCOPE_TONE: Record<KeyScope, "info" | "accent" | "success"> = {
 
 function KeyGlyph({ size = 20 }: { size?: number }) {
   return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
-}
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "Never";
-  const then = new Date(iso).getTime();
-  const diff = Date.now() - then;
-  if (diff < 0) return new Date(iso).toLocaleString();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function ApiKeys() {
@@ -385,8 +371,8 @@ function KeyRow({
       <span className="w-16">
         <Badge tone={revoked ? "neutral" : SCOPE_TONE[apiKey.scope]}>{apiKey.scope}</Badge>
       </span>
-      <span className="w-24 text-label text-muted">{relativeTime(apiKey.created_at)}</span>
-      <span className="w-20 text-label text-muted">{relativeTime(apiKey.last_used_at)}</span>
+      <span className="w-24 text-label text-muted">{ledgerTime(apiKey.created_at)}</span>
+      <span className="w-20 text-label text-muted">{ledgerTime(apiKey.last_used_at)}</span>
       <span className="w-32 flex justify-end gap-1">
         {revoked ? (
           <Badge tone="neutral">Revoked</Badge>
@@ -426,7 +412,7 @@ function AuditRow({ entry }: { entry: ApiKeyAudit }) {
       <span className="flex-1 min-w-0 truncate text-small text-fg">
         {entry.details ?? (entry.api_key_id ? `Key ${entry.api_key_id.slice(0, 8)}…` : "—")}
       </span>
-      <span className="w-28 text-right text-label text-muted">{relativeTime(entry.created_at)}</span>
+      <span className="w-28 text-right text-label text-muted">{ledgerTime(entry.created_at)}</span>
     </div>
   );
 }

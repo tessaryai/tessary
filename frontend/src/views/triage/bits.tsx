@@ -24,7 +24,6 @@ const MONTHS = [
  */
 export function timeAgo(iso: string): string {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
   const mins = Math.max(1, Math.round((Date.now() - d.getTime()) / 60_000));
   if (mins < 60) return `${mins}m ago`;
   const hh = String(d.getHours()).padStart(2, "0");
@@ -37,25 +36,8 @@ export function truncateId(id: string, keep = 8): string {
   return id.length <= keep ? id : `${id.slice(0, keep)}…`;
 }
 
-/** Human label for the detector tag on a case's meta line. */
-export function detectorLabel(detector: string): string {
-  switch (detector) {
-    case "classifier":
-      return "Classifier";
-    case "metric_drift":
-      return "Metric drift";
-    case "tool_error":
-      return "Tool errors";
-    case "secret_leak":
-      return "Secret leak";
-    case "malformed_output":
-      return "Malformed output";
-    case "frustration":
-      return "Frustration";
-    default:
-      return detector;
-  }
-}
+/** The detector tag on a case's meta line: the classifiers' own label, so a case and its finding agree. */
+export { detectorLabel } from "../classifiers/shared";
 
 /**
  * The call site to SHOW, or null.

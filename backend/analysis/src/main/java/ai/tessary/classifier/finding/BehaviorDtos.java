@@ -43,25 +43,6 @@ public final class BehaviorDtos {
     public record BehaviorFindingsView(List<BehaviorFindingView> findings, String lane) {}
 
     /**
-     * One row of {@code finding_evidence} on the wire: a reference into substrate, never a copy.
-     *
-     * <p>{@code grain} is redundant with which id is set and is sent anyway: a client rendering a mixed
-     * list should not have to re-derive the rule that a span reference carries both ids (span identity
-     * is the composite {@code (project_id, trace_id, id)}) while a trace reference carries one.
-     *
-     * @param role which set this belongs to: {@code exemplar} / {@code member} / {@code baseline} /
-     *     {@code witness} / {@code changepoint}
-     * @param rank the detector's own order within the role, or null where the set is unordered
-     */
-    public record EvidenceRefView(
-            String grain,
-            @Nullable String sessionId,
-            @Nullable String traceId,
-            @Nullable String spanId,
-            String role,
-            @Nullable Integer rank) {}
-
-    /**
      * How big one finding's evidence set is, in both readings. Counts only: {@code refs} is always
      * empty, {@code nextCursor} null and {@code rowsOmitted} true, kept for wire compatibility.
      *
@@ -78,7 +59,7 @@ public final class BehaviorDtos {
      *     evidence set that vanished.
      */
     public record FindingEvidencePage(
-            List<EvidenceRefView> refs,
+            List<Object> refs,
             @Nullable String nextCursor,
             boolean rowsOmitted,
             Map<String, Long> counts,

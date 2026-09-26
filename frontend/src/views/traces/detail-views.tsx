@@ -109,7 +109,7 @@ type StepGroup = { kind: "tools"; steps: ToolStep[] } | { kind: "span"; span: Sp
  * span for, and vice versa. Tool spans already accounted for are skipped here so
  * nothing is drawn twice; the rest are shown where they ran.
  */
-function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
+export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
   const out: StepGroup[] = [];
   const pushTools = (list: ToolStep[]) => {
     const last = out[out.length - 1];
@@ -118,7 +118,9 @@ function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
   };
 
   for (const o of steps) {
-    if (o.kind === "tool") {
+    // Keyed on the execution record, not the kind: a tool reached through a retrieval or mcp span is
+    // still a tool call (see toolStepOf), and keying on `kind === "tool"` dropped it from the transcript.
+    if (toolStepOf(o) != null) {
       const orphan = tools.orphans.get(o.id);
       if (orphan) pushTools([orphan]);
       continue;
@@ -579,18 +581,19 @@ export function SessionTreeView({
  * preference order {@link traceBounds} uses (a trace's own started_at/ended_at over scanning its spans),
  * just min/maxed across every trace in the session instead of read from one.
  */
-function sessionBounds(traces: TraceListItem[]): { start: number; end: number } | null {
+export function sessionBounds(
+  traces: TraceListItem[],
+  spansByTrace: SpansByTrace,
+): { start: number; end: number } | null {
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   for (const t of traces) {
-    const s = new Date(t.started_at).getTime();
-    if (Number.isNaN(s)) continue;
-    start = Math.min(start, s);
-    const e = t.ended_at ? new Date(t.ended_at).getTime() : s + (t.latency_ms ?? 0);
-    if (!Number.isNaN(e)) end = Math.max(end, e);
+    const bounds = traceBounds(t, spansByTrace.get(t.id) ?? []);
+    if (!bounds) continue;
+    start = Math.min(start, bounds.start);
+    end = Math.max(end, bounds.end);
   }
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-  return { start, end };
+  return Number.isFinite(start) ? { start, end } : null;
 }
 
 /**
@@ -616,7 +619,7 @@ export function SessionTimelineView({
   focusId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const bounds = sessionBounds(traces);
+  const bounds = sessionBounds(traces, spansByTrace);
   if (!bounds) {
     return (
       <p className="text-subtle py-6 px-0 text-small">

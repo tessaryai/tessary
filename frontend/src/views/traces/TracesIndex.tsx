@@ -155,6 +155,9 @@ export function TracesIndex() {
   const sq = useSessionsIndex(epoch, groupBySession);
 
   const filtered = activeCount > 0 || !!submittedQuery;
+  // The empty state's "filtered": a narrowed list, not a moved window. The range is a choice of
+  // window (it counts toward Clear all above), and an all-time list that is empty has nothing to clear.
+  const narrowed = Object.values(facets).some(Boolean) || !!submittedQuery;
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.traces) ?? [], [q.data]);
   const sessionRows = useMemo(() => sq.data?.pages.flatMap((p) => p.sessions) ?? [], [sq.data]);
 
@@ -343,7 +346,7 @@ export function TracesIndex() {
         // arrived — never a bare header-only table. Both ways out are offered
         // here, and each is hidden when it would do nothing.
         <NothingHere
-          filtered={filtered}
+          filtered={narrowed}
           allTime={range.kind === "all"}
           range={rangeLabel(range).toLowerCase()}
           onClearAll={clearAllFilters}

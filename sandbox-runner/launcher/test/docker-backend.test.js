@@ -435,3 +435,8 @@ test('sandbox network: an unreadable self-inspection falls back to the isolated 
   assert.equal(create.HostConfig.NetworkMode, 'tessary-sandbox');
   assert.notEqual(create.HostConfig.NetworkMode, 'none', 'network must stay on (egress required)');
 });
+
+test('sandbox network: a launcher attached to no network falls back to the isolated bridge', async () => {
+  const { create } = await runOneAgentJob({}, { selfNetworks: [] });
+  assert.equal(create.HostConfig.NetworkMode, 'tessary-sandbox');
+});

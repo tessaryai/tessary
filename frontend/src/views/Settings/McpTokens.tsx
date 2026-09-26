@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, KeyRound } from "lucide-react";
 import { useProjectApi } from "../../tenant/TenantContext";
+import { ledgerTime } from "../../lib/ledgerTime";
 import { ApiError } from "../../api/types";
 import type { McpTokenView } from "../../api/types-auth";
 import {
@@ -37,20 +38,6 @@ import {
 
 function KeyGlyph({ size = 20 }: { size?: number }) {
   return <KeyRound size={size} strokeWidth={1.5} aria-hidden="true" />;
-}
-
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diff = Date.now() - then;
-  if (diff < 0) return new Date(iso).toLocaleString();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function McpTokens() {
@@ -316,8 +303,8 @@ function TokenRow({
       <span className={cn("w-32 font-mono text-label", revoked ? "text-subtle" : "text-muted")}>
         {token.token_prefix}…
       </span>
-      <span className="w-28 text-label text-muted">{relativeTime(token.created_at)}</span>
-      <span className="w-24 text-label text-muted">{token.last_used_at ? relativeTime(token.last_used_at) : "Never"}</span>
+      <span className="w-28 text-label text-muted">{ledgerTime(token.created_at)}</span>
+      <span className="w-24 text-label text-muted">{ledgerTime(token.last_used_at)}</span>
       <span className="w-20 flex justify-end">
         {revoked ? (
           <Badge tone="neutral">Revoked</Badge>

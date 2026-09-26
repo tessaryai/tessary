@@ -121,6 +121,7 @@ export function DetectorsPage() {
   });
 
   const [enabling, setEnabling] = useState<Classifier | null>(null);
+  const stopEnabling = () => setEnabling(null);
   const providersPath = `/orgs/${orgSlug}/projects/${projectSlug}/settings/providers`;
 
   const classifiers = classifiersQ.data ?? [];
@@ -228,8 +229,8 @@ export function DetectorsPage() {
       {enabling && (
         <FrustrationEnableModal
           classifierId={enabling.id}
-          onClose={() => setEnabling(null)}
-          onEnabled={() => setEnabling(null)}
+          onClose={stopEnabling}
+          onEnabled={stopEnabling}
         />
       )}
 

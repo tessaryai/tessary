@@ -19,6 +19,19 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+# emit_local.py is boot-check tooling that only talks to a running platform.
+omit = ["data_gen/emit_local.py", "tests/*"]
+
+[tool.coverage.report]
+# serve.py's model half runs only against the downloaded checkpoint on a real device: scoring
+# through torch, and the process entry point that loads the model before binding the port.
+exclude_also = [
+    "    def score\\(self, passages",
+    "^def main\\(\\)",
+    "^if __name__ == .__main__.:",
+]
+
 [tool.ruff]
 line-length = 118
 target-version = "py311"

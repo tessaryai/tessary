@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * Preloaded into a spawned launcher with `node --require`, so its lazy `require('e2b')` gets this
+ * in-process stand-in instead of the real SDK's HTTP client. FAKE_E2B_MODE picks how the run goes;
+ * every call is appended to FAKE_E2B_LOG as one JSON line for the test to read back.
+ *
+ * No extension on purpose: node --test runs every .js/.cjs under test/ as a test file.
+ */
+const fs = require('node:fs');
+const Module = require('node:module');
+
+const MODE = process.env.FAKE_E2B_MODE || 'ok';
+const LOG = process.env.FAKE_E2B_LOG;
+const record = (entry) => fs.appendFileSync(LOG, JSON.stringify(entry) + '\n');
+
+const FAILURE_ENVELOPE = JSON.stringify({ is_error: true, error: 'agent gave up', usage: { input_tokens: 120, output_tokens: 7 } });
+
+function named(name, message, fields = {}) {
+  return Object.assign(new Error(message), { name }, fields);
+}
+
+class Sandbox {
+  static async create(template, opts) {
+    record({ op: 'create', template, apiKey: opts.apiKey, timeoutMs: opts.timeoutMs });
+    if (MODE === 'create-fail') throw named('NotFoundError', 'template not found');
+    return new Sandbox();
+  }
+
+  static async getInfo(sandboxId) {
+    record({ op: 'getInfo', sandboxId });
+    if (process.env.FAKE_E2B_GETINFO === 'fail') throw named('SandboxNotFoundError', 'sandbox gone');
+    return { state: 'running', startedAt: new Date(0), endAt: new Date(1000) };
+  }
+
+  constructor() {
+    this.sandboxId = 'sbx-fake-1';
+    this.files = { write: async (path, content) => record({ op: 'write', path, content }) };
+    this.commands = {
+      run: async (cmd, opts) => {
+        record({ op: 'run', cmd, timeoutMs: opts.timeoutMs, envs: opts.envs });
+        if (MODE === 'exit') {
+          throw named('CommandExitError', 'Traceback: https://x-access-token:ghs_secret@github.com/acme/app', {
+            exitCode: 1,
+            stdout: FAILURE_ENVELOPE,
+            stderr: 'Traceback: https://x-access-token:ghs_secret@github.com/acme/app',
+          });
+        }
+        if (MODE === 'timeout') throw named('TimeoutError', 'context deadline exceeded');
+        if (MODE === 'severed') {
+          opts.onStdout(FAILURE_ENVELOPE);
+          throw named('SandboxError', '[unknown] terminated');
+        }
+        return { exitCode: 0, stdout: JSON.stringify({ verdict: 'supported' }) };
+      },
+    };
+  }
+
+  async kill() {
+    record({ op: 'kill' });
+  }
+}
+
+const load = Module._load;
+Module._load = function (request, ...rest) {
+  if (request === 'e2b') return { Sandbox };
+  return load.call(this, request, ...rest);
+};

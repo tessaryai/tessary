@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+// Preloaded with `node --require` to stand in for a socket runAgent failed to close: one ref'd
+// handle that holds the event loop open after main() is done. No extension, so node --test skips it.
+setInterval(() => {}, 60_000);

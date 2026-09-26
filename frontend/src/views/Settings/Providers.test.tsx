@@ -11,7 +11,7 @@
  * `catalog.isError || credentials.isError`.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type {
   ModelProvider,
@@ -33,6 +33,7 @@ const listProviderCatalog = vi.fn<() => Promise<ProviderCatalogResponse>>();
 const listProviderCredentials = vi.fn<() => Promise<ProviderCredentialListResponse>>();
 const upsertProviderCredential =
   vi.fn<(provider: ModelProvider, body: UpsertProviderCredentialRequest) => Promise<unknown>>();
+const deleteProviderCredential = vi.fn<(provider: ModelProvider) => Promise<unknown>>();
 
 // A full-replacement vi.mock() here (dropping every export but useOrgApi) leaked across
 // vitest's shared module registry into src/routeManifest.smoke.test.tsx running in the same
@@ -47,7 +48,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
       listProviderCatalog,
       listProviderCredentials,
       upsertProviderCredential,
-      deleteProviderCredential: vi.fn(),
+      deleteProviderCredential,
     }),
   };
 });
@@ -152,6 +153,8 @@ afterEach(() => {
   listProviderCatalog.mockReset();
   listProviderCredentials.mockReset();
   upsertProviderCredential.mockReset();
+  deleteProviderCredential.mockReset();
+  vi.restoreAllMocks();
 });
 
 describe("Providers", () => {
@@ -249,5 +252,148 @@ describe("Providers", () => {
     expect(body.aws_region).toBe("us-west-2");
     expect(body.aws_access_key).toBeUndefined();
     expect(body.aws_secret_key).toBeUndefined();
+  });
+
+  it("reads each provider's models and the credential it expects", async () => {
+    const model = (provider: ModelProvider, display_name: string) =>
+      ({ provider, display_name }) as ProviderCatalogResponse["models"][number];
+    listProviderCatalog.mockResolvedValue({
+      platforms: [OPENAI, ANTHROPIC, BEDROCK],
+      models: [model("OPENAI", "GPT A"), model("ANTHROPIC", "Claude"), model("OPENAI", "GPT B"), model("OPENAI", "GPT C")],
+    });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+
+    renderProviders();
+    await screen.findByText("Amazon Bedrock");
+
+    const card = (label: string) => screen.getByText(label).closest("div")!.parentElement!;
+    expect(within(card("OpenAI")).getByText("3 models · GPT A, GPT B…")).toBeTruthy();
+    expect(within(card("OpenAI")).getByText("API key · base URL")).toBeTruthy();
+    expect(within(card("Anthropic")).getByText("1 model · Claude")).toBeTruthy();
+    expect(within(card("Amazon Bedrock")).getByText("0 models available")).toBeTruthy();
+    expect(within(card("Amazon Bedrock")).getByText("Access key · secret · region")).toBeTruthy();
+  });
+
+  it("adds a first key trimmed, and closes once it is saved", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    fireEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    fireEvent.change(screen.getByLabelText("API key (required)"), { target: { value: "  sk-new  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(upsertProviderCredential.mock.calls[0][1].api_key).toBe("sk-new");
+  });
+
+  it("names a rejected key and retries it as edited, and Cancel closes without saving", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    upsertProviderCredential.mockRejectedValueOnce(new Error("401 from provider")).mockResolvedValue({});
+
+    renderProviders();
+    fireEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    fireEvent.change(screen.getByLabelText("API key (required)"), { target: { value: "sk-bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test and save" }));
+
+    expect(await screen.findByText("The provider rejected this key")).toBeTruthy();
+    expect(screen.getByText("401 from provider")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("API key (required)"), { target: { value: "sk-good" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit and retry" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(upsertProviderCredential.mock.calls[1][1].api_key).toBe("sk-good");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(upsertProviderCredential).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires a base URL and names the model for a custom endpoint", async () => {
+    const CUSTOM: PlatformDescriptor = { ...OPENAI, id: "CUSTOM", label: "Custom endpoint", default_base_url: "" };
+    listProviderCatalog.mockResolvedValue({ platforms: [CUSTOM], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    fireEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    fireEvent.change(screen.getByLabelText("API key (required)"), { target: { value: "k" } });
+    fireEvent.change(screen.getByLabelText("Base URL (required)"), { target: { value: " https://llm.internal/v1 " } });
+    fireEvent.change(screen.getByLabelText("Custom model name"), { target: { value: " llama-3.3-70b " } });
+    fireEvent.click(screen.getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() => expect(upsertProviderCredential).toHaveBeenCalled());
+    expect(upsertProviderCredential.mock.calls[0]).toEqual([
+      "CUSTOM",
+      expect.objectContaining({ base_url_override: "https://llm.internal/v1", custom_model_name: "llama-3.3-70b" }),
+    ]);
+  });
+
+  it("keeps a custom endpoint's stored model name when the field is left blank", async () => {
+    const CUSTOM: PlatformDescriptor = { ...OPENAI, id: "CUSTOM", label: "Custom endpoint", default_base_url: "" };
+    listProviderCatalog.mockResolvedValue({ platforms: [CUSTOM], models: [] });
+    listProviderCredentials.mockResolvedValue({
+      credentials: [storedCred("CUSTOM", { has_api_key: true, custom_model_name: "llama-3.3-70b" })],
+    });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    const body = await saveEdit("Custom endpoint", () =>
+      fireEvent.change(screen.getByLabelText("Custom model name"), { target: { value: "   " } }),
+    );
+
+    expect(body.custom_model_name).toBeUndefined();
+  });
+
+  it("sends typed AWS keys and region when a Bedrock credential goes back to access keys", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [BEDROCK], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    upsertProviderCredential.mockResolvedValue({});
+
+    renderProviders();
+    fireEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    fireEvent.click(screen.getByRole("button", { name: "IAM role" }));
+    fireEvent.click(screen.getByRole("button", { name: "Access + secret key" }));
+    fireEvent.change(screen.getByLabelText("AWS region"), { target: { value: " eu-west-1 " } });
+    fireEvent.change(screen.getByLabelText("AWS access key"), { target: { value: " AKIA1 " } });
+    fireEvent.change(screen.getByLabelText("AWS secret key"), { target: { value: " s3cret " } });
+    fireEvent.click(screen.getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() => expect(upsertProviderCredential).toHaveBeenCalled());
+    expect(upsertProviderCredential.mock.calls[0][1]).toMatchObject({
+      auth_mode: "api_key",
+      aws_region: "eu-west-1",
+      aws_access_key: "AKIA1",
+      aws_secret_key: "s3cret",
+      api_key: undefined,
+    });
+  });
+
+  it("removes a stored key only after confirmation, and names a refused remove", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI, ANTHROPIC], models: [] });
+    listProviderCredentials.mockResolvedValue({
+      credentials: [storedCred("OPENAI", { has_api_key: true }), storedCred("ANTHROPIC", { has_api_key: true })],
+    });
+    deleteProviderCredential.mockRejectedValueOnce(new Error("in use")).mockResolvedValue({});
+    let confirmReply = false;
+    vi.spyOn(window, "confirm").mockImplementation(() => confirmReply);
+
+    renderProviders();
+    await screen.findByText("Anthropic");
+    const remove = () =>
+      within(screen.getByText("Anthropic").closest("div")!.parentElement!).getByRole("button", { name: "Remove" });
+
+    fireEvent.click(remove());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(deleteProviderCredential).not.toHaveBeenCalled();
+
+    confirmReply = true;
+    fireEvent.click(remove());
+    expect(await screen.findByText("Could not remove key")).toBeTruthy();
+    fireEvent.click(remove());
+    expect(await screen.findByText("Provider key removed")).toBeTruthy();
+    expect(deleteProviderCredential).toHaveBeenLastCalledWith("ANTHROPIC");
   });
 });

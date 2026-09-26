@@ -33,15 +33,14 @@ export function Modal({
   const dlgRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    const dlg = dlgRef.current;
-    if (!dlg) return;
+    // The <dialog> is always rendered; only its `open` state follows the prop.
+    const dlg = dlgRef.current!;
     if (open && !dlg.open) dlg.showModal();
     if (!open && dlg.open) dlg.close();
   }, [open]);
 
   useEffect(() => {
-    const dlg = dlgRef.current;
-    if (!dlg) return;
+    const dlg = dlgRef.current!;
     const onCancel = (e: Event) => {
       e.preventDefault();
       onClose();

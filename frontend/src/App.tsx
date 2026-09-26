@@ -4,13 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { signOut } from "./auth/signOut";
 import { TenantProvider, useProjectApi, useTenant } from "./tenant/TenantContext";
 import { auth as authApi } from "./api/client";
 import { isSampleProject } from "./api/types-auth";
 import { ShellChrome } from "./shell";
 import { CapabilityGate } from "./capabilities/CapabilityGate";
 import { ConnectGate } from "./views/onboarding/ConnectGate";
-import { Spinner, ToastProvider } from "./ui";
+import { Button, Spinner, ToastProvider } from "./ui";
 import { registerRouteChunk } from "./lib/routePreload";
 
 /*
@@ -118,12 +119,29 @@ function RootRedirect() {
   // component to own).
   //
   // TenantService#ensureDefaultOrg runs only at signup and login, so `orgs` can be empty: a user
-  // who leaves their only org (Members → Leave organization) keeps the session with no org.
-  // `/login` is the already-public landing for that case.
+  // who leaves their only org (Members → Leave organization) keeps the session with no org. That
+  // cannot go to `/login`, which sends a signed-in visitor straight back here, so it says so instead.
   const { user } = useAuth();
   const first = user?.orgs[0];
-  if (!first) return <Navigate to="/login" replace />;
+  if (!first) return <NoOrganization />;
   return <Navigate to={`/orgs/${first.slug}`} replace />;
+}
+
+function NoOrganization() {
+  return (
+    <div className="h-screen bg-bg text-fg flex items-center justify-center p-8">
+      <div className="max-w-md">
+        <h1 className="text-h1 text-fg">No organization</h1>
+        <p className="text-body text-muted mt-2">
+          This account is not a member of any organization. Ask an administrator for an invitation, then
+          sign in again.
+        </p>
+        <Button className="mt-6" variant="secondary" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function OrgRedirect() {

@@ -471,3 +471,32 @@ def test_idle_watch_keeps_watching_under_the_limit_and_stops_once_at_it():
     stops = []
     serve.watch_idle(clock, 10, lambda: stops.append(now.last), interval_s=0)
     assert stops == [10 * 60], "not at 9 idle minutes, and exactly once at 10"
+
+
+def _fake_torch(mps: bool, cuda: bool) -> SimpleNamespace:
+    return SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+                           cuda=SimpleNamespace(is_available=lambda: cuda))
+
+
+@pytest.mark.parametrize("requested, mps, cuda, picked", [
+    ("cpu", True, True, "cpu"),  # an explicit --device wins over any accelerator found
+    ("auto", True, True, "mps"),  # Apple silicon first
+    ("auto", False, True, "cuda"),
+    ("auto", False, False, "cpu"),  # no accelerator still serves, slowly
+])
+def test_pick_device_honours_the_request_then_prefers_an_accelerator(monkeypatch, requested, mps, cuda, picked):
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(mps, cuda))
+    assert serve.pick_device(requested) == picked
+
+
+def test_only_the_two_routes_answer_and_everything_else_is_404():
+    def score(passages, question, answer):
+        raise AssertionError("no route but /classify scores")
+
+    head = SimpleNamespace(device="cuda", dtype="fp16", score=score)
+    with _Serving(head) as s:
+        with pytest.raises(urllib.error.HTTPError) as got:
+            urllib.request.urlopen(f"{s.base}/healthz/extra", timeout=5)
+        assert (got.value.code, json.loads(got.value.read())) == (404, {"error": "not found"})
+        status, _, body = _post(f"{s.base}/classify/extra", ONE)
+        assert (status, body) == (404, {"error": "not found"}), "an authorized POST off /classify scores nothing"

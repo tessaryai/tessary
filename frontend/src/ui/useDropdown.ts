@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Shell dropdown behavior shared by the project/environment switchers and the account menu:
+ * Dropdown behavior shared by the shell's project switcher and account menu and the concept popover:
  * open/close state plus dismissal on outside-click and Escape while open.
  *
  * Returns a ref to attach to the dropdown's outer container; clicks outside that
