@@ -15,7 +15,15 @@ function LocationProbe() {
   return <output aria-label="location">{loc.pathname + loc.search}</output>;
 }
 
-export function renderRoute(ui: ReactElement, { route = "/", path = "*" }: { route?: string; path?: string } = {}) {
+/**
+ * `parent` nests the page's route under another, as the app nests project pages under
+ * `/orgs/:orgSlug/projects/:projectSlug`: a relative link such as `../cases/x` resolves against the
+ * route tree, so a page that uses one has to be mounted where the app mounts it.
+ */
+export function renderRoute(
+  ui: ReactElement,
+  { route = "/", path = "*", parent }: { route?: string; path?: string; parent?: string } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -24,7 +32,13 @@ export function renderRoute(ui: ReactElement, { route = "/", path = "*" }: { rou
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
         <Routes>
-          <Route path={path} element={ui} />
+          {parent ? (
+            <Route path={parent}>
+              <Route path={path} element={ui} />
+            </Route>
+          ) : (
+            <Route path={path} element={ui} />
+          )}
         </Routes>
         {/* Outside the routes, so it still reads the location after the page navigates off its own. */}
         <LocationProbe />
