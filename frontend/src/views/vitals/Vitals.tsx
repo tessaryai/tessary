@@ -24,8 +24,7 @@ import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
 /** U+2212 minus — matches the sheet's `−3%` glyph, wider than a hyphen. */
 const MINUS = "−";
 
-function usd(n: number | null | undefined): string {
-  if (n == null) return "—";
+function usd(n: number): string {
   return n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
 }
 
