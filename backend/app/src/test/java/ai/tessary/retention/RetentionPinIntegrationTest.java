@@ -19,27 +19,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The retention pin, both directions. Substrate a live claim stands on is never deleted, and substrate
- * nothing stands on still ages out — a pin that never releases is a disk leak wearing a correctness
- * argument, so every test here that proves something survives also proves its unpinned twin does not.
- * The twin does a second job: without it, a survival assertion passes just as happily when the sweep
- * never reached the project at all, which is the shape a broken test takes when it breaks quietly.
+ * The retention pin, both directions: substrate a live claim stands on survives, and substrate nothing stands on
+ * still ages out. Each survival test has an unpinned twin, which also proves the sweep reached the project at all.
  *
- * <p>These run against the real sweep, not the repository alone: {@link RetentionSweeper} is where the
- * three statements of the traces class are ordered, and the ordering is part of the contract (payload,
- * then structure, then the evidence whose substrate has gone). A test that called the repository methods
- * in its own order would pass while the sweeper called them in the wrong one.
+ * <p>Run through the real {@link RetentionSweeper}, because its statement order (payload, structure, then orphaned
+ * evidence) is part of the contract. A finding stays {@code open} while unruled or backing an unresolved case (0011),
+ * so the pin reads {@code status = 'open'} alone.
  *
- * <p><b>One rule now, not two.</b> A finding stays {@code open} for as long as it is unruled OR its
- * positive ruling backs a case nobody has resolved — the case model's own liveness is folded into
- * {@code finding.status} by construction (migration {@code 0011}), so the pin reads {@code status =
- * 'open'} alone. There is no separate case leg to test: a case's own state cannot keep a CLOSED
- * finding's substrate alive, because closing a case closes the findings it holds in the same
- * transaction.
- *
- * <p>Every fixture trace is aged 200 days against the 90-day platform default, so the only reason any of
- * them survives a pass is the pin. Other tests' projects are untouched by construction — their traffic is
- * minutes old.
+ * <p>Fixtures are aged 200 days against the 90-day default, so only the pin saves them.
  */
 @SpringBootTest
 class RetentionPinIntegrationTest {
@@ -59,9 +46,8 @@ class RetentionPinIntegrationTest {
     JdbcClient jdbc;
 
     /**
-     * The base case, and the one that says what "pinned" buys. An open finding holds its exemplar trace
-     * AND that trace's payload: a case page whose trace row survived but whose text did not is the same
-     * dead evidence link by a slower route, which is why the payload tier carries the guard too.
+     * An open finding pins its trace and that trace's payload: a surviving row with lost text is the same dead
+     * evidence link.
      */
     @Test
     @DisplayName("an open finding pins its trace and that trace's payload; an unreferenced trace ages out")
@@ -81,10 +67,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * The case leg is gone: closing a case closes the findings it holds in the same transaction
-     * (migration {@code 0011}), so a case's own {@code state} cannot keep a CLOSED finding's substrate
-     * alive even in the inconsistent state of a case row that was never updated to match. Retention
-     * reads the finding, and only the finding.
+     * Closing a case closes its findings in one transaction (0011), so retention reads the finding only, even beside
+     * a stale open case row.
      */
     @Test
     @DisplayName("a closed finding ages out even if a case row pointing at it still reads open")
@@ -102,11 +86,7 @@ class RetentionPinIntegrationTest {
         assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
     }
 
-    /**
-     * The release. Closed means nobody can act on the claim any more, so its substrate ages on the
-     * ordinary clock and the evidence rows follow it — collected only once the thing they point at is
-     * already gone, which keeps a closed finding's reference count honest right up until it is unusable.
-     */
+    /** Closed releases: substrate ages normally and evidence rows follow only once their target is gone. */
     @Test
     @DisplayName("a closed finding with no case releases, substrate and evidence both")
     void aClosedFindingWithoutACaseAgesOut() {
@@ -123,9 +103,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * Span-grain evidence pins the whole trace. The alternative — deleting the trace and keeping the span
-     * — is not available: {@code fk_span_trace} cascades, so a span-grain reference that did not reach up
-     * to the parent would be aged out by the statement above it every time.
+     * Span-grain evidence pins the whole trace: {@code fk_span_trace} cascades, so pinning the span alone would not
+     * survive.
      */
     @Test
     @DisplayName("span-grain evidence blocks the parent trace's delete, through the denormalized trace_id")
@@ -143,10 +122,7 @@ class RetentionPinIntegrationTest {
         assertFalse(traceExists(p, "trace-loose"), "and the sweep did reach this project, so that means something");
     }
 
-    /**
-     * Session grain pins every trace of the session. A conformance claim about a conversation is a claim
-     * about its turns; a session whose turns were deleted underneath it is evidence of nothing.
-     */
+    /** Session grain pins every trace of the session; a conversation with its turns deleted is evidence of nothing. */
     @Test
     @DisplayName("session-grain evidence pins every trace of that session, and only that session")
     void sessionGrainPinsTheWholeConversation() {
@@ -169,9 +145,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * The session leg's release, which is the half that is easy to get wrong: nothing in retention ever
-     * deletes a {@code session} row, so a release conditioned on the session disappearing would never
-     * fire and this leg would hold its evidence for ever. It releases on the turns instead.
+     * The session leg releases on the turns: retention never deletes a {@code session} row, so waiting for it would
+     * pin forever.
      */
     @Test
     @DisplayName("session-grain evidence releases once the conversation's last turn has aged out")
@@ -189,9 +164,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * Evidence collection is guarded in both directions, and this is the direction that would go unnoticed:
-     * a closed finding whose traces are still inside their TTL keeps its references, because the case page
-     * for a recently-resolved finding is still worth opening.
+     * A closed finding keeps its references while its traces are inside their TTL; a recently resolved case page is
+     * still worth opening.
      */
     @Test
     @DisplayName("a closed finding keeps its evidence while the substrate is still there")
@@ -208,9 +182,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * And the other direction: a LIVE finding's dangling reference is not collected either. Backfilled
-     * findings point at traces that aged out before the pin existed, and silently deleting those rows
-     * would shrink the evidence set of a finding someone is currently triaging.
+     * A live finding's dangling reference is left alone: backfilled findings point at traces that aged out before the
+     * pin existed.
      */
     @Test
     @DisplayName("a live finding's dangling reference is left alone, however dead the pointer")
@@ -224,11 +197,7 @@ class RetentionPinIntegrationTest {
         assertEquals(1, evidenceCount(p, finding), "the pin releases on the claim's lifecycle, not on a lookup");
     }
 
-    /**
-     * The number the sweep reports. Without it an unbounded pin is indistinguishable from a healthy policy:
-     * the deletion counts fall to zero either way, and only this one says whether that is because there is
-     * nothing left to delete or because something is holding everything open.
-     */
+    /** Without this count an unbounded pin looks like a healthy policy: deletions fall to zero either way. */
     @Test
     @DisplayName("the pinned-trace count reports what the pin is holding, and drops when it releases")
     void pinnedCountIsVisible() {
@@ -245,9 +214,8 @@ class RetentionPinIntegrationTest {
     }
 
     /**
-     * The Frustration classifier's copy of a turn's text ages with the payload it was built from: the
-     * aged turn's {@code request} is nulled and the rest of its assessment stays, while a pinned turn's
-     * copy is kept, as its payload is.
+     * Frustration's copy of turn text ages with its payload: an aged turn's {@code request} is nulled and the verdict
+     * kept; a pinned turn keeps both.
      */
     @Test
     @DisplayName("an aged frustration assessment loses its request text and keeps its verdict; a pinned one keeps both")
@@ -277,11 +245,8 @@ class RetentionPinIntegrationTest {
         assertFalse(requestNulled(p, "trace-assessed-pinned"), "a pinned turn keeps its text, as its payload does");
     }
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
     /**
-     * The real sweep, over every active project. Deletion is by event time, and every other test's traffic
-     * is minutes old against a 90-day default, so this only ever reaches the rows aged below.
+     * The real sweep over every project; other tests' traffic is minutes old, so it reaches only the rows aged here.
      */
     private void sweep() {
         sweeper.sweep();
@@ -302,12 +267,11 @@ class RetentionPinIntegrationTest {
                 .update();
     }
 
-    /** An aged trace with one span and that span's payload — the three tiers the traces class deletes. */
+    /** An aged trace with one span and its payload: the three tiers the traces class deletes. */
     private void trace(Project p, String traceId, @Nullable String sessionId) {
         insertTrace(p, traceId, sessionId, AGED);
     }
 
-    /** The same, inside its TTL. */
     private void freshTrace(Project p, String traceId) {
         insertTrace(p, traceId, null, Instant.now().toString());
     }
@@ -343,7 +307,6 @@ class RetentionPinIntegrationTest {
                 .update();
     }
 
-    /** The Frustration classifier the project was seeded with, as every built-in is at bootstrap. */
     private String classifier(Project p) {
         return jdbc.sql("SELECT id FROM classifier WHERE project_id = :pid AND classifier_key = 'frustration'")
                 .param("pid", p.id())
@@ -424,9 +387,9 @@ class RetentionPinIntegrationTest {
                 .update();
     }
 
-    /** A case row pointing at {@code findingId} through {@code finding.case_id} — the reverse of the
-     *  old forward pointer. Retention no longer reads this table at all; it exists only so the "even
-     *  if a case row still reads open" test has a case to be inconsistent with. */
+    /**
+     * A case row pointing at the finding. Retention never reads this table; it exists for the stale-open-case test.
+     */
     private void openCase(Project p, String findingId, String state) {
         String now = Instant.now().toString();
         String caseId = Ids.ulid();
@@ -452,8 +415,6 @@ class RetentionPinIntegrationTest {
                 .param("fid", findingId)
                 .update();
     }
-
-    // ---- assertions -------------------------------------------------------------------------------
 
     private boolean traceExists(Project p, String traceId) {
         return count("SELECT count(*) FROM trace WHERE project_id = :pid AND id = :key", p, traceId) == 1;
