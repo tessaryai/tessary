@@ -2,6 +2,7 @@
 package ai.tessary.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,10 +53,11 @@ class CodeFactShardTest {
 
         var declared = explicitNull.callSites().get(0).outputSchema();
         assertNull(absent.callSites().get(0).outputSchema(), "absent stays Java null");
-        assertTrue(
-                declared == null || declared.isNull(),
+        assertNotNull(
+                declared,
                 "an explicit null must be distinguishable from absent, or 'the code declares none' "
-                        + "cannot be expressed at all — got " + declared);
+                        + "cannot be expressed at all");
+        assertTrue(declared.isNull(), "an explicit null binds to NullNode, got " + declared);
     }
 
     @Test
