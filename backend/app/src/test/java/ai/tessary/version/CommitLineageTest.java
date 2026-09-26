@@ -26,14 +26,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Acceptance for the commit-SHA lineage spine: a substrate grain — session, turn, trace or span —
- * resolves to the exact {@code project_version} (commit SHA) that caused it.
- *
- * <p><b>Three node kinds are gone, and with them the raw-SHA shape.</b> {@code verdict},
- * {@code observer_alert} and {@code diff_classification} were all resolvable here; grading and the
- * observer are gone, and {@code observer_alert.project_version_sha} was the only raw-SHA provenance
- * the spine ever had. What is asserted below is the whole of what remains: the direct-FK shape on
- * {@code trace}/{@code span}, and the session's derived MAX.
+ * The commit-SHA lineage spine: a session, turn, trace, or span resolves to the {@code project_version} that caused
+ * it. {@code verdict}, {@code observer_alert}, and {@code diff_classification} are gone; what remains is the direct
+ * FK on {@code trace}/{@code span} and the session's derived MAX.
  */
 @SpringBootTest
 class CommitLineageTest {
@@ -70,12 +65,8 @@ class CommitLineageTest {
     }
 
     /**
-     * Substrate grains resolve to the version their own row carries — no parent chain left to walk.
-     *
-     * <p>v1 hung {@code project_version_id} on the session and made every grain below it climb an ltree
-     * to find one. In v2 the trace and the span each carry the column, denormalized at ingest, and the
-     * SESSION is the one grain with no stamp of its own — a session can be resumed days later across
-     * several deploys, so it resolves as the MAX over its traces instead of the other way round.
+     * Grains resolve to their own row's version. Trace and span carry the column; a session can be resumed across
+     * deploys, so it resolves as the MAX over its traces.
      */
     @Test
     void substrateGrainsResolveToTheVersionOnTheirOwnRow() {
@@ -105,10 +96,7 @@ class CommitLineageTest {
                 "a bare span id resolves to nothing rather than to whichever trace reused it");
     }
 
-    /**
-     * The bugs: the lineage endpoint answers a resolvable node with the wrong commit, or answers an unknown
-     * node kind or an unresolvable node with a 500 instead of its own error.
-     */
+    /** A wrong commit for a resolvable node, or a 500 for an unknown kind or unresolvable node. */
     @Test
     void lineageEndpointResolvesANodeAndNamesWhyItCannot() {
         var fix = TenantFixture.bootstrap(tenants, "lineage-endpoint");

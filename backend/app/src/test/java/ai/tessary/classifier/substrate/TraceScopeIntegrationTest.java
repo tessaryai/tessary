@@ -20,19 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Which call site a trace is scoped to: the choice that decides which baseline it is fitted into.
- *
- * <p>A trace legitimately spans several call sites: {@code tessary.call_site.id} binds a span, and the
- * vitals slice groups spend and tool-error rate by the span's own. Drift is trace-grain and must
- * collapse that to one, and the right one is the entry point, what the product invoked, not whichever
- * child the agent happened to reach.
- *
- * <p>The collapse happens once, in the rollup recompute, which copies the root span's call site onto the
- * trace; a sweep then reads a column. So these tests seed spans, run the real rollup, and assert on what
- * the trace ended up scoped to.
- *
- * <p>Every assertion here is on {@link BehaviorSubstrateRepository}, shared by every trace-grain
- * classifier, which is why this lives as a substrate test rather than a drift test.
+ * Which call site a trace is scoped to, which decides its baseline. A trace can span several call sites; drift is
+ * trace-grain and takes the entry point, not a child the agent reached. The rollup copies the root span's call site
+ * onto the trace, so these seed spans, run the real rollup, and assert on {@link BehaviorSubstrateRepository}, shared
+ * by every trace-grain classifier.
  */
 @SpringBootTest
 class TraceScopeIntegrationTest {
@@ -72,9 +63,7 @@ class TraceScopeIntegrationTest {
         Instant t0 = Instant.now().minusSeconds(3_600);
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // Root carries no call site: a producer that tags only the spans it owns. The entry point either
-        // declared a scope or it did not, and "did not" is its own bucket that nothing else is pooled into
-        // rather than borrowing a child's scope.
+        // The root carries no call site: "none declared" is its own bucket, not a child's scope.
         seedSpan(pid, traceId, "root", null, "agent", "loop", null, t0);
         seedSpan(pid, traceId, "aaaa-late", "root", "tool", "late", "policy.late", t0.plusSeconds(9));
         seedSpan(pid, traceId, "bbbb-early", "root", "llm", "early", "policy.early", t0.plusSeconds(1));
@@ -116,9 +105,7 @@ class TraceScopeIntegrationTest {
                 .writeRef();
     }
 
-    /**
-     * A plain tenant. Nothing here reads a classifier row; the assertions are on spans and the rollup.
-     */
+    /** A plain tenant; nothing reads a classifier row. */
     private TenantFixture.Setup tenant(String name) {
         return TenantFixture.bootstrap(tenants, name);
     }

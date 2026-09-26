@@ -19,24 +19,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The last-write-wins upsert (substrate-model.md §6.2), which is the whole reason a span's primary key
- * is its natural key.
+ * The last-write-wins upsert (substrate-model.md §6.2), why a span's key is its natural key. A streaming span can
+ * flush partial first and batches redeliver in any order: the completed version replaces the partial, never the
+ * reverse.
  *
- * <p>The case that pays for it: an OTLP exporter flushes a span when it ends, but a streaming span can be
- * flushed partial first, and a redelivered batch can arrive in any order. The completed version has to
- * replace the partial one, and the partial one must not be able to replace the completed one — including
- * after a retry that delivers it second.
- *
- * <p>The two subtleties both live in the guard and the SET list:
- *
- * <ul>
- *   <li>The guard is {@code >=}, not {@code >}. SDK clocks at second granularity make equal
- *       {@code event_ts} common; a strict guard would silently drop the final version of every span whose
- *       partial shared its timestamp.
- *   <li>The SET list carries every producer-sourced column and nothing the platform derived. A newer
- *       version replaces what the producer SAID; it must not discard the ancestry we RESOLVED, or every
- *       replay would push already-resolved spans back into the fixpoint's queue.
- * </ul>
+ * <p>The guard is {@code >=}, not {@code >}: second-granularity SDK clocks make equal {@code event_ts} common, and a
+ * strict guard drops those finals. The SET list carries producer columns only, so a replay never discards resolved
+ * ancestry and requeues it for the fixpoint.
  */
 @SpringBootTest
 class SpanRepositoryLwwTest {
@@ -101,7 +90,6 @@ class SpanRepositoryLwwTest {
     @DisplayName("a newer version replaces what the producer said, never what the platform derived")
     void setListExcludesPlatformDerivedColumns() {
         write(version("streaming", null, t0));
-        // The path resolver runs and materializes ancestry.
         jdbc.sql("UPDATE span SET path = :p::ltree, path_state = 'resolved', correlation_state = 'done'"
                         + " WHERE project_id = :pid AND trace_id = :tid AND id = :id")
                 .param("p", spanId)
@@ -112,7 +100,7 @@ class SpanRepositoryLwwTest {
         String createdAtBefore =
                 spans.findById(pid, traceId, spanId).orElseThrow().createdAt();
 
-        // The completed version arrives, carrying no path (an arrival never does).
+        // The completed version arrives with no path (arrivals never carry one).
         write(version("chat", 42L, t0.plusSeconds(3)));
 
         SpanRow read = spans.findById(pid, traceId, spanId).orElseThrow();

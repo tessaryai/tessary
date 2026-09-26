@@ -33,9 +33,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
- * The RCA worker's heartbeat and its failure isolation, with the queue and the pipeline mocked. The
- * integration suite parks the drain (batch size 0) so it can run jobs by hand, which leaves the claim loop
- * and the paths where a bookkeeping write fails to this class.
+ * The RCA worker's heartbeat and failure isolation with the queue and pipeline mocked; the integration suite parks
+ * the drain, leaving the claim loop and failing bookkeeping writes to this class.
  */
 class RcaWorkerTickTest {
 
@@ -59,8 +58,8 @@ class RcaWorkerTickTest {
             new SyncTaskExecutor());
 
     /**
-     * Catches the exhaustion sweep's outcome gating the claim: whether it failed some jobs or failed itself,
-     * the due jobs must still be claimed and run, round after round until a claim comes back empty.
+     * The exhaustion sweep's outcome, success or failure, never gates the claim: due jobs are claimed round after
+     * round until empty.
      */
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
@@ -82,7 +81,7 @@ class RcaWorkerTickTest {
         verify(jobs, times(2)).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
     }
 
-    /** Catches a failing claim being retried in a tight loop for the rest of the tick instead of ending it. */
+    /** A failing claim ends the tick rather than retrying in a tight loop. */
     @Test
     void aClaimThatFailsEndsTheTick() {
         when(jobs.claimBatch(anyString(), anyInt(), anyLong(), anyInt()))
@@ -94,10 +93,7 @@ class RcaWorkerTickTest {
         verifyNoInteractions(analysis);
     }
 
-    /**
-     * Catches a failed report stamp escaping the worker thread after the job was already marked failed: the
-     * job's own failure must stand, and the exception must not reach the executor.
-     */
+    /** A failed report stamp after the job was marked failed must not reach the executor; the job's failure stands. */
     @Test
     void aReportStampThatFailsDoesNotEscapeTheWorker() {
         doThrow(new IllegalStateException("launcher down")).when(analysis).analyze(JOB);
@@ -120,10 +116,7 @@ class RcaWorkerTickTest {
         verify(jobs, never()).markDone(anyString());
     }
 
-    /**
-     * Catches a finished run whose case never hears about it, and a case-trail write that fails turning a
-     * finished analysis into a failed one: the report is done either way.
-     */
+    /** A finished run reaches its case, and a failed case-trail write does not turn it into a failed analysis. */
     @Test
     void aFinishedRunTellsItsCaseAndAFailedTrailLineDoesNotUndoIt() {
         when(findings.findById("proj-1", "fnd-1")).thenReturn(Optional.of(findingOnCase("case-1")));
@@ -186,8 +179,8 @@ class RcaWorkerTickTest {
     }
 
     /**
-     * The bug: on a machine whose own host name does not resolve, building the lease owner throws and the
-     * worker bean never constructs, so nothing is ever swept there. It falls back to a fixed name instead.
+     * On a host whose name does not resolve, building the lease owner threw and the worker never constructed. It
+     * falls back to a fixed name.
      */
     @Test
     void aHostWhoseNameDoesNotResolveStillNamesItsLeaseOwner() {

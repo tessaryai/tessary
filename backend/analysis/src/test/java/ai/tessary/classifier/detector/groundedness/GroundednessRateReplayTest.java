@@ -35,12 +35,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The rate test over groundedness-shaped tallies: a trace is a trial, one with a flagged answer a failure, and
- * the shared engine runs on {@link GroundednessConfig}'s defaults (judged from 200 traces, the reference learning
- * until 1,000, a floor of 4 on {@code h}, a 50,000-trace false-alarm budget).
- *
- * <p>That two flagged answers in one trace are one failure is the tally query's doing, so it is held against
- * Postgres in {@code GroundednessRateIntegrationTest}; everything here starts from the hourly tallies.
+ * The rate test over groundedness tallies: a trace is a trial and a flagged answer a failure, on {@link
+ * GroundednessConfig}'s defaults (judged from 200 traces, learning until 1,000, {@code h} floor 4, one false alarm
+ * per 50,000 traces). Two flags in one trace counting once is the tally query's, held in {@code
+ * GroundednessRateIntegrationTest}.
  */
 class GroundednessRateReplayTest {
 
@@ -114,11 +112,9 @@ class GroundednessRateReplayTest {
     }
 
     /**
-     * The engine recovers a run's failures from its accumulator, which assumes one reference for the whole run.
-     * A run that began while the reference was learning was judged against several, so the finding counts its
-     * flagged traces instead and derives the rate from the count: failures are the flagged traces, never more
-     * than the traces scored, and a run with no traces reads at the baseline rate. The statistic, threshold and
-     * onset stay the engine's. Expected values are by hand, for a 2% baseline.
+     * The engine assumes one reference per run. A run that began while learning was judged against several, so the
+     * finding counts its flagged traces (never more than scored; none reads at baseline). Statistic, threshold, and
+     * onset stay the engine's. Expected values by hand, for a 2% baseline.
      */
     @ParameterizedTest(name = "{0} calls, {1} flagged -> {2} failures at {3}")
     @CsvSource({
@@ -150,8 +146,6 @@ class GroundednessRateReplayTest {
                         counted.baselineCalls(),
                         String.valueOf(counted.onsetAt())));
     }
-
-    // ---- the service over the replay: only a rise is reported, tuning changes reset, unassigned never judged
 
     @Test
     void onlyARiseIsReported() {
@@ -305,7 +299,7 @@ class GroundednessRateReplayTest {
         }
     }
 
-    /** The service over fake rate and state repositories; a spell's finding write is a mock that records none. */
+    /** Fake rate and state repositories; the finding write records nothing. */
     private static final class Harness {
         final RecordedStates states;
         final Instant at = START.plus(Duration.ofDays(8));
