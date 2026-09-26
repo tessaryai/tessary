@@ -16,9 +16,8 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The validator every {@link AgenticRcaEngine} run passes through — so the receipt whitelists
- * (both windows' trace ids, measured check ids), the verdict normalization, the cross-window
- * burden-of-proof downgrade, and the {@code detailed_report} passthrough are pinned here once.
+ * The validator every {@link AgenticRcaEngine} run passes through: receipt whitelists, verdict normalization, the
+ * cross-window burden-of-proof downgrade, and {@code detailed_report} passthrough.
  */
 class RcaSynthesisOutputTest {
 
@@ -38,15 +37,14 @@ class RcaSynthesisOutputTest {
 
         assertEquals(RcaReportRow.Verdict.BEHAVIOR_CHANGE, out.verdict());
         assertEquals("## Investigation", out.detailedReport());
-        // Ids from BOTH windows are citable; only the invented one is dropped.
+        // Both windows' ids are citable; only the invented one drops.
         assertEquals(List.of("tr-prior", "tr-degraded"), out.hypotheses().get(0).evidenceTraceIds());
         assertNull(out.verdictNote());
     }
 
     @Test
     void crossWindowVerdictWithoutPriorEvidenceIsDowngraded() {
-        // The exact failure this guards against: a traffic_shift "proven" entirely from degraded-window
-        // traces, with the prior window characterized by inference ("must have been...").
+        // The failure guarded: a traffic_shift "proven" from degraded-window traces alone, the prior window inferred.
         for (String verdict : List.of(RcaReportRow.Verdict.TRAFFIC_SHIFT, RcaReportRow.Verdict.BEHAVIOR_CHANGE)) {
             String text = "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\","
                     + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
@@ -76,8 +74,7 @@ class RcaSynthesisOutputTest {
 
     @Test
     void emptyPriorWindowExemptsTheCrossWindowBurden() {
-        // Nothing citable exists on the prior side — demanding a citation would make the verdict
-        // unreachable, so it stands on the rest of its evidence.
+        // Nothing citable on the prior side, so demanding a citation would make the verdict unreachable.
         String text = "{\"summary\":\"s\",\"verdict\":\"traffic_shift\",\"detailed_report\":\"## r\","
                 + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
                 + "\"evidence_trace_ids\":[\"tr-degraded\"]}]}";
@@ -91,9 +88,7 @@ class RcaSynthesisOutputTest {
 
     @Test
     void structuralVerdictsSurviveBecauseTheAgentVerifiesThemItself() {
-        // The deterministic rule-outs this replaced owned definition_change/model_change and the
-        // model's own claim was clamped away. The agent has the repo, so it now owns them — and they
-        // are single-window claims, so no prior-citation burden applies.
+        // The agent has the repo, so it owns these verdicts; single-window, so no prior-citation burden.
         for (String verdict : List.of(RcaReportRow.Verdict.DEFINITION_CHANGE, RcaReportRow.Verdict.MODEL_CHANGE)) {
             RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
                     MAPPER,
@@ -132,11 +127,8 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * The production failure this guards against: a 4m48s / $0.80 investigation was thrown away at its
-     * last step because the reply carried one field the records do not declare. The response schema
-     * does not set {@code additionalProperties: false}, so a model is free to add keys, and every
-     * other validation here already DROPS what it cannot accept (hallucinated trace ids, invented
-     * check ids) rather than failing the run — binding was the one place that did the opposite.
+     * A 4m48s, $0.80 investigation was thrown away at its last step over one undeclared field. The schema allows
+     * extra keys, and every other check here drops what it cannot accept.
      */
     @Test
     void unexpectedFieldsAnywhereInTheTreeDoNotSinkTheRun() {
@@ -157,9 +149,7 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * The salvage path. {@code E2bRcaSandbox} now hands over the envelope's schema-validated
-     * {@code structured_output} first, so a well-formed run never reaches this; it covers the envelope
-     * that carries no structured output and whose {@code result} the model wrapped in prose.
+     * The salvage path, for an envelope with no {@code structured_output} whose {@code result} is wrapped in prose.
      */
     @Test
     void aReplyWrappedInProseAndAFenceIsStillRead() {
@@ -175,9 +165,8 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * Catches the brace-slice salvage throwing its own, less useful failure (or none) when the slice it cut
-     * out of the prose does not bind either: the run must fail closed as UPSTREAM_FAILED carrying the first
-     * parse failure, which names where the reply the agent actually sent went wrong.
+     * When the brace-sliced salvage does not bind either, the run fails closed as UPSTREAM_FAILED with the first
+     * parse failure.
      */
     @Test
     void proseAroundAnUnbindableObjectFailsClosedWithTheFirstFailure() {
@@ -192,10 +181,7 @@ class RcaSynthesisOutputTest {
                 String.valueOf(ex.getCause()));
     }
 
-    /**
-     * Catches a blank or backwards-braced reply binding to an empty report instead of failing the run: there
-     * is nothing in either to persist.
-     */
+    /** A blank or backwards-braced reply fails the run rather than binding to an empty report. */
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"   ", "} the braces are backwards {"})
     void aReplyWithNothingToBindFailsClosed(String reply) {
@@ -206,11 +192,9 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * A reply that fills the schema's optional fields with nulls and blanks. Catches any one of them failing
-     * the run instead of degrading: a blank summary falls back to the whole reply, a blank report to none, an
-     * untitled hypothesis is dropped, a missing confidence reads low, a missing rationale or receipt list reads
-     * empty, an assessment of no check is dropped, and a second assessment of the same check does not override
-     * the first.
+     * Optional fields null or blank degrade rather than fail: blank summary falls back to the reply, blank report to
+     * none, untitled hypothesis dropped, missing confidence reads low, missing lists read empty, a checkless
+     * assessment dropped, and a repeat does not override the first.
      */
     @Test
     void aSparseMetricReplyDegradesFieldByField() {
@@ -233,9 +217,8 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * The same for a cause-naming reply. Catches a cause with a blank title surviving, a session cited twice
-     * counted twice, an unknown or missing attribution kind passed through, absent prose fields failing the
-     * run, and a reply with no causes key at all failing instead of finding nothing.
+     * The same for a cause reply: blank-titled causes drop, a twice-cited session counts once, an unknown
+     * attribution kind is not passed through, absent prose does not fail, and no causes key finds nothing.
      */
     @Test
     void aSparseCauseReplyDegradesFieldByField() {
@@ -285,8 +268,6 @@ class RcaSynthesisOutputTest {
                 () -> RcaSynthesisOutput.parse(MAPPER, "just prose", NO_PRIOR, Set.of(), CHECKS, "proj"));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
     }
-
-    // ---- frustration reports ------------------------------------------------------------------
 
     private static final Set<String> SESSIONS = Set.of("s-1", "s-2", "s-3");
     private static final Set<String> TURNS = Set.of("tr-1", "tr-2", "tr-3");
@@ -345,7 +326,7 @@ class RcaSynthesisOutputTest {
             assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict(), raw);
             assertNull(out.verdictNote(), "an unknown verdict is normalised, not downgraded: " + raw);
         }
-        // And the metric-movement lane never accepts the frustration pair.
+        // The metric lane never accepts the frustration pair.
         RcaSynthesisOutput.Parsed metric = RcaSynthesisOutput.parse(
                 MAPPER,
                 "{\"summary\":\"s\",\"verdict\":\"causes_identified\",\"hypotheses\":[]}",
@@ -390,8 +371,6 @@ class RcaSynthesisOutputTest {
         assertNull(c.attribution().path(), "a blank path is no path");
         assertEquals("low", c.confidence());
     }
-
-    // ---- groundedness -------------------------------------------------------------------------
 
     /** The finding's traces with a flagged answer: a groundedness report's only receipts. */
     private static final Set<String> FLAGGED = Set.of("tr-1", "tr-2", "tr-3");

@@ -17,13 +17,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Acceptance test for the v2 trace list surface: it is a filter, a sort and a page over columns a
- * writer already wrote, never an aggregate computed while the request is in flight. Exercised against
- * the real pgvector Postgres (Testcontainers), so the real schema is exercised.
- *
- * <p>The v1 half of this class — the session → turn → trace → observation spine round-trip and the
- * observation {@code kind} CHECK — went with the tables it exercised in 0083. The spine is two levels
- * now, {@code session → trace → span}, and {@link SubstrateV2Fixtures} seeds it.
+ * The v2 trace list against real Postgres: a filter, a sort, and a page over columns a writer already wrote, never an
+ * aggregate computed during the request.
  */
 @SpringBootTest(
         properties = {
@@ -66,18 +61,10 @@ class TraceSubstrateRepositoryTest {
         fx = new SubstrateV2Fixtures(sessions, v2traces, spans, payloads);
     }
 
-    // ---- the v2 list surface: a filter, a sort and a page over columns already written ------------
-
     /**
-     * <b>The point of the whole exercise.</b> The numbers the list serves are the numbers the rollup
-     * worker wrote — not numbers computed while the request was in flight.
-     *
-     * <p>The first half is the ordinary claim: run the worker, and the list agrees with it. The second
-     * half is the one that can actually fail. It overwrites the trace's stored rollup columns with values
-     * no aggregate over its spans could produce, and asserts the list serves those instead. A list that
-     * recomputed from {@code span} would quietly correct them and pass the first half forever, which is
-     * exactly how the v1 query's {@code GROUP BY o2.trace_id} went unnoticed until it was the slowest
-     * statement in the product.
+     * The list serves the numbers the rollup worker wrote. The second half overwrites the stored rollup with values
+     * no span aggregate could produce: a list recomputing from {@code span} would correct them, which is how v1's
+     * {@code GROUP BY o2.trace_id} became the slowest statement in the product.
      */
     @Test
     void listServesTheNumbersTheRollupWorkerWrote_neverNumbersComputedDuringTheRequest() {
@@ -102,7 +89,6 @@ class TraceSubstrateRepositoryTest {
         assertEquals(new java.math.BigDecimal(stored.totalCost()), listed.totalCost());
         assertTrue(listed.isSettled());
 
-        // Now make the stored rollup disagree with the spans, and watch the list side with the row.
         jdbc.sql("UPDATE trace SET span_count = 99, total_tokens = 4242, total_cost = 7.5"
                         + " WHERE project_id = :pid AND id = :id")
                 .param("pid", pid)
@@ -115,10 +101,7 @@ class TraceSubstrateRepositoryTest {
         assertEquals(0, new java.math.BigDecimal("7.5").compareTo(again.totalCost()), "…nor price anything");
     }
 
-    /**
-     * Model, kind and call-site filters are semi-joins: they keep a trace when ANY of its spans matches,
-     * and they compute nothing about the ones that do.
-     */
+    /** Model, kind, and call-site filters are semi-joins: a trace matches when any span does. */
     @Test
     void modelKindAndCallSiteFiltersAreSemiJoinsOverSpans() {
         String pid =
@@ -153,11 +136,8 @@ class TraceSubstrateRepositoryTest {
     }
 
     /**
-     * A cost sort puts traces with no total last and pages through that tail without losing anyone.
-     *
-     * <p>The v1 query collapsed the two cases with {@code COALESCE(cost, -1)}, which made a genuinely
-     * unpriced trace indistinguishable from one priced at minus a dollar and put it at the wrong end of
-     * the page.
+     * A cost sort puts traces with no total last and pages through them. v1's {@code COALESCE(cost, -1)} priced an
+     * unpriced trace at minus a dollar.
      */
     @Test
     void costSortSendsTracesWithNoTotalToTheEndAndPagesThroughThem() {
@@ -172,7 +152,7 @@ class TraceSubstrateRepositoryTest {
         fx.withCost(fx.llmSpan(pid, cheap, t0.plusSeconds(1)), "0.001", null, null, null, "inferred");
         rollUp(pid, cheap, t0);
 
-        // Never rolled up: no total. Not zero.
+        // Never rolled up: no total, not zero.
         String unknown = SubstrateV2Fixtures.traceId();
         fx.llmSpan(pid, unknown, t0.plusSeconds(2));
 
@@ -180,8 +160,8 @@ class TraceSubstrateRepositoryTest {
         var page = v2traces.list(pid, noFilter, TraceV2Repository.Sort.COST, 10, null, null, null);
         assertEquals(List.of(dear, cheap, unknown), ids(page), "priced descending, then the null tail");
 
-        // Page through it one row at a time, carrying the sort value the previous row ended on — including
-        // the null one, which is what makes the second branch of the keyset predicate necessary.
+        // One row a page, carrying the previous sort value, the null one included: that is the keyset's second
+        // branch.
         var one = v2traces.list(pid, noFilter, TraceV2Repository.Sort.COST, 1, null, null, null);
         assertEquals(List.of(dear), ids(one));
         var two = v2traces.list(
@@ -204,10 +184,7 @@ class TraceSubstrateRepositoryTest {
         assertEquals(List.of(unknown), ids(three), "the null tail is reachable, not stranded past the cursor");
     }
 
-    /**
-     * The token and latency sorts order on their own rollup column, not on cost or on time, and a cursor
-     * that sits in the null tail pages on through it instead of starting over at the priced rows.
-     */
+    /** Token and latency sorts order on their own column, and a cursor in the null tail pages on through it. */
     @Test
     void tokenAndLatencySortsOrderOnTheirColumnAndPageOnWithinTheNullTail() {
         String pid =
@@ -241,10 +218,7 @@ class TraceSubstrateRepositoryTest {
                 "a cursor in the null tail continues through it rather than repeating the counted rows");
     }
 
-    /**
-     * {@code status} answers only for traces that have rolled up, and {@code q} is a case-insensitive
-     * substring match on the trace's name.
-     */
+    /** {@code status} answers only for rolled-up traces; {@code q} is a case-insensitive name substring. */
     @Test
     void statusAndTextFiltersNarrowTheListAndSkipTracesWithNoAnswer() {
         String pid =
@@ -288,8 +262,8 @@ class TraceSubstrateRepositoryTest {
     }
 
     /**
-     * The key-addressed span reads behind the MCP trace tools: bounded when asked, and scoped to the
-     * caller's project even when another project holds a span under the very same producer ids.
+     * The MCP trace tools' span reads: bounded, and scoped to the caller's project even when another holds the same
+     * producer ids.
      */
     @Test
     void keyedSpanReadsAreBoundedAndNeverCrossIntoAnotherProject() {
@@ -468,7 +442,7 @@ class TraceSubstrateRepositoryTest {
             @org.jspecify.annotations.Nullable Long tokens,
             @org.jspecify.annotations.Nullable Long latencyMs,
             @org.jspecify.annotations.Nullable Integer errors) {
-        // latency_ms is generated from the end, so the latency is set by ending the trace that long after it began.
+        // latency_ms is generated from the end.
         jdbc.sql("UPDATE trace SET total_tokens = :tokens, error_count = :errors,"
                         + " ended_at = started_at + make_interval(secs => CAST(:latency AS bigint) / 1000.0)"
                         + " WHERE project_id = :pid AND id = :id")
@@ -485,7 +459,7 @@ class TraceSubstrateRepositoryTest {
         return new TraceV2Repository.TraceQuery(null, null, null, null, null, status, q);
     }
 
-    /** Roll one trace up synchronously: arm it, bring the deadline forward, run the worker once. */
+    /** Arm, backdate the deadline, and run the worker once. */
     private void rollUp(String pid, String traceId, Instant startedAt) {
         v2traces.applyBatchTimers(
                 pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));

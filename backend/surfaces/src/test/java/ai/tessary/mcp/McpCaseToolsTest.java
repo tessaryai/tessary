@@ -48,20 +48,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The {@code list_cases} / {@code get_case} MCP tools, read through {@link CaseService} — the same seam
- * {@code CaseController} uses, so a case reads identically here and in the UI. The service is mocked; this
- * pins the MCP wrapper contract (project scoping, arg mapping and defaults, page clamping, verbatim view
- * rendering, error mapping), not the case logic.
+ * The {@code list_cases} and {@code get_case} MCP tools over a mocked {@link CaseService}, the seam {@code
+ * CaseController} also uses. Pins the wrapper: project scoping, arg mapping, page clamping, verbatim rendering, and
+ * error mapping.
  *
- * <p>A case is what the launch product produces — the three default-on classifiers sweep a partner's traffic
- * and open cases — and until these tools existed an agent holding a partner's token could read raw spans and
- * query aggregates but could not ask what was wrong with the project. That is why the pair is ungated, which
- * {@link McpCapabilityGateTest} pins separately.
- *
- * <p><b>The {@code watching} coverage block is asserted here too, on {@code get_project}.</b> It used to ride
- * along with {@code list_cases}, and it is the only signal separating "nothing is wrong" from "nothing is
- * arriving" (launch requirement E5) — so the test that the flat page dropped it and the test that the project
- * read picked it up belong side by side. Either one alone would pass while the signal was lost.
+ * <p>The {@code watching} block is asserted here on {@code get_project} too: it is the only signal separating
+ * "nothing is wrong" from "nothing is arriving" (launch requirement E5), so the test that the page dropped it sits
+ * beside the test that the project read picked it up.
  */
 class McpCaseToolsTest {
 
@@ -114,15 +107,12 @@ class McpCaseToolsTest {
                         + "\"limit\":10,\"cursor\":\"tok\"}"));
 
         verify(cases).page(PROJECT_ID, "resolved", "tool_error", "cs-7", 10, "tok");
-        // Last page: the key is present and null rather than absent, so a caller has one thing to test.
+        // Last page: the key is present and null, not absent.
         assertTrue(body.has("next_cursor"));
         assertTrue(body.get("next_cursor").isNull());
     }
 
-    /**
-     * The page is clamped to the MCP cap, not to the REST one. These rows carry a title and a basis sentence
-     * each, so an unclamped {@code limit: 500} is a context window spent on a list.
-     */
+    /** Clamped to the MCP cap, not the REST one: an unclamped {@code limit: 500} spends a context window on a list. */
     @Test
     void listCases_clampsAnOversizedLimitToTheSurfaceCap() throws Exception {
         when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
@@ -133,11 +123,7 @@ class McpCaseToolsTest {
         verify(cases).page(PROJECT_ID, "open", null, null, 100, null);
     }
 
-    /**
-     * A state nobody has is an error rather than an empty page. {@code state: "closed"} matches no row, so a
-     * page would come back clean and empty — and an empty page of cases reads as "nothing is wrong with this
-     * project". A wrong answer that looks like good news is worth spending the caller a turn on.
-     */
+    /** An unknown state is an error, not an empty page, which would read as "nothing is wrong". */
     @Test
     void listCases_refusesAStateThatIsNotAStateInsteadOfReturningNothing() throws Exception {
         String text = errorText(callTool("list_cases", "{\"state\":\"closed\"}"));
@@ -147,11 +133,9 @@ class McpCaseToolsTest {
     }
 
     /**
-     * <b>The coverage block is gone from the page and present on the project read.</b> Flattened into pages,
-     * a per-page copy of "3 classifiers, 7 call sites, 1200 traces yesterday" would read as a measurement of
-     * the page; dropped outright, an agent would report an all-clear for a project that stopped sending
-     * traffic a week ago. Both halves are asserted together because either alone passes while the signal is
-     * lost (watch-out 1 of the MCP v2 plan).
+     * Coverage leaves the page and appears on the project read. Per page it would read as a measurement of the page;
+     * dropped, an agent reports an all-clear for a project that stopped sending traffic. Either half alone passes
+     * while the signal is lost.
      */
     @Test
     void theWatchingCoverageBlockMovedFromTheCasePageToGetProject() throws Exception {
@@ -167,18 +151,15 @@ class McpCaseToolsTest {
         verify(cases).watching(PROJECT_ID);
         assertEquals(3, project.get("watching").get("classifiers").asInt());
         assertEquals(7, project.get("watching").get("call_sites").asInt());
-        // The one number that separates the two silences a reader must never confuse.
         assertEquals(1200, project.get("watching").get("traces_last_day").asInt());
-        // get_project goes through the 1-arg overload, which always counts: an agent asking what a
-        // project looks like gets the same block whether or not the case queue happens to be empty.
+        // The 1-arg overload always counts, so the block does not depend on the case queue being empty.
         assertEquals(48_000, project.get("watching").get("traces_total").asInt());
         assertEquals(2, project.get("watching").get("open_findings").asInt());
     }
 
     @Test
     void getCase_passesTheIdThroughUntouchedSoAHumanReferenceResolves() throws Exception {
-        // The service accepts the stored id OR the display reference; the tool must not "normalise" either,
-        // or a case number quoted by a person stops resolving.
+        // The stored id or the display reference: the tool must not normalise either.
         when(cases.detail(eq(PROJECT_ID), eq("C-118"))).thenReturn(detail("rca-4", null));
 
         JsonNode body = structured(callTool("get_case", "{\"id\":\"C-118\"}"));
@@ -189,11 +170,8 @@ class McpCaseToolsTest {
     }
 
     /**
-     * <b>The finished RCA report arrives inline, whole.</b> The report IS the answer to "why is this case
-     * open", and reaching it used to mean a second, capability-gated tool call — which is how a written
-     * investigation goes unread. The assertions reach the deep fields (the agent's markdown, a hypothesis, a
-     * ruled-out check) on purpose: an {@code rca} object carrying only the summary columns would satisfy a
-     * shallower test and still lose the investigation.
+     * The finished RCA report arrives inline and whole: a second, gated call is how a written investigation goes
+     * unread. The assertions reach deep fields on purpose; summary columns alone would still lose the investigation.
      */
     @Test
     void getCase_inlinesTheFinishedRcaReportInFull() throws Exception {
@@ -201,7 +179,6 @@ class McpCaseToolsTest {
 
         JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
 
-        // The id stays beside the report, for provenance and for the poll.
         assertEquals("rca-4", body.get("rca_report_id").asText());
         JsonNode rca = body.get("rca");
         assertEquals("model_change", rca.get("verdict").asText());
@@ -214,11 +191,7 @@ class McpCaseToolsTest {
         assertTrue(rca.get("ruled_out").get(0).get("passed").asBoolean());
     }
 
-    /**
-     * A report still running is named and not rendered: {@code rca_report_id} is there to poll, {@code rca} is
-     * null. Rendering the shell would show an object whose every interesting field is null, which reads as
-     * "the analysis concluded nothing" rather than "the analysis has not finished".
-     */
+    /** A running report is named, not rendered: an all-null shell reads as "concluded nothing", not "not finished". */
     @Test
     void getCase_leavesRcaNullWhileTheReportIsStillRunning() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail("rca-5", null));
@@ -231,9 +204,7 @@ class McpCaseToolsTest {
     }
 
     /**
-     * <b>{@code get_case} strips ids the way {@code get_finding} does.</b> The case carries the same summary
-     * blocks as its finding plus the exemplar traces, so without this an agent reads the sample
-     * {@code get_finding} withholds by calling one tool over. The numbers stay; the ids go.
+     * {@code get_case} strips ids as {@code get_finding} does, or an agent reads the withheld sample one tool over.
      */
     @Test
     void getCase_toolError_keepsTheNumbersAndDropsFailingTracesAndExemplars() throws Exception {
@@ -268,8 +239,6 @@ class McpCaseToolsTest {
         assertFalse(body.toString().contains("trace-secret-9"), "a witness trace id reached the agent");
         assertFalse(body.toString().contains("trace-exemplar-1"), "an exemplar trace id reached the agent");
     }
-
-    // ------------------------------------------------------------------ helpers
 
     private static CaseDetailView detail(String rcaReportId, @Nullable RcaReportView rca) {
         return detail(rcaReportId, rca, null, null, List.of());
@@ -413,8 +382,7 @@ class McpCaseToolsTest {
                 1L,
                 "fnd-1",
                 null,
-                // cause + rca_verdict: this fixture is a case nothing has analysed, which is what
-                // almost every case in the queue is.
+                // cause + rca_verdict: an unanalysed case, like most in the queue.
                 null,
                 null);
     }

@@ -28,22 +28,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The chicken-and-egg this feature exists to break, end to end against the real pgvector Postgres.
+ * The chicken-and-egg this feature breaks, against real Postgres. The plugin assesses a repo only after correctly
+ * tagged traces arrive, and that assessment declares {@code call_site.output_schema}, so a project's first traffic is
+ * swept by Malformed Output before it can gate: it abstains and the cursor advances.
  *
- * <p>The platform must ingest correctly-tagged traces before the plugin will assess the repo, and it
- * is that assessment's bundle which declares {@code call_site.output_schema}. So a project's first
- * traffic is always swept by Malformed Output before it has anything to gate on: it abstains, and the
- * cursor advances over the abstention.
- *
- * <p>These tests pin the fix at its real seams: a fact landing rewinds exactly the signals that
- * declare it, an unchanged re-declaration rewinds nothing, and a fact change never disturbs a signal
- * that reads only the trace.
- *
- * <p>{@link ai.tessary.model.CallSite} facts have one live reader in this build: {@code
- * MalformedOutputDetector} declares {@code OUTPUT_SCHEMA}. {@code
- * ClassifierService.rewindForCallSiteFact} asks {@code catalog.detectorFor(row.detector())} what
- * facts a signal reads and skips it when that answer is {@code null}, so a {@code SHAPE} fact
- * change rewinds nothing here: nothing on this classpath reads it.
+ * <p>Pinned: a fact landing rewinds exactly the signals that declare it, an unchanged re-declaration rewinds nothing,
+ * and a fact change never disturbs a trace-only signal. Only {@code MalformedOutputDetector} reads a fact ({@code
+ * OUTPUT_SCHEMA}) on this classpath, so a {@code SHAPE} change rewinds nothing here.
  */
 @SpringBootTest
 class CallSiteFactRewindIntegrationTest {
@@ -70,12 +61,8 @@ class CallSiteFactRewindIntegrationTest {
     CapabilityFixture capabilities;
 
     /**
-     * A project whose built-ins have each already swept its pre-synthesis history — the state every
-     * real project reaches before any repo assessment is possible.
-     *
-     * <p>Frustration is granted before the project exists, the moment seeding reads capabilities, so
-     * its sweep job is a live control here for "a call-site fact does not disturb a signal that reads
-     * only the trace."
+     * A project whose built-ins already swept their pre-synthesis history. Frustration is granted before the project
+     * exists, so its sweep is a live trace-only control.
      */
     private String projectWithSweptHistory(String name) {
         String pid = TenantFixture.bootstrap(tenants, name, org -> {
@@ -117,7 +104,6 @@ class CallSiteFactRewindIntegrationTest {
         String pid = projectWithSweptHistory("fact-rewind-schema");
         assertEquals(SWEPT_ID, jobFor(pid, "malformed_output").cursorId(), "setup: history already swept");
 
-        // The bundle finally declares the call site's structured output.
         pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"), "the schema-gated built-in re-reads its whole history");
@@ -134,7 +120,7 @@ class CallSiteFactRewindIntegrationTest {
         pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
 
         assertTrue(rewound(pid, "malformed_output"), "declares OUTPUT_SCHEMA");
-        // Frustration reads the user's own words, so nothing declared by the repo can invalidate it.
+        // Frustration reads the user's own words; nothing the repo declares invalidates it.
         assertFalse(rewound(pid, "frustration"), "reads the trace alone");
         assertFalse(rewound(pid, "secret_leak"), "reads the trace alone");
     }
@@ -147,8 +133,7 @@ class CallSiteFactRewindIntegrationTest {
         jobs.claimBatch("resweep-clear", 500, 300, 5);
         jobs.markSwept(job.id(), SWEPT_AT, SWEPT_ID);
 
-        // The code stopped declaring structured output. History scored against the withdrawn schema is
-        // as wrong as history scored against no schema — both need re-reading.
+        // History scored against a withdrawn schema is as wrong as against none.
         pipelineService.replace(pid, pipelineWithNullSchema("cs-answer", "rag_answer"));
 
         assertTrue(rewound(pid, "malformed_output"), "the withdrawn schema's verdicts are re-derived");
@@ -156,9 +141,7 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void aDisabledSignalIsRewoundToo() {
-        // Re-enabling a signal does NOT reset its cursor (enqueue re-pends "without disturbing its
-        // cursor"), so skipping a disabled signal here would leave it resuming from its old high-water
-        // mark — re-stranding exactly the history this feature recovers.
+        // Re-enabling does not reset a cursor, so skipping a disabled signal would re-strand this history.
         String pid = projectWithSweptHistory("fact-rewind-disabled");
         ClassifierRow malformed = signals.list(pid).stream()
                 .filter(s -> s.classifierKey().equals("malformed_output"))
@@ -174,9 +157,7 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void aKeyReorderedSchemaIsNotAChange() {
-        // A producer emits the keys in whatever order its run produced. Compared raw against a text
-        // column, an identical schema would read as a change and rewind the whole history on every
-        // import.
+        // Keys arrive in any order; compared as raw text, an identical schema would rewind on every import.
         String pid = projectWithSweptHistory("fact-rewind-key-order");
         pipelineService.replace(pid, pipelineWithCallSite("cs-answer", "rag_answer", SCHEMA));
         ClassifierJobRow job = jobFor(pid, "malformed_output");
@@ -205,8 +186,7 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void theDefaultUpsertImportPathRewindsToo() {
-        // ImportController's DEFAULT mode is upsert, not replace — so every fact-change assertion
-        // proven only against replace() is proven against the path most imports don't take.
+        // ImportController's default mode is upsert, not replace.
         String pid = projectWithSweptHistory("fact-upsert-path");
 
         pipelineService.upsert(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
@@ -216,11 +196,8 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void anExplicitNullInTheBundleClearsTheStoredSchema() {
-        // The contract's two nulls, end to end. A shard SILENT on output_schema keeps the stored
-        // schema; a shard declaring `output_schema: null` asserts the code has no structured output
-        // and clears it. Jackson binds that null to NullNode rather than Java null, so without the
-        // isNull() branch the column would hold the string "null" — not SQL NULL — and the Malformed
-        // Output built-in would keep reading it back as a schema forever.
+        // The contract's two nulls. A shard silent on output_schema keeps the stored schema; an explicit null clears
+        // it. Jackson binds that null to NullNode, so without isNull() the column would hold the string "null".
         String pid = projectWithSweptHistory("fact-bundle-explicit-null");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
         assertNotNull(storedSchema(pid, "cs-rag"), "setup: the bundle's schema is stored");
@@ -235,7 +212,7 @@ class CallSiteFactRewindIntegrationTest {
         String pid = projectWithSweptHistory("fact-bundle-silent-vs-null");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
 
-        // Silent on the fact — the stored schema must survive the wipe-and-write.
+        // Silent on the fact: the stored schema survives the wipe-and-write.
         pipelineService.replace(pid, pipelineWithCallSiteShape("cs-rag", "rag_answer"));
 
         assertEquals(json(SCHEMA), storedSchema(pid, "cs-rag"), "silence carried the schema across");
@@ -243,9 +220,7 @@ class CallSiteFactRewindIntegrationTest {
 
     @Test
     void aBundleDeclaredSchemaOverridesTheCarriedSchema() {
-        // When the bundle declares a schema it must WIN over the carried-across one — otherwise a user
-        // correcting a stale schema by editing the bundle would be silently overwritten by the very
-        // mechanism that protects a silent shard.
+        // A declared schema wins over the carried one, or correcting a stale schema in the bundle is silently undone.
         String pid = projectWithSweptHistory("fact-rewind-bundle-wins");
         pipelineService.replace(pid, pipelineWithCallSite("cs-rag", "rag_answer", SCHEMA));
 
@@ -280,7 +255,7 @@ class CallSiteFactRewindIntegrationTest {
         return withCallSite(callSiteId, shape, null);
     }
 
-    /** A shard that DECLARES `output_schema: null` — the code asserts it has no structured output. */
+    /** Declares `output_schema: null`: the code has no structured output. */
     private static Pipeline pipelineWithNullSchema(String callSiteId, String shape) {
         return withCallSite(callSiteId, shape, NullNode.getInstance());
     }

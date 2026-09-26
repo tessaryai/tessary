@@ -40,12 +40,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Acceptance for classifier arming — the replacement for the threshold {@code alert_rule} path.
+ * Classifier arming, which replaced the threshold {@code alert_rule} path.
  *
- * <p>Two shapes are under test. The classifier-wide one: N detections inside the configured window open
- * exactly ONE finding, the spans that fired are pinned under it as members, a re-sweep refreshes that one
- * finding, and a classifier nobody armed files nothing. And the faceted one Secret Leak uses: one finding
- * per call site and pattern, counted on the window each span HAPPENED in, with its spans as witnesses.
+ * <p>Classifier-wide: N detections in the window open exactly one finding with the spans as members, a re-sweep
+ * refreshes it, and an unarmed classifier files nothing. Faceted (Secret Leak): one finding per call site and
+ * pattern, counted on the window each span happened in.
  */
 @SpringBootTest
 class ClassifierArmingIntegrationTest {
@@ -94,8 +93,7 @@ class ClassifierArmingIntegrationTest {
     @Test
     void armedWindowOpensOneFindingWithItsSpansAsEvidence_andReSweepingRefreshesIt() {
         String pid = TenantFixture.bootstrap(tenants, "arming-open").project().id();
-        // Three in a day, armed at three: the bar is crossed exactly, which is the boundary that decides
-        // whether "N" means "N" or "more than N".
+        // Exactly at the bar: decides whether "N" means "N" or "more than N".
         String classifierId = armedClassifier(pid, "regex", "event_count", 3, 86_400);
 
         List<FindingEvidenceRepository.Ref> refs = writeDetections(pid, classifierId, "regex", 3);
@@ -110,8 +108,7 @@ class ClassifierArmingIntegrationTest {
         assertEquals(3, finding.sampleCount());
         assertEquals(3, evidenceCount(findingId, FindingEvidenceRow.Role.MEMBER), "the spans that fired are members");
 
-        // A second pass over the same window is a REFRESH, not a second finding: the count is assigned
-        // from the window rather than accumulated, so an idempotent re-sweep reports the same number.
+        // A refresh, not a second finding: the count is assigned from the window, not accumulated.
         List<String> again = arming.evaluate(row(pid, classifierId, "regex"), pid, refs, Instant.now());
         assertEquals(List.of(findingId), again, "re-sweeping the same window refreshes the one finding");
         assertEquals(1, liveFindings(pid), "and opens no second one");
@@ -128,7 +125,7 @@ class ClassifierArmingIntegrationTest {
     @Test
     void anUnarmedClassifierNeverFilesAnything() {
         String pid = TenantFixture.bootstrap(tenants, "arming-absent").project().id();
-        // No arming block: how a user's classifier ships. Nobody drew a bar, so nothing is filed.
+        // No arming block, as a user's classifier ships: nothing is filed.
         String classifierId = classifier(pid, "regex", null);
 
         List<FindingEvidenceRepository.Ref> refs = writeDetections(pid, classifierId, "regex", 25);
@@ -143,8 +140,7 @@ class ClassifierArmingIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "arming-users").project().id();
         String classifierId = armedClassifier(pid, "regex", "distinct_users", 3, 86_400);
 
-        // Three detections, two sessions. The session basis is the user proxy the threshold rules used,
-        // and it must keep counting people rather than events or the translated number changes meaning.
+        // The session basis counts people, not events.
         String sessionA = SubstrateV2Fixtures.sessionId();
         String sessionB = SubstrateV2Fixtures.sessionId();
         List<FindingEvidenceRepository.Ref> refs = new ArrayList<>();
@@ -174,9 +170,7 @@ class ClassifierArmingIntegrationTest {
                 .id();
         String classifierId = armedClassifier(pid, "regex", "event_count", 3, (int) DAY);
 
-        // Three matches, but on three different days 30 to 90 days back: each event-time window holds
-        // exactly one, well under a bar of three. Summing them into "the window now falls in" — the old
-        // classifier-wide behaviour — would wrongly arm; walking each window separately must not.
+        // One match per event-time window, 30 to 90 days back. Summing them into today's window would wrongly arm.
         List<FindingEvidenceRepository.Ref> refs = List.of(
                 writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), daysAgo(30)),
                 writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), daysAgo(60)),
@@ -197,8 +191,7 @@ class ClassifierArmingIntegrationTest {
         String classifierId = armedClassifier(pid, "regex", "event_count", 3, (int) DAY);
         Instant backfillDay = daysAgo(45);
 
-        // All three on the same backfilled day: one window crosses the bar, and it must file under the
-        // day the spans ran, not under today (when the sweep happened to check them).
+        // One backfilled day crosses the bar and must file under that day, not today.
         List<FindingEvidenceRepository.Ref> refs = List.of(
                 writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), backfillDay),
                 writeOneAt(pid, classifierId, "regex", SubstrateV2Fixtures.sessionId(), backfillDay.plusSeconds(60)),
@@ -253,9 +246,7 @@ class ClassifierArmingIntegrationTest {
     void aLeakUploadedLateFilesUnderTheDayItHappened_notTheDayItWasChecked() {
         String pid = TenantFixture.bootstrap(tenants, "arming-late").project().id();
         String classifierId = armedSecretLeak(pid);
-        // Checked today, happened forty days ago: a backfill. Bucketing on when the sweep wrote the
-        // detection would file this as today's leak, and at a bar of one a window that only ever looked
-        // at today would not file it at all.
+        // A backfill. Bucketing on sweep time would file it as today's leak, or not at all at a bar of one.
         Instant happened = daysAgo(40);
 
         List<String> filed = arming.evaluate(
@@ -271,9 +262,8 @@ class ClassifierArmingIntegrationTest {
     }
 
     /**
-     * bf70c1d: a high-confidence leak found long after it happened opened no case, because the case source
-     * only kept findings last seen in the past 48 hours. The key is exposed until someone rotates it, however
-     * old the leak is.
+     * bf70c1d: a leak found long after it happened opened no case, because the case source kept only findings seen in
+     * the past 48 hours. The key stays exposed until rotated.
      */
     @Test
     void aHighConfidenceLeakFoundFortyDaysLateStillOpensItsCase() {
@@ -300,9 +290,7 @@ class ClassifierArmingIntegrationTest {
     }
 
     /**
-     * bf70c1d: high confidence is sticky across a finding's windows. Here the newer window is low and
-     * arrives first, then an older high one lands late. If the late window's high band were dropped
-     * because its window is older, the credential would stay low, unruled and caseless.
+     * bf70c1d: high confidence is sticky. A late older high window after a newer low one must make the finding high.
      */
     @Test
     void anOlderHighWindowArrivingAfterANewerLowOneMakesTheFindingHighAndOpensItsCase() {
@@ -334,9 +322,8 @@ class ClassifierArmingIntegrationTest {
     }
 
     /**
-     * bf70c1d, the other arrival order: a newer low window refreshing a finding that is already high must
-     * not downgrade it. Written straight to the repository: arming rules a high finding at once, and a ruled
-     * row is never refreshed, so this order only reaches the upsert between the write and the ruling.
+     * bf70c1d, the other order: a newer low window must not downgrade a high finding. Written straight to the
+     * repository, since arming rules a high finding at once and a ruled row is never refreshed.
      */
     @Test
     void aNewerLowWindowRefreshingAHighFindingKeepsItHigh() {
@@ -412,7 +399,7 @@ class ClassifierArmingIntegrationTest {
     @Test
     void anOlderWindowArrivingLateNeverMovesTheFindingBackwards() {
         String pid = TenantFixture.bootstrap(tenants, "arming-order").project().id();
-        // Low band, counted: a high-confidence finding is ruled at once, and a ruled row is not refreshed.
+        // Low band: a high finding is ruled at once and never refreshed.
         String classifierId = armedSecretLeakAnyBand(pid);
         Instant recent = hoursAgo(1);
         Instant older = daysAgo(3);
@@ -442,7 +429,7 @@ class ClassifierArmingIntegrationTest {
     @Test
     void aNewerWindowStaysInTheSpellUntilTwoWindowsWentQuiet() {
         String pid = TenantFixture.bootstrap(tenants, "arming-spell").project().id();
-        // Low band, counted, for the same reason as the late-window test above.
+        // Low band, as above.
         String classifierId = armedSecretLeakAnyBand(pid);
         Instant twoDaysAgo = daysAgo(2);
         Instant tenDaysAgo = daysAgo(10);
@@ -561,8 +548,7 @@ class ClassifierArmingIntegrationTest {
         FindingRow ruled = findings.findById(pid, firstId).orElseThrow();
         assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict());
 
-        // The same day, detected later: the window's last-seen moves past the ruled finding's, but the
-        // window is the one the ruling already covers.
+        // Detected later the same day: the ruling already covers this window.
         assertTrue(
                 arming.evaluate(
                                 secretLeakRow(pid, classifierId),
@@ -657,11 +643,7 @@ class ClassifierArmingIntegrationTest {
 
     // ---- fixtures ---------------------------------------------------------------------------------
 
-    /**
-     * The classifier row, armed or not. An upsert because bootstrapping a project already seeds the
-     * built-in catalog — this test is about the arming block on that row, not about creating a second
-     * classifier under a key that is unique per project.
-     */
+    /** An upsert: bootstrapping already seeds the built-in catalog, and the key is unique per project. */
     private String classifier(String pid, String key, @Nullable String configJson) {
         return jdbc.sql("INSERT INTO classifier (id, project_id, classifier_key, name, detector, built_in, version,"
                         + " enabled, config_json, created_at, updated_at)"
@@ -736,10 +718,7 @@ class ClassifierArmingIntegrationTest {
         return refs;
     }
 
-    /**
-     * A real span (the classifier-wide shape now resolves its event-time window off
-     * {@code subject_started_at}, filled at write time from the span itself), carrying one detection.
-     */
+    /** A real span carrying one detection; the window resolves off {@code subject_started_at}. */
     private FindingEvidenceRepository.Ref writeOne(String pid, String classifierId, String key, String sessionId) {
         return writeOneAt(pid, classifierId, key, sessionId, Instant.now());
     }
@@ -766,9 +745,8 @@ class ClassifierArmingIntegrationTest {
     }
 
     /**
-     * A real span at {@code callSiteId}, started at {@code startedAt}, carrying a Secret Leak detection of
-     * {@code pattern}. Faceted arming reads the call site and the event time off the span, so unlike the
-     * classifier-wide fixture above, the span has to exist.
+     * A real span at {@code callSiteId} carrying a Secret Leak detection of {@code pattern}. Faceted arming reads the
+     * call site and event time off the span.
      */
     private FindingEvidenceRepository.Ref leak(
             String pid, String classifierId, String callSiteId, String pattern, String confidence, Instant startedAt) {

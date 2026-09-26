@@ -45,12 +45,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 
-/** Case lifecycle as a human drives it: resolve, mute, unmute, how a case is looked up, and what
- *  pressing RCA on one does (1c). */
+/** Case lifecycle as a human drives it: resolve, mute, unmute, lookup, and pressing RCA (1c). */
 @SpringBootTest
-// batch-size=0 parks RcaWorker's own drain (claimBatch's LIMIT 0 returns nothing), the same reason
-// RcaControllerTest does it: this class presses runRca and must read back locked_at / the trail line
-// itself, not race the real worker picking the job up first.
+// batch-size=0 parks RcaWorker's drain so this class reads locked_at and the trail itself.
 @TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
 class CaseServiceTest {
 
@@ -132,12 +129,8 @@ class CaseServiceTest {
     }
 
     /**
-     * The paged read walks the whole set with the cursor it hands back, and stops by handing back none.
-     *
-     * <p>Asserted as a set rather than a sequence on purpose: what a page must guarantee is that every case
-     * appears exactly once across the walk. The worst-first ORDER is a repository claim, pinned in
-     * {@link CaseRepositoryIntegrationTest} against timestamps chosen to make ties bite; re-asserting it here
-     * off two cases opened microseconds apart would be a test of the clock.
+     * Every case appears exactly once across the cursor walk, which ends with no cursor. A set, not a sequence:
+     * worst-first order is pinned in {@link CaseRepositoryIntegrationTest}.
      */
     @Test
     void pagingWalksEveryOpenCaseExactlyOnceAndThenStops() {
@@ -160,13 +153,8 @@ class CaseServiceTest {
     }
 
     /**
-     * A finished RCA report is the case page's answer to "why is this open," so it arrives inline.
-     *
-     * <p>The pending half of this test is the load-bearing half. A report's shell is inserted at
-     * trigger time and carries nothing (no verdict, no hypotheses, no write-up), so inlining it
-     * would render an object whose every interesting field is null, indistinguishable from an
-     * analysis that concluded nothing. While it runs, the id is the whole answer: it is what a poll
-     * is for.
+     * A finished RCA report arrives inline. A pending one is only named: its shell carries nothing and would read as
+     * an analysis that concluded nothing.
      */
     @Test
     void aFinishedRcaReportIsInlinedAndAPendingOneIsOnlyNamed() {
@@ -217,8 +205,8 @@ class CaseServiceTest {
                 null,
                 "## Why\nThe provider rotated the default.",
                 true);
-        // The wire status is the JOB's, so the queue is what has to say "finished" — the report's own column
-        // alone would leave an exhaustion-swept job reading as claimed forever.
+        // The wire status is the job's: the report column alone would leave an exhaustion-swept job reading as
+        // claimed.
         rcaJobs.markDone(jobId);
 
         CaseDetailView finished = service.detail(p.id(), row.id());
@@ -228,8 +216,6 @@ class CaseServiceTest {
         assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, report.verdict());
         assertEquals("## Why\nThe provider rotated the default.", report.detailedReport());
     }
-
-    // ---- 1c: RCA locks a case --------------------------------------------------------------
 
     /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */
     @Test
@@ -251,8 +237,6 @@ class CaseServiceTest {
                 "only the locking press narrates the request");
     }
 
-    // ---- resolving/absorbing closes every finding the case holds ---------------------------
-
     @Test
     void resolvingClosesEveryOpenFindingTheCaseHolds() {
         Project p = project("svc-resolve-closes-findings");
@@ -266,12 +250,9 @@ class CaseServiceTest {
                 findings.findById(p.id(), findingId).orElseThrow().status());
     }
 
-    // ---- refusals and resets ----------------------------------------------------------------
-
     /**
-     * Absorb moves a detector's reference, so it is refused where there is none to move (a malformed-output
-     * case) and where the org no longer has the classifier; either closing as absorbed would leave the
-     * detector's bar where it was and the case would reopen on the next window.
+     * Absorb moves a detector's reference, so it is refused with no reference (malformed output) or no classifier;
+     * closing anyway would let the case reopen next window.
      */
     @Test
     void absorbIsRefusedWithNoReferenceToMoveOrNoClassifierToMoveItFor() {
@@ -287,7 +268,7 @@ class CaseServiceTest {
                 cases.findById(p.id(), toolError.id()).orElseThrow().state());
     }
 
-    /** RCA is anchored on a finding; a case holding none (a pre-link archived row) has nothing to analyse. */
+    /** RCA is anchored on a finding; a case with none has nothing to analyse. */
     @Test
     void rcaOnACaseHoldingNoFindingIsRefused() {
         Project p = project("svc-rca-no-finding");
@@ -301,9 +282,8 @@ class CaseServiceTest {
     }
 
     /**
-     * Closing a tool-error or malformed-output case by hand clears the accumulator behind it. Left standing,
-     * an outage's accumulator would re-derive the pre-fix rate on the next sweep and reopen the case for
-     * weeks after the fix.
+     * Closing a tool-error or malformed-output case clears its accumulator, or it re-derives the pre-fix rate and
+     * reopens the case.
      */
     @ParameterizedTest
     @ValueSource(strings = {CaseRow.Detector.TOOL_ERROR, CaseRow.Detector.MALFORMED_OUTPUT})
@@ -333,10 +313,7 @@ class CaseServiceTest {
         assertNotNull(after.resetAt());
     }
 
-    /**
-     * A frustration or groundedness case closed with no disposition writes no disposition detail on its
-     * trail line, rather than a detail naming a disposition nobody gave.
-     */
+    /** Closed with no disposition, the trail line names none. */
     @ParameterizedTest
     @ValueSource(strings = {CaseRow.Detector.FRUSTRATION, CaseRow.Detector.GROUNDEDNESS})
     void aCaseClosedWithoutADispositionRecordsNone(String detector) {
@@ -354,9 +331,8 @@ class CaseServiceTest {
     }
 
     /**
-     * The ruling a case shows is read off its finding: a person's ruling outranks any machine one and
-     * carries no citations, and a triage citations blob of the wrong shape shows as no citations rather
-     * than failing the case page.
+     * A person's ruling outranks a machine one and carries no citations; a misshapen citations blob shows as none,
+     * not a failed page.
      */
     @Test
     void theCaseShowsWhoRuledAndSurvivesAMisshapenCitationBlob() {
@@ -442,8 +418,6 @@ class CaseServiceTest {
         assertEquals(expected, assertThrows(TessaryException.class, call).error());
     }
 
-    // ---- helpers -----------------------------------------------------------------------------
-
     private Project project(String name) {
         return TenantFixture.bootstrap(tenants, name).project();
     }
@@ -458,9 +432,7 @@ class CaseServiceTest {
                 new CaseKey(detector, subjectKind, "subject-" + detector, "pass_rate"),
                 "subject label",
                 null,
-                // Every case points at a finding; the forward CHECK on eval_case enforces it. The two
-                // detectors that open one without a finding are exempt by name, so seeding a real
-                // finding for the rest is the invariant, not test scaffolding.
+                // The forward CHECK on eval_case requires a finding behind every case but two exempt detectors.
                 findingBehind(p, detector),
                 "something happened",
                 "because the detector said so",
@@ -475,7 +447,7 @@ class CaseServiceTest {
     /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
     private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
 
-    /** Every case opened after cutover points at a finding — the forward CHECK requires it. */
+    /** The forward CHECK requires a finding behind every case opened after cutover. */
     private String findingBehind(Project p, String detector) {
         String now = Instant.now().toString();
         return Objects.requireNonNull(findings.recordArmedWindow(

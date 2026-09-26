@@ -27,37 +27,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The rollup worker and its reaper against the real schema (substrate-model.md §7.2–§7.4).
+ * The rollup worker and reaper against the real schema (substrate-model.md §7.2–§7.4).
  *
- * <h2>What is actually under test</h2>
+ * <p>Three claims: the claim clears the deadline, so a span arriving before the write re-arms it and {@code
+ * is_settled} can never mean "we stopped waiting"; every rollup is a replacement, never a delta, so a hand-corrupted
+ * total heals; and a worker dying between claim and write leaves a fingerprint the reaper re-arms.
  *
- * <p>One protocol, in three claims:
- *
- * <ol>
- *   <li><b>The claim clears the deadline, and that is what makes {@code is_settled} mean something.</b> A
- *       span arriving between the claim and the write re-arms it, the write sees a non-null deadline and
- *       declines to settle, and the trace fires again with that span in. {@code is_settled} therefore says
- *       "nothing has arrived since the last rollup" and can never be made to say "we stopped waiting".
- *   <li><b>Every rollup is a replacement, never a delta.</b> Firing twice writes the same numbers; a total
- *       corrupted by hand heals on the next fire. That is the property that makes crash recovery safe to
- *       be blunt about, and it is why no counter here is ever incremented.
- *   <li><b>Nothing is stranded.</b> A worker that dies between the claim and the write leaves a
- *       fingerprint the reaper recognises; re-arming a claim that was merely in flight costs one redundant
- *       recompute and corrupts nothing, because of (2).
- * </ol>
- *
- * <h2>Why nothing here sleeps</h2>
- *
- * <p>The worker and reaper are built here rather than injected, and driven through their synchronous
- * run-once methods. The scheduler is off in this context ({@code rollup-enabled=false}), so every claim in
- * these assertions is one this test made: a live worker claims due traces GLOBALLY, and a test that raced
- * it would be asserting against whichever of the two got there first.
- *
- * <p><b>Time is Postgres's, and only Postgres's.</b> The deadlines are {@code timestamptz} written by
- * {@code now()} inside the spec's own statements, so the tests move the clock the same way production
- * experiences it — by backdating the deadline — rather than through an app-side clock, which would be a
- * second opinion about whether a trace is due and any skew between the two lands squarely on the settle
- * protocol.
+ * <p>The worker and reaper are built here and run once synchronously, with the scheduler off, because a live worker
+ * claims due traces globally. Time is Postgres's: tests backdate the deadline rather than use an app-side clock.
  */
 @SpringBootTest(
         properties = {
@@ -101,14 +78,11 @@ class TraceRollupWorkerIntegrationTest {
         ownTheQueue();
         fx.trace(pid, traceId, t0);
 
-        // A metrics bean of this test's own: the container's is a singleton every other class in the
-        // context also feeds, so counter assertions on it would be reading someone else's traffic.
+        // Its own metrics: the container's singleton is fed by every other class in the context.
         metrics = new TraceRollupMetrics();
         worker = new TraceRollupWorker(traces, metrics, props(300));
         reaper = new TraceRollupReaper(traces, metrics, props(300));
     }
-
-    // ---- claim, write, settle -----------------------------------------------------------------------
 
     @Test
     @DisplayName("the claim clears the deadline, and a quiet trace settles on the write that follows")
@@ -139,7 +113,7 @@ class TraceRollupWorkerIntegrationTest {
         arm(true);
         expire();
 
-        // The worker's two statements, pulled apart so the arrival can land exactly between them.
+        // The worker's two statements, pulled apart so the arrival lands between them.
         List<TraceV2Repository.Claim> claimed = traces.claimDue(500);
         assertTrue(claimed.stream().anyMatch(c -> c.traceId().equals(traceId)));
 
@@ -147,7 +121,7 @@ class TraceRollupWorkerIntegrationTest {
                 fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(1), t0.plusSeconds(2)),
                 10L,
                 5L);
-        arm(true); // the §6.1 re-arm, in the same transaction as the span row in production
+        arm(true); // the §6.1 re-arm
 
         traces.recompute(pid, traceId);
 
@@ -180,8 +154,6 @@ class TraceRollupWorkerIntegrationTest {
         assertNotNull(row.rollupDueAt());
     }
 
-    // ---- replacement, not accumulation --------------------------------------------------------------
-
     @Test
     @DisplayName("a total corrupted by hand heals on the next fire — no accumulation means no permanent drift")
     void corruptThenRecomputeSelfHeals() {
@@ -203,15 +175,13 @@ class TraceRollupWorkerIntegrationTest {
         assertEquals(1, healed.unpricedSpans());
     }
 
-    // ---- crash recovery ------------------------------------------------------------------------------
-
     @Test
     @DisplayName("the reaper re-arms the fingerprint a dead worker leaves, and leaves a settled trace alone")
     void reaperReArmsStrandedTracesOnly() {
         fx.withUsage(fx.llmSpan(pid, traceId, t0), 100L, 50L);
         arm(true);
         expire();
-        // The worker dies here: claimed (deadline cleared), never written back.
+        // The worker dies here: claimed, never written back.
         traces.claimDue(500);
 
         TraceRollupReaper.Sweep sweep = reaper.sweepOnce();
@@ -219,7 +189,6 @@ class TraceRollupWorkerIntegrationTest {
         assertTrue(sweep.rearmed() >= 1);
         assertNotNull(require(traceId).rollupDueAt(), "armed for nobody, until the sweep put it back in the queue");
 
-        // The re-armed deadline is now(), so the worker takes it on its very next pass.
         worker.runOnce();
         TraceV2Row recovered = require(traceId);
         assertTrue(recovered.isSettled());
@@ -247,8 +216,6 @@ class TraceRollupWorkerIntegrationTest {
         assertEquals(0, reaper.sweepOnce().overdueMs(), "a drained queue is not behind on anything");
     }
 
-    // ---- what the replacement counts -----------------------------------------------------------------
-
     @Test
     @DisplayName("unpriced_spans counts spans of ANY kind that carried usage — an unpriced tool call is spend too")
     void unpricedSpansCountsEveryKindThatCarriedUsage() {
@@ -259,7 +226,6 @@ class TraceRollupWorkerIntegrationTest {
                 fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "embedding", t0, t0.plusSeconds(1)),
                 30L,
                 null);
-        // Priced, so not a hole in the total.
         fx.withCost(
                 fx.withUsage(
                         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1)),
@@ -270,7 +236,7 @@ class TraceRollupWorkerIntegrationTest {
                 null,
                 null,
                 SpanRow.CostSource.INFERRED);
-        // Unpriced but carrying no usage at all: nothing could have been billed, so it is not a hole.
+        // Unpriced but with no usage: nothing could have been billed.
         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "tool", t0, t0.plusSeconds(1));
 
         rollUp(true);
@@ -312,8 +278,6 @@ class TraceRollupWorkerIntegrationTest {
         assertNull(row.callSiteId());
     }
 
-    // ---- helpers -------------------------------------------------------------------------------------
-
     private SubstrateProperties props(int graceSeconds) {
         SubstrateProperties p = new SubstrateProperties();
         p.setRollupClaimLimit(500);
@@ -326,13 +290,8 @@ class TraceRollupWorkerIntegrationTest {
     }
 
     /**
-     * Leave this test method the only occupant of the rollup queue.
-     *
-     * <p>The §7.3 claim is deployment-wide by design — there is no project in it, because the queue is one
-     * queue — so a class that counts what a pass claimed has to own it. Traces every other test class in
-     * this database left armed, or left claimed-and-unwritten, are taken out of both the queue and the
-     * reaper's fingerprint here. Without this the counts below would depend on which suites ran first and
-     * how long ago, which is the definition of a flaky assertion.
+     * Leave this test the only occupant of the rollup queue. The §7.3 claim is deployment-wide, so traces other
+     * classes left armed or claimed are cleared here, or the counts depend on suite order.
      */
     private void ownTheQueue() {
         jdbc.sql("""
@@ -342,7 +301,7 @@ class TraceRollupWorkerIntegrationTest {
                         """).param("pid", pid).update();
     }
 
-    /** One batch's worth of arming for this trace — the §7.1 update the write path issues. */
+    /** One batch's arming for this trace, the §7.1 update the write path issues. */
     private void arm(boolean hasRoot) {
         traces.applyBatchTimers(pid, List.of(new TraceV2Repository.TimerUpdate(traceId, t0.toString(), null, hasRoot)));
     }
@@ -353,11 +312,7 @@ class TraceRollupWorkerIntegrationTest {
         worker.runOnce();
     }
 
-    /**
-     * Bring the deadline forward so the claim's {@code rollup_due_at <= now()} sees it. Production waits
-     * out the real two or ten seconds; a suite that slept them would be the slowest in the repo and would
-     * still be racing a clock it does not own.
-     */
+    /** Backdate the deadline so the claim's {@code rollup_due_at <= now()} sees it, instead of sleeping. */
     private void expire() {
         jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
                         + " WHERE project_id = :pid AND id = :id")

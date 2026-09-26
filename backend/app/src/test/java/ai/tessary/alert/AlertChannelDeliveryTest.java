@@ -38,17 +38,11 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.AopTestUtils;
 
 /**
- * Acceptance for alert channels. Exercised against the real pgvector Postgres
- * (Testcontainers) so the alert schema applies for real. Proves the full delivery path: a fired
- * {@link AlertFiredEvent} fans out through {@code AlertDeliveryListener} to all enabled channels for the
- * project, the real SPI impls serialize, sign, and render the payload, each outbound call is recorded in
- * the delivery-attempt log, and the at-most-once guard de-dupes a re-fire.
+ * Alert channels against real Postgres: a fired {@link AlertFiredEvent} fans out to every enabled channel, the real
+ * SPI impls serialize, sign, and render, each call is logged, and a re-fire is de-duped.
  *
- * <p>Outbound HTTP is captured by a recording {@link HttpClient} installed via the {@link ChannelHttp}
- * test seam. Channels are configured with public TEST-NET-3 (203.0.113.x) URLs so {@code UrlGuard} runs
- * for real and passes; the recording client (which never opens a socket) then captures the request URI,
- * headers, and body, so the SSRF guard, the JSON bodies, the HMAC signature, and the connector auth
- * headers are all exercised end to end.
+ * <p>A recording {@link HttpClient} via the {@link ChannelHttp} seam captures each request without a socket. URLs are
+ * TEST-NET-3 (203.0.113.x), so {@code UrlGuard} runs for real and passes.
  */
 @SpringBootTest
 class AlertChannelDeliveryTest {
@@ -102,13 +96,11 @@ class AlertChannelDeliveryTest {
     void firedAlertFansOutToSlackWebhookGenericWebhookAndPagerDuty() throws Exception {
         var fixture = TenantFixture.bootstrap(tenants, "alert-channel");
         String pid = fixture.project().id();
-        // The precondition the Slack assertion below rests on, stated rather than assumed: this test
-        // exercises the adapter path, not the capability gate.
+        // Precondition: this test covers the adapter path, not the capability gate.
         assertTrue(
                 capabilities.isEnabled(fixture.org().id(), ai.tessary.plan.Capability.SLACK),
                 "this test exercises the adapter path, so the org must HAVE slack_enabled");
 
-        // Generic webhook (with HMAC signing secret), public TEST-NET URL passes UrlGuard.
         channelService.create(
                 pid,
                 new UpsertChannelRequest(
@@ -116,18 +108,13 @@ class AlertChannelDeliveryTest {
                         "ops-webhook",
                         true,
                         json("{\"url\":\"https://203.0.113.10/hook\",\"secret\":\"sek\"}")));
-        // A Slack channel. This posts to slack-service, not to Slack directly, and that service is not
-        // deployed in this suite, so the attempt is expected to fail and say why in the delivery log: an
-        // undeployed adapter must make Slack deliveries visibly fail rather than silently vanish.
-        //
-        // Not captured by the recording client either, deliberately: SlackDelivery uses its own HttpClient
-        // rather than the ChannelHttp seam, because the adapter lives at a private address that the SSRF
-        // guard would rightly reject.
+        // Slack posts to slack-service, not deployed here, so the attempt must fail visibly in the log. It bypasses
+        // the recorder: the adapter's private address would fail the SSRF guard.
         channelService.create(
                 pid,
                 new UpsertChannelRequest(
                         "slack", "team-slack", true, json("{\"url\":\"https://203.0.113.11/slack\"}")));
-        // PagerDuty connector (url overridden to a TEST-NET path so the recorder captures the enqueue).
+        // URL overridden so the recorder captures the enqueue.
         channelService.create(
                 pid,
                 new UpsertChannelRequest(
@@ -144,22 +131,20 @@ class AlertChannelDeliveryTest {
         AlertEventRow event = persistFiredEvent(pid);
         publisher.publishEvent(new AlertFiredEvent(event));
 
-        // Fan-out runs on the @Async("alertDeliveryExecutor") pool (it does not block the publisher),
-        // so wait until the delivery-attempt log shows all 3 enabled channels resolved.
+        // Fan-out is @Async; wait for all three enabled channels to resolve.
         awaitDeliveries(pid, 3);
 
-        // The two directly-delivered channels received the POST; the disabled one did not.
         assertTrue(client.bodies.containsKey("/hook"), "generic webhook reached");
         assertTrue(client.bodies.containsKey("/v2/enqueue"), "pagerduty connector reached (creates an incident)");
         assertTrue(!client.bodies.containsKey("/nope"), "disabled channel skipped");
         assertTrue(!client.bodies.containsKey("/slack"), "slack no longer goes to slack.com — it goes to the adapter");
 
-        // The generic webhook payload is the stable, versioned, signed envelope.
+        // The stable, versioned, signed envelope.
         JsonNode hook = mapper.readTree(client.bodies.get("/hook"));
         assertEquals(AlertPayload.SCHEMA_VERSION, hook.get("schema_version").asText());
         assertEquals(event.id(), hook.get("event_id").asText());
         assertEquals(pid, hook.get("project_id").asText());
-        // payload is inlined as a first-class object, not a JSON-in-a-string.
+        // Inlined as an object, not a JSON string.
         assertEquals(
                 42,
                 hook.path("payload")
@@ -174,15 +159,12 @@ class AlertChannelDeliveryTest {
         assertNotNull(sig, "HMAC signature header present");
         assertEquals("sha256=" + WebhookChannel.hmacSha256("sek", client.bodies.get("/hook")), sig);
 
-        // PagerDuty got a v2 trigger with the routing key + stable dedup key.
         JsonNode pd = mapper.readTree(client.bodies.get("/v2/enqueue"));
         assertEquals("R0UT1NG", pd.get("routing_key").asText());
         assertEquals("trigger", pd.get("event_action").asText());
         assertEquals(AlertPayload.dedupKey(event), pd.get("dedup_key").asText());
 
-        // Delivery-attempt log: the two direct channels delivered, the disabled one absent, and Slack
-        // recorded as a failure naming the missing adapter. A delivery that cannot be made must leave a
-        // trace, since this log is the only visibility surface the fan-out has.
+        // Slack is logged as a failure naming the missing adapter: the log is the fan-out's only visibility.
         List<DeliveryAttemptRow> log = attempts.listByProject(pid, 100);
         long delivered =
                 log.stream().filter(a -> a.status().equals("delivered")).count();
@@ -194,10 +176,8 @@ class AlertChannelDeliveryTest {
                                 && String.valueOf(a.error()).contains("slack-service")),
                 "the slack attempt failed naming the undeployed adapter");
 
-        // Re-firing the same event is at-most-once: the (event, channel) claim de-dupes, no new sends.
-        // The re-fire runs the dispatcher's fan-out on this thread, past its @Async proxy, so the
-        // assertions below read what it did once it has returned rather than whatever it had done by
-        // an arbitrary deadline.
+        // A re-fire is de-duped by the (event, channel) claim. It runs the fan-out on this thread, past the @Async
+        // proxy, so the assertions read what it did.
         client.bodies.clear();
         AlertDeliveryDispatcher fanOut = AopTestUtils.getUltimateTargetObject(dispatcher);
         fanOut.deliverAll(event);
@@ -206,10 +186,8 @@ class AlertChannelDeliveryTest {
     }
 
     /**
-     * One channel's trouble never stops the others, and each kind of trouble leaves the right trace. A
-     * withheld Slack is skipped with no attempt row (nothing was attempted, so no permanent red line); a
-     * config missing its URL, or one that cannot be opened, is recorded as failed with a categorical reason
-     * and never the decrypted config; and the channels behind them still deliver.
+     * One channel's trouble never stops the others. A withheld Slack is skipped with no attempt row; a missing or
+     * unopenable URL is logged failed with a categorical reason, never the decrypted config.
      */
     @Test
     void aWithheldOrBrokenChannelNeverStopsTheFanOutAndEachLeavesItsOwnTrace() {
@@ -288,10 +266,7 @@ class AlertChannelDeliveryTest {
         throw new AssertionError("timed out waiting for " + expected + " resolved delivery attempts");
     }
 
-    /**
-     * Persist a digest firing. alert_event.alert_rule_id is a REAL FK to alert_rule, so
-     * a matching roll-up rule must exist first.
-     */
+    /** alert_event.alert_rule_id is a real FK, so a roll-up rule must exist first. */
     private AlertEventRow persistFiredEvent(String pid) {
         String now = Instant.now().toString();
         String ruleId = Ids.ulid();
@@ -347,10 +322,7 @@ class AlertChannelDeliveryTest {
         }
     }
 
-    /**
-     * An {@link HttpClient} that records each request's path, headers, and body and returns a synthetic
-     * 202, no socket is opened. Keyed by URI path so the test can assert per-channel payloads.
-     */
+    /** Records each request's path, headers, and body and answers 202 without a socket. */
     private static final class RecordingClient extends HttpClient {
         final Map<String, String> bodies = new ConcurrentHashMap<>();
         final Map<String, HttpHeaders> headers = new ConcurrentHashMap<>();

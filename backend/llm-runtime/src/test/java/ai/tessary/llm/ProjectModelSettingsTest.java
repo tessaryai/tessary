@@ -33,9 +33,7 @@ class ProjectModelSettingsTest {
     private static final String PID = "p1";
     private static final String ORG = "org1";
     private static final String HAIKU = "anthropic.claude-haiku-4-5";
-    /** Removed (Amazon is not one of the six supported makers) — kept as a string
-     *  constant purely so the "unknown model key" tests below still exercise a Bedrock-SHAPED
-     *  (dotted) key that resolves nowhere, the same failure class a stale removed-model row would hit. */
+    /** Removed (Amazon is not a supported maker); kept as a dotted Bedrock-shaped key that resolves nowhere. */
     private static final String NOVA = "amazon.nova-2-lite";
 
     private static final String TERRA = "openai.gpt-5.6-terra";
@@ -52,9 +50,7 @@ class ProjectModelSettingsTest {
         credentials = mock(ProviderCredentialRepository.class);
         ProjectOrgResolver orgs = mock(ProjectOrgResolver.class);
         when(orgs.orgIdFor(PID)).thenReturn(ORG);
-        // Every model in either lane's priority order is reachable by default, so a test that cares
-        // about validation or caching does not also have to say which providers the org has. The
-        // tests that DO care call configured(...) to narrow it.
+        // Every provider is configured by default; tests that care narrow it with configured(...).
         configured(ModelProvider.values());
         settings = new ProjectModelSettings(repo, credentials, orgs, mock(ModelCatalogFetchService.class));
     }
@@ -113,11 +109,8 @@ class ProjectModelSettingsTest {
 
     @Test
     void providerIsChosenBeforeModel() {
-        // The org holds a key for a provider that is NOT first in RCA's order but whose flagship would
-        // outrank the configured provider's smaller model on any flat by-model ranking. Provider order
-        // decides: Bedrock is configured, so RCA runs Bedrock's own default rather than reaching past
-        // it. Both providers here are in the list, which is what makes the ordering the thing under
-        // test rather than availability.
+        // Bedrock's flagship would outrank on a flat by-model ranking, but provider order decides: Bedrock is
+        // configured, so RCA runs Bedrock's default.
         configured(ModelProvider.BEDROCK, ModelProvider.GEMINI);
         assertEquals(
                 SONNET_5, settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey());
@@ -131,8 +124,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void triageAcceptsTheSameFrontierModelRcaDoes() {
-        // Sonnet 5 is RCA's own default on Bedrock. With the ceiling gone it is also TRIAGE's default,
-        // and a raw PUT naming it explicitly on either lane now succeeds identically.
+        // Sonnet 5 is the default on both lanes, and an explicit PUT naming it succeeds on either.
         settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5);
         verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
         settings.set(PID, ORG, ModelLane.RCA, SONNET_5);
@@ -141,13 +133,8 @@ class ProjectModelSettingsTest {
 
     @Test
     void everyLaneReachesEveryProviderTheSandboxCanRun() {
-        // The coverage rule: whichever single key an org holds, both lanes resolve to something.
-        // ANTHROPIC, OPENROUTER and MOONSHOT used to be absent here because the sandbox launcher had
-        // no provider mode for them; it now has one for all ten, so the rule is over the whole enum.
-        // Asserted as allOf rather than a hand-listed set on purpose: a new ModelProvider constant
-        // must fail this test until it is given both a launcher mode and a place on both lanes, which
-        // is the mistake the three exclusions above were.
-        // TYPESAFE is the one exclusion: it serves decision models only, never a sandbox agent.
+        // Whichever single key an org holds, both lanes resolve. allOf, not a hand-listed set, so a new ModelProvider
+        // fails here until it has a launcher mode and a place on both lanes. TYPESAFE serves decision models only.
         Set<ModelProvider> reachable = EnumSet.complementOf(EnumSet.of(ModelProvider.TYPESAFE));
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             Set<ModelProvider> covered = LanePriority.of(lane).stream()
@@ -228,9 +215,7 @@ class ProjectModelSettingsTest {
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
         assertEquals(HAIKU, rca.modelKey());
         assertFalse(rca.automatic());
-        // TRIAGE has no row of its own, so it resolves independently through its own (now identical)
-        // provider order rather than inheriting RCA's pinned Haiku — it lands on SONNET_5 only because
-        // that is Bedrock's default on both lanes, not because the two lanes are coupled.
+        // TRIAGE resolves through its own provider order, not RCA's pinned Haiku.
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
         assertEquals(SONNET_5, triage.modelKey());
         assertTrue(triage.automatic());
@@ -238,8 +223,8 @@ class ProjectModelSettingsTest {
 
     @Test
     void anExplicitChoiceWhoseProviderIsGoneFallsBackToTheOrder() {
-        // A credential deleted after the choice was made. The lane must keep running, and the row must
-        // survive so re-adding the key brings the choice back.
+        // The credential was deleted after the choice: the lane keeps running and the row survives for when the key
+        // returns.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
         configured(ModelProvider.BEDROCK);
 
@@ -265,12 +250,8 @@ class ProjectModelSettingsTest {
     }
 
     /**
-     * Nova was removed (Amazon is not a supported maker), and every model left in
-     * {@link BedrockModelProfile#PROFILES} is agentic=true — there is no findable, non-agentic
-     * Bedrock model left to exercise {@code MODEL_NOT_AGENTIC} through the Bedrock half of
-     * {@link ProjectModelSettings#validate} any more. {@code aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane}
-     * below is the surviving {@code MODEL_NOT_AGENTIC} coverage, via the catalog half instead —
-     * {@code OPENAI:gpt-5.5} is a real, non-agentic entry.
+     * No non-agentic Bedrock model is left, so this key fails as unknown. {@code
+     * aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane} covers {@code MODEL_NOT_AGENTIC} via the catalog.
      */
     @Test
     void aNovaShapedKeyFailsAsUnknownRatherThanNonAgentic() {
@@ -282,16 +263,14 @@ class ProjectModelSettingsTest {
 
     @Test
     void aStoredRowForARemovedModelFallsBackToTheOrder() {
-        // A row written before the validator existed (or before Nova was removed
-        // entirely) must not pin a sandbox to a model that no longer resolves anywhere.
+        // A row from before the validator must not pin a sandbox to a model that resolves nowhere.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, NOVA, ServiceTier.STANDARD)));
         assertTrue(settings.resolve(PID, ModelLane.RCA).orElseThrow().automatic());
     }
 
     @Test
     void aStoredPairThatIsNoLongerSupportedFallsBackToTheOrder() {
-        // If AWS retires a tier for a model (or we drop a model from the profile list), the stored row
-        // would otherwise fail EVERY call in that lane.
+        // A retired tier would otherwise fail every call in the lane.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.FLEX)));
 
         assertTrue(
@@ -302,8 +281,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void readsAreCachedAndInvalidatedOnWrite() {
-        // Reads sit on the path of every LLM call, so they must not hit Postgres each time — but a
-        // settings change has to take effect on the NEXT call, not after some TTL.
+        // Cached on the LLM call path, but a change applies on the next call, not after a TTL.
         settings.resolve(PID, ModelLane.RCA);
         settings.resolve(PID, ModelLane.RCA);
         verify(repo, times(1)).findByProject(PID);
@@ -315,8 +293,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void clearingALaneDeletesTheRowRatherThanWritingADefault() {
-        // There is no default to write: the lane goes back to its priority order, resolved against
-        // whatever providers the org has at the time.
+        // No default is written: the lane returns to its priority order.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.STANDARD)));
         settings.clear(PID, ModelLane.RCA);
         verify(repo).delete(PID, ModelLane.RCA);
@@ -326,9 +303,8 @@ class ProjectModelSettingsTest {
     }
 
     /**
-     * A stored row the validator would refuse today (written before a rule existed, or by hand) must not
-     * pin the lane: a chat model on a sandbox lane cannot drive the agent, a chat model on the decision
-     * lane cannot answer a decision, and a key naming no provider resolves nowhere.
+     * A stored row the validator would refuse today must not pin the lane: a chat model cannot drive a sandbox or
+     * answer a decision, and a key naming no provider resolves nowhere.
      */
     @ParameterizedTest
     @CsvSource({
@@ -352,8 +328,6 @@ class ProjectModelSettingsTest {
         assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
     }
 
-    // ---- the non-Bedrock model_key union (GEMINI/GLM/GROK/CUSTOM) ----
-
     @Test
     void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {
         settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
@@ -369,8 +343,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aCatalogEntryThatIsNotAgentic_isRejectedOnTheSandboxLane() {
-        // OPENAI:gpt-5.5 is a real ModelCatalog entry (chat-completion only, agentic=false) — a valid
-        // model, just not one offered for a lane that hands its id to a sandbox agent.
+        // A real catalog entry, but not agentic, so not offered on a sandbox lane.
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.TRIAGE, "OPENAI:gpt-5.5"));
         assertEquals(ModelConfigError.MODEL_NOT_AGENTIC, ex.error());
@@ -395,9 +368,8 @@ class ProjectModelSettingsTest {
 
     @Test
     void resolveAgenticModel_forACatalogRowOnARoutePrefixedProvider_pricingIdCarriesThePrefix() {
-        // Decision 19: Grok, GLM, Moonshot and OpenRouter book keys carry a route prefix ModelCatalog's
-        // own model names do not — modelId (what the agent runs and llm_call.model records) must stay
-        // bare, and pricingId must carry it, or these models price as unknown.
+        // Decision 19: book keys carry a route prefix. modelId stays bare, pricingId carries it, or these price as
+        // unknown.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.GROK, resolved.provider());
@@ -407,8 +379,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aCustomProviderCatalogKey_acceptsAnyModelNameSuffix() {
-        // CUSTOM has no real per-model catalog (ModelCatalog's own comment) — any non-blank suffix is
-        // valid, and it round-trips through resolveAgenticModel as the free-text name the user chose.
+        // CUSTOM has no catalog: any non-blank suffix round-trips as the user's name.
         settings.set(PID, ORG, ModelLane.RCA, "CUSTOM:my-self-hosted-model");
         verify(repo).upsert(PID, ModelLane.RCA, "CUSTOM:my-self-hosted-model", ServiceTier.STANDARD, null);
 

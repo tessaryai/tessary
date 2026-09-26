@@ -23,31 +23,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The partner-facing classifier catalog, against real {@code org_feature_flag} rows.
+ * The partner-facing classifier catalog against real {@code org_feature_flag} rows: two orgs' lists differ by
+ * configuration only.
  *
- * <p>The claim under test is that two orgs' classifier lists differ by <b>configuration only</b>:
- * every module stays defined for everyone, and which of them an org sees is one row.
+ * <p>Non-launch classifiers stay defined and are hidden by flag. Turning a capability off reaches already-seeded
+ * projects: the classifier leaves the list, 404s by id, and stops being swept. Off is not withdrawn: the project's
+ * {@code enabled} switch survives the flag going off and a resync, and flipping it back restores it.
  *
- * <ul>
- *   <li>The non-launch classifiers stay defined and are hidden by flag; an org targeted on sees
- *       all of them, an org that has withheld them sees the launch catalog, with no code branch
- *       between the two.
- *   <li>Turning a capability off reaches <b>already-seeded</b> projects, not just newly created
- *       ones: the classifier leaves the list, 404s by id, and stops being swept.
- *   <li>Switched off is not withdrawn. Withholding writes nothing, so the project's own
- *       {@code enabled} switch survives the flag going off <em>and</em> a full resync (which
- *       runs the retirement path), and flipping the flag back on restores exactly what the
- *       project had.
- * </ul>
- *
- * <p>Most cases seed while their capabilities are ON and narrow afterwards, so each starts from a
- * fully-seeded project, the only starting state in which "takes effect on existing projects"
- * means anything. A capability going <em>off</em> takes effect on the next read, because
- * withholding is a filter; one going <em>on</em> takes effect on the next re-seed, because the
- * row has to be inserted before anything can list it. In production {@link
- * ClassifierCatalogWorker} is that re-seed; here it is usually an explicit {@code seedBuiltIns},
- * and in {@link #flagOnReachesAProjectWithNoTracesAtAll()} it is the worker itself, because
- * <em>which projects that worker scans</em> is the thing under test.
+ * <p>Off takes effect on the next read (a filter); on takes effect on the next re-seed, done here by {@code
+ * seedBuiltIns} or by {@link ClassifierCatalogWorker} itself.
  */
 @SpringBootTest
 class PartnerCatalogTest {
@@ -82,10 +66,7 @@ class PartnerCatalogTest {
         flags.invalidate(orgId);
     }
 
-    /**
-     * Pin one capability OFF for one org: an explicit row, not the absence of one. The absence of
-     * a row means ON for everything under test here, so withholding has to be stated.
-     */
+    /** An explicit OFF row: no row means ON here. */
     private void withhold(String orgId, Capability capability) {
         overrides.upsert(orgId, capability.wire(), false);
         flags.invalidate(orgId);
@@ -98,7 +79,7 @@ class PartnerCatalogTest {
                 .collect(Collectors.toUnmodifiableSet());
     }
 
-    /** Whether the row still physically exists for the project, ignoring the flag layer entirely. */
+    /** Whether the row physically exists, ignoring the flag layer. */
     private ClassifierRow storedRow(String projectId, String key) {
         return ClassifierRows.byKey(rows, projectId, key).orElseThrow();
     }
@@ -107,20 +88,18 @@ class PartnerCatalogTest {
     void flaggingOffReachesAnAlreadySeededProjectAndStopsItSweeping() {
         var fix = TenantFixture.bootstrap(tenants, "catalog-withdraw");
         String projectId = fix.project().id();
-        // Seeded and visible while the capability is on: the state a project is in before anyone
-        // flips anything.
+        // Seeded and visible while the capability is on.
         grant(fix.org().id(), Capability.SECRET_LEAK);
         classifiers.seedBuiltIns(projectId);
         assertTrue(visibleKeys(projectId).contains("secret_leak"), "on, the classifier is in the list");
         String id = storedRow(projectId, "secret_leak").id();
         assertEquals(id, classifiers.get(projectId, id).id(), "and readable by id");
 
-        // Turn it off for this org. No re-seed, no project edit, no deploy.
+        // Off for this org. No re-seed, no project edit, no deploy.
         withhold(fix.org().id(), Capability.SECRET_LEAK);
 
         assertFalse(visibleKeys(projectId).contains("secret_leak"), "it leaves an EXISTING project's list");
-        // 404 rather than 403: from this org's point of view there is no such classifier, and a "you can't
-        // have this" would itself be a mention of a capability the org doesn't have.
+        // 404, not 403: a "you can't have this" would itself mention a capability the org doesn't have.
         assertThrows(TessaryException.class, () -> classifiers.get(projectId, id), "and 404s by id");
         assertThrows(
                 TessaryException.class, () -> classifiers.setEnabled(projectId, id, false), "and cannot be written");
@@ -132,26 +111,18 @@ class PartnerCatalogTest {
     }
 
     /**
-     * A flag going ON must reach a project that has <b>never sent a single trace</b>: catalog
-     * provisioning must not be a function of trace ingestion, or a capability flip on a quiet
-     * project would silently wait for its first production span before taking effect.
-     *
-     * <p>The test drives {@link ClassifierCatalogWorker#tick()} rather than {@code
-     * resyncBuiltIns}, because which projects get scanned is what is under test. Asserting
-     * mid-test that the project is absent from {@code projectsWithObservations()} pins that a
-     * project with zero spans is reached anyway.
+     * A flag going on reaches a project that never sent a trace, or a quiet project would wait for its first span.
+     * Drives {@link ClassifierCatalogWorker#tick()} because which projects get scanned is under test.
      */
     @Test
     void flagOnReachesAProjectWithNoTracesAtAll() {
-        // secret_leak is withheld before the project exists, which is what keeps this premise
-        // reachable: the creation-time ClassifierSeedListener cannot seed it, so the only thing that
-        // can make the row appear later is the periodic reconcile.
+        // Withheld before the project exists, so the creation-time seed skips it and only the reconcile can add it.
         var fix = TenantFixture.bootstrap(
                 tenants, "catalog-no-traces", org -> withhold(org.id(), Capability.SECRET_LEAK));
         String projectId = fix.project().id();
         assertFalse(ClassifierRows.byKey(rows, projectId, "secret_leak").isPresent(), "off at creation, never seeded");
 
-        grant(fix.org().id(), Capability.SECRET_LEAK); // the org gains the capability, nothing else changes
+        grant(fix.org().id(), Capability.SECRET_LEAK); // the only change
         assertFalse(
                 substrate.projectsWithObservations().contains(projectId),
                 "the project has never ingested a span, which used to make it invisible to provisioning");
@@ -167,10 +138,8 @@ class PartnerCatalogTest {
     }
 
     /**
-     * Guards against a future edit that expresses "flagged off" by disabling the row instead of
-     * withholding it: it asserts the row is still {@code enabled} after the flag went off and
-     * after a resync has run the retirement path over it, which is exactly what a withdrawal
-     * would have destroyed.
+     * Guards against expressing "flagged off" by disabling the row: it stays {@code enabled} after the flag goes off
+     * and a resync runs retirement.
      */
     @Test
     void flagOffNeverWritesToTheRow() {
@@ -183,7 +152,7 @@ class PartnerCatalogTest {
         assertTrue(storedRow(projectId, "secret_leak").enabled(), "it seeds enabled");
 
         withhold(fix.org().id(), Capability.SECRET_LEAK);
-        classifiers.resyncBuiltIns(fix.project()); // seeds, then runs retireDroppedBuiltIns over every row
+        classifiers.resyncBuiltIns(fix.project()); // seeds, then retires dropped built-ins
 
         ClassifierRow stored = storedRow(projectId, "secret_leak");
         assertEquals(id, stored.id(), "the row is neither deleted nor re-inserted under a new id");

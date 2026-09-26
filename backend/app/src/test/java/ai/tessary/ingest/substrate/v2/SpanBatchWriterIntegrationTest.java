@@ -48,27 +48,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * The v2 write path against the real schema: what one drained batch does to
- * {@code session / trace / span / span_payload}, and the three invariants the spec says must hold in
- * code rather than only on paper.
+ * The v2 write path against the real schema: what one drained batch does to {@code session / trace / span /
+ * span_payload}, and three spec invariants. §6.1: a span row and its trace re-arm commit together or not at all.
+ * §6.2: a completed span replaces its partial, an older redelivery cannot undo it, and neither overwrites platform-
+ * derived fields. §7.1: one trace update per trace per batch, with sorted locking so overlapping batches cannot
+ * deadlock.
  *
- * <p>The three, in the order they are proven below:
- *
- * <ol>
- *   <li><b>§6.1 atomicity.</b> A span row and the trace re-arm that reflects it commit together, or neither
- *       does. Break it and the settle protocol silently excludes a visible span from a settling rollup.
- *   <li><b>§6.2 last-write-wins.</b> A span's completed version replaces the partial that preceded it, an
- *       older redelivery cannot undo it, and neither can overwrite what the PLATFORM derived.
- *   <li><b>§7.1 coalescing.</b> One trace update per trace per batch — not one per span — and sorted
- *       locking so two batches over overlapping traces cannot deadlock.
- * </ol>
- *
- * <p>The scheduled resolvers are off in this context. They tick every second, and half the assertions here
- * are about what the write path did and did NOT derive — {@code path} is null on arrival because ancestry
- * belongs to the fixpoint — which a resolver racing the assertion would make flaky rather than wrong. The
- * rollup worker is off for the harder version of the same reason: it claims due traces GLOBALLY, so a
- * running one could take the claim out from under {@link #settle} and leave the assertion reading a trace
- * something else had already rolled up.
+ * <p>The resolvers and rollup worker are off: several assertions are about what the write path did not derive, and
+ * the worker claims due traces globally.
  */
 @SpringBootTest(
         properties = {
@@ -137,8 +124,6 @@ class SpanBatchWriterIntegrationTest {
         t0 = Instant.parse("2026-08-12T10:00:00Z");
     }
 
-    // ---- the shape one batch lands ------------------------------------------------------------------
-
     @Test
     @DisplayName("one batch lands session, trace and spans, with the payload split off the row")
     void write_landsTheWholeSpine() {
@@ -187,10 +172,8 @@ class SpanBatchWriterIntegrationTest {
     @DisplayName("§6.1 — a batch that fails to commit leaves no trace or session row behind")
     void write_failedBatchLeavesNoIdentityRows() {
         String traceId = traceId("uncommittable");
-        // A tool call whose arguments are valid JSON that Postgres will not take as jsonb: \u0000 is a legal
-        // escape in a JSON string and has no representation in Postgres text, so Jackson parses it and the
-        // bind throws. This is the real shape — a web search result carrying a NUL byte — that failed a
-        // batch mid-transaction and left the shell this test exists to forbid.
+        // Valid JSON Postgres will not take as jsonb: a \u0000 escape, from a real web search result. It failed a
+        // batch mid-transaction and left the shell this test forbids.
         RawEntry uncommittable = new RawEntry(
                 "tool-1",
                 "execute_tool",
@@ -223,7 +206,7 @@ class SpanBatchWriterIntegrationTest {
     @DisplayName("rows no v2 row could represent are dropped before the transaction, and the batch still lands")
     void write_poisonRowsAreDroppedNotThrown() {
         String traceId = traceId("poison");
-        // Its own writer instance, so the drop counter is this test's and not the whole suite's.
+        // Its own writer, so the drop counter is this test's.
         SpanBatchWriter isolated = newWriter(traces);
         List<RawEntry> batch = new ArrayList<>();
         batch.add(span("ok", null, traceId, KindNormalizer.LLM, t0, t0, Map.of()));
@@ -247,7 +230,7 @@ class SpanBatchWriterIntegrationTest {
                 "huge-input", "n", "x".repeat(8_000_001), "o", null, Map.of(), null, traceId, t0.toString(), null));
         batch.add(span("long-session", null, traceId, KindNormalizer.LLM, t0, t0, meta("s".repeat(513))));
         batch.add(new RawEntry("bad-start", "n", "i", "o", null, Map.of(), null, traceId, "yesterday", null));
-        // ISO-8601 allows a 60th second; an offset parser refuses it, an instant parser reads it as :59.
+        // ISO-8601 allows a 60th second; an instant parser reads it as :59.
         batch.add(new RawEntry("leap", "n", "i", "o", null, Map.of(), null, traceId, "2026-08-12T23:59:60Z", null));
 
         assertEquals(2, isolated.write(pid, batch), "the ordinary span and the leap-second one");
@@ -293,8 +276,6 @@ class SpanBatchWriterIntegrationTest {
                 "ended 2.5s after the watermark (the rolled-up span's end): one sample in the 1s-10s bucket");
     }
 
-    // ---- §6.1 atomicity ------------------------------------------------------------------------------
-
     @Test
     @DisplayName("§6.1: a failure between the span write and the trace re-arm leaves NEITHER visible")
     void atomicity_spanAndTraceReArmCommitTogether() {
@@ -319,10 +300,6 @@ class SpanBatchWriterIntegrationTest {
                         + "outside the transaction and accepted the shell it strands. Nothing can complete that "
                         + "row and nothing can retire it");
     }
-
-    // ---- §6.2 last write wins ------------------------------------------------------------------------
-
-    // ---- §7.1 batch coalescing ----------------------------------------------------------------------
 
     @Test
     @DisplayName("§7.1: 1,000 spans over 50 traces are 50 trace updates in one statement, not 1,000 statements")
@@ -361,8 +338,7 @@ class SpanBatchWriterIntegrationTest {
         for (int i = 0; i < 20; i++) {
             traceIds.add(traceId("dl-" + i));
         }
-        // Two batches naming the same traces in OPPOSITE orders: the shape that deadlocks the moment two
-        // writers lock rows in the order they happen to hold them.
+        // The same traces in opposite orders: the shape that deadlocks without sorted locking.
         List<RawEntry> ascending = new ArrayList<>();
         List<RawEntry> descending = new ArrayList<>();
         for (int i = 0; i < traceIds.size(); i++) {
@@ -403,8 +379,6 @@ class SpanBatchWriterIntegrationTest {
             }
         };
     }
-
-    // ---- §6.5 pricing --------------------------------------------------------------------------------
 
     @Test
     @DisplayName("§6.5: usage with a known model is priced at write and stamped with the book that did it")
@@ -483,8 +457,8 @@ class SpanBatchWriterIntegrationTest {
     @DisplayName("§6.5: a container span's cumulative usage and cost are a receipt, so the rollup cannot double-count")
     void pricing_containerKindsDoNotDoubleCountIntoTheTrace() {
         String traceId = traceId("container");
-        // The shape that produces the bug: an agent span reporting the SUM of its children, plus the
-        // children themselves. Storing its numbers verbatim would put the whole subtree into the trace twice.
+        // An agent span reporting the sum of its children, beside the children: stored verbatim, the subtree counts
+        // twice.
         Map<String, Object> agentAttrs = new HashMap<>(usageAttrs(2_000_000L, 2_000_000L));
         agentAttrs.put(GenAiAttributes.USAGE_COST, "8.00");
         Map<String, Object> childAttrs = new HashMap<>(usageAttrs(1_000_000L, 1_000_000L));
@@ -537,12 +511,9 @@ class SpanBatchWriterIntegrationTest {
         assertEquals(4_000_000L, trace.totalTokens());
     }
 
-    // ---- helpers -------------------------------------------------------------------------------------
-
     /**
-     * A writer with the real collaborators and one substituted trace repository, so a test can induce a
-     * failure at an exact point of the batch, or count the statements it issues, without a bean override
-     * (which would cost this class its own Spring context and a fresh Liquibase run).
+     * Real collaborators with one substituted trace repository, to fail at an exact point or count statements without
+     * a bean override (which would cost a Spring context).
      */
     private SpanBatchWriter newWriter(TraceV2Repository tracesRepo) {
         return new SpanBatchWriter(
@@ -562,10 +533,7 @@ class SpanBatchWriterIntegrationTest {
                 transactionManager);
     }
 
-    /**
-     * The bean behind the proxy. Spring wraps every {@code @Repository} for persistence-exception
-     * translation, and Mockito cannot spy a proxy — there are no fields on it to copy.
-     */
+    /** The bean behind the {@code @Repository} proxy: Mockito cannot spy a proxy. */
     private static TraceV2Repository unproxied(TraceV2Repository repository) {
         if (!AopUtils.isAopProxy(repository)) return repository;
         try {
@@ -577,7 +545,7 @@ class SpanBatchWriterIntegrationTest {
         }
     }
 
-    /** Claim and recompute once, with the deadline pulled forward — the rollup worker's tick, run inline. */
+    /** The rollup worker's tick, run inline with the deadline pulled forward. */
     private void settle(String traceId) {
         jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
                         + " WHERE project_id = :pid AND id = :id")
