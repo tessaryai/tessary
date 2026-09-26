@@ -21,9 +21,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Protocol-level behaviour of {@link McpDispatcher}. The contract here is
- * the MCP wire — if we break the distinction between JSON-RPC errors (protocol)
- * and tool errors (application), clients can't tell whether to retry or surface.
+ * {@link McpDispatcher} on the MCP wire: JSON-RPC errors (protocol) and tool errors (application) stay distinct, or
+ * clients cannot tell whether to retry or surface.
  */
 class McpDispatcherTest {
 
@@ -52,7 +51,7 @@ class McpDispatcherTest {
         return new TenantContext("u", "u@x", "o", "p", "member", null);
     }
 
-    /** Asserts the dispatch produced a response (most methods do) and returns it non-null. */
+    /** The dispatch produced a response. */
     private static JsonRpc.Response require(JsonRpc.@Nullable Response r) {
         assertNotNull(r);
         return Objects.requireNonNull(r);
@@ -95,7 +94,7 @@ class McpDispatcherTest {
 
     @Test
     void notification_unknownMethod_stillSilent() {
-        // unknown methods that arrive as notifications shouldn't emit JSON-RPC errors.
+        // Unknown notifications emit no JSON-RPC error.
         JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/whatever", null);
         assertNull(dispatcher.dispatch(n, ctx()));
     }
@@ -111,8 +110,7 @@ class McpDispatcherTest {
     void toolsCall_unknownTool_isToolErrorNotProtocolError() throws Exception {
         JsonNode params = mapper.readTree("{\"name\":\"does-not-exist\",\"arguments\":{}}");
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-        // Spec: unknown tool is reported INSIDE the result with isError=true,
-        // not as a JSON-RPC error. Clients use this to decide retry vs UI surface.
+        // Spec: an unknown tool is an isError result, not a JSON-RPC error.
         assertNull(r.error());
         assertEquals(Boolean.TRUE, resultMap(r).get("isError"));
     }
@@ -132,7 +130,7 @@ class McpDispatcherTest {
     @Test
     void toolsCall_toolThrowsRuntime_isProtocolError() throws Exception {
         JsonNode params = mapper.readTree("{\"name\":\"kaboom\",\"arguments\":{}}");
-        // Unexpected exceptions ARE protocol errors — caller can't recover by retrying input.
+        // Unexpected exceptions are protocol errors.
         assertEquals(
                 JsonRpc.INTERNAL_ERROR,
                 error(dispatcher.dispatch(req(1, "tools/call", params), ctx())).code());
@@ -166,9 +164,7 @@ class McpDispatcherTest {
     }
 
     /**
-     * A tool result Jackson cannot pretty-print still comes back as a successful tool result, its text block
-     * falling back to the value's own string form. Letting the serialisation failure escape would turn a tool
-     * that answered into a -32603 the client reads as a server fault.
+     * A result Jackson cannot pretty-print falls back to its string form rather than becoming a -32603 server fault.
      */
     @Test
     void toolsCall_aResultJacksonCannotRenderStillReturnsTheResult() throws Exception {
@@ -209,10 +205,7 @@ class McpDispatcherTest {
         assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
     }
 
-    /**
-     * A batch element that decodes to nothing ({@code [null]}) reaches the dispatcher as a null request. It is an
-     * invalid request answered with a null id, not a NullPointerException that would fail the whole batch.
-     */
+    /** A batch element decoding to null is an invalid request with a null id, not an NPE failing the whole batch. */
     @Test
     void aNullRequestIsAnInvalidRequestWithANullId() {
         JsonRpc.Response r = require(dispatcher.dispatch(null, ctx()));
@@ -221,10 +214,7 @@ class McpDispatcherTest {
         assertEquals(JsonRpc.INVALID_REQUEST, error(r).code());
     }
 
-    /**
-     * A known method sent as a notification (no id at all, or a null id) is run but answered with nothing: a
-     * response to a notification is a protocol violation clients may choke on.
-     */
+    /** A known method sent as a notification runs but gets no response, which clients may choke on. */
     @Test
     void aKnownMethodSentAsANotificationGetsNoResponse() {
         assertNull(dispatcher.dispatch(new JsonRpc.Request("2.0", null, "ping", null), ctx()));

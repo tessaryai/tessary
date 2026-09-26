@@ -36,23 +36,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Web-layer acceptance for the v2 trace read API.
- *
- * <p>Driven directly against the controller with a real bootstrapped tenant, so {@code requireProject}
- * and {@code ORG_VIEW} are exercised for real rather than mocked away.
- *
- * <p>What these assert, beyond "the endpoint works":
- *
- * <ul>
- *   <li>The list serves the rollup worker's numbers. The provenance case is in
- *       {@code TraceSubstrateRepositoryTest}; here the concern is that the wire carries them intact,
- *       including the three-way distinction between unsettled, no-usage and unpriced that a single em
- *       dash used to flatten.
- *   <li>A deep link minted before the cutover still resolves. The path parameter is a producer trace id
- *       now, and every bookmark in existence carries a v1 ULID.
- *   <li>A cursor minted before the cutover degrades to page one instead of resuming from a point that is
- *       not on the v2 ordering.
- * </ul>
+ * The v2 trace read API against a real tenant, so {@code requireProject} and {@code ORG_VIEW} run for real. The wire
+ * carries the rollup numbers intact, keeping unsettled, no-usage, and unpriced distinct; a pre-cutover deep link (a
+ * v1 ULID) still resolves; and a pre-cutover cursor degrades to page one.
  */
 @SpringBootTest(
         properties = {
@@ -222,7 +208,7 @@ class TracesControllerTest {
         String traceId = SubstrateV2Fixtures.traceId();
         fx.trace(t.pid(), traceId, t0);
 
-        // The v1 cursor shape: [occurred_at, id], base64 of the PreviewCursor envelope, no version tag.
+        // The v1 cursor: [occurred_at, id] in a PreviewCursor envelope, no version tag.
         String legacy = ai.tessary.ingest.PreviewCursor.encode(t0 + "\u001f" + Ids.ulid(), 0);
         var page = ok(controller.list(
                 t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null));
@@ -270,9 +256,8 @@ class TracesControllerTest {
     @Test
     @DisplayName("export preserves real image and document bytes as inline data: URIs, one JSONL span per line")
     void exportRoundTripsRealMediaBytes() throws Exception {
-        // The endpoint TraceSpanMapper.toSpan/toSpanLine had zero production callers before this test.
-        // Base64 media needs no MediaStore round trip (the bytes are already inline), so this
-        // exercises the export wiring end to end without a separate media-store seeding step.
+        // TraceSpanMapper's export had no production callers before this. Base64 media is inline, so no MediaStore
+        // seeding.
         Tenant t = tenant("traces-export");
         Instant t0 = Instant.parse("2026-09-02T12:00:00Z");
         String traceId = SubstrateV2Fixtures.traceId();
@@ -301,8 +286,7 @@ class TracesControllerTest {
         String body = java.util.Objects.requireNonNull(response.getBody());
         String[] lines = body.strip().split("\n");
         assertEquals(1, lines.length, "one JSONL line per span");
-        // gen_ai.input.messages is a JSON-encoded STRING attribute (the plugin's messages-as-attributes
-        // shape), so the message must be decoded from the span line before its fields can be read.
+        // gen_ai.input.messages is a JSON-encoded string attribute, decoded before reading.
         JsonNode inputMessages = MAPPER.readTree(MAPPER.readTree(lines[0])
                 .path("attributes")
                 .path("gen_ai.input.messages")
@@ -329,7 +313,7 @@ class TracesControllerTest {
                         .getStatusCode());
     }
 
-    /** Roll one trace up synchronously — the scheduler is off in this context, so nothing races it. */
+    /** The scheduler is off, so nothing races this rollup. */
     @Test
     @DisplayName("a trace opens with each tool call and retrieved document on the span that made it")
     void detailHangsEachToolCallAndDocumentOffItsOwnSpan() {

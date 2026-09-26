@@ -25,19 +25,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The settings payload's shape, held against the one claim
- * {@link ProjectModelSettingController} makes about itself: the page must be renderable with no lane,
- * group or model knowledge of its own.
- *
- * <p>That claim is not checkable by the compiler and only half-checkable by the OpenAPI drift test,
- * which pins the field NAMES against the spec but says nothing about whether the values reaching them
- * are self-consistent — a lane whose group has no section, or whose options name a model the payload
- * does not carry, serializes perfectly and renders a dropdown with a missing heading or a blank
- * selection. Those are the two ways this payload has actually broken.
- *
- * <p>A unit test rather than a Spring one deliberately: none of these facts involve the database. The
- * org here holds no provider credential, which is the shape a brand-new org has: every lane's
- * {@code effective_model_key} is null and the page asks for a provider rather than a model.
+ * The settings payload against {@link ProjectModelSettingController}'s claim: the page renders with no lane, group,
+ * or model knowledge of its own. The OpenAPI drift test pins names, not consistency; a lane whose group has no
+ * section, or an option naming a model the payload lacks, serializes fine and renders broken. The org holds no
+ * credential, like a new org, so every {@code effective_model_key} is null.
  */
 class ProjectModelSettingViewTest {
 
@@ -79,12 +70,9 @@ class ProjectModelSettingViewTest {
 
     @Test
     void eachLaneCarriesItsOwnOptionsGroupedByProviderInPriorityOrder() {
-        // Every option a lane offers must name a model the same payload describes, or the dropdown
-        // renders a key with no label — the wrong-label failure this page was rebuilt to end.
+        // Every option names a model the payload describes, or the dropdown shows a key with no label.
         var v = view();
-        // A lane's model keys can name either half of the model_key union — a Bedrock key
-        // (v.models()) or a "<PROVIDER>:<model_name>" catalog key (v.catalogModels()) — so the
-        // catalogue this test checks every offered key against must be the union of both.
+        // Keys can be Bedrock (models) or catalog (catalogModels), so check against the union.
         Set<String> catalogue = new java.util.HashSet<>(v.models().stream()
                 .map(BedrockModelProfile.ModelDescriptor::modelKey)
                 .toList());
@@ -115,8 +103,7 @@ class ProjectModelSettingViewTest {
 
     @Test
     void anOrgWithNoProviderRunsNoModelOnAnyLane() {
-        // The state the page has to say out loud rather than paper over with a default: no credential
-        // means no model, on every lane, and automatic (nobody has chosen anything yet).
+        // No credential means no model on every lane, and automatic; the page says so rather than defaulting.
         for (var lane : view().lanes()) {
             assertNull(lane.effectiveModelKey(), "lane " + lane.id() + " has no provider to run on");
             assertTrue(lane.automatic(), "lane " + lane.id());
@@ -125,15 +112,12 @@ class ProjectModelSettingViewTest {
 
     @Test
     void theWireNamesAreSnakeCaseAndTheRetiredFieldsAreGone() throws Exception {
-        // Serialization rather than record accessors, because the frontend reads the JSON: a dropped
-        // @JsonProperty renames a field to camelCase and every consumer silently reads undefined. The
-        // absent-field assertions are the cutover's own: there is no default model anywhere in this
-        // payload any more, and LaneView.tiered is retired.
+        // Serialized, since the frontend reads JSON: a dropped @JsonProperty turns a field camelCase and consumers
+        // read undefined. No default model remains, and LaneView.tiered is retired.
         JsonNode json = new ObjectMapper().valueToTree(view());
 
         assertTrue(json.at("/default_model_key").isMissingNode(), "a default named a provider the org may not have");
-        // RCA, not "assistant": ModelLane.ASSISTANT (the lane that used to ship first) is deleted,
-        // so RCA is first in declaration order now, and it is an AGENT_VM lane — no tier, no effort.
+        // ModelLane.ASSISTANT is deleted, so RCA is first: an AGENT_VM lane with no tier or effort.
         JsonNode rca = json.at("/lanes/0");
         assertEquals("rca", rca.at("/id").asText(), "lanes ship in ModelLane declaration order");
         assertEquals("agent_vm", rca.at("/group").asText());
@@ -142,8 +126,7 @@ class ProjectModelSettingViewTest {
         assertTrue(rca.at("/automatic").asBoolean());
         assertTrue(rca.at("/model_keys").isMissingNode(), "options are grouped by provider now, not flat");
         assertTrue(rca.at("/provider_options").isArray());
-        // The default a lane DOES carry sits one level down, per provider: which model that provider
-        // runs when nobody has chosen. That is the shape the page's two dropdowns read.
+        // Each provider carries the model it runs when nobody has chosen, which the page's two dropdowns read.
         assertEquals("BEDROCK", rca.at("/provider_options/0/provider").asText());
         assertEquals("AWS Bedrock", rca.at("/provider_options/0/label").asText());
         assertEquals(
@@ -156,8 +139,7 @@ class ProjectModelSettingViewTest {
         assertFalse(json.at("/groups/1/model_selectable").asBoolean());
         assertTrue(json.at("/groups/0/model_selectable").asBoolean());
 
-        // Every surviving lane, on the wire name it ships under — "grading", "synthesis" and
-        // "assistant" are gone; this set is what a client may now PUT.
+        // The surviving lanes, the set a client may PUT.
         Set<String> laneIds = json.at("/lanes").findValuesAsText("id").stream().collect(Collectors.toSet());
         assertEquals(Set.of("rca", "triage", "frustration"), laneIds);
     }
