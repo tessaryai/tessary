@@ -93,6 +93,10 @@ export function Retention() {
             <Spinner size="sm" />
             Loading retention…
           </div>
+        ) : view.isError ? (
+          <p className="text-small text-error">
+            {(view.error as ApiError)?.message ?? "Could not load retention. Try again."}
+          </p>
         ) : (
           <div className="rounded-card border border-border divide-y divide-border">
             {classes.map((c) => {
