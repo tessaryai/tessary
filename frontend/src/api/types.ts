@@ -177,7 +177,7 @@ export type RedactionRuleView = S["RuleView"];
 /** Settings → Data retention: one row per data class the hourly sweep enforces. */
 export type RetentionClassView = S["RetentionClassView"];
 export type RetentionView = S["RetentionView"];
-/** Replaces both overrides: a number sets one (0 keeps forever), `null` clears it. */
+/** Replaces both overrides: a number sets one (0 keeps forever), `null` clears it; refused while retention is fixed. */
 export type RetentionUpdateRequest = S["RetentionUpdateRequest"];
 
 export type RedactionRuleListView = S["RuleListView"];

@@ -8011,12 +8011,12 @@
           "data_class" : {
             "type" : "string"
           },
-          "from_policy" : {
-            "type" : "boolean"
-          },
-          "max_ttl_days" : {
+          "fixed_ttl_days" : {
             "format" : "int32",
             "type" : "integer"
+          },
+          "from_policy" : {
+            "type" : "boolean"
           },
           "platform_default_days" : {
             "format" : "int32",
@@ -8029,8 +8029,8 @@
         },
         "required" : [
           "data_class",
+          "fixed_ttl_days",
           "from_policy",
-          "max_ttl_days",
           "platform_default_days",
           "ttl_days"
         ],

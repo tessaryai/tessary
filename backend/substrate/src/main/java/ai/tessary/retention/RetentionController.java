@@ -27,8 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
  * Settings → Data retention: how long this project keeps traces and detections. The
  * install-wide default comes from {@code tessary.retention.*}; a project override is a
  * {@code retention_policy} row, and clearing the override returns the project to the default.
- * {@code 0} means keep forever. The sweeper reads the same {@link RetentionResolver}, so what this
- * page shows is what the hourly pass enforces.
+ * {@code 0} means keep forever. When {@link FixedRetention} fixes a project's retention, the page is read-only
+ * and every update is refused. The sweeper reads the same {@link RetentionResolver}, so what this page shows
+ * is what the hourly pass enforces.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/retention")
@@ -50,7 +51,7 @@ public class RetentionController {
             @JsonProperty("ttl_days") int ttlDays,
             @JsonProperty("from_policy") boolean fromPolicy,
             @JsonProperty("platform_default_days") int platformDefaultDays,
-            @JsonProperty("max_ttl_days") int maxTtlDays) {}
+            @JsonProperty("fixed_ttl_days") int fixedTtlDays) {}
 
     public record RetentionView(
             List<RetentionClassView> classes,
@@ -59,6 +60,7 @@ public class RetentionController {
     /**
      * Replaces both overrides at once: a number sets that class's override ({@code 0} keeps
      * forever), and {@code null} or an absent key clears it so the install default applies.
+     * Refused when either class's retention is fixed.
      */
     public record RetentionUpdateRequest(
             @Nullable @Min(0) Integer traces,
@@ -80,6 +82,12 @@ public class RetentionController {
             @Valid @RequestBody RetentionUpdateRequest req) {
         var r = tenants.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.RETENTION_MANAGE, "change data retention");
+        for (RetentionResolver.DataClass dataClass : RetentionResolver.DataClass.values()) {
+            int fixedDays = resolver.fixedTtlDays(r.project().id(), dataClass);
+            if (fixedDays > 0) {
+                throw new TessaryException(RetentionError.FIXED, fixedDays);
+            }
+        }
         apply(r.project().id(), RetentionResolver.DataClass.TRACES, req.traces());
         apply(r.project().id(), RetentionResolver.DataClass.DETECTIONS, req.detections());
         return ApiResponse.ok(view(r.project().id(), true));
@@ -89,10 +97,6 @@ public class RetentionController {
         if (ttlDays == null) {
             policies.delete(projectId, dataClass.wire());
             return;
-        }
-        int max = resolver.maxTtlDays(projectId, dataClass);
-        if (max > 0 && (ttlDays == 0 || ttlDays > max)) {
-            throw new TessaryException(RetentionError.ABOVE_CEILING, ttlDays == 0 ? "forever" : ttlDays + " days", max);
         }
         policies.upsert(new RetentionPolicyRow(
                 Ids.ulid(),
@@ -111,7 +115,7 @@ public class RetentionController {
                         e.ttlDays(),
                         e.fromPolicy(),
                         resolver.platformDefault(e.dataClass()),
-                        resolver.maxTtlDays(projectId, e.dataClass())))
+                        resolver.fixedTtlDays(projectId, e.dataClass())))
                 .toList();
         return new RetentionView(classes, canManage);
     }

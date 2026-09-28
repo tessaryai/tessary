@@ -2,6 +2,7 @@
 package ai.tessary.retention;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -14,24 +15,23 @@ import ai.tessary.config.RetentionProperties;
 import ai.tessary.open.errors.RetentionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.ops.RetentionPolicyRepository;
-import ai.tessary.ops.RetentionPolicyRow;
 import ai.tessary.retention.RetentionController.RetentionUpdateRequest;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
+import java.util.Objects;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 
 /**
- * Saving a retention override against a ceiling another build supplies: anything longer than the
- * ceiling, "keep forever" included, is refused with 422 and nothing is written, so the page cannot
- * record a promise the sweep will not keep.
+ * Saving retention while another build fixes it: every update is refused with 409 and nothing is written or
+ * cleared, so the page cannot record a promise the sweep will not keep. The read reports the fixed value.
  */
 @ExtendWith(MockitoExtension.class)
 class RetentionControllerTest {
@@ -54,32 +54,41 @@ class RetentionControllerTest {
         when(tenants.requireProject(OWNER, "acme", "app"))
                 .thenReturn(new TenantPathResolver.Resolved(org, project, "owner"));
         RetentionResolver resolver =
-                new RetentionResolver(policies, new RetentionProperties(), (projectId, dataClass) -> 30);
+                new RetentionResolver(policies, new RetentionProperties(), (projectId, dataClass) -> 21);
         controller = new RetentionController(resolver, policies, tenants);
     }
 
-    @ParameterizedTest(name = "{0} days is refused")
-    @CsvSource({
-        "0, Retention of forever is above the 30-day ceiling for this project",
-        "31, Retention of 31 days is above the 30-day ceiling for this project",
-    })
-    void anOverrideAboveTheCeilingIsRefusedAndNothingIsWritten(int ttlDays, String message) {
-        TessaryException ex = assertThrows(
-                TessaryException.class,
-                () -> controller.update(OWNER, "acme", "app", new RetentionUpdateRequest(ttlDays, null)));
+    static Stream<RetentionUpdateRequest> updates() {
+        return Stream.of(
+                new RetentionUpdateRequest(7, null),
+                new RetentionUpdateRequest(21, 21),
+                new RetentionUpdateRequest(0, null),
+                new RetentionUpdateRequest(null, null));
+    }
 
-        assertEquals(RetentionError.ABOVE_CEILING, ex.error());
-        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, ex.error().status());
-        assertEquals(message, ex.getMessage());
+    @ParameterizedTest
+    @MethodSource("updates")
+    void everyUpdateIsRefusedAndNothingIsWrittenOrCleared(RetentionUpdateRequest request) {
+        TessaryException ex =
+                assertThrows(TessaryException.class, () -> controller.update(OWNER, "acme", "app", request));
+
+        assertEquals(RetentionError.FIXED, ex.error());
+        assertEquals(HttpStatus.CONFLICT, ex.error().status());
+        assertEquals("Retention for this project is fixed at 21 days and cannot be changed", ex.getMessage());
         verify(policies, never()).upsert(any());
+        verify(policies, never()).delete(any(), any());
     }
 
     @Test
-    void anOverrideAtTheCeilingIsSaved() {
-        controller.update(OWNER, "acme", "app", new RetentionUpdateRequest(30, null));
+    void theReadReportsTheFixedRetentionForEveryClass() {
+        RetentionController.RetentionView view =
+                Objects.requireNonNull(controller.get(OWNER, "acme", "app").data());
 
-        ArgumentCaptor<RetentionPolicyRow> saved = ArgumentCaptor.forClass(RetentionPolicyRow.class);
-        verify(policies).upsert(saved.capture());
-        assertEquals(30, saved.getValue().ttlDays());
+        assertEquals(2, view.classes().size());
+        for (RetentionController.RetentionClassView c : view.classes()) {
+            assertEquals(21, c.ttlDays());
+            assertEquals(21, c.fixedTtlDays());
+            assertFalse(c.fromPolicy());
+        }
     }
 }

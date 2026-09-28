@@ -3789,9 +3789,9 @@ export interface components {
         };
         RetentionClassView: {
             data_class: string;
-            from_policy: boolean;
             /** Format: int32 */
-            max_ttl_days: number;
+            fixed_ttl_days: number;
+            from_policy: boolean;
             /** Format: int32 */
             platform_default_days: number;
             /** Format: int32 */
