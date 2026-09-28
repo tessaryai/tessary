@@ -243,7 +243,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       // reads. The capability gates authoring a custom rule, inside the page, not the page itself.
       { id: "pii-redaction", label: "PII redaction", icon: Shield },
       // How long this project keeps traces and detections; the install default comes from the
-      // deployment's environment, and this page is the per-project override.
+      // deployment's environment, and this page is the per-project override, read-only when another
+      // build fixes the project's retention.
       { id: "retention", label: "Data retention", icon: Hourglass },
     ],
   },

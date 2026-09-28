@@ -25,7 +25,7 @@ const cls = (data_class: string, over: Partial<RetentionClassView> = {}): Retent
   ttl_days: 30,
   from_policy: false,
   platform_default_days: 30,
-  max_ttl_days: 0,
+  fixed_ttl_days: 0,
   ...over,
 });
 /** Traces follow the install default; detections carry an override that keeps them forever. */
@@ -77,6 +77,25 @@ describe("reading", () => {
     renderRoute(<Retention />);
 
     expect((await screen.findByRole("alert")).textContent).toBe("UNAVAILABLE: retention unavailable");
+  });
+
+  it("shows a fixed retention as read-only, with nothing to change or save", async () => {
+    api.getRetention.mockResolvedValue({
+      ...VIEW,
+      classes: [
+        cls("traces", { ttl_days: 21, platform_default_days: 0, fixed_ttl_days: 21 }),
+        cls("detections", { ttl_days: 21, from_policy: false, fixed_ttl_days: 21 }),
+      ],
+    });
+    await ready();
+
+    expect(screen.getByText(/Your plan sets these periods, so they can't be changed here/)).toBeTruthy();
+    expect(screen.queryByText(/set by whoever runs the deployment/)).toBeNull();
+    expect(section("Traces").textContent).toContain("Set by your plan: 21 days");
+    expect(section("Traces").textContent).not.toContain("Install default");
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(days("Traces")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
   it("gives a reader who cannot manage retention no working control", async () => {
