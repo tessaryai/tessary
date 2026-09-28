@@ -52,7 +52,7 @@
         <spotbugs-maven-plugin.version>4.10.4.1</spotbugs-maven-plugin.version>
         <spotbugs.version>4.10.4</spotbugs.version>
         <findsecbugs.version>1.14.0</findsecbugs.version>
-        <awssdk.version>2.54.12</awssdk.version>
+        <awssdk.version>2.55.5</awssdk.version>
         <grpc.version>1.84.0</grpc.version>
         <!-- CVE-2026-65182 / CVE-2026-65905 / CVE-2026-68525: spring-boot-starter-parent:4.1.1's
              BOM pins tomcat-embed-core to 11.0.24. Override ahead of Boot's own BOM until a
