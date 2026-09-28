@@ -6,9 +6,7 @@ import ai.tessary.featureflags.FlagContext;
 import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,7 +18,7 @@ import org.springframework.stereotype.Service;
  *
  * <ol>
  *   <li>the org's own <b>override</b>, if it states one ({@link FeatureFlags});
- *   <li>this build's <b>default</b> below: on, except {@link #OFF_BY_DEFAULT}.
+ *   <li>this build's <b>default</b>, from {@link CapabilityDefaults}.
  * </ol>
  *
  * There is no third layer here: plan tiers and numeric quotas are not this class's concern, and it
@@ -38,18 +36,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class CapabilityService {
 
-    /**
-     * Capabilities that are present but start off. Automatic Layer-2 triage drives LLM escalation
-     * with no ceiling, so running it unattended is an opt-in an operator takes knowingly. Alerts are
-     * not shipping in this build, so their settings page stays hidden and nothing is delivered. Both
-     * are toggleable per org like anything else; this is a default, not a restriction.
-     */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
-
     private final FeatureFlags featureFlags;
+    private final CapabilityDefaults defaults;
 
-    public CapabilityService(FeatureFlags featureFlags) {
+    public CapabilityService(FeatureFlags featureFlags, CapabilityDefaults defaults) {
         this.featureFlags = featureFlags;
+        this.defaults = defaults;
     }
 
     // ---- capability resolution --------------------------------------------------------------
@@ -83,13 +75,13 @@ public class CapabilityService {
     }
 
     /**
-     * This build's answer with nobody's override in play: on, except {@link #OFF_BY_DEFAULT}. Public
+     * The answer with nobody's override in play, from {@link CapabilityDefaults}. Public
      * because the Features settings read renders "on, but that is only the default" differently from
      * "on, because somebody turned it on", and recomputing this table in the controller would be two
      * copies of one policy.
      */
     public boolean defaultFor(Capability capability) {
-        return !OFF_BY_DEFAULT.contains(capability);
+        return defaults.defaultFor(capability);
     }
 
     /** The org's override of the default. */

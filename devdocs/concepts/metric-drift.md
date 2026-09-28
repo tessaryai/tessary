@@ -557,7 +557,7 @@ the sweep writes the finding and stops. A person presses **Run analysis** on the
 (`POST /findings/{id}/analysis`), and `escalated_at` keeps that to once per cause.
 
 The one way that valve opens without a person is `triage_automatic_enabled`, off for every org
-until a targeting rule says otherwise. `TriageAutoEscalator` then presses the same button on a
+in this build until an override turns it on (Settings → Features). `TriageAutoEscalator` then presses the same button on a
 slow tick under a recurrence bar, which logs what it withheld. It calls `BehaviorDriftService.analyze` rather than enqueueing,
 so automatic mode is the manual path pressed by a scheduler and cannot drift away from it.
 

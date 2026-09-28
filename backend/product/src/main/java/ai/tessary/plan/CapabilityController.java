@@ -74,7 +74,7 @@ public class CapabilityController {
     public record OverrideView(
             String capability,
             boolean enabled,
-            @JsonProperty("open_default") boolean openDefault,
+            @JsonProperty("default_enabled") boolean defaultEnabled,
             @JsonProperty("has_override") boolean hasOverride) {}
 
     /** Pin one capability on or off for this org. */

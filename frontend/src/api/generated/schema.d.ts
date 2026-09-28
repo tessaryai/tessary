@@ -3519,9 +3519,9 @@ export interface components {
         };
         OverrideView: {
             capability: string;
+            default_enabled: boolean;
             enabled: boolean;
             has_override: boolean;
-            open_default: boolean;
         };
         Pack: {
             content_digest: string | null;

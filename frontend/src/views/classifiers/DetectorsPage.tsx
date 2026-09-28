@@ -15,7 +15,7 @@
  * stops: grading a flagged trace costs a grader call and ruling a finding costs an E2B microVM, so
  * the sweep is not entitled to spend either. That makes this rail the place both escalations start,
  * from a person who has looked. (`triage_automatic_enabled` presses the second button unattended,
- * off by default and bounded when on; nothing on this page changes when it is.)
+ * off by default and toggled in Settings → Features; nothing on this page changes when it is.)
  */
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

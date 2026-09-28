@@ -14,8 +14,8 @@ import java.util.Optional;
  * SPA gates on. It is deliberately one string rather than a name plus a derived key: two identifiers
  * for the same thing is how an override ends up pointing at a flag nobody is reading.
  *
- * <p>This build's {@code CapabilityService} serves every capability on except {@code
- * TRIAGE_AUTOMATIC} and {@code ALERTS}.
+ * <p>This build's {@code CapabilityDefaults} serves every capability on except {@code
+ * TRIAGE_AUTOMATIC} and {@code ALERTS}. Another build can supply its own defaults.
  *
  * <p>Adding a capability is adding a constant here. Nothing else in the codebase learns a
  * capability's name; surfaces ask this enum.
@@ -109,8 +109,8 @@ public enum Capability {
     // ---- triage ----
 
     /**
-     * Whether Layer-2 triage runs on its own rather than on a press. Off by default ({@code
-     * CapabilityService.OFF_BY_DEFAULT}) because the LLM escalation it drives is uncapped: automatic
+     * Whether Layer-2 triage runs on its own rather than on a press. Off by default in this build
+     * ({@code CapabilityDefaults.open()}) because the LLM escalation it drives is uncapped: automatic
      * is an opt-in an org takes knowingly, per org, through an override. That spend lands on the
      * org's own provider credential rather than on us, which makes the opt-in more clearly theirs to
      * take and no less necessary.

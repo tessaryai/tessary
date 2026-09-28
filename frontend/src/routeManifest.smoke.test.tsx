@@ -40,7 +40,7 @@ import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
-// Mirrors CapabilityService.OFF_BY_DEFAULT: every wire key is on except these.
+// Mirrors CapabilityDefaults.open(): every wire key is on except these.
 const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled", "alerts_enabled"];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
@@ -105,6 +105,14 @@ vi.mock("./api/client", () => {
     getOrg: vi.fn(() => Promise.resolve(FAKE_ORG)),
     listMembers: vi.fn(() => Promise.resolve([])),
     listInvitations: vi.fn(() => Promise.resolve([])),
+    listCapabilityOverrides: vi.fn(() =>
+      Promise.resolve(
+        ALL_CAPABILITY_KEYS.map((k) => {
+          const on = !OFF_IN_OPEN_EDITION.includes(k);
+          return { capability: k, enabled: on, default_enabled: on, has_override: false };
+        }),
+      ),
+    ),
     loginUrl: vi.fn((returnTo?: string) => `/auth/login${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`),
     // Login and Signup call this on mount; unresolved, both hang on the loading screen.
     mode: vi.fn(() => Promise.resolve({ redirectFlow: false, firstRun: false })),

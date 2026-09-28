@@ -173,7 +173,7 @@ false positives before, zero after, and zero across all five credential rules.
 ### Who may author a rule
 
 `custom_redaction_enabled` (off by default on the hosted tier; on by default in the open/self-hosted
-edition, since it isn't in `CapabilityService.OFF_BY_DEFAULT`) gates **create / update / delete**, and previewing an
+edition, since `CapabilityDefaults.open()` leaves it on) gates **create / update / delete**, and previewing an
 *unsaved* pattern. Reading the rule list, toggling a built-in, and previewing the whole active set stay
 open to every org — that page is what a partner's security review reads to find out what we strip on the
 ingest path, and gating it would hide the defaults along with the authoring tool.

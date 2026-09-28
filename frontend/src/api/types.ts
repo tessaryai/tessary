@@ -184,6 +184,9 @@ export type RetentionUpdateRequest = S["RetentionUpdateRequest"];
 
 export type RedactionRuleListView = S["RuleListView"];
 
+/** Settings → Features: one capability, what it resolves to, this build's default, and whether the org pinned it. */
+export type CapabilityOverrideView = S["OverrideView"];
+
 /**
  * Kept hand-authored: the generated `UpsertRuleRequest` is the alert-rule upsert
  * (basis/threshold/window_seconds), which collides by name with this redaction-rule

@@ -311,7 +311,7 @@ holds. A package appears in exactly one module.
 | `crypto/` | `core` | `SecretBox` (AES-GCM seal/open for at-rest secrets), `CryptoConstants`. | — |
 | `db/` | `core` | `DataSourceConfig` (HikariCP against `TESSARY_JDBC_URL`), `LiquibaseConfig`, SQL helpers (`Upsert`). | — |
 | `edition/` | `tenancy` | which edition this JVM is running (`open` is the only one this tree defines), derived from the classpath, no property/env var behind it — `Edition`, `EditionConfig`, `EditionBanner`. | — |
-| `featureflags/` | `tenancy` | the flag-override seam under the capability layer; holds no defaults of its own. Open adapter reads `org_feature_flag`; the LaunchDarkly adapter is paid. | — |
+| `featureflags/` | `tenancy` | the flag-override seam under the capability layer; holds no defaults of its own. Open adapter reads `org_feature_flag`; another build can supply its own. | — |
 | `gate/` | `product` | the pre-deploy gate's finding store (`PreDeployCheck*`), read by the `surfaces/ci` controller. | — |
 | `git/` | `substrate` | Git provider SPI (GitHub first). | — |
 | `ingest/` | `substrate` | normalizing raw trace data on the write path. | `/v1/traces` |
@@ -324,7 +324,7 @@ holds. A package appears in exactly one module.
 | `onboarding/` | `analysis` | the ladder from no ingest key to first case, as an ordered `OnboardingStage` (not_connected → listening → fitting → watching → finding → case) rather than independent booleans, so the surface says one thing at a time and never walks backwards. | `/api/orgs/{orgSlug}/projects/{projectSlug}/onboarding` |
 | `ops/` | `core` | repository-only persistence for operational entities (no controller/service):… | — |
 | `pipeline/` | `product` | the imported `.tessary/` bundle, DB-backed per project. | — |
-| `plan/` | `product` | capabilities (the single gating axis). Plan tiers and quotas are not part of this tree; the open edition is uncapped. | — |
+| `plan/` | `product` | capabilities (the single gating axis). A capability's default comes from `CapabilityDefaults`, which another build can replace; the org's override in Settings → Features wins over it. Plan tiers and quotas are not part of this tree; the open edition is uncapped. | — |
 | `query/` | `surfaces` | aggregation-first query API over the substrate with allow-list validation. | `/v1/query` |
 | `rca/` | `analysis` | root-cause analysis: pressed on a case, reads the finding's CLAIM (never any triage ruling — the context firewall) and its evidence over MCP → grounded hypotheses + ruled-out checks. | [The three analysis layers](#the-three-analysis-layers-and-the-firewall-between-two-of-them) |
 | `redaction/` | `substrate` | PII redaction: rule authoring/testing + write-path guard (`RedactionService.redactBatch` called by the `SubstrateWriter` drainer, immediately before the write). | [pii-redaction.md](../concepts/pii-redaction.md) |

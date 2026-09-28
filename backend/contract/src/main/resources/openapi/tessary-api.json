@@ -6839,21 +6839,21 @@
           "capability" : {
             "type" : "string"
           },
+          "default_enabled" : {
+            "type" : "boolean"
+          },
           "enabled" : {
             "type" : "boolean"
           },
           "has_override" : {
             "type" : "boolean"
-          },
-          "open_default" : {
-            "type" : "boolean"
           }
         },
         "required" : [
           "capability",
+          "default_enabled",
           "enabled",
-          "has_override",
-          "open_default"
+          "has_override"
         ],
         "type" : "object"
       },

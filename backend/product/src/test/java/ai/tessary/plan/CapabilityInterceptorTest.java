@@ -47,7 +47,7 @@ class CapabilityInterceptorTest {
 
     private final Map<String, Boolean> overrides = new HashMap<>();
     private final FeatureFlags flags = (key, ctx) -> Optional.ofNullable(overrides.get(key));
-    private final CapabilityService capabilities = new CapabilityService(flags);
+    private final CapabilityService capabilities = new CapabilityService(flags, CapabilityDefaults.open());
     private CapabilityInterceptor interceptor;
 
     /** A controller gated on RCA, with one handler gated on Slack instead. */

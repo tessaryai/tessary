@@ -57,7 +57,7 @@ Two consequences worth knowing before you reach for a workaround:
 - `capabilities/` — `useCapabilities()` / `CapabilityGate`. ONE gating axis:
   the backend resolves every capability per session and the SPA reads the answer. **Fail-closed**
   on the client while the read is in flight (the browser has no defaults of its own). There is no
-  frontend LaunchDarkly client and no plan logic.
+  frontend flag client and no plan logic.
 - `views/` — surfaces, mostly one directory per IA surface (`triage/`, `traces/`,
   `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
   `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are

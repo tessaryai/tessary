@@ -13,6 +13,7 @@ import ai.tessary.classifier.ClassifierService;
 import ai.tessary.config.AlertProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.plan.Capability;
+import ai.tessary.plan.CapabilityDefaults;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -214,7 +215,8 @@ class AlertWorkerTest {
                 new AlertProperties(),
                 published::add,
                 new CapabilityService(
-                        (key, ctx) -> key.equals(Capability.ALERTS.wire()) ? Optional.of(true) : Optional.empty()),
+                        (key, ctx) -> key.equals(Capability.ALERTS.wire()) ? Optional.of(true) : Optional.empty(),
+                        CapabilityDefaults.open()),
                 projects,
                 new TraceMdcBridge(Tracer.NOOP));
     }

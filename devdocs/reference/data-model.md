@@ -525,7 +525,7 @@ Purpose-level summary. The SQL baseline (`db/changelog/changes/`) is the source 
 | `audit_log` | Append-only trail for any governed subject: typed `(subject_kind, subject_id)`, `organization_id`, `principal_id`, `occurred_at`, `changes`. |
 | `prior_consent` / `prior_contribution` | Retained from the removed priors feature; no code reads or writes them. |
 | `intelligence_mode_audit` | Retained; no code writes it. No tenant data. |
-| `org_feature_flag` | Per-org override of one capability flag, evaluated against LaunchDarkly's on-by-default global+org targeting. Sparse: no row means no opinion (falls through to the LD/open-edition default); `delete` is how an operator reverts to that default rather than writing a value that means the same thing. |
+| `org_feature_flag` | Per-org override of one capability flag, written by Settings → Features. Sparse: no row means no opinion (falls through to the build's `CapabilityDefaults`); `delete` is how an operator reverts to that default rather than writing a value that means the same thing. |
 
 ### Ingestion / Sources
 | Table | Purpose |
