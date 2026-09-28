@@ -44,7 +44,7 @@ import org.springframework.web.server.ResponseStatusException;
 class CapabilityFlagLayerTest {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's private set. */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC);
+    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
 
     @Autowired
     TenantService tenants;
@@ -65,7 +65,7 @@ class CapabilityFlagLayerTest {
     OrgMembershipRepository memberships;
 
     @Test
-    void withNoOverrides_everythingIsOnExceptAutomaticTriage() {
+    void withNoOverrides_everythingIsOnExceptTheOffByDefaultSet() {
         var fix = TenantFixture.bootstrap(tenants, "cap-default");
         String orgId = fix.org().id();
 
@@ -84,11 +84,11 @@ class CapabilityFlagLayerTest {
         var fix = TenantFixture.bootstrap(tenants, "cap-override");
         String orgId = fix.org().id();
 
-        assertTrue(capabilities.isEnabled(orgId, Capability.ALERTS), "on by default");
+        assertTrue(capabilities.isEnabled(orgId, Capability.API_ACCESS), "on by default");
 
-        set(orgId, Capability.ALERTS, false);
-        assertFalse(capabilities.isEnabled(orgId, Capability.ALERTS), "the row turns it off");
-        assertThrows(TessaryException.class, () -> capabilities.require(orgId, Capability.ALERTS));
+        set(orgId, Capability.API_ACCESS, false);
+        assertFalse(capabilities.isEnabled(orgId, Capability.API_ACCESS), "the row turns it off");
+        assertThrows(TessaryException.class, () -> capabilities.require(orgId, Capability.API_ACCESS));
 
         assertFalse(capabilities.isEnabled(orgId, Capability.TRIAGE_AUTOMATIC), "off by default");
         set(orgId, Capability.TRIAGE_AUTOMATIC, true);
@@ -152,26 +152,26 @@ class CapabilityFlagLayerTest {
         var fix = TenantFixture.bootstrap(tenants, "cap-endpoint");
         TenantContext owner = session(fix.user());
         String slug = fix.org().slug();
-        assertTrue(controller.capabilities(owner, slug).data().capabilities().get("alerts_enabled"), "cache warm");
+        assertTrue(controller.capabilities(owner, slug).data().capabilities().get("api_access_enabled"), "cache warm");
 
         OverrideView set = controller
-                .setOverride(owner, slug, "alerts_enabled", new SetOverrideRequest(false))
+                .setOverride(owner, slug, "api_access_enabled", new SetOverrideRequest(false))
                 .data();
 
-        assertEquals(new OverrideView("alerts_enabled", false, true, true), set);
-        assertFalse(controller.capabilities(owner, slug).data().capabilities().get("alerts_enabled"));
+        assertEquals(new OverrideView("api_access_enabled", false, true, true), set);
+        assertFalse(controller.capabilities(owner, slug).data().capabilities().get("api_access_enabled"));
         assertEquals(
-                new OverrideView("alerts_enabled", false, true, true),
+                new OverrideView("api_access_enabled", false, true, true),
                 controller.overrides(owner, slug).data().stream()
-                        .filter(v -> v.capability().equals("alerts_enabled"))
+                        .filter(v -> v.capability().equals("api_access_enabled"))
                         .findFirst()
                         .orElseThrow());
 
         OverrideView cleared =
-                controller.clearOverride(owner, slug, "alerts_enabled").data();
+                controller.clearOverride(owner, slug, "api_access_enabled").data();
 
-        assertEquals(new OverrideView("alerts_enabled", true, true, false), cleared);
-        assertTrue(controller.capabilities(owner, slug).data().capabilities().get("alerts_enabled"));
+        assertEquals(new OverrideView("api_access_enabled", true, true, false), cleared);
+        assertTrue(controller.capabilities(owner, slug).data().capabilities().get("api_access_enabled"));
     }
 
     @Test
@@ -205,14 +205,15 @@ class CapabilityFlagLayerTest {
                 controller.overrides(ctx, fix.org().slug()).data().size());
         ResponseStatusException set = assertThrows(
                 ResponseStatusException.class,
-                () -> controller.setOverride(ctx, fix.org().slug(), "alerts_enabled", new SetOverrideRequest(false)));
+                () -> controller.setOverride(
+                        ctx, fix.org().slug(), "api_access_enabled", new SetOverrideRequest(false)));
         ResponseStatusException clear = assertThrows(
                 ResponseStatusException.class,
-                () -> controller.clearOverride(ctx, fix.org().slug(), "alerts_enabled"));
+                () -> controller.clearOverride(ctx, fix.org().slug(), "api_access_enabled"));
 
         assertEquals(HttpStatus.FORBIDDEN, set.getStatusCode());
         assertEquals(HttpStatus.FORBIDDEN, clear.getStatusCode());
-        assertTrue(capabilities.isEnabled(fix.org().id(), Capability.ALERTS), "the refused write changed nothing");
+        assertTrue(capabilities.isEnabled(fix.org().id(), Capability.API_ACCESS), "the refused write changed nothing");
     }
 
     private static TenantContext session(Principal user) {

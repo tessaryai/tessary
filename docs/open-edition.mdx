@@ -54,8 +54,6 @@ These wait on something from you. A requirement marked self-hosted applies only 
 | The `groundedness` classifier | Self-hosted only. A GPU for its model: a Mac with Apple silicon for development, or a GPU instance on AWS for production. It is present on every project and starts switched off. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). |
 | Automatic triage | Self-hosted only. An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
 | Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
-| A case reaching you | An alert rule and a notification destination. Nothing is sent until you add both. |
-| Slack notifications | Self-hosted, the deployment's own Slack credentials, on top of the organization capability. Both must be present, and they fail closed independently. |
 
 Self-hosted, replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
 
@@ -65,7 +63,7 @@ These apply to Tessary Cloud and self-hosted alike.
 
 ### Tessary explains and hands off
 
-Tessary reports what it found, the evidence behind it, and what it believes caused it. It does not open the fix, change your code, or change your agent's configuration. A case reaches a person through an alert rule and a notification destination you configure. [Cases](/concepts/cases) covers what a case carries and how it reaches you.
+Tessary reports what it found, the evidence behind it, and what it believes caused it. It does not open the fix, change your code, or change your agent's configuration. New cases are listed on **Triage**. Tessary does not send notifications yet. [Cases](/concepts/cases) covers what a case carries.
 
 ### Automatic triage starts off
 

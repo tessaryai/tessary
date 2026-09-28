@@ -39,11 +39,12 @@ import org.springframework.stereotype.Service;
 public class CapabilityService {
 
     /**
-     * Capabilities that are present but start off. Exactly one: automatic Layer-2 triage drives LLM
-     * escalation with no ceiling, so running it unattended is an opt-in an operator takes knowingly.
-     * It is toggleable per org like anything else; this is a default, not a restriction.
+     * Capabilities that are present but start off. Automatic Layer-2 triage drives LLM escalation
+     * with no ceiling, so running it unattended is an opt-in an operator takes knowingly. Alerts are
+     * not shipping in this build, so their settings page stays hidden and nothing is delivered. Both
+     * are toggleable per org like anything else; this is a default, not a restriction.
      */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC);
+    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
 
     private final FeatureFlags featureFlags;
 

@@ -73,6 +73,7 @@ class AlertChannelControllerTest {
     @Test
     void anUpdateKeepsTheStoredSecretUnlessANewConfigIsGiven() {
         var fix = TenantFixture.bootstrap(tenants, "channel-crud");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();
@@ -139,6 +140,7 @@ class AlertChannelControllerTest {
     @Test
     void onlyAnOwnerOrTheProjectsTokenMayChangeWhereAlertsGo() {
         var fix = TenantFixture.bootstrap(tenants, "channel-rbac");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         Principal member = tenants.upsertUserFromWorkos(
                 "user_channel_member_" + System.nanoTime(),
                 "channel-member+" + System.nanoTime() + "@example.com",
@@ -170,6 +172,7 @@ class AlertChannelControllerTest {
     @Test
     void aSlackChannelIsWrittenOnlyWhileTheOrgHasSlack() {
         var fix = TenantFixture.bootstrap(tenants, "channel-slack-gate");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();
@@ -199,6 +202,7 @@ class AlertChannelControllerTest {
     @Test
     void theDeliveryLogReadsBackEachAttemptsOutcome() {
         var fix = TenantFixture.bootstrap(tenants, "channel-log");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();

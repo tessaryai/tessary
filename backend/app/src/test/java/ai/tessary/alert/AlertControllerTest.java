@@ -78,6 +78,7 @@ class AlertControllerTest {
     @Test
     void aCaseOpenedRuleIsReconfiguredWithoutLosingItsAnchorSwitchOrSnooze() {
         var fix = TenantFixture.bootstrap(tenants, "alert-case-rule");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();
@@ -146,6 +147,7 @@ class AlertControllerTest {
             @Nullable String briefCron,
             ErrorCode expected) {
         var fix = TenantFixture.bootstrap(tenants, "alert-refuse");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         String classifierId =
                 "seeded".equals(classifier) ? seedClassifier(fix.project().id()) : classifier;
         UpsertAlertRuleRequest req = new UpsertAlertRuleRequest(
@@ -210,6 +212,7 @@ class AlertControllerTest {
     @Test
     void thresholdAndRollupRulesTakeDefaultsAndAreReconfiguredInPlace() {
         var fix = TenantFixture.bootstrap(tenants, "alert-upsert");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();
@@ -353,6 +356,7 @@ class AlertControllerTest {
     @Test
     void theLoserOfTwoConcurrentDeletesIsNotFound() {
         var fix = TenantFixture.bootstrap(tenants, "alert-delete-race");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         String ruleId = requireNonNull(controller
                         .listRules(owner(fix), fix.org().slug(), fix.project().slug())
                         .data())
@@ -376,6 +380,7 @@ class AlertControllerTest {
     @Test
     void switchingOrSnoozingARuleThatDoesNotExistIsNotFound() {
         var fix = TenantFixture.bootstrap(tenants, "alert-missing");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         String org = fix.org().slug();
         String project = fix.project().slug();
 
@@ -394,6 +399,7 @@ class AlertControllerTest {
     @Test
     void firedAlertsAreReadByRuleByClassifierOrForTheWholeProjectNewestFirst() {
         var fix = TenantFixture.bootstrap(tenants, "alert-fired");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         TenantContext owner = owner(fix);
         String org = fix.org().slug();
         String project = fix.project().slug();
