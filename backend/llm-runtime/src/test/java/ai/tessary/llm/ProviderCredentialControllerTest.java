@@ -88,8 +88,8 @@ class ProviderCredentialControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller =
-                new ProviderCredentialController(repo, secretBox, resolver, capabilities, catalogFetchService, events);
+        controller = new ProviderCredentialController(
+                repo, secretBox, resolver, capabilities, catalogFetchService, events, PlatformProviderSupplier.none());
         ctx = new TenantContext("user_1", "user@example.com", ORG_ID, null, "owner", null);
         Organization org = new Organization(ORG_ID, null, ORG_SLUG, "Acme", "2026-01-01T00:00:00Z", null, null);
         resolved = new TenantPathResolver.OrgResolved(org, "owner");
@@ -521,7 +521,14 @@ class ProviderCredentialControllerTest {
             return List.of();
         });
         var fast = new ProviderCredentialController(
-                repo, secretBox, resolver, capabilities, hanging, events, Duration.ofMillis(100));
+                repo,
+                secretBox,
+                resolver,
+                capabilities,
+                hanging,
+                events,
+                PlatformProviderSupplier.none(),
+                Duration.ofMillis(100));
 
         var models = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> fast.catalog(ctx, ORG_SLUG))
                 .data()
@@ -541,7 +548,14 @@ class ProviderCredentialControllerTest {
             return List.of();
         });
         var fast = new ProviderCredentialController(
-                repo, secretBox, resolver, capabilities, hanging, events, Duration.ofMillis(200));
+                repo,
+                secretBox,
+                resolver,
+                capabilities,
+                hanging,
+                events,
+                PlatformProviderSupplier.none(),
+                Duration.ofMillis(200));
 
         Thread.currentThread().interrupt();
         boolean stillInterrupted;
@@ -553,7 +567,84 @@ class ProviderCredentialControllerTest {
         }
 
         assertTrue(stillInterrupted, "the interrupt must survive the fan-out");
-        assertEquals(ModelCatalog.entries().size(), models.size());
-        assertTrue(models.containsAll(ModelCatalog.entries()), "every provider falls back to its static entries");
+        List<ModelCatalog.CatalogEntry> expected = ModelCatalog.entries().stream()
+                .filter(e -> e.provider() != ModelProvider.PLATFORM)
+                .toList();
+        assertEquals(expected.size(), models.size());
+        assertTrue(
+                models.containsAll(expected),
+                "every provider falls back to its static entries, and PLATFORM is not offered");
+    }
+
+    // ---- the deployment-supplied provider: offered only by a supplier, never written ----
+
+    @Test
+    void catalogOmitsThePlatformProviderWhenNoSupplierOffersIt() {
+        var catalog = controller.catalog(ctx, ORG_SLUG).data();
+
+        assertTrue(catalog.platforms().stream().noneMatch(p -> p.id() == ModelProvider.PLATFORM));
+        assertTrue(catalog.models().stream().noneMatch(m -> m.provider() == ModelProvider.PLATFORM));
+    }
+
+    @Test
+    void catalogShowsTheSuppliedPlatformProviderUnderTheSuppliersLabelAndDetail() {
+        PlatformProviderSupplier tessaryAi = new PlatformProviderSupplier() {
+            @Override
+            public boolean available(String orgId) {
+                return true;
+            }
+
+            @Override
+            public Optional<SuppliedProvider> describe(String orgId) {
+                return Optional.of(new SuppliedProvider("Tessary AI", "$10.00 left"));
+            }
+        };
+        var offered = new ProviderCredentialController(
+                repo, secretBox, resolver, capabilities, catalogFetchService, events, tessaryAi);
+
+        var catalog = offered.catalog(ctx, ORG_SLUG).data();
+
+        assertEquals(
+                List.of(new PlatformCatalog.PlatformDescriptor(
+                        ModelProvider.PLATFORM,
+                        "Tessary AI",
+                        PlatformCatalog.AUTH_PLATFORM,
+                        false,
+                        null,
+                        List.of(),
+                        "$10.00 left")),
+                catalog.platforms().stream()
+                        .filter(p -> p.id() == ModelProvider.PLATFORM)
+                        .toList());
+        assertEquals(
+                List.of("claude-sonnet-5"),
+                catalog.models().stream()
+                        .filter(m -> m.provider() == ModelProvider.PLATFORM)
+                        .map(ModelCatalog.CatalogEntry::modelName)
+                        .toList());
+    }
+
+    @Test
+    void upsertRefusesThePlatformProviderAndWritesNothing() {
+        TessaryException e = assertThrows(
+                TessaryException.class,
+                () -> controller.upsert(
+                        ctx,
+                        ORG_SLUG,
+                        ModelProvider.PLATFORM,
+                        new ProviderCredentialController.UpsertRequest(
+                                null, "sk-x", null, null, null, null, null, null)));
+
+        assertEquals(ModelConfigError.PROVIDER_NOT_EDITABLE, e.error());
+        verify(repo, never()).insert(any());
+        verify(repo, never()).update(any());
+    }
+
+    @Test
+    void deleteRefusesThePlatformProvider() {
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.PLATFORM));
+
+        assertEquals(ModelConfigError.PROVIDER_NOT_EDITABLE, e.error());
     }
 }

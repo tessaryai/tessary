@@ -5,6 +5,7 @@ import ai.tessary.llmspi.ModelLane;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-platform connection metadata, served alongside the {@link ModelCatalog}
@@ -21,9 +22,17 @@ public final class PlatformCatalog {
     public static final String AUTH_AWS = "aws";
 
     /**
+     * No credential of the org's own: the deployment supplies it ({@link ModelProvider#PLATFORM}). The
+     * form renders no fields, only the supplier's label and {@code detail}.
+     */
+    public static final String AUTH_PLATFORM = "platform";
+
+    /**
      * @param usedBy the lanes, by wire name, that are the only reason to add this platform's key: set for a
      *     provider that serves one feature and no chat lane, so the Providers page can say what it is for.
      *     Empty for a chat provider, which every agentic lane may use.
+     * @param detail a short status line the Providers page shows under the label; set only on the
+     *     {@link #AUTH_PLATFORM} descriptor a {@link PlatformProviderSupplier} describes, null otherwise
      */
     public record PlatformDescriptor(
             ModelProvider id,
@@ -31,15 +40,28 @@ public final class PlatformCatalog {
             String auth,
             @JsonProperty("supports_base_url") boolean supportsBaseUrl,
             @JsonProperty("default_base_url") String defaultBaseUrl,
-            @JsonProperty("used_by") List<String> usedBy) {
+            @JsonProperty("used_by") List<String> usedBy,
+            @JsonProperty("detail") @Nullable String detail) {
 
         PlatformDescriptor(
                 ModelProvider id, String label, String auth, boolean supportsBaseUrl, String defaultBaseUrl) {
-            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, List.of());
+            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, List.of(), null);
+        }
+
+        PlatformDescriptor(
+                ModelProvider id,
+                String label,
+                String auth,
+                boolean supportsBaseUrl,
+                String defaultBaseUrl,
+                List<String> usedBy) {
+            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, usedBy, null);
         }
     }
 
-    // Every platform requires an org-provided credential; there is no credential-free platform.
+    // Every platform but PLATFORM requires an org-provided credential. PLATFORM's descriptor is a
+    // placeholder: the settings endpoints drop it unless a PlatformProviderSupplier offers the
+    // provider, and replace its label and detail with the supplier's when one does.
     private static final List<PlatformDescriptor> PLATFORMS = List.of(
             new PlatformDescriptor(ModelProvider.OPENAI, "OpenAI", AUTH_API_KEY, true, "https://api.openai.com/v1"),
             // WITH the /v1: OpenCode's @ai-sdk/anthropic in the agentic sandbox appends the bare path
@@ -78,7 +100,8 @@ public final class PlatformCatalog {
                     AUTH_API_KEY,
                     true,
                     "https://api.typesafe.ai",
-                    List.of(ModelLane.FRUSTRATION.wire())));
+                    List.of(ModelLane.FRUSTRATION.wire())),
+            new PlatformDescriptor(ModelProvider.PLATFORM, "Platform", AUTH_PLATFORM, false, null));
 
     private PlatformCatalog() {}
 

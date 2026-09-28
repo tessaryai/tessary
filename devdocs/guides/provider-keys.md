@@ -42,9 +42,10 @@ That is the state a brand-new self-host install starts in, and it is a real, tes
 placeholder: `BYO_PROVIDER_KEYS` is **on** by default, through `CapabilityService`'s own default
 (every capability is on except the ones it names as off by default). It was off for hosted orgs
 previously; once the last platform-funded lane was removed, that default no longer held. Nobody has to flip a flag to reach this page; it's there
-from the first boot. **Every org now needs at least one commercial provider key configured before
-the first RCA or Triage run can succeed** — there is no keyless default any more, in either
-edition.
+from the first boot. **An open-edition org needs at least one commercial provider key configured before
+the first RCA or Triage run can succeed** — this build supplies no keyless provider. A build that
+registers a `PlatformProviderSupplier` can offer `PLATFORM`, which the page shows as **Included**
+with the supplier's status line, and which sits last in every agent lane's order.
 
 ## The picker shows what you can actually run
 
@@ -133,8 +134,8 @@ else.
    one running.
 3. Run an RCA investigation or a triage escalation against a project in that org.
    `AgenticCredentialResolver#resolve` fails closed with
-   `MISSING_CREDENTIALS` for any platform with no stored org key — there is no platform-funded
-   exception left at all.
+   `MISSING_CREDENTIALS` for any platform with no stored org key. The one exception is `PLATFORM`,
+   which this build never offers, so it never reaches the resolver here.
 
 ## See also
 

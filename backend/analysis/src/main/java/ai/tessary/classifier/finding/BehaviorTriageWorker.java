@@ -5,8 +5,10 @@ import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.ingest.RetryPolicy;
+import ai.tessary.open.errors.AwaitsConfiguration;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
@@ -238,6 +240,17 @@ public class BehaviorTriageWorker {
             }
             if (isCredentialGap(e)) {
                 releaseUntilConfigured(job, e, "the org has no usable provider credential");
+                return;
+            }
+            if (e instanceof AwaitsConfiguration) {
+                releaseUntilConfigured(job, e, "someone acts on: " + e.getMessage());
+                return;
+            }
+            if (e instanceof Retryable retryable) {
+                // Clears on its own (every run slot taken, say): back after the delay it names, unspent.
+                long delaySeconds = retryable.retryAfterSeconds();
+                log.debug("triage of {} deferred {}s: {}", job.findingId(), delaySeconds, e.getMessage());
+                jobs.releaseWithoutAttempt(job.id(), e.getMessage(), delaySeconds);
                 return;
             }
             retry(job, e);

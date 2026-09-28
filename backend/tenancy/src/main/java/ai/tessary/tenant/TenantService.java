@@ -128,6 +128,7 @@ public class TenantService {
             String slug = uniqueSlug(workosOrgId.toLowerCase(Locale.ROOT).replace("org_", "org-"));
             Organization fresh = newOrg(Ids.ulid(), workosOrgId, slug, slug);
             orgs.insert(fresh);
+            events.publishEvent(new OrganizationCreatedEvent(fresh.id()));
             ensureMembership(fresh.id(), user.id(), OrgMembership.MEMBER);
             return fresh;
         }
@@ -139,6 +140,7 @@ public class TenantService {
         String slug = uniqueSlug(Ids.slugify(personalName));
         Organization personal = newOrg(Ids.ulid(), null, slug, personalName);
         orgs.insert(personal);
+        events.publishEvent(new OrganizationCreatedEvent(personal.id()));
         ensureMembership(personal.id(), user.id(), OrgMembership.OWNER);
         return personal;
     }
@@ -168,6 +170,7 @@ public class TenantService {
                     HttpStatus.TOO_MANY_REQUESTS, "org creation limit reached (" + maxOwnedOrgs + ")");
         }
         orgs.insert(org);
+        events.publishEvent(new OrganizationCreatedEvent(org.id()));
         ensureMembership(org.id(), ownerUserId, OrgMembership.OWNER);
         createProject(org.id(), "Default", null, true);
         return org;

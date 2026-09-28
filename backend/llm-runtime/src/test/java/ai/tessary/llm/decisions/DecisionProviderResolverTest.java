@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformProviderSupplier;
 import ai.tessary.llm.ProjectModelSettingRepository;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llm.ProjectOrgResolver;
@@ -61,7 +62,8 @@ class DecisionProviderResolverTest {
         TessaryProperties props = new TessaryProperties();
         props.setSecretKey(Base64.getEncoder().encodeToString(new byte[32]));
         box = new SecretBox(props);
-        ProjectModelSettings settings = new ProjectModelSettings(settingRows, credentials, orgs, catalog);
+        ProjectModelSettings settings =
+                new ProjectModelSettings(settingRows, credentials, orgs, catalog, PlatformProviderSupplier.none());
         resolver = new DecisionProviderResolver(settings, credentials, box, orgs);
     }
 

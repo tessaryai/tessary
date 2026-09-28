@@ -102,7 +102,9 @@ export type ModelProvider =
   // AWS's second Bedrock endpoint: OpenAI-wire, and the only place the GPT-5.6 line lives.
   | "BEDROCK_MANTLE"
   // Decision models only (TypeSafe's Jev), never a chat or agent model.
-  | "TYPESAFE";
+  | "TYPESAFE"
+  // Supplied by the deployment, with no key of the org's own; listed only when offered.
+  | "PLATFORM";
 
 export type PlatformDescriptor = S["PlatformDescriptor"];
 export type CatalogEntry = S["CatalogEntry"];

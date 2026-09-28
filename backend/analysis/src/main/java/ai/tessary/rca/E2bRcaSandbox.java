@@ -32,6 +32,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -212,6 +213,8 @@ public class E2bRcaSandbox implements RcaSandbox {
                 .setNoParent()
                 .setSpanKind(SpanKind.CLIENT)
                 .startSpan();
+        // Released in the finally below however the run ends; see AgenticCredentialResolver#release.
+        AgenticCredentialResolver.@Nullable Credential credential = null;
         try (var _ = span.makeCurrent()) {
             span.setAttribute("langfuse.trace.name", "agentic-rca");
             span.setAttribute("tessary.project.id", req.projectId());
@@ -249,7 +252,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             // still key off it to pick which OpenCode provider block to build.
             ModelProvider provider = providerFor(req.projectId());
             body.put("provider", provider.name());
-            AgenticCredentialResolver.Credential credential = credentials.resolve(req.projectId(), provider);
+            credential = credentials.resolve(req.projectId(), provider);
             body.set("credential", mapper.valueToTree(credential));
             ObjectNode mcp = body.putObject("mcp");
             mcp.put("url", req.mcpUrl());
@@ -299,6 +302,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             span.recordException(e);
             throw new TessaryException(RcaError.UPSTREAM_FAILED, e, "agentic RCA failed: " + e.getMessage());
         } finally {
+            if (credential != null) credentials.release(credential);
             span.end();
         }
     }

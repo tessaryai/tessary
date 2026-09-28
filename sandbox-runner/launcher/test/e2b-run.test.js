@@ -19,7 +19,7 @@ const FAKE_E2B = path.join(__dirname, 'fixtures', 'fake-e2b');
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 const PAYLOAD = { prompt: 'why?', mcp: { url: 'https://tessary.example.com/mcp', token: 't' }, timeout_ms: 10000, credential: CREDENTIAL };
 
-async function runOnce(mode, route = '/rca', extraEnv = {}) {
+async function runOnce(mode, route = '/rca', extraEnv = {}, payload = PAYLOAD) {
   const logPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fake-e2b-')), 'calls.jsonl');
   fs.writeFileSync(logPath, '');
   const child = spawn('node', [SERVER_JS], {
@@ -47,7 +47,7 @@ async function runOnce(mode, route = '/rca', extraEnv = {}) {
       child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
     });
     const res = await new Promise((resolve, reject) => {
-      const data = Buffer.from(JSON.stringify(PAYLOAD));
+      const data = Buffer.from(JSON.stringify(payload));
       const req = http.request(
         { host: '127.0.0.1', port, path: route, method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer testkey' } },
         (r) => {
@@ -153,4 +153,22 @@ test('a post-mortem lookup that fails never replaces the run\'s own failure', as
   assert.equal(status, 502);
   assert.equal(body.kind, 'script_exit');
   assert.equal(body.exit_code, 1);
+});
+
+test('an egress credential creates the sandbox with the key injected at its egress, and nothing but a placeholder inside', async () => {
+  const egress = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
+  const payload = { ...PAYLOAD, model: 'claude-sonnet-5', clone_url: 'https://x-access-token:t@github.com/acme/app.git', credential: egress };
+
+  const { status, calls } = await runOnce('ok', '/rca', {}, payload);
+
+  assert.equal(status, 200);
+  assert.deepEqual(calls[0].network, {
+    allowOut: ['api.anthropic.com', 'tessary.example.com', 'github.com'],
+    denyOut: ['0.0.0.0/0'],
+    rules: {
+      'api.anthropic.com': [{ transform: { headers: { 'x-api-key': '${e2b.secrets.tessary-ai-anthropic}' } } }],
+    },
+  });
+  assert.equal(calls[2].envs.ANTHROPIC_API_KEY, 'injected-at-egress');
+  assert.ok(!calls[1].content.includes('egress_secret'), 'the credential never reaches the sandbox filesystem');
 });

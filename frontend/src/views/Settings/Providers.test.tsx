@@ -65,6 +65,7 @@ const OPENAI: PlatformDescriptor = {
   default_base_url: "https://api.openai.com/v1",
   supports_base_url: true,
   used_by: [],
+  detail: null,
 };
 
 const ANTHROPIC: PlatformDescriptor = {
@@ -74,6 +75,7 @@ const ANTHROPIC: PlatformDescriptor = {
   default_base_url: "https://api.anthropic.com/v1",
   supports_base_url: true,
   used_by: [],
+  detail: null,
 };
 
 const BEDROCK: PlatformDescriptor = {
@@ -83,6 +85,7 @@ const BEDROCK: PlatformDescriptor = {
   default_base_url: "",
   supports_base_url: false,
   used_by: [],
+  detail: null,
 };
 
 /** A stored credential as the backend's View sends it: has_* booleans, never the secret itself. */
@@ -121,6 +124,18 @@ const TYPESAFE: PlatformDescriptor = {
   default_base_url: "https://api.typesafe.ai",
   supports_base_url: true,
   used_by: ["frustration"],
+  detail: null,
+};
+
+/** A provider the deployment supplies: no key of the org's own, a status line from the supplier. */
+const TESSARY_AI: PlatformDescriptor = {
+  id: "PLATFORM",
+  label: "Tessary AI",
+  auth: "platform",
+  default_base_url: "",
+  supports_base_url: false,
+  used_by: [],
+  detail: "$10.00 left",
 };
 
 function renderProviders() {
@@ -186,6 +201,20 @@ describe("Providers", () => {
     within(anthropicRow).getByText("Not configured");
 
     expect(screen.queryByText(/could not load/i)).toBeNull();
+  });
+
+  // Bug: a provider the deployment supplies rendered as "Not configured" with an "Add key" button,
+  // telling the org to bring a key that nothing would ever read.
+  it("shows a deployment-supplied provider as included, with its detail line and no key actions", async () => {
+    listProviderCatalog.mockResolvedValue({ platforms: [OPENAI, TESSARY_AI], models: [] });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+
+    renderProviders();
+
+    const row = (await screen.findByText("Tessary AI")).closest("div")!.parentElement!;
+    within(row).getByText("Included");
+    within(row).getByText("$10.00 left");
+    expect(within(row).queryByRole("button")).toBeNull();
   });
 
   it("shows an error, not a false empty state, when the credentials query fails", async () => {

@@ -53,11 +53,12 @@ class ProjectModelSettingViewTest {
                         repo,
                         providerCredentials,
                         mock(ProjectOrgResolver.class),
-                        mock(ai.tessary.llm.catalog.ModelCatalogFetchService.class)),
+                        mock(ai.tessary.llm.catalog.ModelCatalogFetchService.class),
+                        PlatformProviderSupplier.none()),
                 resolver,
                 priceModels,
                 mock(ai.tessary.pricing.PriceBookRepository.class),
-                providerCredentials);
+                PlatformProviderSupplier.none());
     }
 
     private ProjectModelSettingController.ModelSettingsView view() {
@@ -83,6 +84,8 @@ class ProjectModelSettingViewTest {
             assertEquals(
                     LanePriority.of(lane.id()).stream()
                             .map(LanePriority.ProviderOption::provider)
+                            // This build supplies no PLATFORM, so the page must not offer it.
+                            .filter(p -> p != ModelProvider.PLATFORM)
                             .toList(),
                     lane.providerOptions().stream()
                             .map(ProjectModelSettingController.ProviderOptionView::provider)

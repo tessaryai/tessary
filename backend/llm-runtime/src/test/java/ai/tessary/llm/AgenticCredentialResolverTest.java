@@ -15,6 +15,7 @@ import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -314,5 +315,21 @@ class AgenticCredentialResolverTest {
                     resolver.resolve(PROJECT, provider).customModelName(),
                     provider + " must not carry custom_model_name");
         }
+    }
+
+    /**
+     * The credential is serialized straight onto the launcher request. The egress secret's name must
+     * reach the launcher, and the resolver's lease handle must not.
+     */
+    @Test
+    void theEgressSecretGoesOnTheWireAndTheLeaseDoesNot() throws Exception {
+        var credential = new AgenticCredentialResolver.Credential(
+                ModelProvider.ANTHROPIC, null, null, null, null, null, null, true, "tessary-ai-anthropic", "lease-1");
+
+        String json = new ObjectMapper().writeValueAsString(credential);
+
+        assertEquals(
+                "{\"provider\":\"ANTHROPIC\",\"platform_funded\":true,\"egress_secret\":\"tessary-ai-anthropic\"}",
+                json);
     }
 }

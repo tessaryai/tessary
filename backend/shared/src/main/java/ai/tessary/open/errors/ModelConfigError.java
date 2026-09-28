@@ -33,6 +33,12 @@ public enum ModelConfigError implements ErrorCode {
      * resolved lane's credential has since gone missing: this fires at save time, on a choice the
      * settings picker should already have shown disabled.
      */
+    /**
+     * A write to {@code PLATFORM}'s credential. The deployment supplies that provider, so there is
+     * no org credential to store or delete.
+     */
+    PROVIDER_NOT_EDITABLE(
+            HttpStatus.BAD_REQUEST, "%s is supplied by this deployment and takes no credential of your own."),
     PROVIDER_NOT_CONFIGURED(
             HttpStatus.BAD_REQUEST,
             "Model %s needs a %s credential — add one under Settings → Providers before pointing a lane at" + " it."),

@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -418,6 +419,50 @@ class E2bRcaSandboxTest {
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
         assertEquals(RcaError.UPSTREAM_FAILED, ex.error());
+    }
+
+    private static final AgenticCredentialResolver.Credential LEASED = new AgenticCredentialResolver.Credential(
+            ModelProvider.ANTHROPIC, null, null, null, null, null, null, true, "secret", "lease-1");
+
+    /**
+     * A resolver that reserves something per run frees it in {@code release}; a finished run and a
+     * failed one must both hand it back, or the reservation leaks until it expires.
+     */
+    @Test
+    void theRunsCredentialIsReleasedWhetherTheRunSucceedsOrFails() throws Exception {
+        String completed = envelope("{\"hypotheses\":[]}");
+        for (Launcher launcher : java.util.List.<Launcher>of(bodyJson -> completed, bodyJson -> {
+            throw new IOException("launcher went away");
+        })) {
+            AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
+            when(resolver.resolve(any(), any())).thenReturn(LEASED);
+            E2bRcaSandbox sandbox =
+                    new E2bRcaSandbox(
+                            props(),
+                            new ObserverProperties(),
+                            noLaneSetting(),
+                            resolver,
+                            mock(LlmUsageAccountant.class),
+                            OpenTelemetry.noop(),
+                            MAPPER) {
+                        @Override
+                        String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
+                            try {
+                                return launcher.answer(bodyJson);
+                            } catch (Exception e) {
+                                throw new IllegalStateException(e);
+                            }
+                        }
+                    };
+
+            try {
+                sandbox.run(request());
+            } catch (TessaryException expectedForTheFailingLauncher) {
+                // The outcome is not this test's subject; the release is.
+            }
+
+            verify(resolver, times(1)).release(LEASED);
+        }
     }
 
     /** The launcher's answer to one posted body. */

@@ -157,6 +157,8 @@ public class E2bTriageSandbox implements TriageSandbox {
                 .setNoParent()
                 .setSpanKind(SpanKind.CLIENT)
                 .startSpan();
+        // Released in the finally below however the run ends; see AgenticCredentialResolver#release.
+        AgenticCredentialResolver.@Nullable Credential credential = null;
         try (var _ = span.makeCurrent()) {
             Optional<ProjectModelSettings.ResolvedAgenticModel> resolved = resolvedModel(req.projectId());
             String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
@@ -186,7 +188,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             ModelProvider provider = resolved.map(ProjectModelSettings.ResolvedAgenticModel::provider)
                     .orElse(ModelProvider.BEDROCK);
             body.put("provider", provider.name());
-            AgenticCredentialResolver.Credential credential = credentials.resolve(req.projectId(), provider);
+            credential = credentials.resolve(req.projectId(), provider);
             body.set("credential", mapper.valueToTree(credential));
             // mcp.token is a live platform key — sent to the launcher, never logged. Not optional on
             // this lane: the dossier carries the detector's numbers and nothing else, so an agent
@@ -254,6 +256,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             span.recordException(e);
             return Optional.empty();
         } finally {
+            if (credential != null) credentials.release(credential);
             span.end();
         }
     }

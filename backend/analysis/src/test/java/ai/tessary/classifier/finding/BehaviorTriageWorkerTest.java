@@ -21,9 +21,11 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.open.errors.AwaitsConfiguration;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import io.micrometer.tracing.Tracer;
 import java.util.List;
@@ -120,6 +122,63 @@ class BehaviorTriageWorkerTest {
                 Arguments.of(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED),
                 Arguments.of(ModelConfigError.MISSING_CREDENTIALS),
                 Arguments.of(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED));
+    }
+
+    /** A refusal only a person can clear, such as a provider balance at zero. */
+    private static final class OutOfCredit extends TessaryException implements AwaitsConfiguration {
+        OutOfCredit() {
+            super(ClassifierError.TRIAGE_RUN_INCOMPLETE, "f1", "the provider's credit is exhausted");
+        }
+    }
+
+    /** A refusal that clears on its own, such as every concurrent run slot being taken. */
+    private static final class Busy extends TessaryException implements Retryable {
+        Busy() {
+            super(ClassifierError.TRIAGE_RUN_INCOMPLETE, "f1", "every run slot is taken");
+        }
+
+        @Override
+        public int retryAfterSeconds() {
+            return 60;
+        }
+    }
+
+    /**
+     * A refusal that waits on a person (credit to top up) holds the job for the re-check window with its
+     * attempt unspent. Retrying it on the backoff dead-letters the finding within a minute, and topping up
+     * later publishes no event that would bring it back.
+     */
+    @Test
+    void aRefusalAwaitingConfigurationParksTheJobUnspentForTheRecheckWindow() {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
+        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
+        OutOfCredit refusal = new OutOfCredit();
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
+        ClassifierProperties props = new ClassifierProperties();
+        props.setTriageConfigRetrySeconds(1800);
+
+        tickableWorker(jobs, engine, breaker, new BriefingSource(), props).triageForTest(job("job_1", "f1"));
+
+        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), 1800L);
+        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
+        verifyNoInteractions(breaker);
+    }
+
+    /** A refusal that clears on its own (a busy slot) returns the job unspent after the delay it names. */
+    @Test
+    void aRetryableRefusalReturnsTheJobUnspentAfterItsOwnDelay() {
+        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
+        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
+        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
+        Busy refusal = new Busy();
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
+
+        worker(jobs, engine, breaker, new BriefingSource()).triageForTest(job("job_1", "f1"));
+
+        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), 60L);
+        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
+        verifyNoInteractions(breaker);
     }
 
     /** Any other failure spends the attempt and backs off 2s, RetryPolicy's schedule. */

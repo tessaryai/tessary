@@ -24,7 +24,8 @@ import java.util.Optional;
  * model the project could not run, followed by an instruction to go and buy the key that would make
  * the option true. Configure Bedrock and RCA lands on Claude Sonnet 5; configure only xAI and it
  * lands on Grok 4.6; configure nothing and the lane has no model at all, which is the honest answer
- * rather than a model id that will fail on the first call.
+ * rather than a model id that will fail on the first call, unless the deployment supplies
+ * {@link ModelProvider#PLATFORM}, which sits last on both agent lanes.
  *
  * <p><b>Each provider carries every model we support for that lane</b>, with one of them the default.
  * The default is what automatic selection takes; the rest are what the dropdown offers once someone
@@ -54,6 +55,8 @@ import java.util.Optional;
  * chat lanes, that left an org holding only one of those three keys unable to run anything at all. The launcher now has a mode for each — Anthropic
  * on its own wire, the other two as OpenAI-compat — so the coverage rule reaches every provider the
  * Providers page will sell you. Adding an eleventh still means adding it to the launcher first.
+ * {@link ModelProvider#PLATFORM} needs no launcher mode of its own: the credential the supplying build
+ * resolves for it names the provider whose wire it speaks.
  *
  * <p><b>FRUSTRATION is a {@link LaneGroup#DECISION_CALLS} lane</b> and stands outside the coverage rule:
  * only TypeSafe and OpenRouter serve TypeSafe's Jev, one model each. TypeSafe leads because it is the
@@ -113,6 +116,13 @@ public final class LanePriority {
      */
     private static final String CUSTOM_MODEL = "CUSTOM:custom-model";
 
+    /**
+     * After every provider an org brings its own key for, CUSTOM included: a deployment-supplied
+     * provider is what a lane runs on when the org has configured nothing, and an org that adds a key
+     * of its own moves every lane it never pinned onto that key.
+     */
+    private static final String PLATFORM_SONNET_5 = "PLATFORM:claude-sonnet-5";
+
     private static final Map<ModelLane, List<ProviderOption>> BY_LANE = byLane();
 
     private static Map<ModelLane, List<ProviderOption>> byLane() {
@@ -138,7 +148,8 @@ public final class LanePriority {
                 // smaller model than every flagship above it.
                 new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_SOL, OR_LUNA), OR_SOL),
                 new ProviderOption(ModelProvider.MOONSHOT, List.of(KIMI_K2_6), KIMI_K2_6),
-                new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL));
+                new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL),
+                new ProviderOption(ModelProvider.PLATFORM, List.of(PLATFORM_SONNET_5), PLATFORM_SONNET_5));
         m.put(ModelLane.RCA, agentVmOrder);
         m.put(ModelLane.TRIAGE, agentVmOrder);
         m.put(

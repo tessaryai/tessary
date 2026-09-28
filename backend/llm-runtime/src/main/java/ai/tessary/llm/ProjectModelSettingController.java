@@ -13,7 +13,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -51,20 +50,20 @@ public class ProjectModelSettingController {
     private final TenantPathResolver resolver;
     private final ModelResolver priceModels;
     private final PriceBookRepository priceBooks;
-    /** Which providers the org has a credential for; drives the picker's disabled options. */
-    private final ProviderCredentialRepository providerCredentials;
+    /** The label {@link ModelProvider#PLATFORM}'s option carries when the deployment offers it. */
+    private final PlatformProviderSupplier platformSupplier;
 
     public ProjectModelSettingController(
             ProjectModelSettings settings,
             TenantPathResolver resolver,
             ModelResolver priceModels,
             PriceBookRepository priceBooks,
-            ProviderCredentialRepository providerCredentials) {
+            PlatformProviderSupplier platformSupplier) {
         this.settings = settings;
         this.resolver = resolver;
         this.priceModels = priceModels;
         this.priceBooks = priceBooks;
-        this.providerCredentials = providerCredentials;
+        this.platformSupplier = platformSupplier;
     }
 
     /**
@@ -175,7 +174,9 @@ public class ProjectModelSettingController {
             List<ModelRateView> rates,
             List<ProjectModelSetting> settings,
             /**
-             * The providers the org has a credential for: the picker disables any option whose
+             * The providers the org can run on ({@link ProjectModelSettings#configuredProviders}):
+             * every one it holds a credential for, plus {@link ModelProvider#PLATFORM} when the
+             * deployment offers it. The picker disables any option whose
              * provider is absent here, with a link to Settings → Providers, rather than letting
              * the pair be selected and only failing at save (PUT, {@link ModelConfigError
              * #PROVIDER_NOT_CONFIGURED}) or at run time (resolve, {@link ModelConfigError
@@ -206,8 +207,13 @@ public class ProjectModelSettingController {
         // pointed at, and the decision entries a DECISION_CALLS lane runs; see
         // ModelSettingsView#catalogModels's javadoc. Every other entry is offered on no lane, so it
         // is filtered out here rather than left for the client to skip.
+        // ModelProvider.PLATFORM is left out entirely unless the deployment offers it to this org: an
+        // option the org could never configure would read as a key it should go and buy.
+        Set<ModelProvider> configured = settings.configuredProviders(r.org().id());
+        boolean platformOffered = configured.contains(ModelProvider.PLATFORM);
         List<ModelCatalog.CatalogEntry> offeredCatalog = ModelCatalog.entries().stream()
                 .filter(e -> e.agentic() || e.decision())
+                .filter(e -> platformOffered || e.provider() != ModelProvider.PLATFORM)
                 .toList();
         List<LaneView> lanes = Arrays.stream(ModelLane.values())
                 .map(l -> {
@@ -219,11 +225,10 @@ public class ProjectModelSettingController {
                             l.description(),
                             l.group(),
                             LanePriority.of(l).stream()
+                                    .filter(o -> platformOffered || o.provider() != ModelProvider.PLATFORM)
                                     .map(o -> new ProviderOptionView(
                                             o.provider(),
-                                            PlatformCatalog.find(o.provider())
-                                                    .orElseThrow()
-                                                    .label(),
+                                            label(r.org().id(), o.provider()),
                                             o.modelKeys(),
                                             o.defaultModelKey()))
                                     .toList(),
@@ -236,9 +241,6 @@ public class ProjectModelSettingController {
                 })
                 .toList();
         List<BedrockModelProfile.ModelDescriptor> models = BedrockModelProfile.platformModels();
-        Set<ModelProvider> configured = providerCredentials.findByOrg(r.org().id()).stream()
-                .map(ProviderCredential::provider)
-                .collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(ModelProvider.class)));
         return ApiResponse.ok(new ModelSettingsView(
                 groups,
                 lanes,
@@ -250,6 +252,16 @@ public class ProjectModelSettingController {
                         .toList(),
                 settings.list(r.project().id()),
                 configured));
+    }
+
+    /** A provider's label: the supplier's name for {@link ModelProvider#PLATFORM}, the catalog's for the rest. */
+    private String label(String orgId, ModelProvider provider) {
+        String catalogLabel = PlatformCatalog.find(provider).orElseThrow().label();
+        if (provider != ModelProvider.PLATFORM) return catalogLabel;
+        return platformSupplier
+                .describe(orgId)
+                .map(PlatformProviderSupplier.SuppliedProvider::label)
+                .orElse(catalogLabel);
     }
 
     /**

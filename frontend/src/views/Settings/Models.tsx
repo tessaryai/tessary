@@ -21,8 +21,9 @@ import { Button, cn, Modal, PageBody, PageHeader, Select, Skeleton, useToast } f
  * Settings, Models: which model each job runs on.
  *
  * Sibling of Providers, and deliberately distinct from it: Providers is "which keys this org has
- * stored", this is "which model each of our jobs spends them on". No lane runs on a platform
- * credential; every model here bills the org.
+ * stored", this is "which model each of our jobs spends them on". Every model here bills the org,
+ * except a provider the deployment supplies (PLATFORM), which the server lists only when it offers
+ * one and always last in each job's order.
  *
  * That is also why the order between the two pages is the product: a key is what makes any model
  * reachable, so this page has nothing to offer until Providers has something in it. With no key it
@@ -139,7 +140,8 @@ export function Models() {
     return [...bedrock, ...catalog];
   }, [q.data]);
   const rates = q.data?.rates ?? [];
-  // The providers this org has a credential for. A model whose provider is absent is not offered at
+  // The providers this org can run on: every one it holds a credential for, plus a deployment-supplied
+  // PLATFORM when the server offers it. A model whose provider is absent is not offered at
   // all: an option nobody can pick is noise, and naming the key it would need turns a settings page
   // into a shopping list: one that is wrong as often as not, since the same model is reachable
   // through more than one provider.
@@ -289,7 +291,7 @@ function LaneRow({
   group: ModelLaneGroupView;
   models: ModelOption[];
   rates: ModelRateView[];
-  /** Providers the org has a credential for: gates which options exist at all. */
+  /** Providers the org can run on: gates which options exist at all. */
   configuredProviders: Set<ModelProvider>;
   setting: ProjectModelSetting | undefined;
   busy: boolean;

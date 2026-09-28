@@ -17,8 +17,8 @@ public enum ModelProvider {
     OPENROUTER,
     // OLLAMA was removed: it was the platform's sole credential-free, AUTH_NONE
     // provider, and the maker filter (OpenAI, Anthropic, Google, Moonshot, Zhipu, xAI) drops it —
-    // Meta is not a supported maker. Removing it also removed the LAST platform-funded path: every
-    // provider requires an org credential.
+    // Meta is not a supported maker. Every provider in this list requires an org credential except
+    // PLATFORM below.
     MOONSHOT,
     BEDROCK,
     /** Google's Gemini line over its OpenAI-compatible endpoint. */
@@ -50,5 +50,14 @@ public enum ModelProvider {
      * TypeSafe's hosted decision models (Jev). Never a chat model: it answers typed questions about a
      * state in one POST, so it is reached only through {@code llm/decisions/}.
      */
-    TYPESAFE
+    TYPESAFE,
+
+    /**
+     * A provider the deployment itself supplies, with no org credential behind it. Offered only when
+     * a {@link PlatformProviderSupplier} says so for the org; the default supplier offers it to no
+     * one, so an install that registers no supplier never lists, selects or runs it. Its
+     * {@link PlatformCatalog} descriptor is a placeholder the supplier's label and detail replace.
+     * Tessary Cloud offers it as Tessary AI; nothing in this repo does, and that is deliberate.
+     */
+    PLATFORM
 }
