@@ -632,7 +632,8 @@ class ProviderCredentialControllerTest {
                         ctx,
                         ORG_SLUG,
                         ModelProvider.PLATFORM,
-                        new ProviderCredentialController.UpsertRequest(null, "sk-x", null, null, null, null, null, null)));
+                        new ProviderCredentialController.UpsertRequest(
+                                null, "sk-x", null, null, null, null, null, null)));
 
         assertEquals(ModelConfigError.PROVIDER_NOT_EDITABLE, e.error());
         verify(repo, never()).insert(any());
@@ -641,8 +642,8 @@ class ProviderCredentialControllerTest {
 
     @Test
     void deleteRefusesThePlatformProvider() {
-        TessaryException e = assertThrows(
-                TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.PLATFORM));
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.PLATFORM));
 
         assertEquals(ModelConfigError.PROVIDER_NOT_EDITABLE, e.error());
     }

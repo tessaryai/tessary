@@ -35,7 +35,8 @@ public interface PlatformProviderSupplier {
      * @param label the provider's name on the Providers page
      * @param detail a short status line under it, such as a remaining balance, or null for none
      */
-    record SuppliedProvider(String label, @JsonProperty("detail") @Nullable String detail) {}
+    record SuppliedProvider(
+            String label, @JsonProperty("detail") @Nullable String detail) {}
 
     /** The open default: {@link ModelProvider#PLATFORM} is offered to no org. */
     static PlatformProviderSupplier none() {

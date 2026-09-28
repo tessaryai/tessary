@@ -200,7 +200,8 @@ public class ProviderCredentialController {
     @GetMapping("/catalog")
     public ApiResponse<CatalogView> catalog(TenantContext ctx, @PathVariable String orgSlug) {
         var r = resolver.requireOrg(ctx, orgSlug);
-        Optional<PlatformProviderSupplier.SuppliedProvider> supplied = platformSupplier.describe(r.org().id());
+        Optional<PlatformProviderSupplier.SuppliedProvider> supplied =
+                platformSupplier.describe(r.org().id());
         Map<ModelProvider, List<ProviderModel>> live = fetchAllProviders(r.org().id());
         List<ModelCatalog.CatalogEntry> models = new ArrayList<>();
         for (ModelProvider provider : ModelProvider.values()) {

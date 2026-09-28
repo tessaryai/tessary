@@ -436,23 +436,24 @@ class E2bRcaSandboxTest {
         })) {
             AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
             when(resolver.resolve(any(), any())).thenReturn(LEASED);
-            E2bRcaSandbox sandbox = new E2bRcaSandbox(
-                    props(),
-                    new ObserverProperties(),
-                    noLaneSetting(),
-                    resolver,
-                    mock(LlmUsageAccountant.class),
-                    OpenTelemetry.noop(),
-                    MAPPER) {
-                @Override
-                String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-                    try {
-                        return launcher.answer(bodyJson);
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                }
-            };
+            E2bRcaSandbox sandbox =
+                    new E2bRcaSandbox(
+                            props(),
+                            new ObserverProperties(),
+                            noLaneSetting(),
+                            resolver,
+                            mock(LlmUsageAccountant.class),
+                            OpenTelemetry.noop(),
+                            MAPPER) {
+                        @Override
+                        String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
+                            try {
+                                return launcher.answer(bodyJson);
+                            } catch (Exception e) {
+                                throw new IllegalStateException(e);
+                            }
+                        }
+                    };
 
             try {
                 sandbox.run(request());

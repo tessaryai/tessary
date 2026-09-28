@@ -146,13 +146,19 @@ class E2bTriageSandboxTest {
     void theRunsCredentialIsReleasedHoweverTheRunEnds(int status, String body) {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER) {
-            @Override
-            HttpResponse<String> send(HttpRequest req) {
-                return respondWith(status, body);
-            }
-        };
+        E2bTriageSandbox sandbox =
+                new E2bTriageSandbox(
+                        props(),
+                        noLaneSetting(),
+                        resolver,
+                        mock(LlmUsageAccountant.class),
+                        OpenTelemetry.noop(),
+                        MAPPER) {
+                    @Override
+                    HttpResponse<String> send(HttpRequest req) {
+                        return respondWith(status, body);
+                    }
+                };
 
         try {
             sandbox.run(request());
@@ -167,13 +173,19 @@ class E2bTriageSandboxTest {
     void aTimedOutRunStillReleasesItsCredential() {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER) {
-            @Override
-            HttpResponse<String> send(HttpRequest req) throws IOException {
-                throw new HttpTimeoutException("request timed out");
-            }
-        };
+        E2bTriageSandbox sandbox =
+                new E2bTriageSandbox(
+                        props(),
+                        noLaneSetting(),
+                        resolver,
+                        mock(LlmUsageAccountant.class),
+                        OpenTelemetry.noop(),
+                        MAPPER) {
+                    @Override
+                    HttpResponse<String> send(HttpRequest req) throws IOException {
+                        throw new HttpTimeoutException("request timed out");
+                    }
+                };
 
         assertEquals(Optional.empty(), sandbox.run(request()));
         verify(resolver, times(1)).release(LEASED);

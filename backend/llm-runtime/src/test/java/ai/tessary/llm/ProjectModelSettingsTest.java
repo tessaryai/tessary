@@ -162,8 +162,8 @@ class ProjectModelSettingsTest {
         // not make the provider count as configured on a build that offers it to no one.
         configured(ModelProvider.PLATFORM);
         assertTrue(settings.resolve(PID, ModelLane.RCA).isEmpty());
-        TessaryException refused = assertThrows(
-                TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET));
+        TessaryException refused =
+                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET));
         assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, refused.error());
     }
 

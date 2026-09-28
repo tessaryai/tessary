@@ -62,8 +62,8 @@ class DecisionProviderResolverTest {
         TessaryProperties props = new TessaryProperties();
         props.setSecretKey(Base64.getEncoder().encodeToString(new byte[32]));
         box = new SecretBox(props);
-        ProjectModelSettings settings = new ProjectModelSettings(
-                settingRows, credentials, orgs, catalog, PlatformProviderSupplier.none());
+        ProjectModelSettings settings =
+                new ProjectModelSettings(settingRows, credentials, orgs, catalog, PlatformProviderSupplier.none());
         resolver = new DecisionProviderResolver(settings, credentials, box, orgs);
     }
 

@@ -227,7 +227,10 @@ public class ProjectModelSettingController {
                             LanePriority.of(l).stream()
                                     .filter(o -> platformOffered || o.provider() != ModelProvider.PLATFORM)
                                     .map(o -> new ProviderOptionView(
-                                            o.provider(), label(r.org().id(), o.provider()), o.modelKeys(), o.defaultModelKey()))
+                                            o.provider(),
+                                            label(r.org().id(), o.provider()),
+                                            o.modelKeys(),
+                                            o.defaultModelKey()))
                                     .toList(),
                             effective
                                     .map(ProjectModelSettings.LaneSelection::modelKey)
