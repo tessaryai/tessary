@@ -4,6 +4,7 @@ package ai.tessary.llm;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
@@ -29,8 +30,9 @@ import org.jspecify.annotations.Nullable;
  * other half of that discipline.
  *
  * <p>Registered by {@link LlmSeamConfig} only when no other build supplies one, so another build can
- * extend this class and fall back to a platform-held credential; {@link Credential#platformFunded()}
- * is how that build tells the ledger whose bill the run lands on.
+ * extend this class and resolve {@link ModelProvider#PLATFORM} to a credential of its own;
+ * {@link Credential#platformFunded()} is how that build tells the ledger whose bill the run lands on,
+ * and {@link #release} is where it frees whatever it reserved for the run.
  */
 public class AgenticCredentialResolver {
 
@@ -53,6 +55,11 @@ public class AgenticCredentialResolver {
      * irrelevant to {@link #provider} are simply null and dropped by {@code @JsonInclude(NON_NULL)}
      * — the launcher's own {@code requireCredential} validates by provider, so there is no shared
      * "every field always present" contract to keep.
+     *
+     * <p>{@code egressSecret} names a secret in the sandbox provider's own store that its egress proxy
+     * injects into the model provider's requests, outside the sandbox, in place of {@code apiKey}: the
+     * key never enters the VM. {@code lease} is an opaque handle a resolver can attach to find the
+     * run's reservation again in {@link #release}; it never goes on the wire.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Credential(
@@ -63,7 +70,9 @@ public class AgenticCredentialResolver {
             @JsonProperty("aws_region") @Nullable String awsRegion,
             @JsonProperty("aws_access_key") @Nullable String awsAccessKey,
             @JsonProperty("aws_secret_key") @Nullable String awsSecretKey,
-            @JsonProperty("platform_funded") boolean platformFunded) {
+            @JsonProperty("platform_funded") boolean platformFunded,
+            @JsonProperty("egress_secret") @Nullable String egressSecret,
+            @JsonIgnore @Nullable String lease) {
 
         public Credential(
                 ModelProvider provider,
@@ -73,7 +82,7 @@ public class AgenticCredentialResolver {
                 @Nullable String awsRegion,
                 @Nullable String awsAccessKey,
                 @Nullable String awsSecretKey) {
-            this(provider, apiKey, baseUrl, customModelName, awsRegion, awsAccessKey, awsSecretKey, false);
+            this(provider, apiKey, baseUrl, customModelName, awsRegion, awsAccessKey, awsSecretKey, false, null, null);
         }
     }
 
@@ -126,5 +135,14 @@ public class AgenticCredentialResolver {
                 null,
                 null,
                 null);
+    }
+
+    /**
+     * Called once the run {@code credential} was resolved for has ended, however it ended: success,
+     * failure or timeout. Nothing to free here, since an org's own key reserves nothing; a build that
+     * reserves something per run (a slot, a budget) frees it here, using {@link Credential#lease()}.
+     */
+    public void release(Credential credential) {
+        // An org's own key reserves nothing per run, so there is nothing to free.
     }
 }

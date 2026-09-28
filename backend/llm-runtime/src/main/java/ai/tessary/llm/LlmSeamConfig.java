@@ -7,9 +7,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires this build's {@link AgenticCredentialResolver}. The {@code @ConditionalOnMissingBean} sits
- * on the {@code @Bean} method so another build can register its own resolver and this one yields,
- * the same shape as {@code OrgCreationLimitConfig}.
+ * Wires this build's {@link AgenticCredentialResolver} and {@link PlatformProviderSupplier}. The
+ * {@code @ConditionalOnMissingBean} sits on each {@code @Bean} method so another build can register
+ * its own and this one yields, the same shape as {@code OrgCreationLimitConfig}.
  */
 @Configuration(proxyBeanMethods = false)
 public class LlmSeamConfig {
@@ -19,5 +19,11 @@ public class LlmSeamConfig {
     AgenticCredentialResolver agenticCredentialResolver(
             ProviderCredentialRepository repo, SecretBox secretBox, ProjectOrgResolver orgResolver) {
         return new AgenticCredentialResolver(repo, secretBox, orgResolver);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(PlatformProviderSupplier.class)
+    PlatformProviderSupplier platformProviderSupplier() {
+        return PlatformProviderSupplier.none();
     }
 }

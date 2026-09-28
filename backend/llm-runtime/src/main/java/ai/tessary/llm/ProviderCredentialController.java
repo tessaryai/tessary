@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,6 +79,9 @@ public class ProviderCredentialController {
 
     private final ApplicationEventPublisher events;
 
+    /** Whether and how {@link #catalog} lists {@link ModelProvider#PLATFORM}. */
+    private final PlatformProviderSupplier platformSupplier;
+
     /** How long {@link #catalog} waits on one provider; {@link #PER_PROVIDER_FETCH_DEADLINE} in production. */
     private final Duration fetchDeadline;
 
@@ -88,8 +92,17 @@ public class ProviderCredentialController {
             TenantPathResolver resolver,
             CapabilityService capabilities,
             ModelCatalogFetchService catalogFetchService,
-            ApplicationEventPublisher events) {
-        this(repo, secretBox, resolver, capabilities, catalogFetchService, events, PER_PROVIDER_FETCH_DEADLINE);
+            ApplicationEventPublisher events,
+            PlatformProviderSupplier platformSupplier) {
+        this(
+                repo,
+                secretBox,
+                resolver,
+                capabilities,
+                catalogFetchService,
+                events,
+                platformSupplier,
+                PER_PROVIDER_FETCH_DEADLINE);
     }
 
     /** Test seam: a short deadline, so a test can hang one provider without waiting ten seconds. */
@@ -100,6 +113,7 @@ public class ProviderCredentialController {
             CapabilityService capabilities,
             ModelCatalogFetchService catalogFetchService,
             ApplicationEventPublisher events,
+            PlatformProviderSupplier platformSupplier,
             Duration fetchDeadline) {
         this.fetchDeadline = fetchDeadline;
         this.repo = repo;
@@ -108,6 +122,7 @@ public class ProviderCredentialController {
         this.resolver = resolver;
         this.capabilities = capabilities;
         this.catalogFetchService = catalogFetchService;
+        this.platformSupplier = platformSupplier;
     }
 
     /**
@@ -185,9 +200,11 @@ public class ProviderCredentialController {
     @GetMapping("/catalog")
     public ApiResponse<CatalogView> catalog(TenantContext ctx, @PathVariable String orgSlug) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        Optional<PlatformProviderSupplier.SuppliedProvider> supplied = platformSupplier.describe(r.org().id());
         Map<ModelProvider, List<ProviderModel>> live = fetchAllProviders(r.org().id());
         List<ModelCatalog.CatalogEntry> models = new ArrayList<>();
         for (ModelProvider provider : ModelProvider.values()) {
+            if (provider == ModelProvider.PLATFORM && supplied.isEmpty()) continue;
             List<ProviderModel> providerLive = live.getOrDefault(provider, List.of());
             List<ModelCatalog.CatalogEntry> providerEntries = providerLive.isEmpty()
                     ? ModelCatalog.entries().stream()
@@ -196,7 +213,25 @@ public class ProviderCredentialController {
                     : ModelCatalog.mergeLive(provider, providerLive);
             models.addAll(providerEntries);
         }
-        return ApiResponse.ok(new CatalogView(PlatformCatalog.platforms(), List.copyOf(models)));
+        return ApiResponse.ok(new CatalogView(platforms(supplied), List.copyOf(models)));
+    }
+
+    /**
+     * {@link PlatformCatalog#platforms()} with {@link ModelProvider#PLATFORM}'s placeholder replaced by
+     * the supplier's label and detail, or dropped when the supplier does not offer it to this org.
+     */
+    private static List<PlatformCatalog.PlatformDescriptor> platforms(
+            Optional<PlatformProviderSupplier.SuppliedProvider> supplied) {
+        List<PlatformCatalog.PlatformDescriptor> out = new ArrayList<>();
+        for (PlatformCatalog.PlatformDescriptor p : PlatformCatalog.platforms()) {
+            if (p.id() != ModelProvider.PLATFORM) {
+                out.add(p);
+            } else {
+                supplied.ifPresent(s -> out.add(new PlatformCatalog.PlatformDescriptor(
+                        p.id(), s.label(), p.auth(), p.supportsBaseUrl(), p.defaultBaseUrl(), p.usedBy(), s.detail())));
+            }
+        }
+        return List.copyOf(out);
     }
 
     /**
@@ -211,6 +246,8 @@ public class ProviderCredentialController {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Map<ModelProvider, Future<List<ProviderModel>>> futures = new EnumMap<>(ModelProvider.class);
             for (ModelProvider provider : ModelProvider.values()) {
+                // No org credential and no listing: the supplier, not a vendor, answers for PLATFORM.
+                if (provider == ModelProvider.PLATFORM) continue;
                 futures.put(provider, executor.submit(() -> catalogFetchService.refreshingRead(orgId, provider)));
             }
             Map<ModelProvider, List<ProviderModel>> results = new EnumMap<>(ModelProvider.class);
@@ -253,6 +290,7 @@ public class ProviderCredentialController {
             @PathVariable ModelProvider provider,
             @RequestBody UpsertRequest req) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        requireEditable(provider);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
 
         // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target (the
@@ -321,9 +359,20 @@ public class ProviderCredentialController {
     public ApiResponse<DeleteResponse> delete(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable ModelProvider provider) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        requireEditable(provider);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
         boolean deleted = repo.deleteByOrgAndProvider(r.org().id(), provider);
         return ApiResponse.ok(new DeleteResponse(deleted));
+    }
+
+    /**
+     * {@link ModelProvider#PLATFORM} takes no org credential: a stored row would be a key nothing reads,
+     * and {@link ProjectModelSettings#configuredProviders} ignores one anyway.
+     */
+    private static void requireEditable(ModelProvider provider) {
+        if (provider == ModelProvider.PLATFORM) {
+            throw new TessaryException(ModelConfigError.PROVIDER_NOT_EDITABLE, provider);
+        }
     }
 
     private static String blankToNull(String s) {

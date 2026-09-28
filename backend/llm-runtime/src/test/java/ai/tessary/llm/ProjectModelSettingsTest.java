@@ -35,10 +35,14 @@ class ProjectModelSettingsTest {
     private static final String HAIKU = "anthropic.claude-haiku-4-5";
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String SONNET_5 = "anthropic.claude-sonnet-5";
+    private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5";
 
     private ProjectModelSettingRepository repo;
     private ProviderCredentialRepository credentials;
     private ProjectModelSettings settings;
+
+    /** Whether the fake supplier below offers {@link ModelProvider#PLATFORM} to the org. */
+    private boolean platformOffered;
 
     @BeforeEach
     void setUp() {
@@ -49,7 +53,18 @@ class ProjectModelSettingsTest {
         when(orgs.orgIdFor(PID)).thenReturn(ORG);
         // Every provider is configured by default; tests that care narrow it with configured(...).
         configured(ModelProvider.values());
-        settings = new ProjectModelSettings(repo, credentials, orgs, mock(ModelCatalogFetchService.class));
+        PlatformProviderSupplier supplier = new PlatformProviderSupplier() {
+            @Override
+            public boolean available(String orgId) {
+                return platformOffered && ORG.equals(orgId);
+            }
+
+            @Override
+            public Optional<SuppliedProvider> describe(String orgId) {
+                return Optional.empty();
+            }
+        };
+        settings = new ProjectModelSettings(repo, credentials, orgs, mock(ModelCatalogFetchService.class), supplier);
     }
 
     /** Give the org a credential for exactly these providers, and for none of the others. */
@@ -108,6 +123,48 @@ class ProjectModelSettingsTest {
                 "GEMINI:gemini-3.1-pro-preview",
                 settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey(),
                 "with Bedrock gone, the next provider in the order supplies its own default");
+    }
+
+    @Test
+    void anOrgWithNoKeyRunsOnThePlatformProviderWhenItIsOffered() {
+        configured();
+        platformOffered = true;
+        var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
+        assertEquals(PLATFORM_SONNET, rca.modelKey());
+        assertTrue(rca.automatic());
+        assertEquals(
+                PLATFORM_SONNET,
+                settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey(),
+                "TRIAGE shares RCA's order, so it lands on the platform provider too");
+    }
+
+    @Test
+    void anOrgsOwnKeyOutranksThePlatformProvider() {
+        configured(ModelProvider.ANTHROPIC);
+        platformOffered = true;
+        assertEquals(
+                "ANTHROPIC:claude-sonnet-5",
+                settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey(),
+                "the platform provider is last, so an unpinned lane moves to the org's own key");
+    }
+
+    @Test
+    void aLaneCanBePinnedToThePlatformProviderWhenItIsOffered() {
+        configured();
+        platformOffered = true;
+        settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET);
+        verify(repo).upsert(PID, ModelLane.RCA, PLATFORM_SONNET, ServiceTier.STANDARD, null);
+    }
+
+    @Test
+    void thePlatformProviderIsNeverConfiguredWithoutASupplierEvenWithAStoredRow() {
+        // A PLATFORM credential row cannot be written through the API, but one left in the table must
+        // not make the provider count as configured on a build that offers it to no one.
+        configured(ModelProvider.PLATFORM);
+        assertTrue(settings.resolve(PID, ModelLane.RCA).isEmpty());
+        TessaryException refused = assertThrows(
+                TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET));
+        assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, refused.error());
     }
 
     @Test

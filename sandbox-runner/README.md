@@ -58,6 +58,10 @@ narrower.
   AGENT_POSTURE hands it the provider credentials `agentEnvs()` derives and puts the container on the
   sandbox bridge network. `E2B_API_KEY` stays in the launcher and is never sent to the backend or
   into a sandbox.
+  - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
+    no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
+    `x-api-key` outside the microVM. The agent gets a placeholder, and that run's egress is limited
+    to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value

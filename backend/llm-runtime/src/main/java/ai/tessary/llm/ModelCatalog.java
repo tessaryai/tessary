@@ -444,6 +444,17 @@ public final class ModelCatalog {
                     "https://openrouter.ai/api/v1",
                     false,
                     true),
+            // The deployment-supplied provider runs Anthropic's model on Anthropic's wire, so it prices
+            // under the same bare book key. No default base URL: the supplying build decides the route.
+            new CatalogEntry(
+                    ModelProvider.PLATFORM,
+                    "Anthropic",
+                    "claude-sonnet-5",
+                    "Claude Sonnet 5",
+                    false,
+                    NO_EFFORT,
+                    null,
+                    true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
             // shows unqualified.

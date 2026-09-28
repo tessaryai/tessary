@@ -16,6 +16,7 @@ import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,16 +50,26 @@ class ProjectModelSettingControllerTest {
     @Mock
     private PriceBookRepository priceBooks;
 
-    @Mock
-    private ProviderCredentialRepository providerCredentials;
-
     private ProjectModelSettingController controller;
     private TenantContext ctx;
 
+    /** A supplier offering {@link ModelProvider#PLATFORM} as "Tessary AI", for the tests that need one. */
+    private static final PlatformProviderSupplier TESSARY_AI = new PlatformProviderSupplier() {
+        @Override
+        public boolean available(String orgId) {
+            return true;
+        }
+
+        @Override
+        public Optional<SuppliedProvider> describe(String orgId) {
+            return Optional.of(new SuppliedProvider("Tessary AI", "$10.00 left"));
+        }
+    };
+
     @BeforeEach
     void setUp() {
-        controller =
-                new ProjectModelSettingController(settings, resolver, priceModels, priceBooks, providerCredentials);
+        controller = new ProjectModelSettingController(
+                settings, resolver, priceModels, priceBooks, PlatformProviderSupplier.none());
         ctx = new TenantContext("user_1", "user@example.com", ORG_ID, null, "owner", null);
         Organization org = new Organization(ORG_ID, null, ORG_SLUG, "Acme", "2026-01-01T00:00:00Z", null, null);
         Project project = new Project(
@@ -66,8 +77,6 @@ class ProjectModelSettingControllerTest {
         var resolved = new TenantPathResolver.Resolved(org, project, "owner");
         when(resolver.requireProject(ctx, ORG_SLUG, PROJECT_SLUG)).thenReturn(resolved);
         when(settings.list(PROJECT_ID)).thenReturn(List.of());
-        // No credentials configured; tests that need a provider override this.
-        when(providerCredentials.findByOrg(ORG_ID)).thenReturn(List.of());
     }
 
     @Test
@@ -107,6 +116,8 @@ class ProjectModelSettingControllerTest {
                     java.util.Arrays.stream(ModelProvider.values())
                             // Decision models only; never a sandbox agent.
                             .filter(p -> p != ModelProvider.TYPESAFE)
+                            // Offered only when a supplier says so; see the two PLATFORM tests below.
+                            .filter(p -> p != ModelProvider.PLATFORM)
                             .map(ModelProvider::name)
                             .collect(java.util.stream.Collectors.toSet()),
                     laneView.providerOptions().stream()
@@ -135,6 +146,42 @@ class ProjectModelSettingControllerTest {
                 "catalog_models must never carry a chat entry no lane offers (the older OpenAI-direct models, "
                         + "Anthropic-direct, OpenRouter, Moonshot, Bedrock): "
                         + view.catalogModels());
+    }
+
+    @Test
+    void aBuildWithNoSupplierOffersNoPlatformOptionOrModel() {
+        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
+
+        assertTrue(
+                view.lanes().stream()
+                        .flatMap(l -> l.providerOptions().stream())
+                        .noneMatch(o -> o.provider() == ModelProvider.PLATFORM),
+                "PLATFORM must not appear as an option an org could be told to add a key for");
+        assertTrue(view.catalogModels().stream().noneMatch(e -> e.provider() == ModelProvider.PLATFORM));
+    }
+
+    @Test
+    void aSuppliedPlatformProviderIsOfferedLastUnderTheSuppliersLabel() {
+        controller = new ProjectModelSettingController(settings, resolver, priceModels, priceBooks, TESSARY_AI);
+        when(settings.configuredProviders(ORG_ID)).thenReturn(Set.of(ModelProvider.PLATFORM));
+
+        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
+
+        var rcaOptions = view.lanes().stream()
+                .filter(l -> l.id() == ModelLane.RCA)
+                .findFirst()
+                .orElseThrow()
+                .providerOptions();
+        var last = rcaOptions.get(rcaOptions.size() - 1);
+        assertEquals(
+                new ProjectModelSettingController.ProviderOptionView(
+                        ModelProvider.PLATFORM,
+                        "Tessary AI",
+                        List.of("PLATFORM:claude-sonnet-5"),
+                        "PLATFORM:claude-sonnet-5"),
+                last);
+        assertTrue(view.catalogModels().stream().anyMatch(e -> e.provider() == ModelProvider.PLATFORM));
+        assertEquals(Set.of(ModelProvider.PLATFORM), view.configuredProviders());
     }
 
     /**

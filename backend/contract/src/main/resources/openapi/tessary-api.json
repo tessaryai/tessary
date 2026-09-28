@@ -3482,7 +3482,8 @@
               "GROK",
               "CUSTOM",
               "BEDROCK_MANTLE",
-              "TYPESAFE"
+              "TYPESAFE",
+              "PLATFORM"
             ],
             "type" : "string"
           },
@@ -6547,7 +6548,8 @@
                 "GROK",
                 "CUSTOM",
                 "BEDROCK_MANTLE",
-                "TYPESAFE"
+                "TYPESAFE",
+                "PLATFORM"
               ],
               "type" : "string"
             },
@@ -7117,6 +7119,12 @@
           "default_base_url" : {
             "type" : "string"
           },
+          "detail" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "id" : {
             "enum" : [
               "OPENAI",
@@ -7129,7 +7137,8 @@
               "GROK",
               "CUSTOM",
               "BEDROCK_MANTLE",
-              "TYPESAFE"
+              "TYPESAFE",
+              "PLATFORM"
             ],
             "type" : "string"
           },
@@ -7149,6 +7158,7 @@
         "required" : [
           "auth",
           "default_base_url",
+          "detail",
           "id",
           "label",
           "supports_base_url",
@@ -7578,7 +7588,8 @@
               "GROK",
               "CUSTOM",
               "BEDROCK_MANTLE",
-              "TYPESAFE"
+              "TYPESAFE",
+              "PLATFORM"
             ],
             "type" : "string"
           }
@@ -11057,7 +11068,8 @@
               "GROK",
               "CUSTOM",
               "BEDROCK_MANTLE",
-              "TYPESAFE"
+              "TYPESAFE",
+              "PLATFORM"
             ],
             "type" : "string"
           },
@@ -17861,7 +17873,8 @@
                 "GROK",
                 "CUSTOM",
                 "BEDROCK_MANTLE",
-                "TYPESAFE"
+                "TYPESAFE",
+                "PLATFORM"
               ],
               "type" : "string"
             }
@@ -17918,7 +17931,8 @@
                 "GROK",
                 "CUSTOM",
                 "BEDROCK_MANTLE",
-                "TYPESAFE"
+                "TYPESAFE",
+                "PLATFORM"
               ],
               "type" : "string"
             }

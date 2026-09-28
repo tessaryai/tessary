@@ -140,6 +140,7 @@ const BAD_CREDENTIALS = [
   [{ provider: 'GEMINI', api_key: '  ' }, 'GEMINI credential is missing api_key'],
   [{ provider: 'GEMINI' }, 'GEMINI credential is missing api_key'],
   [{ provider: 'CUSTOM', api_key: 'k' }, 'CUSTOM credential is missing base_url'],
+  [{ provider: 'OPENAI', egress_secret: 's' }, 'egress_secret is only supported on an ANTHROPIC credential'],
 ];
 
 test('an unusable credential is the caller\'s bad_request, named, before any sandbox is spent', async () => {
@@ -151,6 +152,19 @@ test('an unusable credential is the caller\'s bad_request, named, before any san
       assert.equal(res.body.kind, 'bad_request', why);
       assert.ok(res.body.detail.startsWith(`rca.js: missing or invalid credential (${why}`), res.body.detail);
     }
+  } finally {
+    child.kill();
+  }
+});
+
+test('an egress credential on the docker backend is the caller\'s bad_request: only E2B injects at egress', async () => {
+  const { child, port } = await startLauncher({ SANDBOX_BACKEND: 'docker', SANDBOX_WORK_VOLUME: 'vol', SANDBOX_API_KEY: 'testkey' });
+  try {
+    const credential = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' };
+    const res = await request(port, 'POST', '/rca', { auth: 'Bearer testkey', body: { mcp: MCP, credential } });
+    assert.equal(res.status, 502);
+    assert.equal(res.body.kind, 'bad_request');
+    assert.equal(res.body.detail, 'rca.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)');
   } finally {
     child.kill();
   }

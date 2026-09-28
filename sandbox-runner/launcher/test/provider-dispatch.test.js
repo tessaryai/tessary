@@ -261,3 +261,22 @@ test('toProviderModel: an OPENROUTER model gains the openrouter prefix once, sla
   assert.equal(toProviderModel('openai/gpt-5.6-terra', cred), 'openrouter/openai/gpt-5.6-terra');
   assert.equal(toProviderModel('openrouter/openai/gpt-5.6-terra', cred), 'openrouter/openai/gpt-5.6-terra');
 });
+
+// ---- egress-injected credentials: the key lives in the sandbox provider's secret store ----
+
+const EGRESS_CRED = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
+
+test('providerConfig: an egress credential gives OpenCode a placeholder key and runs its background work on the same model', () => {
+  const cfg = providerConfig(EGRESS_CRED, 'anthropic/claude-sonnet-5');
+  assert.deepEqual(cfg.provider.anthropic, {
+    npm: '@ai-sdk/anthropic',
+    options: { baseURL: 'https://api.anthropic.com/v1', apiKey: 'injected-at-egress' },
+  });
+  assert.equal(cfg.small_model, 'anthropic/claude-sonnet-5', 'title generation must not reach for a second model');
+});
+
+test('agentEnvs: an egress credential puts only the placeholder in the agent env, never a key', () => {
+  const envs = agentEnvs(EGRESS_CRED, 'anthropic/claude-sonnet-5');
+  assert.equal(envs.ANTHROPIC_API_KEY, 'injected-at-egress');
+  assert.ok(!JSON.stringify(envs).includes('tessary-ai-anthropic'), 'the secret name is the launcher\'s business, not the agent\'s');
+});

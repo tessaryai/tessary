@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +17,7 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.open.errors.ClassifierError;
+import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -120,6 +123,72 @@ class E2bTriageSandboxTest {
                 return canned;
             }
         };
+    }
+
+    // ---- release: the run's credential is handed back however the run ends --------------------
+
+    private static final AgenticCredentialResolver.Credential LEASED = new AgenticCredentialResolver.Credential(
+            ModelProvider.ANTHROPIC, null, null, null, null, null, null, true, "secret", "lease-1");
+
+    /**
+     * A resolver that reserves something per run (a slot) frees it in {@code release}. A run that ends
+     * any other way than success must still release it, or the reservation leaks until it expires.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "502 | {\"kind\":\"script_exit\"}    ",
+                "502 | {\"kind\":\"orchestration\"}  ",
+                "400 | ''                         ",
+                "200 | {}                         "
+            })
+    void theRunsCredentialIsReleasedHoweverTheRunEnds(int status, String body) {
+        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
+        when(resolver.resolve(any(), any())).thenReturn(LEASED);
+        E2bTriageSandbox sandbox = new E2bTriageSandbox(
+                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER) {
+            @Override
+            HttpResponse<String> send(HttpRequest req) {
+                return respondWith(status, body);
+            }
+        };
+
+        try {
+            sandbox.run(request());
+        } catch (TessaryException expectedForSomeRows) {
+            // The outcome is not this test's subject; the release is.
+        }
+
+        verify(resolver, times(1)).release(LEASED);
+    }
+
+    @Test
+    void aTimedOutRunStillReleasesItsCredential() {
+        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
+        when(resolver.resolve(any(), any())).thenReturn(LEASED);
+        E2bTriageSandbox sandbox = new E2bTriageSandbox(
+                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER) {
+            @Override
+            HttpResponse<String> send(HttpRequest req) throws IOException {
+                throw new HttpTimeoutException("request timed out");
+            }
+        };
+
+        assertEquals(Optional.empty(), sandbox.run(request()));
+        verify(resolver, times(1)).release(LEASED);
+    }
+
+    @Test
+    void aCredentialThatNeverResolvedReleasesNothing() {
+        AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
+        when(resolver.resolve(any(), any()))
+                .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.BEDROCK));
+        E2bTriageSandbox sandbox = new E2bTriageSandbox(
+                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER);
+
+        assertThrows(TessaryException.class, () -> sandbox.run(request()));
+        verify(resolver, never()).release(any());
     }
 
     // ---- classifyFailure: the pure split -------------------------------------------------------

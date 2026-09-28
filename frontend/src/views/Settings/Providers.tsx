@@ -110,9 +110,8 @@ export function Providers() {
             "Could not load the provider catalog. Try again."}
         </p>
       ) : (
-        // The "Free judge included" banner named Ollama, the platform's one no-key
-        // provider — dropped by the maker filter (Amazon/Meta are not supported makers). Every
-        // provider now needs an org key, so there is nothing left to point that banner at.
+        // A provider the deployment supplies (auth "platform") needs no key and renders as
+        // included; every other provider needs an org key.
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {platforms.map((p) => (
             <ProviderRow
@@ -171,7 +170,9 @@ function ProviderRow({
   onRemove: () => void;
   removing: boolean;
 }) {
-  const configured = !!cred && (cred.has_api_key || cred.has_aws_credentials);
+  // A provider the deployment supplies takes no key of the org's own: always on, nothing to edit.
+  const supplied = platform.auth === "platform";
+  const configured = supplied || (!!cred && (cred.has_api_key || cred.has_aws_credentials));
   const names = models.map((m) => m.display_name);
   const namePreview = names.slice(0, 2).join(", ");
   const usedBy = usedByLine(platform);
@@ -185,7 +186,7 @@ function ProviderRow({
         {configured ? (
           <span className="flex items-center gap-1.5 text-label uppercase text-success">
             <span className="h-1.5 w-1.5 rounded-pill bg-success" aria-hidden="true" />
-            Configured
+            {supplied ? "Included" : "Configured"}
           </span>
         ) : (
           <span className="text-label uppercase text-subtle">Not configured</span>
@@ -195,7 +196,9 @@ function ProviderRow({
       {usedBy && <div className="mt-1 text-label text-muted">{usedBy}</div>}
 
       <div className="mt-2.5 text-label text-muted">
-        {configured ? (
+        {supplied ? (
+          <span className="text-subtle">{platform.detail ?? "No key needed"}</span>
+        ) : configured ? (
           <span className="font-mono text-subtle">Key stored</span>
         ) : (
           <span className="text-subtle">{expectedFields(platform)}</span>
@@ -208,7 +211,7 @@ function ProviderRow({
           {namePreview ? ` · ${namePreview}${names.length > 2 ? "…" : ""}` : " available"}
         </span>
         <div className="flex shrink-0 items-center gap-1">
-          {configured ? (
+          {supplied ? null : configured ? (
             <>
               <button
                 type="button"

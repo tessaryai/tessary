@@ -78,6 +78,9 @@ public class ProjectModelSettings {
      */
     private final ModelCatalogFetchService catalogFetchService;
 
+    /** Whether {@link ModelProvider#PLATFORM} counts as configured for an org; see {@link #configuredProviders}. */
+    private final PlatformProviderSupplier platformSupplier;
+
     /** projectId → its explicitly-set lanes. Absent lane = inherit the platform default. */
     private final ConcurrentMap<String, Map<ModelLane, ProjectModelSetting>> cache = new ConcurrentHashMap<>();
 
@@ -85,11 +88,13 @@ public class ProjectModelSettings {
             ProjectModelSettingRepository repo,
             ProviderCredentialRepository credentials,
             ProjectOrgResolver orgResolver,
-            ModelCatalogFetchService catalogFetchService) {
+            ModelCatalogFetchService catalogFetchService,
+            PlatformProviderSupplier platformSupplier) {
         this.repo = repo;
         this.credentials = credentials;
         this.orgResolver = orgResolver;
         this.catalogFetchService = catalogFetchService;
+        this.platformSupplier = platformSupplier;
     }
 
     /** Every lane this project has explicitly set, unset lanes omitted. */
@@ -194,13 +199,21 @@ public class ProjectModelSettings {
                         .isPresent();
     }
 
-    /** The providers this org holds a credential for; empty for an org that has configured none. */
-    private Set<ModelProvider> configuredProviders(@Nullable String orgId) {
+    /**
+     * The providers this org can run on: every provider it holds a credential for, plus
+     * {@link ModelProvider#PLATFORM} when the {@link PlatformProviderSupplier} offers it. The one
+     * answer to "is this provider set up", read by both {@link #resolve} and {@link #set}.
+     *
+     * <p>A stored {@code PLATFORM} credential row never counts: the Providers API refuses to write
+     * one, and a stray row must not offer the provider on a build that supplies it to no one.
+     */
+    public Set<ModelProvider> configuredProviders(@Nullable String orgId) {
         if (orgId == null) return EnumSet.noneOf(ModelProvider.class);
         Set<ModelProvider> configured = EnumSet.noneOf(ModelProvider.class);
         for (ProviderCredential c : credentials.findByOrg(orgId)) {
-            configured.add(c.provider());
+            if (c.provider() != ModelProvider.PLATFORM) configured.add(c.provider());
         }
+        if (platformSupplier.available(orgId)) configured.add(ModelProvider.PLATFORM);
         return configured;
     }
 
@@ -309,8 +322,8 @@ public class ProjectModelSettings {
     /**
      * Point a lane at a model, after checking the org can actually run it.
      *
-     * <p>The provider gate comes first: a {@code (lane, modelKey)} whose provider the org holds no
-     * credential for is refused with {@link ModelConfigError#PROVIDER_NOT_CONFIGURED}. The picker
+     * <p>The provider gate comes first: a {@code (lane, modelKey)} whose provider the org cannot run
+     * on (see {@link #configuredProviders}) is refused with {@link ModelConfigError#PROVIDER_NOT_CONFIGURED}. The picker
      * only offers models the org has a key for, so reaching this is a bug in the picker's filter
      * rather than a normal user path, but it is also the boundary a raw PUT crosses, and a row
      * written past it would be a stored choice the lane could never serve.
@@ -348,7 +361,7 @@ public class ProjectModelSettings {
     private void requireConfiguredProvider(String orgId, String modelKey) {
         Optional<ModelProvider> provider = providerFor(modelKey);
         if (provider.isEmpty()) return;
-        if (credentials.findByOrgAndProvider(orgId, provider.get()).isEmpty()) {
+        if (!configuredProviders(orgId).contains(provider.get())) {
             throw new TessaryException(ModelConfigError.PROVIDER_NOT_CONFIGURED, modelKey, provider.get());
         }
     }

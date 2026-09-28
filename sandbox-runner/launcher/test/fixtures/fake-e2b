@@ -22,7 +22,7 @@ function named(name, message, fields = {}) {
 
 class Sandbox {
   static async create(template, opts) {
-    record({ op: 'create', template, apiKey: opts.apiKey, timeoutMs: opts.timeoutMs });
+    record({ op: 'create', template, apiKey: opts.apiKey, timeoutMs: opts.timeoutMs, ...(opts.network ? { network: opts.network } : {}) });
     if (MODE === 'create-fail') throw named('NotFoundError', 'template not found');
     return new Sandbox();
   }
@@ -61,8 +61,11 @@ class Sandbox {
   }
 }
 
+// The real Secret.fill is a local formatting helper too: it names the secret, it never reads it.
+const Secret = { fill: (name) => `\${e2b.secrets.${name}}` };
+
 const load = Module._load;
 Module._load = function (request, ...rest) {
-  if (request === 'e2b') return { Sandbox };
+  if (request === 'e2b') return { Sandbox, Secret };
   return load.call(this, request, ...rest);
 };

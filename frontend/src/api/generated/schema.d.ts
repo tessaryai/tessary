@@ -2730,7 +2730,7 @@ export interface components {
             effort_levels: string[];
             model_name: string;
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             strict_json_schema: boolean;
             vendor: string;
         };
@@ -3453,7 +3453,7 @@ export interface components {
         };
         ModelSettingsView: {
             catalog_models: components["schemas"]["CatalogEntry"][];
-            configured_providers: ("OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE")[];
+            configured_providers: ("OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM")[];
             groups: components["schemas"]["GroupView"][];
             lanes: components["schemas"]["LaneView"][];
             models: components["schemas"]["ModelDescriptor"][];
@@ -3577,8 +3577,9 @@ export interface components {
         PlatformDescriptor: {
             auth: string;
             default_base_url: string;
+            detail: string | null;
             /** @enum {string} */
-            id: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+            id: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             label: string;
             supports_base_url: boolean;
             used_by: string[];
@@ -3677,7 +3678,7 @@ export interface components {
             label: string;
             model_keys: string[];
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
         };
         RateDetail: {
             bucketKey: string;
@@ -4535,7 +4536,7 @@ export interface components {
             has_aws_credentials: boolean;
             id: string;
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             updated_at: string;
         };
         Vitals: {
@@ -7882,7 +7883,7 @@ export interface operations {
             header?: never;
             path: {
                 orgSlug: string;
-                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             };
             cookie?: never;
         };
@@ -7911,7 +7912,7 @@ export interface operations {
             header?: never;
             path: {
                 orgSlug: string;
-                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE";
+                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             };
             cookie?: never;
         };
