@@ -33,14 +33,14 @@ import org.springframework.stereotype.Component;
  * non-regional rate and under-report that spend by 10%, silently. Unresolved is the better
  * answer: the substrate records it as unpriced and counts it.
  *
- * <p><b>A vendor prefix is naming, so stripping it is safe, but only when no region prefix was
- * consumed first.</b> Producers emit undated Bedrock-style ids the snapshot does not always carry
- * verbatim: {@code anthropic.claude-haiku-4-5} is absent while both {@code claude-haiku-4-5} and
- * the dated {@code anthropic.claude-haiku-4-5-20251001-v1:0} are present, so before this fallback
- * a real project's entire spend read as unpriced. Across every vendor-prefixed key in the
- * snapshot that has a bare counterpart, none differs in price, a property pinned by {@code
- * PriceSnapshotTest}, so a future snapshot that introduces a divergence fails there rather than
- * quietly mispricing here.
+ * <p><b>A vendor prefix is stripped only when the book lacks the prefixed key and no region prefix
+ * was consumed first.</b> Producers emit undated Bedrock-style ids the snapshot does not always
+ * carry verbatim: {@code anthropic.claude-haiku-4-5} is absent while both {@code claude-haiku-4-5}
+ * and the dated {@code anthropic.claude-haiku-4-5-20251001-v1:0} are present, so before this
+ * fallback a real project's entire spend read as unpriced. Vendors may price the same model
+ * differently ({@code anthropic.claude-mythos-preview} on Bedrock is not {@code
+ * claude-mythos-preview} direct), which is why the exact key always wins; the fallback answers
+ * only for a spelling the book does not carry.
  */
 @Component
 public class ModelResolver {

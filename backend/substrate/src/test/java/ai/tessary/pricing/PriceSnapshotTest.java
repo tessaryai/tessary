@@ -6,13 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -64,27 +60,6 @@ class PriceSnapshotTest {
     }
 
     @Test
-    @DisplayName("no vendor-prefixed key in the snapshot disagrees with its bare counterpart")
-    void load_vendorPrefixIsPriceNeutralAcrossTheWholeBook() {
-        // The guarantee ModelResolver's vendor strip rests on, pinned against the file itself rather than
-        // asserted about one id — so a future snapshot that introduces a divergence fails here.
-        Map<String, ModelRates> rates = byId(litellm());
-        List<String> mismatches = new ArrayList<>();
-        int compared = 0;
-        for (String vendor : new String[] {"anthropic.", "openai.", "meta.", "mistral.", "cohere.", "amazon."}) {
-            for (Map.Entry<String, ModelRates> entry : rates.entrySet()) {
-                if (!entry.getKey().startsWith(vendor)) continue;
-                ModelRates bare = rates.get(entry.getKey().substring(vendor.length()));
-                if (bare == null) continue;
-                compared++;
-                if (!samePrice(entry.getValue(), bare)) mismatches.add(entry.getKey());
-            }
-        }
-        assertTrue(compared > 0, "the sweep must actually compare something");
-        assertTrue(mismatches.isEmpty(), "vendor prefix changed the price: " + mismatches);
-    }
-
-    @Test
     @DisplayName("an unreadable rate file is empty, not a boot failure")
     void load_missingResourceIsEmpty() {
         Optional<PriceSnapshot> missing = PriceSnapshot.load(mapper, PriceBook.SOURCE_LITELLM, "pricing/absent.json");
@@ -104,17 +79,5 @@ class PriceSnapshotTest {
                         body.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         "https://example.test/prices.json")
                 .isEmpty());
-    }
-
-    private static boolean samePrice(ModelRates a, ModelRates b) {
-        return same(a.inputPerMtok(), b.inputPerMtok())
-                && same(a.outputPerMtok(), b.outputPerMtok())
-                && same(a.cacheReadPerMtok(), b.cacheReadPerMtok())
-                && same(a.cacheWritePerMtok(), b.cacheWritePerMtok());
-    }
-
-    private static boolean same(@Nullable BigDecimal a, @Nullable BigDecimal b) {
-        if (a == null || b == null) return a == b;
-        return a.compareTo(b) == 0;
     }
 }
