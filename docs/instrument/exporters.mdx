@@ -141,7 +141,7 @@ Nothing arriving is an exporter problem, not a tagging problem. [Instrumentation
 
 ### Transports
 
-The HTTP receiver is always on. A gRPC receiver exists and is opt-in through `TESSARY_INGEST_OTLP_TRANSPORT`, documented in [Ingest and OTLP](/self-hosting/configuration#ingest-and-otlp). The default Docker Compose configuration does not publish the gRPC port to the host, so HTTP is the reachable transport on a stock self-hosted install.
+The HTTP receiver is always on. A gRPC receiver exists and is opt-in through `TESSARY_INGEST_OTLP_TRANSPORT`, documented in [Ingest and OTLP](/self-hosting/configuration#ingest-and-otlp). The default Docker Compose configuration does not publish the gRPC port to the host, so HTTP is the reachable transport on a stock self-hosted install. Tessary Cloud accepts OTLP over HTTP only, and gRPC is not available there.
 
 ## Related pages
 

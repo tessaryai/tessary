@@ -3,7 +3,11 @@ title: "Catch answers your documents don't support"
 description: "Turn on the groundedness classifier, see what it sends and where, what it costs, and read and resolve the finding and case it opens when a call site's answers stop matching their retrieved documents."
 ---
 
-The groundedness classifier checks each answer your agent gives against the documents it retrieved, or against its prompt when it retrieved none, and flags the sentences that source doesn't support. It opens a finding when the share of a call site's traces with a flagged answer rises above what that call site learned as normal. It starts switched off on every project, because the model it scores with runs on a GPU you provide: a Mac with Apple silicon for development, or a GPU instance on AWS for production.
+The groundedness classifier checks each answer your agent gives against the documents it retrieved, or against its prompt when it retrieved none, and flags the sentences that source doesn't support. It opens a finding when the share of a call site's traces with a flagged answer rises above what that call site learned as normal. On a self-hosted instance, it starts switched off on every project, because the model it scores with runs on a GPU you provide: a Mac with Apple silicon for development, or a GPU instance on AWS for production.
+
+<Note>
+  On Tessary Cloud, the groundedness classifier is on by default, with nothing to set up. The Mac and AWS setup in [Before you start](#before-you-start) and [Turn it on](#turn-it-on) applies only to self-hosted Tessary.
+</Note>
 
 ## Before you start
 
@@ -181,7 +185,7 @@ On AWS, a row that is scoring reads **last run** and the time of the latest hour
 
 - Each scored answer's score and whether it was flagged are kept, with no text, because the call site's share is rebuilt from them. The retention sweep does not delete them.
 - Flagged answers are detections, and follow the detection retention period. Each keeps the position and score of its flagged sentences and the text of its highest-scoring sentence, shortened when it is long.
-- The question, answer, and documents are not copied. The finding reads them from the trace, so they are deleted on the trace's schedule. See [Data retention](/self-hosting/configuration#data-retention).
+- The question, answer, and documents are not copied. The finding reads them from the trace, so they are deleted on the trace's schedule. See [Data retention](/self-hosting/configuration#data-retention). On Tessary Cloud, retention can't go above the Cloud maximum. See [Retention](/cloud/data-handling#retention).
 - `serve.py` keeps nothing it is sent.
 
 ## Turn it off

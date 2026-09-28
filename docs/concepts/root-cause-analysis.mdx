@@ -95,7 +95,7 @@ On the case page, each cause has a button such as **Show 12 answers** that narro
 ## What a run needs before it is useful
 
 - **A case to press it on.** RCA analyzes the finding behind a case, so the chain from [classifiers and findings](/concepts/classifiers-and-findings) through [cases](/concepts/cases) has to have produced one.
-- **An LLM (large language model) provider credential**, under **Settings → Providers**. The sandboxed agent is the only analysis path there is, so a run has nothing to fall back to without one.
+- **An LLM (large language model) provider credential**, under **Settings → Providers**. The sandboxed agent is the only analysis path there is, so a run has nothing to fall back to without one. On Tessary Cloud, a one-time model credit pays for RCA while you have no key of your own. Once it is used up, new runs need a key, and a run already in progress can finish. See [Usage and credit](/cloud/usage-and-credit).
 - **A reachable `sandbox-runner` service.** It starts by default in the self-hosting configuration.
 - **A connected repository**, for the runs that need to name a commit rather than describe a symptom.
 
