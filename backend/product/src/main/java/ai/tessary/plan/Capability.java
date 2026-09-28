@@ -15,7 +15,7 @@ import java.util.Optional;
  * for the same thing is how an override ends up pointing at a flag nobody is reading.
  *
  * <p>This build's {@code CapabilityService} serves every capability on except {@code
- * TRIAGE_AUTOMATIC}.
+ * TRIAGE_AUTOMATIC} and {@code ALERTS}.
  *
  * <p>Adding a capability is adding a constant here. Nothing else in the codebase learns a
  * capability's name; surfaces ask this enum.
@@ -51,7 +51,8 @@ public enum Capability {
     /** Programmatic API access via project tokens. */
     API_ACCESS("api_access_enabled"),
     /** Alerts, since a case has to reach a human. The transport is a channel, and which channels an
-     *  org may use is a separate question (see {@link #SLACK}). */
+     *  org may use is a separate question (see {@link #SLACK}). Off by default: not shipping in this
+     *  build, so an org sees it only through its own override. */
     ALERTS("alerts_enabled"),
     /**
      * The whole Slack surface: the {@code slack} alert channel, the native app's outbound channel posts,

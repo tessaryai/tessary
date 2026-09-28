@@ -5,7 +5,9 @@ fires, what it carries, and the two decisions in the design that are easy to get
 
 Schema: [`data-model.md`](../reference/data-model.md) § *Alerts*. Config keys:
 [`config-keys.md`](../reference/config-keys.md) § `tessary.alert.*`. Capability gate:
-`alerts_enabled`, on by default.
+`alerts_enabled`, off by default: alerting is not shipping in this build, so Settings → Notifications
+is hidden and `AlertWorker` delivers nothing until an org override turns it on. Removing `ALERTS` from
+`CapabilityService.OFF_BY_DEFAULT` ships it.
 
 > **Slack is not part of the launch.** `slack_enabled` is off, so the launch delivery route is a signed
 > generic webhook. Everything below is transport-agnostic except where it says otherwise; the Slack

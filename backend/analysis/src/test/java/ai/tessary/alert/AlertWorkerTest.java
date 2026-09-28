@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.config.AlertProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.plan.Capability;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -212,7 +213,8 @@ class AlertWorkerTest {
                 classifiers,
                 new AlertProperties(),
                 published::add,
-                new CapabilityService((key, ctx) -> Optional.empty()),
+                new CapabilityService(
+                        (key, ctx) -> key.equals(Capability.ALERTS.wire()) ? Optional.of(true) : Optional.empty()),
                 projects,
                 new TraceMdcBridge(Tracer.NOOP));
     }

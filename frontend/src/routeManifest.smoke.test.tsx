@@ -40,8 +40,8 @@ import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
-// Mirrors CapabilityService.OFF_BY_DEFAULT: every wire key is on except this one.
-const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled"];
+// Mirrors CapabilityService.OFF_BY_DEFAULT: every wire key is on except these.
+const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled", "alerts_enabled"];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
   "rca_enabled",
@@ -830,6 +830,16 @@ describe("route manifest render smoke test", () => {
 
     expect(container.textContent).not.toContain("Organizations");
     expect(container.textContent).not.toContain("New organization");
+  });
+
+  // Bug: the notifications page reachable by URL while alerting is off, showing settings that deliver nothing.
+  it("does not open the notifications page while alerting is off", async () => {
+    const listAlertRules = vi.fn(EMPTY);
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.notifications, listAlertRules };
+
+    await mountAndSettle(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/settings/notifications"));
+
+    expect(listAlertRules).not.toHaveBeenCalled();
   });
 });
 

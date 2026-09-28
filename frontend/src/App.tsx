@@ -267,7 +267,10 @@ function ProjectShell() {
               settings tab rather than redirecting to a route that no longer exists. */}
           <Route path="observer" element={<Navigate to="../sources" replace />} />
           {/* The summoned flow's admin surface: Slack channel, cadence, quiet hours. */}
-          <Route path="notifications" element={<Notifications />} />
+          <Route
+            path="notifications"
+            element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
+          />
           {/* Signal tuning moved into the Classifiers detail rails (one home per concept). */}
           <Route path="signal-tuning" element={<Navigate to="../../classifiers" replace />} />
           <Route
