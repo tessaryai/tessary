@@ -14,6 +14,14 @@ The stages are separate on purpose. Each answers a different question with a dif
 | Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default | A case, or a closed finding |
 | Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, hypotheses with cited traces, and the checks it ruled out |
 
+<Note>
+  Tessary Cloud differs from a self-hosted instance in three ways:
+
+  - Triage starts only when you select **Run triage** on a finding. Automatic triage is not available.
+  - A one-time model credit pays for triage and RCA while you have no provider key of your own. Once it is used up, add a key under **Settings → Providers**. See [Usage and credit](/cloud/usage-and-credit).
+  - The `groundedness` classifier is on by default, with nothing to set up.
+</Note>
+
 ## Traces arrive
 
 Your agent exports OTLP (OpenTelemetry Protocol) traces to your instance's own origin plus `/v1/traces`, authenticated with a per-project bearer token. There is no Tessary client library to install: ingest is OTLP and the call-site tag is a plain span attribute.
@@ -34,7 +42,7 @@ A classifier is a check that evaluates traces against a defined condition, and i
 
 They are built to be cheap enough to run against every trace rather than a sample. None of the five that run by default costs a model call: `duration_drift`, `cost_drift` and `tool_error` are arithmetic over stored spans, and `secret_leak` and `malformed_output` are pattern and schema checks.
 
-Model calls arrive later, at triage and root-cause analysis, and they are spent per finding and per case rather than per span. Two classifiers are exceptions, and both stay off until you turn them on. [`frustration`](/classifiers/frustration) makes one call per message it scores, only on your own OpenRouter or TypeSafe key, and only for the user messages it can score. In our testing, that shape cost 5x less than grading on 1% sampled traces. [`groundedness`](/classifiers/groundedness) runs a model on each answer it scores, but it isn't an LLM call and spends nothing on a provider key. A public model on a GPU you run, on a Mac with Apple silicon or an instance on AWS, checks whether the answer is supported by the documents the call retrieved, or by its prompt when it retrieved none.
+Model calls arrive later, at triage and root-cause analysis, and they are spent per finding and per case rather than per span. Two classifiers are exceptions. [`frustration`](/classifiers/frustration) stays off until you turn it on, and makes one call per message it scores, only on your own OpenRouter or TypeSafe key, and only for the user messages it can score. In our testing, that shape cost 5x less than grading on 1% sampled traces. [`groundedness`](/classifiers/groundedness) runs a model on each answer it scores, but it isn't an LLM call and spends nothing on a provider key. A public model checks whether the answer is supported by the documents the call retrieved, or by its prompt when it retrieved none. Self-hosted, that model runs on a GPU you provide, a Mac with Apple silicon or an instance on AWS, and the classifier stays off until you turn it on. On Tessary Cloud, it is on by default with nothing to set up.
 
 Three of them compare a call site, or a single tool, against its own recent past, which is why a new project stays quiet for a while. There is no shipped notion of "good" latency, "good" spend, or a "good" failure rate, so each of those classifiers has to watch its population long enough to learn what that population normally does before it can say anything moved. The milestone ladder names that wait: a project sits at `fitting` until its classifiers reach `watching`.
 
@@ -48,7 +56,7 @@ Triage is the step in between. It runs an agent in a sandbox against the finding
 
 A case is the unit a person is meant to act on, and there is one live case per classifier, subject, and metric. Several findings about the same tool over several weeks collapse onto one case rather than opening a queue of near-duplicates.
 
-Triage needs three things the ingest and classifier stages do not: an LLM provider credential, configured in-app under **Settings → Providers**; a reachable `sandbox-runner` service; and automatic triage turned on for your organization, which is off by default in every edition. [Cases](/concepts/cases) covers what triage rules on, how to turn it on, how findings collapse into one case, and the states a case moves through.
+Triage needs three things the ingest and classifier stages do not: an LLM provider credential, configured in-app under **Settings → Providers**; a reachable `sandbox-runner` service; and automatic triage turned on for your organization, which is off by default on a self-hosted instance. On Tessary Cloud, automatic triage is not available: the model credit pays for triage until it is used up, and triage runs only when you select **Run triage** on a finding. [Cases](/concepts/cases) covers what triage rules on, how to turn it on, how findings collapse into one case, and the states a case moves through.
 
 ## A root-cause run explains a case
 

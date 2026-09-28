@@ -7,7 +7,7 @@ The frustration classifier finds sessions where users get frustrated with your a
 
 ## Before you start
 
-- An OpenRouter or TypeSafe API key. You can paste it while turning the classifier on, or store it first under **Settings** then **Providers**.
+- An OpenRouter or TypeSafe API key. You can paste it while turning the classifier on, or store it first under **Settings** then **Providers**. Tessary Cloud needs the same key, because its one-time model credit pays only for triage and root-cause analysis.
 - Traces whose spans carry user and assistant messages, tagged with a call site. See [Call sites](/concepts/call-sites).
 - Traces that carry a thread ID or a session ID, so messages from one session can be read together.
 
@@ -112,7 +112,7 @@ Saving a working key lifts the pause. **Retry** on the classifier lifts it right
 
 ## What Tessary keeps
 
-- The text sent for scoring is deleted on the same schedule as the trace it came from. See [Data retention](/self-hosting/configuration#data-retention).
+- The text sent for scoring is deleted on the same schedule as the trace it came from. See [Data retention](/self-hosting/configuration#data-retention). On Tessary Cloud, retention can't go above the Cloud maximum. See [Retention](/cloud/data-handling#retention).
 - Whether a message was flagged, the model's scores, the cost, and the response time are kept after the text is deleted, because the call site's rate is rebuilt from them.
 - Flagged sessions are detections, and follow the detection retention period.
 

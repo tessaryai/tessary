@@ -211,7 +211,17 @@ Ad-hoc alias spellings of canonical fields are never read either. `sessionId`, `
 | Single span payload | `8,000,000` characters | The whole span is dropped rather than clipped |
 | Live buffer pressure | The ingest buffer's byte budget, `64 MiB` by default; the receiver refuses above 80% of it. See [Ingest buffer](/self-hosting/configuration#ingest-buffer) | The request is refused with `503` and a `Retry-After` header, before the body is decoded. Stock exporters retry a `503`, so a shed costs latency rather than data |
 
-How long a stored trace survives afterward is a separate setting: see [Data retention](/self-hosting/configuration#data-retention).
+On Tessary Cloud, three more limits apply to the whole organization. The values are on the [pricing page](https://tessary.ai/pricing). Each refusal rejects the whole export request, and the JSON error body carries the code in `meta.error.code`.
+
+| Limit | Response | Error code and message |
+| --- | --- | --- |
+| Monthly trace allowance | `402`. Exporters do not retry it, so the traces in the request are not stored | `CAPABILITY.QUOTA_EXCEEDED`, `Quota 'ingested_traces_month' exceeded: <used> of <included> used for this period` |
+| Stored data | `402`. Exporters do not retry it, so the traces in the request are not stored | `CAPABILITY.QUOTA_EXCEEDED`, `Quota 'storage_bytes' exceeded: <used> of <included> used for this period` |
+| Export requests per minute | `429` with a `Retry-After` header. Stock exporters retry it | `PAID_INGEST.RATE_LIMITED`, `This organization's plan admits <limit> pushes a minute; retry after <seconds> second(s)` |
+
+[Usage and credit](/cloud/usage-and-credit) covers how traces and stored data are counted, and how to recover from each refusal.
+
+How long a stored trace survives afterward is a separate setting: see [Data retention](/self-hosting/configuration#data-retention), or [Retention](/cloud/data-handling#retention) on Tessary Cloud.
 
 ## Invariants
 

@@ -1,26 +1,33 @@
 ---
-title: "Open Edition"
-description: "What the open edition of Tessary includes, which classifiers run out of the box, what needs configuring, and where the product's boundaries are today."
+title: "Cloud and Self-Hosted"
+description: "How Tessary Cloud and the self-hosted open edition differ, which classifiers run out of the box on each, what needs configuring, and where the product's boundaries are today."
 ---
 
-The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). It is the build you get when you self-host. This page says what runs in it, what you have to configure first, and what it cannot do.
+Tessary runs two ways. Tessary Cloud is the hosted service: Tessary runs it, and you sign up at [app.tessary.ai](https://app.tessary.ai). The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and it is the build you get when you self-host.
 
-Two categories are worth keeping apart, because they need different things from you:
+Every stage of the pipeline runs on both. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), and an agentic RCA (root-cause analysis) run investigates a case. What differs is who runs the stack, what pays for the model work, and what is switched on from the start.
 
-| Category | What it means for you |
-| --- | --- |
-| Included and on by default | Works after first boot. Nothing to configure. |
-| Included, needs configuration | Present in this build, but waits on something you supply. |
+Tessary Cloud's usage limits and model credit are not part of the repository. The pages under Tessary Cloud document how they behave.
 
-## What the open edition includes
+## How Tessary Cloud and self-hosting differ
 
-Every stage of the pipeline runs here. Traces arrive over the OTLP (OpenTelemetry Protocol) endpoint, classifiers evaluate them and create findings, triage validates findings into cases (a high-confidence secret leak and a frustration finding open their case without it), and an agentic root-cause analysis (RCA) run investigates a case. The bundled `sandbox-runner` service runs the agentic work, and Compose wires it up for you.
+| | Tessary Cloud | Self-hosted open edition |
+| --- | --- | --- |
+| Hosting | Tessary runs it. Sign up and connect traces; there is nothing to deploy. | You run a single-node Docker Compose stack and replace three placeholder secrets. See [Set up Tessary](/self-hosting/setup). |
+| Cost | Free, with no payment method. | Free under the Apache License 2.0. You pay for your own infrastructure. |
+| Model work for triage and RCA | A one-time model credit per organization pays for it. When the credit is used up, add your own model provider key. | Your own model provider credential from the start. |
+| Triage | Started by hand: select **Run triage** on a finding. Automatic triage is not available. | Started by hand, or automatically once an owner or admin turns automatic triage on. It starts off. |
+| `groundedness` | On by default, with nothing to set up. | Off by default. Its model needs a Mac with Apple silicon or a GPU instance on AWS. |
+| `frustration` | Off by default. Needs your own OpenRouter or TypeSafe key. | The same. |
+| Trace ingestion | OTLP over HTTP at `https://app.tessary.ai/v1/traces`. gRPC is not available. | OTLP over HTTP at your instance's origin. gRPC is opt-in. |
+| Retention | Capped by the plan at the period on the [pricing page](https://tessary.ai/pricing). A project can keep data for less, not more. | Configurable per install and per project, including keeping data forever. See [Data retention](/self-hosting/configuration#data-retention). |
+| Limits | A monthly trace limit, a stored-data cap, and a rate limit, with the numbers on the [pricing page](https://tessary.ai/pricing). At the trace limit or the stored-data cap, new traces are rejected with an explicit error rather than sampled. See [Usage and credit](/cloud/usage-and-credit). | No trace or storage limit set by Tessary. Your infrastructure sets the ceiling. |
 
-What the open edition does not include is the commercially licensed overlay, and Tessary Cloud, the hosted service. Neither is documented here.
+To raise a limit on Tessary Cloud, see [Get higher limits](/cloud/usage-and-credit#get-higher-limits).
 
 ## Classifiers available out of the box
 
-These five are present and enabled by default on every new project:
+These five are present and enabled by default on every new project, on Tessary Cloud and self-hosted alike:
 
 | Classifier | What it detects |
 | --- | --- |
@@ -30,29 +37,31 @@ These five are present and enabled by default on every new project:
 | `secret_leak` | Credentials and similar secrets appearing in trace content. |
 | `malformed_output` | Model output that does not match the structure the call site expects. |
 
+On Tessary Cloud, [`groundedness`](/classifiers/groundedness) is also on from the start.
+
 The three drift classifiers compare a call site against its own history, so each one needs a stretch of your traffic before it can report anything. A new project sits at the `fitting` milestone until they have it. [Classifiers and findings](/concepts/classifiers-and-findings) covers what fitting a baseline means and what a finding records.
 
 Each of these is switchable per project under **Classifiers**.
 
 ## Capabilities that require configuration
 
-These are in this build and waiting on something from you.
+These wait on something from you. A requirement marked self-hosted applies only to a self-hosted instance.
 
 | Capability | What it needs |
 | --- | --- |
-| Triage, and everything downstream of it | A model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. |
-| `frustration` | An OpenRouter or TypeSafe key. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. See [Watch for frustrated users](/classifiers/frustration). |
-| The `groundedness` classifier | A GPU for its model: a Mac with Apple silicon for development, or a GPU instance on AWS for production. It is present on every project and starts switched off. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). |
-| Automatic triage | An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
+| Triage, and everything downstream of it | Self-hosted, a model provider credential, stored under **Settings** then **Providers**. Without one, findings accumulate and none of them becomes a case. On Tessary Cloud, nothing until the model credit is used up, then your own key in the same place. |
+| `frustration` | An OpenRouter or TypeSafe key, on both. It is present on every project and starts switched off, because each eligible user message it scores is a call on your own key. Turning it on under **Classifiers** asks which provider to use and takes the key there. See [Watch for frustrated users](/classifiers/frustration). |
+| The `groundedness` classifier | Self-hosted only. A GPU for its model: a Mac with Apple silicon for development, or a GPU instance on AWS for production. It is present on every project and starts switched off. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). |
+| Automatic triage | Self-hosted only. An override you set per organization. It is available, and it starts switched off. See [Automatic triage starts off](#automatic-triage-starts-off). |
 | Root-cause analysis grounded in your code | A connected repository, under **Settings** then **Git integration**. RCA runs without one, but it cannot reason about the code that changed. |
 | A case reaching you | An alert rule and a notification destination. Nothing is sent until you add both. |
-| Slack notifications | The deployment's own Slack credentials, on top of the organization capability. Both must be present, and they fail closed independently. |
+| Slack notifications | Self-hosted, the deployment's own Slack credentials, on top of the organization capability. Both must be present, and they fail closed independently. |
 
-Replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
+Self-hosted, replacing the three placeholder secrets is not on this list, because it is not optional. [Secure the instance](/self-hosting/setup#secure-the-instance) covers it.
 
 ## Current product boundaries
 
-These apply to every edition, not only this one.
+These apply to Tessary Cloud and self-hosted alike.
 
 ### Tessary explains and hands off
 
@@ -60,7 +69,9 @@ Tessary reports what it found, the evidence behind it, and what it believes caus
 
 ### Automatic triage starts off
 
-Triage escalates a finding to a large language model to decide whether it is a real issue. That work runs on the model provider credential you stored, and Tessary applies no ceiling of its own to how much of it runs. Automatic triage is therefore switched off by default, so that turning it on is a decision an operator makes knowingly rather than a default they inherit.
+Triage escalates a finding to a large language model to decide whether it is a real issue. Self-hosted, that work runs on the model provider credential you stored, and Tessary applies no ceiling of its own to how much of it runs. Automatic triage is therefore switched off by default, so that turning it on is a decision an operator makes knowingly rather than a default they inherit.
+
+On Tessary Cloud, automatic triage is not available. Triage runs when a person selects **Run triage** on a finding.
 
 Nothing is lost while it is off. Classifiers keep evaluating every trace, findings keep being filed, and the evidence stays on each one. What waits is the escalation that turns a finding into a case.
 
@@ -71,16 +82,16 @@ The drift classifiers learn what normal looks like from your own traffic, not fr
 ## Read next
 
 <CardGroup cols={2}>
+  <Card title="Start on Tessary Cloud" icon="cloud" href="/cloud/quickstart">
+    Sign up, connect your traces, and get to your first finding.
+  </Card>
+  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
+    First boot of a self-hosted instance, securing it, and connecting a trace source.
+  </Card>
   <Card title="Classifiers and findings" icon="magnifying-glass-chart" href="/concepts/classifiers-and-findings">
     What a classifier is, what fitting a baseline means, and what a finding records.
   </Card>
   <Card title="Cases" icon="folder-open" href="/concepts/cases">
     How triage turns a finding into a case, and how a case reaches you.
-  </Card>
-  <Card title="Set up Tessary" icon="rocket" href="/self-hosting/setup">
-    First boot, securing the instance, and connecting a trace source.
-  </Card>
-  <Card title="Configuration reference" icon="sliders" href="/self-hosting/configuration">
-    Every environment variable a self-hosted deployment reads.
   </Card>
 </CardGroup>

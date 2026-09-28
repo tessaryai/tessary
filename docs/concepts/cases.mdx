@@ -29,9 +29,9 @@ A ruling changes nothing about the classifier itself. It never moves a baseline 
 
 ### What triage needs before it can run
 
-- **An LLM (large language model) provider credential**, configured in-app under **Settings → Providers**. Triage jobs park on a missing credential and re-check later rather than burning their retries, so adding the key afterward lets them proceed.
+- **An LLM (large language model) provider credential**, configured in-app under **Settings → Providers**. Triage jobs park on a missing credential and re-check later rather than burning their retries, so adding the key afterward lets them proceed. On Tessary Cloud, a one-time model credit pays for triage while you have no key of your own. Once it is used up, add a key to keep triage running. See [Usage and credit](/cloud/usage-and-credit).
 - **A reachable `sandbox-runner` service**, which the self-hosting configuration starts by default. See [Set up Tessary](/self-hosting/setup#prerequisites) for the Docker socket group id it needs on Linux.
-- **Automatic triage turned on for your organization.** It is off by default in every edition, because running it unattended drives model spend with no ceiling, so it is an opt-in an operator takes knowingly. An owner or admin turns it on over the API: `PUT /api/orgs/{orgSlug}/capabilities/overrides/triage_automatic_enabled` with a body of `{"enabled": true}`. With it off, findings are still filed and still visible, and nothing escalates them on its own.
+- **Automatic triage turned on for your organization.** Self-hosted, it is off by default, because running it unattended drives model spend with no ceiling, so it is an opt-in an operator takes knowingly. An owner or admin turns it on over the API: `PUT /api/orgs/{orgSlug}/capabilities/overrides/triage_automatic_enabled` with a body of `{"enabled": true}`. With it off, findings are still filed and still visible, and nothing escalates them on its own. On Tessary Cloud, automatic triage is not available: triage starts only when you select **Run triage** on a finding.
 
 ## How findings collapse onto one case
 

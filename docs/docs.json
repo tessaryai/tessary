@@ -31,6 +31,14 @@
         ]
       },
       {
+        "group": "Tessary Cloud",
+        "pages": [
+          "cloud/quickstart",
+          "cloud/usage-and-credit",
+          "cloud/data-handling"
+        ]
+      },
+      {
         "group": "Instrument",
         "pages": [
           "instrument/overview",
@@ -86,6 +94,11 @@
   },
   "navbar": {
     "links": [
+      {
+        "label": "Open Tessary Cloud",
+        "href": "https://app.tessary.ai",
+        "icon": "cloud"
+      },
       {
         "label": "Releases",
         "href": "https://github.com/tessaryai/tessary/releases",
