@@ -13,6 +13,8 @@ import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.TurnFac
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EligibleTurn;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.config.FrustrationProperties;
+import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionAnswer;
 import ai.tessary.llm.decisions.DecisionClient;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
@@ -54,13 +56,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
- * Frustration, judged by TypeSafe's Jev decision model on the org's own OpenRouter or TypeSafe key.
+ * Frustration, judged by TypeSafe's Jev decision model on the org's own OpenRouter or TypeSafe key, or on
+ * the deployment's own provider when it supplies one.
  *
  * <p>Per page: a paused classifier sends nothing. Otherwise each turn root whose conversation is known
  * and whose turn is eligible ({@link FrustrationTurnBuilder}) is sent as one request carrying one
  * choice question ({@link JevFrustrationQuestion}), a few at a time. A turn fires when the probability
  * of {@code unhappy_with_assistant} exceeds the classifier's threshold; {@code unhappy_other_cause}
- * never fires. A refused key, or no key at all, pauses the classifier and abandons the page.
+ * never fires. A refused key, no key at all, or no platform credit left pauses the classifier and
+ * abandons the page.
  *
  * <p>What a persisted page writes, in one transaction: an assessment row for every turn sent, flagged
  * or not, with the exact request and response bodies, and a detection row for every flagged turn
@@ -218,12 +222,20 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 return new Page(Status.PAUSED, pause.get().reason(), 0, List.of(), threshold, scorerVersion);
             }
         }
-        Optional<DecisionTarget> resolved = providers.resolve(projectId, ModelLane.FRUSTRATION);
+        Optional<DecisionTarget> resolved;
+        String unresolved = ClassifierPause.NO_PROVIDER;
+        try {
+            resolved = providers.resolve(projectId, ModelLane.FRUSTRATION);
+        } catch (TessaryException e) {
+            if (!(e instanceof PlatformCreditExhausted)) throw e;
+            resolved = Optional.empty();
+            unresolved = ClassifierPause.NO_CREDIT;
+        }
         if (resolved.isEmpty()) {
-            classifiers.pause(projectId, signal.id(), ClassifierPause.NO_PROVIDER, now);
-            // A re-check that still finds no key passes the page, as the pause it extends would have.
+            classifiers.pause(projectId, signal.id(), unresolved, now);
+            // A re-check that still finds nothing to run on passes the page, as the pause it extends would have.
             Status status = recheck ? Status.PAUSED : Status.ABORTED;
-            return new Page(status, ClassifierPause.NO_PROVIDER, 0, List.of(), threshold, scorerVersion);
+            return new Page(status, unresolved, 0, List.of(), threshold, scorerVersion);
         }
         DecisionTarget target = resolved.get();
         if (recheck) classifiers.unpause(projectId, signal.id());
@@ -251,9 +263,12 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             sent.add(new Sent(eligibleTurns.get(i), eligible.get(i), eligibleFacts.get(i), outcome));
         }
         if (sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()))) {
-            classifiers.pause(projectId, signal.id(), ClassifierPause.PROVIDER_REJECTED, now);
-            return new Page(
-                    Status.ABORTED, ClassifierPause.PROVIDER_REJECTED, eligible.size(), sent, threshold, scorerVersion);
+            // The platform provider's key is the deployment's, so its refusal is not the org's to fix.
+            String reason = target.provider() == ModelProvider.PLATFORM
+                    ? ClassifierPause.PLATFORM_UNAVAILABLE
+                    : ClassifierPause.PROVIDER_REJECTED;
+            classifiers.pause(projectId, signal.id(), reason, now);
+            return new Page(Status.ABORTED, reason, eligible.size(), sent, threshold, scorerVersion);
         }
         return new Page(Status.SCORED, null, eligible.size(), sent, threshold, scorerVersion);
     }
@@ -440,6 +455,15 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         return mapper.valueToTree(value).toString();
     }
 
+    private static String pauseCause(@Nullable String reason) {
+        if (ClassifierPause.PROVIDER_REJECTED.equals(reason)) return "the provider rejected the org's key";
+        if (ClassifierPause.NO_CREDIT.equals(reason)) return "the org has no credit left for the platform provider";
+        if (ClassifierPause.PLATFORM_UNAVAILABLE.equals(reason)) {
+            return "the platform provider rejected the deployment's key";
+        }
+        return "no provider key is configured for the frustration lane";
+    }
+
     private void logPage(ClassifierRow signal, Page page, PageAction action, int fired, long durationMs) {
         int inputTokens = 0;
         BigDecimal cost = BigDecimal.ZERO;
@@ -452,13 +476,13 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (callCost != null) cost = cost.add(callCost);
         }
         if (page.status() == Status.ABORTED) {
-            StructuredLog.warn(log, Markers.OPS, "signal.frustration.paused")
-                    .message(
+            // Every org on the deployment shares the platform provider's key, so its refusal needs a human.
+            StructuredLog.Builder line = ClassifierPause.PLATFORM_UNAVAILABLE.equals(page.pauseReason())
+                    ? StructuredLog.error(log, Markers.OPS, "signal.frustration.paused")
+                    : StructuredLog.warn(log, Markers.OPS, "signal.frustration.paused");
+            line.message(
                             "paused %s: %s; the page was not recorded",
-                            signal.classifierKey(),
-                            ClassifierPause.PROVIDER_REJECTED.equals(page.pauseReason())
-                                    ? "the provider rejected the org's key"
-                                    : "no provider key is configured for the frustration lane")
+                            signal.classifierKey(), pauseCause(page.pauseReason()))
                     .field("signal", signal.classifierKey())
                     .field("classifierId", signal.id())
                     .field("project", signal.projectId())

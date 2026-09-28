@@ -18,6 +18,7 @@ import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
@@ -454,7 +455,8 @@ public class ClassifierService {
      *
      * <p>Frustration spends the org's own provider credit, so enabling it without a key its lane can
      * run on is refused with {@link ClassifierError#PROVIDER_REQUIRED} rather than accepted and paused on
-     * the first sweep. Any enable clears a pause: it is how a person says "try again", and the next
+     * the first sweep. A lane on the deployment's own provider with no credit left is refused with the
+     * deployment's own error, which the resolver throws. Any enable clears a pause: it is how a person says "try again", and the next
      * sweep pauses again if the provider still refuses.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
@@ -483,7 +485,14 @@ public class ClassifierService {
             for (ClassifierRow row : signals.listByProject(project.id())) {
                 if (!BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) continue;
                 if (signals.findPause(project.id(), row.id()).isEmpty()) continue;
-                Optional<DecisionTarget> target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
+                Optional<DecisionTarget> target;
+                try {
+                    target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
+                } catch (TessaryException e) {
+                    // Out of platform credit: the lane still runs there, not on the key just saved.
+                    if (!(e instanceof PlatformCreditExhausted)) throw e;
+                    continue;
+                }
                 if (target.isEmpty() || target.get().provider() != provider) continue;
                 lifted += signals.unpause(project.id(), row.id());
             }

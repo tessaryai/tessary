@@ -147,6 +147,18 @@ describe("DetectorsPage", () => {
     await screen.findByText("No provider key");
   });
 
+  it.each([
+    ["no_credit", "No credit left", /used all of its credit/],
+    ["platform_unavailable", "Provider unavailable", /Nothing needs to change on your side/],
+  ])("names a %s pause on the row and explains it in the rail", async (readiness, label, explained) => {
+    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness })]);
+    renderPage("/?classifier=clf-1");
+
+    await screen.findByText(label);
+    const r = await screen.findByRole("dialog", { name: "Frustration detail" });
+    within(r).getByText(explained);
+  });
+
   it("renders a refused toggle's error", async () => {
     listClassifiers.mockResolvedValue([
       classifier({ id: "clf-2", classifier_key: "tool_error", name: "Tool error", detector: "tool_error" }),

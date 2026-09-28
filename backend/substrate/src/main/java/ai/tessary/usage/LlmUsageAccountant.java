@@ -110,17 +110,19 @@ public class LlmUsageAccountant {
     }
 
     /**
-     * Record one hosted decision-model call ({@code llm/decisions/}): one typed question set answered on
-     * the org's own key, so always customer-funded. The caller has already priced it, under the book id
-     * its gateway maps to, and passes the book that did.
+     * Record one hosted decision-model call ({@code llm/decisions/}): one typed question set. The caller
+     * has already priced it, under the book id its gateway maps to, and passes the book that did.
      *
      * @param lane the lane's wire value
      * @param model the model id as requested, e.g. {@code jev-latest}
+     * @param platformFunded true when the call ran on the deployment's own provider rather than the org's
+     *     key, which is the row a credit debit reads
      */
     public void recordDecisionCall(
             @Nullable String projectId,
             String lane,
             String model,
+            boolean platformFunded,
             @Nullable Integer inputTokens,
             @Nullable Integer outputTokens,
             @Nullable BigDecimal costUsd,
@@ -130,7 +132,7 @@ public class LlmUsageAccountant {
                 projectId,
                 lane,
                 model,
-                false,
+                platformFunded,
                 inputTokens,
                 outputTokens,
                 null,

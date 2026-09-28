@@ -5,10 +5,10 @@ import org.springframework.http.HttpStatus;
 
 /**
  * Error codes for a hosted decision-model call ({@code llm/decisions/}): one typed question set sent
- * to TypeSafe's Jev directly or over OpenRouter, on the org's own key.
+ * to TypeSafe's Jev directly, over OpenRouter, or on the deployment's own provider.
  */
 public enum DecisionError implements ErrorCode {
-    /** 401 or 403: the org's key was refused. Retrying cannot help until the key changes. */
+    /** 401, 402 or 403: the key was refused or has no funds. Retrying cannot help until that changes. */
     PROVIDER_REJECTED(HttpStatus.BAD_GATEWAY, "Decision provider %s rejected the key (HTTP %s)"),
     /** 429, 5xx or a transport failure that outlasted every retry. */
     PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "Decision provider %s is unavailable: %s"),

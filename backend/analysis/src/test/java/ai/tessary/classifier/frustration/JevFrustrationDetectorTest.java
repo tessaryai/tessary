@@ -30,6 +30,7 @@ import ai.tessary.classifier.frustration.StructuredThread.Message;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.config.FrustrationProperties;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionAnswer;
 import ai.tessary.llm.decisions.DecisionClient;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
@@ -37,6 +38,7 @@ import ai.tessary.llm.decisions.DecisionRequest;
 import ai.tessary.llm.decisions.DecisionTarget;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.DecisionError;
+import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -470,6 +472,73 @@ class JevFrustrationDetectorTest {
         }
     }
 
+    /** Out of platform credit is not "no key": the org has a provider, and adding a key is one of two ways out. */
+    @Test
+    void aResolverReportingNoPlatformCreditPausesAsNoCreditAndSendsNothing() {
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(ClassifierPause.NO_CREDIT, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
+        assertTrue(client.requests.isEmpty());
+    }
+
+    @Test
+    void aRecheckThatStillFindsNoCreditPassesThePageAndRestampsThePause() {
+        when(classifiers.findPause(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(new ClassifierPause(
+                        ClassifierPause.NO_CREDIT, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.PAUSED, page.status());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
+        verify(classifiers, never()).unpause(any(), any());
+    }
+
+    /**
+     * The platform provider's key is the deployment's, shared by every org on it. Its refusal is not the org's to
+     * fix, so the pause must not tell them to fix a key, and an operator has to hear about it.
+     */
+    @Test
+    void aRejectedPlatformProviderCallPausesAsPlatformUnavailableAndLogsAnError() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
+                    .thenReturn(Optional.of(new DecisionTarget(
+                            ModelProvider.PLATFORM,
+                            "typesafe/jev-latest",
+                            URI.create("https://openrouter.ai/api/alpha/decisions"),
+                            "platform-key")));
+            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+            JevFrustrationDetector d = detector();
+
+            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(eligibleTurn("t-refused", "conv-a")));
+            d.complete(signal("{}"), page, PageAction.ABORT, 5);
+
+            assertEquals(Status.ABORTED, page.status());
+            assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
+            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
+            List<Object> errors = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.ERROR)
+                    .map(e -> e.getKeyValuePairs().stream()
+                            .filter(kv -> "reason".equals(kv.key))
+                            .findFirst()
+                            .map(kv -> kv.value)
+                            .orElse("none"))
+                    .toList();
+            assertEquals(List.of(ClassifierPause.PLATFORM_UNAVAILABLE), errors);
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
     @Test
     void aPausedClassifierSendsNothingUntilTheRetryIntervalPasses() {
         when(classifiers.findPause(PROJECT, CLASSIFIER))
@@ -573,6 +642,13 @@ class JevFrustrationDetectorTest {
         List<String> names = new ArrayList<>();
         node.fieldNames().forEachRemaining(names::add);
         return names;
+    }
+
+    /** What a deployment's resolver throws when the org has no platform credit left. */
+    private static final class NoCredit extends TessaryException implements PlatformCreditExhausted {
+        NoCredit() {
+            super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
+        }
     }
 
     /** Answers by the trace id in the message text; records what it was asked. */

@@ -19,6 +19,12 @@ the lane can run on is refused (`PROVIDER_REQUIRED`). A key the provider refuses
 pauses the classifier (`provider_rejected`, `no_provider`); a paused sweep sends nothing and skips what
 it passes, and saving the key or pressing Retry lifts the pause.
 
+A build that supplies `PLATFORM` (see [provider-keys.md](../guides/provider-keys.md)) can also run the
+lane on its own key, last in the lane's order, so an org's own key always wins. Those calls are booked
+platform-funded. An org with no credit left for it pauses as `no_credit`, and a refusal of the
+deployment's key pauses as `platform_unavailable`, which also logs an error for the operator. This
+build supplies no `PLATFORM`, so neither pause happens here.
+
 It is not a per-observation LLM call in the catalog's cost sense: it is a hosted classifier call, and
 only a filtered subset of turns reaches it.
 

@@ -90,20 +90,26 @@ model cannot be saved on RCA or Triage (`ModelConfigError.MODEL_NOT_OFFERED_FOR_
 override on either credential replaces the host; a trailing `/v1` is dropped, since neither decision
 path sits under it.
 
-Each call is booked in the usage ledger on the org's own key, and priced from the price book under
-`typesafe/jev-latest` on both routes: the book has no OpenRouter-specific Jev rate, so an OpenRouter
+A build that supplies `PLATFORM` adds it last on the lane, as `PLATFORM:typesafe/jev-latest`, and
+resolves it through its own `DecisionProviderResolver` (the open one never resolves it). The enable
+dialog then offers it with no key field.
+
+Each call is booked in the usage ledger, on the org's own key or, for `PLATFORM`, as platform-funded,
+and priced from the price book under `typesafe/jev-latest` on every route: the book has no OpenRouter-specific Jev rate, so an OpenRouter
 markup, if any, is not in the booked figure. OpenRouter's own reported cost is kept with the call's
 raw response for audit. Only `jev-latest` is offered, with no pinned versions; the version that
 answered each call is recorded with it.
 
-A rejected key (HTTP 401 or 403) fails with `DECISION.PROVIDER_REJECTED` and is not retried.
+A rejected key, or one with no funds (HTTP 401, 402 or 403), fails with `DECISION.PROVIDER_REJECTED` and
+is not retried.
 
 The Providers page marks TypeSafe "Used by Frustration" (the catalog's `used_by` on that platform),
 since that is the only thing its key does. Enabling Frustration without a key its lane can run on is
 refused with `CLASSIFIER.PROVIDER_REQUIRED`; the Catalog's enable dialog picks the provider, takes the
 key when the org has none, and sets the lane before it enables. When the provider later refuses the
 key, or the key is deleted, the classifier pauses (`readiness` reads `provider_rejected` or
-`no_provider`, shown on the Catalog row and rail) and sends nothing until the key works again. Saving
+`no_provider`, shown on the Catalog row and rail) and sends nothing until the key works again. On
+`PLATFORM` the two pauses are `no_credit` and `platform_unavailable` instead. Saving
 the key the lane runs on lifts the pause at once, as does the rail's Retry or any re-enable; otherwise
 the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
 

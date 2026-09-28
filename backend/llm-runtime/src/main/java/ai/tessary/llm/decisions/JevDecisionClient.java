@@ -3,6 +3,7 @@ package ai.tessary.llm.decisions;
 
 import ai.tessary.config.FrustrationProperties;
 import ai.tessary.llm.ModelCatalog;
+import ai.tessary.llm.ModelProvider;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pricing.PlatformCallPricer;
@@ -36,7 +37,11 @@ import org.springframework.stereotype.Component;
  * same {@code {model, state, questions}} body with a bearer key and answer the same envelope.
  *
  * <p>429, 5xx and transport failures are retried with exponential back-off and jitter, honouring
- * {@code Retry-After}; 401 and 403 are not, since only a new key can change the answer.
+ * {@code Retry-After}; 401, 402 and 403 are not, since only a new key, or funds on it, can change the
+ * answer.
+ *
+ * <p>A call on {@link ModelProvider#PLATFORM} is booked platform-funded: the deployment pays the provider
+ * and recovers it from the org's credit. Every other call is on the org's own key.
  *
  * <p><b>Pricing.</b> Every call is priced under {@code typesafe/<bare model id>} whichever gateway
  * carried it, on the REQUESTED id: the book has no
@@ -194,7 +199,7 @@ public class JevDecisionClient implements DecisionClient {
             }
             int status = response.statusCode();
             if (status / 100 == 2) return response.body();
-            if (status == 401 || status == 403) {
+            if (status == 401 || status == 402 || status == 403) {
                 throw new TessaryException(DecisionError.PROVIDER_REJECTED, target.provider(), status);
             }
             if (status == 429 || status >= 500) {
@@ -325,6 +330,7 @@ public class JevDecisionClient implements DecisionClient {
                 projectId,
                 lane,
                 answer.requestedModel(),
+                answer.provider() == ModelProvider.PLATFORM,
                 answer.inputTokens(),
                 answer.outputTokens(),
                 answer.costUsd(),

@@ -70,8 +70,8 @@ const SCHEMAS_EXPLAINED =
 
 
 /**
- * `ClassifierView.readiness` while a classifier that calls a provider on the org's key is paused: the
- * row's short label and the rail's sentence. A paused sweep sends nothing until the key works again.
+ * `ClassifierView.readiness` while a classifier that calls a provider is paused: the row's short label
+ * and the rail's sentence. A paused sweep sends nothing until the provider works again.
  */
 const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
   provider_rejected: {
@@ -83,6 +83,16 @@ const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
     label: "No provider key",
     explained:
       "There is no key for the provider this classifier runs on, so no messages are being scored. Add one under Settings, Providers, then retry.",
+  },
+  no_credit: {
+    label: "No credit left",
+    explained:
+      "This organization has used all of its credit for the provider this classifier runs on, so no messages are being scored. Add a key of your own under Settings, Providers, then retry.",
+  },
+  platform_unavailable: {
+    label: "Provider unavailable",
+    explained:
+      "The provider this classifier runs on is not accepting requests, so no messages are being scored. Nothing needs to change on your side. It retries on its own.",
   },
 };
 

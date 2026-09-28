@@ -2,7 +2,8 @@
 /*
  * FrustrationEnableModal: an unconfigured provider asks for its key, and confirm writes the key, then
  * the lane's model, then the enable, in that order, so a failure part way never leaves the classifier
- * on without a provider. A provider that already has a key skips the key write.
+ * on without a provider. A provider that already has a key, or the deployment's own provider, skips the key
+ * write.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -147,6 +148,38 @@ describe("FrustrationEnableModal", () => {
 
     await waitFor(() => expect(onEnabled).toHaveBeenCalled());
     expect(calls).toEqual(["lane frustration OPENROUTER:typesafe/jev-latest", "enable clf-1 true"]);
+  });
+
+  it("runs on the deployment's own provider with no key when the org has no key of its own", async () => {
+    getModelSettings.mockResolvedValue({
+      ...SETTINGS,
+      lanes: [
+        {
+          ...SETTINGS.lanes[0],
+          provider_options: [
+            ...SETTINGS.lanes[0].provider_options,
+            {
+              provider: "PLATFORM",
+              label: "Tessary AI",
+              model_keys: ["PLATFORM:typesafe/jev-latest"],
+              default_model_key: "PLATFORM:typesafe/jev-latest",
+            },
+          ],
+        },
+      ],
+      configured_providers: ["PLATFORM"],
+    });
+    listProviderCredentials.mockResolvedValue({ credentials: [] });
+    const onEnabled = renderModal();
+
+    expect(await screen.findByLabelText(/Tessary AI/)).toHaveProperty("checked", true);
+    expect(screen.queryByLabelText(/API key/)).toBeNull();
+    screen.getByText(/paid from your Tessary AI credit/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(onEnabled).toHaveBeenCalled());
+    expect(calls).toEqual(["lane frustration PLATFORM:typesafe/jev-latest", "enable clf-1 true"]);
   });
 
   it("shows the key field when the other, unconfigured provider is chosen", async () => {
