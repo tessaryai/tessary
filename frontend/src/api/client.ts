@@ -60,6 +60,7 @@ import {
   type UpsertAlertRule,
   type AlertChannel,
   type CreateAlertChannel,
+  type CapabilityOverrideView,
 } from "./types";
 import type {
   AddMemberResult,
@@ -69,6 +70,7 @@ import type {
   CredentialAuthResult,
   CreateKeyRequest,
   CapabilitiesView,
+  CapabilityWire,
   IssuedKeyResponse,
   IssueTokenResponse,
   McpTokenView,
@@ -242,13 +244,24 @@ export const auth = {
     http<Project>(`/api/orgs/${enc(orgSlug)}/sample-project`, { method: "POST" }),
 
   /**
-   * The org's capability object: one boolean per capability, resolved server-side from the
-   * platform defaults, the org's plan tier, and any flag overrides. Readable by any member.
-   * Server-side `CapabilityService.require` on each gated endpoint remains the authority; this is
-   * what the UI is built from.
+   * The org's capability object: one boolean per capability, resolved server-side from the build's
+   * defaults and the org's own overrides. Readable by any member. Server-side
+   * `CapabilityService.require` on each gated endpoint remains the authority; this is what the UI is
+   * built from.
    */
   getCapabilities: (orgSlug: string) =>
     http<CapabilitiesView>(`/api/orgs/${enc(orgSlug)}/capabilities`),
+
+  /** Every capability with its default and whether the org overrides it. Readable by any member. */
+  listCapabilityOverrides: (orgSlug: string) =>
+    http<CapabilityOverrideView[]>(`/api/orgs/${enc(orgSlug)}/capabilities/overrides`),
+
+  /** Pin one capability on or off for the org. Owner or admin. */
+  setCapabilityOverride: (orgSlug: string, key: CapabilityWire, enabled: boolean) =>
+    http<CapabilityOverrideView>(`/api/orgs/${enc(orgSlug)}/capabilities/overrides/${enc(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }),
 
   // ---- Organization lifecycle ----
 

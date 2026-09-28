@@ -37,6 +37,7 @@ import {
   Route as RouteIcon,
   Settings as SettingsIcon,
   Shield,
+  ToggleRight,
   TrendingUp,
   Users,
   Zap,
@@ -201,6 +202,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     items: [
       { id: "organization", label: "Organization", icon: Building2 },
       { id: "members", label: "Members", icon: Users },
+      // Capabilities an operator decides for the whole org. Today only automatic triage, which starts
+      // unattended LLM spend on the org's provider.
+      { id: "features", label: "Features", icon: ToggleRight },
     ],
   },
   {

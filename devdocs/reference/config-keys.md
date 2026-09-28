@@ -13,8 +13,8 @@ Worker cadences (`heartbeat-ms` / `drain-interval-ms` / `schedule.heartbeat-ms`)
 are bound directly by `@Scheduled(fixedDelayString=…)` on each worker, never on a
 `*Properties` class.
 
-Feature gating is a different axis — capabilities, their platform defaults and
-LaunchDarkly targeting belong to the capability layer, not to this page.
+Feature gating is a different axis — capabilities, their build defaults (`CapabilityDefaults`)
+and per-org overrides belong to the capability layer, not to this page.
 
 ## Prefix → class map
 

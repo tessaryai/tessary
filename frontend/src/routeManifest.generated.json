@@ -175,6 +175,11 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/workspace"
   },
   {
+    "path": "features",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/features"
+  },
+  {
     "path": "appearance",
     "kind": "redirect",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/appearance"

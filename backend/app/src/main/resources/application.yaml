@@ -34,8 +34,8 @@ tessary:
   telemetry:
     enabled: ${TESSARY_TELEMETRY_ENABLED:true}
   # Feature flags: nothing to configure. This build resolves a capability from the org's own
-  # `org_feature_flag` rows (Settings -> Features) and, absent a row, from the built-in default in
-  # CapabilityService. There is no SDK, no key and no `tessary.launchdarkly` block, and no
+  # `org_feature_flag` rows (Settings -> Features) and, absent a row, from the build's
+  # CapabilityDefaults. There is no SDK, no key and no `tessary.launchdarkly` block, and no
   # `tessary.plan`: this build has no tiers and no quota caps.
 
   # Platform staff: the identities allowed to move another org's plan by hand (pilot upgrades; there is

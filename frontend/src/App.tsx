@@ -66,6 +66,7 @@ const PiiRedaction = named(() => import("./views/Settings/PiiRedaction"), "PiiRe
 const Retention = named(() => import("./views/Settings/Retention"), "Retention");
 const Notifications = named(() => import("./views/Settings/Notifications"), "Notifications");
 const Members = named(() => import("./views/Settings/Members"), "Members");
+const Features = named(() => import("./views/Settings/Features"), "Features");
 const Providers = named(() => import("./views/Settings/Providers"), "Providers");
 const GitIntegration = named(() => import("./views/Settings/GitIntegration"), "GitIntegration");
 const Models = named(() => import("./views/Settings/Models"), "Models");
@@ -289,10 +290,11 @@ function ProjectShell() {
           <Route path="organization" element={<Organization />} />
           {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
-          {/* Appearance lives under Organization; feature flags are managed via
-              LaunchDarkly, not in-app. Redirect old bookmarks. */}
+          <Route path="features" element={<Features />} />
+          {/* Appearance lives under Organization, and the old feature-flags tab is Features now.
+              Redirect old bookmarks. */}
           <Route path="appearance" element={<Navigate to="../organization" replace />} />
-          <Route path="feature-flags" element={<Navigate to="../sources" replace />} />
+          <Route path="feature-flags" element={<Navigate to="../features" replace />} />
           {/* Any other settings path: a retired tab, a typo, a deep link into a section that was
               removed, folds to Sources rather than rendering an empty <Outlet/>. Absolute, like the
               project-level catch-all: a relative `to="sources"` resolves against the splat it

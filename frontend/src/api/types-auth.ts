@@ -231,10 +231,10 @@ export interface ApiKeyAudit {
 
 /**
  * Every capability key, the mirror of the backend `ai.tessary.plan.Capability` enum's `wire()`
- * values, which are also the LaunchDarkly flag keys. Keep in sync with that enum.
+ * values, which are also the `org_feature_flag` keys. Keep in sync with that enum.
  *
- * The browser has no LaunchDarkly client and no plan logic: the backend resolves all of this per
- * session and the SPA only reads the answer.
+ * The browser has no flag client and no plan logic: the backend resolves all of this per session and
+ * the SPA only reads the answer.
  */
 export type CapabilityWire =
   // "graders_enabled", "observer_enabled", "human_review_enabled" and "agentic_synthesis_enabled"

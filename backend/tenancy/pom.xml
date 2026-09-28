@@ -100,7 +100,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot</artifactId>
         </dependency>
-        <!-- @ConditionalOnMissingBean, which is what lets another LaunchDarkly adapter displace
+        <!-- @ConditionalOnMissingBean, which is what lets another build's adapter displace
              the default DbFeatureFlags bean instead of colliding with it (FeatureFlagsConfig). It lives
              in autoconfigure, not in spring-boot proper. -->
         <dependency>
