@@ -57,6 +57,8 @@ class PlatformLaneRatesTest {
         m.put("moonshot/kimi-k2.6", new String[] {"0.95", "4", "0.16", "-"});
         m.put("openrouter/openai/gpt-5.6-terra", new String[] {"2", "12", "0.2", "2.5"});
         m.put("openrouter/openai/gpt-5.6-luna", new String[] {"0.2", "1.2", "0.02", "0.25"});
+        // Jev on the deployment's own provider: an unpriced platform call is never debited from the org's credit.
+        m.put("typesafe/jev-latest", new String[] {"0.042", "0", "-", "-"});
         return Map.copyOf(m);
     }
 

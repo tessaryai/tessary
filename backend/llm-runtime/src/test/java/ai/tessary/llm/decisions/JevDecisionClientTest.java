@@ -7,8 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -88,6 +90,14 @@ class JevDecisionClientTest {
                 "typesafe/jev-latest",
                 DecisionTarget.endpointFor(ModelProvider.OPENROUTER, null),
                 "or-key");
+    }
+
+    private static DecisionTarget platform() {
+        return new DecisionTarget(
+                ModelProvider.PLATFORM,
+                "typesafe/jev-latest",
+                URI.create("https://openrouter.ai/api/alpha/decisions"),
+                "platform-key");
     }
 
     private DecisionRequest request() {
@@ -177,9 +187,30 @@ class JevDecisionClientTest {
                         eq("p1"),
                         eq("frustration"),
                         eq("typesafe/jev-latest"),
+                        eq(false),
                         eq(1000),
                         eq(12),
                         any(),
+                        eq(BOOK),
+                        anyInt());
+    }
+
+    /** The credit worker debits only platform-funded rows that carry a cost, so both halves matter. */
+    @Test
+    void aPlatformProviderCall_isBookedAsPlatformFundedWithItsBookCost() throws Exception {
+        stub(response(200, answer("")));
+
+        client().decide("p1", "frustration", platform(), request());
+
+        verify(accountant)
+                .recordDecisionCall(
+                        eq("p1"),
+                        eq("frustration"),
+                        eq("typesafe/jev-latest"),
+                        eq(true),
+                        eq(1000),
+                        eq(12),
+                        argThat(cost -> cost != null && new BigDecimal("0.000042").compareTo(cost) == 0),
                         eq(BOOK),
                         anyInt());
     }
@@ -238,6 +269,19 @@ class JevDecisionClientTest {
         sent(1);
     }
 
+    /** A key with no funds left is fixed only by a top-up, so retrying it or skipping turns silently helps no one. */
+    @Test
+    void a402_isRejectedWithoutRetrying() throws Exception {
+        stub(response(402, "{\"error\":\"insufficient credits\"}"));
+
+        TessaryException e = assertThrows(
+                TessaryException.class, () -> client().decide("p1", "frustration", openrouter(), request()));
+
+        assertSame(DecisionError.PROVIDER_REJECTED, e.error());
+        assertEquals(List.of(), sleeps);
+        sent(1);
+    }
+
     @Test
     void a400_isRefusedWithoutRetrying() throws Exception {
         stub(response(400, "{}"));
@@ -258,7 +302,8 @@ class JevDecisionClientTest {
 
         assertSame(DecisionError.MALFORMED_ANSWER, e.error());
         verify(accountant, times(0))
-                .recordDecisionCall(anyString(), anyString(), anyString(), any(), any(), any(), any(), anyInt());
+                .recordDecisionCall(
+                        anyString(), anyString(), anyString(), anyBoolean(), any(), any(), any(), any(), anyInt());
     }
 
     @Test

@@ -19,10 +19,9 @@ import java.util.Locale;
  * question per observation; the provider is the whole choice there, since each serves one decision
  * model.
  *
- * <p>These lanes always run on the org's own credential; there is no platform-funded path. Every
- * RCA/TRIAGE run resolves an org {@code ProviderCredential} for its provider (Bedrock/mantle by
- * default, or one of the four OpenAI-compat providers) and injects it into the sandbox request; see
- * {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
+ * <p>These lanes run on the org's own credential, or on the {@code PLATFORM} provider when the
+ * deployment supplies one. Every RCA/TRIAGE run resolves a credential for its provider and injects it
+ * into the sandbox request; see {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
  * lanes entirely and bills the customer's own provider credential.
  */
 public enum ModelLane {
@@ -58,14 +57,15 @@ public enum ModelLane {
             LaneGroup.AGENT_VM),
 
     /**
-     * The Frustration classifier's per-turn question to TypeSafe's Jev, direct or over OpenRouter.
-     * Runs once per eligible user turn, so the price per thousand turns is what matters.
+     * The Frustration classifier's per-turn question to TypeSafe's Jev: direct, over OpenRouter, or on
+     * the deployment's own provider. Runs once per eligible user turn, so the price per thousand turns
+     * is what matters.
      */
     FRUSTRATION(
             "frustration",
             "Frustration",
-            "Scores each eligible user turn with a decision model on your key. Runs per turn, so price per"
-                    + " 1k turns is what matters.",
+            "Scores each eligible user turn with a decision model. Runs per turn, so price per 1k turns is what"
+                    + " matters.",
             LaneGroup.DECISION_CALLS);
 
     private final String wire;

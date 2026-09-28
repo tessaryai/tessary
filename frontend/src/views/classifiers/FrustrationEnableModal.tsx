@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Enabling Frustration spends the org's own provider credit, so the switch opens this instead of
- * flipping: pick the provider the lane runs on, add its key if the org has none, and read what will be
- * sent and what it costs before anything is.
+ * Enabling Frustration spends provider credit, so the switch opens this instead of flipping: pick the
+ * provider the lane runs on, add its key if the org has none, and read what will be sent and what it
+ * costs before anything is. A provider the deployment supplies (`PLATFORM`) needs no key: it runs on
+ * the organization's credit.
  *
  * Confirm is three writes in order: the key (only when the chosen provider has none), the lane's
  * model, then the enable. The server refuses the enable without a usable key, so a failure part way
@@ -45,8 +46,10 @@ export function FrustrationEnableModal({
   const configured = useMemo(() => {
     const out = new Set<ModelProvider>();
     for (const c of credentialsQ.data?.credentials ?? []) if (c.has_api_key) out.add(c.provider);
+    // The deployment's own provider has no credential row; the settings say whether it is offered.
+    if (settingsQ.data?.configured_providers.includes("PLATFORM")) out.add("PLATFORM");
     return out;
-  }, [credentialsQ.data]);
+  }, [credentialsQ.data, settingsQ.data]);
 
   const [picked, setPicked] = useState<ModelProvider | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -120,7 +123,11 @@ export function FrustrationEnableModal({
                 <span className="min-w-0">
                   <span className="block text-small text-fg">{o.label}</span>
                   <span className="block text-label text-muted">
-                    {configured.has(o.provider) ? "Key stored" : "No key added"}
+                    {o.provider === "PLATFORM"
+                      ? "Uses your organization's credit"
+                      : configured.has(o.provider)
+                        ? "Key stored"
+                        : "No key added"}
                   </span>
                 </span>
               </label>
@@ -149,7 +156,11 @@ export function FrustrationEnableModal({
             <div className="font-medium text-fg-secondary">Once enabled, Frustration</div>
             <ul className="text-muted mt-1.5 mb-0 pl-4.5 list-disc flex flex-col gap-1">
               <li>Sends redacted user messages to {choice.label} for TypeSafe's Jev model to score.</li>
-              <li>Costs about $0.04 per 1,000 messages on your {choice.label} key.</li>
+              <li>
+                {choice.provider === "PLATFORM"
+                  ? `Costs about $0.04 per 1,000 messages, paid from your ${choice.label} credit.`
+                  : `Costs about $0.04 per 1,000 messages on your ${choice.label} key.`}
+              </li>
               <li>
                 Learns each call site's normal rate from its first 200 sessions, then opens a case when the
                 rate rises.

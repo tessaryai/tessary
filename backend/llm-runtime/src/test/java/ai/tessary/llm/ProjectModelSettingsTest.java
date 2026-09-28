@@ -36,6 +36,7 @@ class ProjectModelSettingsTest {
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String SONNET_5 = "anthropic.claude-sonnet-5";
     private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5";
+    private static final String PLATFORM_JEV = "PLATFORM:typesafe/jev-latest";
 
     private ProjectModelSettingRepository repo;
     private ProviderCredentialRepository credentials;
@@ -192,7 +193,7 @@ class ProjectModelSettingsTest {
     @Test
     void theFrustrationLaneOffersOnlyJevAndTypeSafeLeadsIt() {
         assertEquals(
-                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest"),
+                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest", PLATFORM_JEV),
                 LanePriority.modelKeys(ModelLane.FRUSTRATION));
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             assertTrue(
@@ -215,6 +216,27 @@ class ProjectModelSettingsTest {
         assertTrue(
                 settings.resolve(PID, ModelLane.FRUSTRATION).isEmpty(),
                 "a chat-only key runs no decision lane, whatever else it serves");
+    }
+
+    @Test
+    void anOrgWithNoJevKeyScoresFrustrationOnThePlatformProviderWhenItIsOffered() {
+        configured(ModelProvider.BEDROCK);
+        platformOffered = true;
+
+        assertEquals(
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.PLATFORM, "typesafe/jev-latest"),
+                settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
+    }
+
+    @Test
+    void anOrgsOwnJevKeyOutranksThePlatformProviderOnTheFrustrationLane() {
+        configured(ModelProvider.OPENROUTER);
+        platformOffered = true;
+
+        assertEquals(
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow(),
+                "the platform provider is last, so an unpinned lane runs on the org's own key");
     }
 
     @Test

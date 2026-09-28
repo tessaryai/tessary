@@ -28,6 +28,8 @@ import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
@@ -106,6 +108,22 @@ class FrustrationEnableIntegrationTest {
         ClassifierRow row =
                 ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
         assertEquals(ClassifierPause.NO_PROVIDER, classifierService.readiness(pid, row));
+    }
+
+    /** The column's check constraint lists the reasons it accepts; a reason missing there fails the sweep's write. */
+    @ParameterizedTest
+    @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.PLATFORM_UNAVAILABLE})
+    void aPlatformProviderPauseIsStoredAndNamedByReadiness(String reason) {
+        TenantFixture.Setup t = tenant("fr-platform-" + reason.replace('_', '-'));
+        String pid = t.project().id();
+        ClassifierRow signal = frustration(t);
+        classifiers.setEnabled(pid, signal.id(), true);
+
+        classifiers.pause(pid, signal.id(), reason, Instant.now());
+
+        ClassifierRow row =
+                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
+        assertEquals(reason, classifierService.readiness(pid, row));
     }
 
     @Test

@@ -9,7 +9,6 @@ import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
 import ai.tessary.llmspi.ModelLane;
 import java.util.Optional;
-import org.springframework.stereotype.Component;
 
 /**
  * Project to decision target: the decision lane's provider and model for this project, then the org's
@@ -19,8 +18,12 @@ import org.springframework.stereotype.Component;
  * lane runs there even when the org also holds a TypeSafe key, and an unpinned lane follows
  * {@code LanePriority} (TypeSafe first). Empty when the org holds a key for no provider the lane
  * offers, which a caller treats as "no provider".
+ *
+ * <p>Registered by {@code LlmSeamConfig} only when no other build supplies one, so a build that offers
+ * {@link ModelProvider#PLATFORM} can extend this class and resolve that provider to a target of its
+ * own. It may throw an exception implementing {@link ai.tessary.llm.PlatformCreditExhausted} when the
+ * org has no credit left for it. This build never resolves {@code PLATFORM}: no credential row backs it.
  */
-@Component
 public class DecisionProviderResolver {
 
     private final ProjectModelSettings settings;

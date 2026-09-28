@@ -60,7 +60,8 @@ import java.util.Optional;
  *
  * <p><b>FRUSTRATION is a {@link LaneGroup#DECISION_CALLS} lane</b> and stands outside the coverage rule:
  * only TypeSafe and OpenRouter serve TypeSafe's Jev, one model each. TypeSafe leads because it is the
- * model's own endpoint; OpenRouter is the same model one hop further away.
+ * model's own endpoint; OpenRouter is the same model one hop further away. {@link ModelProvider#PLATFORM}
+ * follows both, for the same reason it is last on the agent lanes.
  *
  * <p>Model keys are the two spellings {@link ProjectModelSettings} decodes: a dotted
  * {@link BedrockModelProfile} key, or {@code "<PROVIDER>:<model_name>"} for a {@link ModelCatalog}
@@ -106,6 +107,7 @@ public final class LanePriority {
     // TypeSafe's Jev decision model, direct and over OpenRouter.
     private static final String JEV = "TYPESAFE:jev-latest";
     private static final String OR_JEV = "OPENROUTER:typesafe/jev-latest";
+    private static final String PLATFORM_JEV = "PLATFORM:typesafe/jev-latest";
 
     /**
      * Last on every lane, because the entry stands for "whatever model this endpoint serves" rather
@@ -156,7 +158,8 @@ public final class LanePriority {
                 ModelLane.FRUSTRATION,
                 List.of(
                         new ProviderOption(ModelProvider.TYPESAFE, List.of(JEV), JEV),
-                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV)));
+                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV),
+                        new ProviderOption(ModelProvider.PLATFORM, List.of(PLATFORM_JEV), PLATFORM_JEV)));
         return Collections.unmodifiableMap(m);
     }
 

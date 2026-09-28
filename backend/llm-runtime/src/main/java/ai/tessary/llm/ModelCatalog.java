@@ -455,6 +455,18 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     null,
                     true),
+            // Jev on the deployment-supplied provider, named as OpenRouter names it, so it prices under the
+            // same typesafe/ book key the other two routes do. No default base URL, as above.
+            new CatalogEntry(
+                    ModelProvider.PLATFORM,
+                    "TypeSafe",
+                    "typesafe/jev-latest",
+                    "Jev (latest)",
+                    false,
+                    NO_EFFORT,
+                    null,
+                    false,
+                    true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
             // shows unqualified.
@@ -511,9 +523,9 @@ public final class ModelCatalog {
     }
 
     /**
-     * The id a decision model is priced under: {@code typesafe/<bare id>} on both gateways. OpenRouter's
-     * name is already {@code typesafe/jev-latest}, so it passes through unchanged rather than via
-     * {@link #pricingId}'s {@code openrouter/} case, which names no book key.
+     * The id a decision model is priced under: {@code typesafe/<bare id>} on every gateway. OpenRouter's
+     * and the platform provider's names are already {@code typesafe/jev-latest}, so they pass through
+     * unchanged rather than via {@link #pricingId}'s {@code openrouter/} case, which names no book key.
      */
     public static String decisionPricingId(ModelProvider provider, String modelName) {
         return provider == ModelProvider.TYPESAFE ? pricingId(provider, modelName) : modelName;
