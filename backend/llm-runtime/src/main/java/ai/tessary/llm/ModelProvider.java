@@ -57,6 +57,7 @@ public enum ModelProvider {
      * a {@link PlatformProviderSupplier} says so for the org; the default supplier offers it to no
      * one, so an install that registers no supplier never lists, selects or runs it. Its
      * {@link PlatformCatalog} descriptor is a placeholder the supplier's label and detail replace.
+     * Tessary Cloud offers it as Tessary AI; nothing in this repo does, and that is deliberate.
      */
     PLATFORM
 }

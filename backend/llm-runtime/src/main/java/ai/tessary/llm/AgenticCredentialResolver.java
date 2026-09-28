@@ -59,7 +59,8 @@ public class AgenticCredentialResolver {
      * <p>{@code egressSecret} names a secret in the sandbox provider's own store that its egress proxy
      * injects into the model provider's requests, outside the sandbox, in place of {@code apiKey}: the
      * key never enters the VM. {@code lease} is an opaque handle a resolver can attach to find the
-     * run's reservation again in {@link #release}; it never goes on the wire.
+     * run's reservation again in {@link #release}; it never goes on the wire. This build sets
+     * neither; Tessary Cloud's resolver sets both for its Tessary AI provider.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Credential(
@@ -141,6 +142,8 @@ public class AgenticCredentialResolver {
      * Called once the run {@code credential} was resolved for has ended, however it ended: success,
      * failure or timeout. Nothing to free here, since an org's own key reserves nothing; a build that
      * reserves something per run (a slot, a budget) frees it here, using {@link Credential#lease()}.
+     * Tessary Cloud's resolver frees its per-org run slot here, which is why the sandboxes call a
+     * method that does nothing in this build.
      */
     public void release(Credential credential) {
         // An org's own key reserves nothing per run, so there is nothing to free.

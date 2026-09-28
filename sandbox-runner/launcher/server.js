@@ -171,7 +171,9 @@ function Secret() {
 // An egress credential (`credential.egress_secret`) names a secret in E2B's own store instead of
 // carrying a key: E2B's egress proxy adds it to the model provider's requests OUTSIDE the microVM, so
 // the key is never in the agent's env, config or filesystem. OpenCode still needs a non-empty key to
-// start, so it gets this placeholder, which the injected header overrides on the wire.
+// start, so it gets this placeholder, which the injected header overrides on the wire. The open
+// backend never sends an egress credential; Tessary Cloud's does, for its Tessary AI provider, so
+// every run here keeps its current path.
 const EGRESS_PLACEHOLDER_KEY = 'injected-at-egress';
 // Extra hosts an egress-credential run may reach besides the model provider, the MCP door and the
 // clone host (comma-separated). Everything else is denied for those runs only; an org's own-key run
