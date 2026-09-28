@@ -31,6 +31,10 @@ COPY frontend/tsconfig.json frontend/vite.config.ts frontend/index.html ./
 COPY frontend/tokens.css ./
 COPY frontend/public ./public
 COPY frontend/src ./src
+# src/api/client.contract.test.ts imports the backend's OpenAPI document by relative path, and
+# `tsc -b` type-checks the tests along with the app. Put the one file it needs where the repo
+# keeps it, relative to /app, so the image build sees the same tree the checkout does.
+COPY backend/contract/src/main/resources/openapi/tessary-api.json /backend/contract/src/main/resources/openapi/tessary-api.json
 # scripts/ is part of `pnpm run build`, not a side tool: the build's last step is
 # `node scripts/copy-dep-licenses.mjs`, which copies the font and icon packages' license text out
 # of node_modules into dist/licenses/ so it travels into /srv with the binaries it covers (SIL OFL
