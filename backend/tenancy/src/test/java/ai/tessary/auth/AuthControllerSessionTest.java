@@ -267,7 +267,8 @@ class AuthControllerSessionTest {
         assertEquals(location, res.getHeader("Location"), "a malformed return-to falls back to the frontend");
         Cookie session = Objects.requireNonNull(cookie(res, "sid"));
         assertEquals(
-                new SealedSession("rt_1", EXPIRES.toString(), "wos_1", sessionOrg, null), cipher.unseal(session.getValue()));
+                new SealedSession("rt_1", EXPIRES.toString(), "wos_1", sessionOrg, null),
+                cipher.unseal(session.getValue()));
         assertEquals(
                 session.getValue() + " maxAge=604800 path=/ secure=true httpOnly=true sameSite=Lax",
                 describe(session),

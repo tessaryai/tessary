@@ -129,7 +129,9 @@ public interface AuthProvider {
             if (parts.length != 3) return null;
             try {
                 byte[] payload = Base64.getUrlDecoder().decode(parts[1]);
-                JsonNode sid = JWT_READER.readTree(new String(payload, StandardCharsets.UTF_8)).path("sid");
+                JsonNode sid = JWT_READER
+                        .readTree(new String(payload, StandardCharsets.UTF_8))
+                        .path("sid");
                 return sid.isTextual() ? sid.asText() : null;
             } catch (IllegalArgumentException | java.io.IOException e) {
                 return null;

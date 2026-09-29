@@ -416,7 +416,9 @@ class AuthFilterPostureTest {
                 new TenantContext("usr_1", "ada@example.com", null, null, null, null),
                 req.getAttribute(TenantContext.ATTRIBUTE));
         jakarta.servlet.http.Cookie reissued = java.util.Objects.requireNonNull(res.getCookie("sid"));
-        assertEquals(new SealedSession("rt_2", FAR_FUTURE, sealedUser, sealedOrg, "session_old"), CIPHER.unseal(reissued.getValue()));
+        assertEquals(
+                new SealedSession("rt_2", FAR_FUTURE, sealedUser, sealedOrg, "session_old"),
+                CIPHER.unseal(reissued.getValue()));
         assertEquals(
                 "maxAge=604800 path=/ secure=true httpOnly=true sameSite=Lax",
                 "maxAge=" + reissued.getMaxAge() + " path=" + reissued.getPath() + " secure=" + reissued.getSecure()

@@ -133,7 +133,9 @@ class WorkOsClientTest {
     }
 
     @ParameterizedTest
-    @CsvSource(nullValues = "NULL", value = {"local-session", "a.!!!.c", "a.e30.c.d", "NULL"})
+    @CsvSource(
+            nullValues = "NULL",
+            value = {"local-session", "a.!!!.c", "a.e30.c.d", "NULL"})
     void sessionId_isNullForATokenThatIsNotAJwt(@org.jspecify.annotations.Nullable String token) {
         assertEquals(null, tokenResult(token).sessionId());
     }
