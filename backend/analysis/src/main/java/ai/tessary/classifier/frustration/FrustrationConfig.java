@@ -23,6 +23,8 @@ import org.jspecify.annotations.Nullable;
  * @param shiftMultiple the multiple of the learned rate the test is tuned to catch quickly
  * @param shiftFloor the smallest absolute rise in the frustrated-conversation rate worth arming for
  * @param minBaselineConversations conversations the learned reference must hold before anything is judged
+ * @param freezeBaselineConversations conversations the reference keeps learning up to, judging all the while;
+ *     never below {@code minBaselineConversations}, and equal to it when the blob does not name one
  */
 public record FrustrationConfig(
         double threshold,
@@ -30,7 +32,8 @@ public record FrustrationConfig(
         double minDecisionInterval,
         double shiftMultiple,
         double shiftFloor,
-        int minBaselineConversations) {
+        int minBaselineConversations,
+        int freezeBaselineConversations) {
 
     /**
      * EXPERIMENT(frustration-tuning): conversations a healthy call site runs between false alarms. A starting
@@ -57,10 +60,17 @@ public record FrustrationConfig(
     public static final double DEFAULT_SHIFT_FLOOR = 0.02;
 
     /**
-     * EXPERIMENT(frustration-tuning): conversations the reference learns from before it is frozen. At a 5%
-     * rate that pins the reference at least as tightly, relatively, as tool_error's 500 calls pin a 1% tool.
+     * EXPERIMENT(frustration-tuning): conversations the reference holds before a call site is judged. At a 5%
+     * rate that pins the reference as tightly, relatively, as tool_error's 500 calls pin a 1% tool.
      */
-    public static final int DEFAULT_MIN_BASELINE_CONVERSATIONS = 200;
+    public static final int DEFAULT_MIN_BASELINE_CONVERSATIONS = 100;
+
+    /**
+     * No default of its own: a blob without {@code freeze_baseline_conversations} freezes the reference the
+     * moment judging starts, as every frustration row did before the key existed, so those rows keep their state
+     * epoch and are not rebuilt. The catalog seeds new rows with {@code 1000}, Groundedness's freeze.
+     */
+    private static final int UNSET_FREEZE = 0;
 
     public FrustrationConfig {
         threshold = threshold > 0 && threshold < 1 ? threshold : JevFrustrationQuestion.DEFAULT_THRESHOLD;
@@ -79,6 +89,9 @@ public record FrustrationConfig(
         minBaselineConversations = minBaselineConversations <= 0
                 ? DEFAULT_MIN_BASELINE_CONVERSATIONS
                 : Math.max(30, Math.min(1_000_000, minBaselineConversations));
+        freezeBaselineConversations = freezeBaselineConversations <= 0
+                ? minBaselineConversations
+                : Math.max(minBaselineConversations, Math.min(1_000_000, freezeBaselineConversations));
     }
 
     public static FrustrationConfig defaults() {
@@ -88,7 +101,8 @@ public record FrustrationConfig(
                 DEFAULT_MIN_DECISION_INTERVAL,
                 DEFAULT_SHIFT_MULTIPLE,
                 DEFAULT_SHIFT_FLOOR,
-                DEFAULT_MIN_BASELINE_CONVERSATIONS);
+                DEFAULT_MIN_BASELINE_CONVERSATIONS,
+                UNSET_FREEZE);
     }
 
     /**
@@ -105,7 +119,8 @@ public record FrustrationConfig(
                     root.path("min_decision_interval").asDouble(DEFAULT_MIN_DECISION_INTERVAL),
                     root.path("shift_multiple").asDouble(DEFAULT_SHIFT_MULTIPLE),
                     root.path("shift_floor").asDouble(DEFAULT_SHIFT_FLOOR),
-                    root.path("min_baseline_conversations").asInt(DEFAULT_MIN_BASELINE_CONVERSATIONS));
+                    root.path("min_baseline_conversations").asInt(DEFAULT_MIN_BASELINE_CONVERSATIONS),
+                    root.path("freeze_baseline_conversations").asInt(UNSET_FREEZE));
         } catch (JsonProcessingException e) {
             return defaults();
         }
@@ -123,7 +138,8 @@ public record FrustrationConfig(
                 minBaselineConversations,
                 ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
                 ToolErrorConfig.DEFAULT_MAX_PATTERNS,
-                minDecisionInterval);
+                minDecisionInterval,
+                freezeBaselineConversations);
     }
 
     /** The hash of the question and the threshold every assessment row this config scores carries. */

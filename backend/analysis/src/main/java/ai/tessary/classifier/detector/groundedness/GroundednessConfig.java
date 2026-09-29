@@ -57,12 +57,13 @@ public record GroundednessConfig(
     public static final double DEFAULT_SHIFT_FLOOR = 0.02;
 
     /** Traces the reference holds before a call site is judged. */
-    public static final int DEFAULT_MIN_BASELINE_TRACES = 200;
+    public static final int DEFAULT_MIN_BASELINE_TRACES = 100;
 
     /**
-     * Traces the reference keeps learning up to. Simulated, judging from 200 while learning to 1,000 gives
-     * about a 1% chance of a false finding while learning and afterwards matches waiting for 1,000, where
-     * freezing at 200 gives about four times the false findings.
+     * Traces the reference keeps learning up to. Simulated on null traffic at 2% to 10% flagged, judging from
+     * 100 while learning to 1,000 gives a 0.6% to 2.6% chance of a false finding while learning, against 0.5%
+     * to 2.0% when judging waits for 200, and the two match once the reference is full. Freezing at 100
+     * instead roughly doubles the false findings over the first 5,000 traces.
      */
     public static final int DEFAULT_FREEZE_BASELINE_TRACES = 1_000;
 

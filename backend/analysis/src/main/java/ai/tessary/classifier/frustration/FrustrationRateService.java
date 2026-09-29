@@ -44,8 +44,9 @@ import org.springframework.transaction.support.TransactionOperations;
  * <p><b>tool_error's engine, not a copy of it</b>, as Malformed Output uses it: a conversation is a Bernoulli
  * trial on the call site of its first scored turn, and it fails when it carries an uncleared frustration flag.
  * The hourly tallies ({@link FrustrationRateRepository}) are replayed through {@link ToolErrorTrend} on
- * {@link FrustrationConfig#engine()}. The reference is learned from the first {@code min_baseline_conversations}
- * and frozen; a call site that is frustrated from its first day learns that as its normal and is flagged only
+ * {@link FrustrationConfig#engine()}. Judging starts once the reference holds {@code min_baseline_conversations},
+ * and the reference keeps learning each later hour until it holds {@code freeze_baseline_conversations}, then
+ * stops moving; a call site that is frustrated from its first day learns that as its normal and is flagged only
  * for getting worse.
  *
  * <p><b>Rebuilt every pass</b> ({@link CarriedState#rebuilding}), because a conversation flagged on a later turn

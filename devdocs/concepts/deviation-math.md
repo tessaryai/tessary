@@ -368,7 +368,8 @@ Frustration runs it per call site with a **conversation** as the trial (`Frustra
 conversation belongs to the call site of its first scored turn, and it is a failure when it holds an
 uncleared frustration detection. Like Malformed Output it rebuilds every pass, because a later turn can
 flag a conversation first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
-it in its original hour either way. The reference is its first `min_baseline_conversations = 200`. A
+it in its original hour either way. Judging starts at `min_baseline_conversations = 100`, and the
+reference keeps learning until `freeze_baseline_conversations = 1,000`, as Groundedness's does. A
 state row built under another scorer version or other dials is reset with the note `tuning changed`
 and re-learns, because a reference learned under other weights is not comparable. Its budget is in
 conversations, so its dials differ (`FrustrationConfig`, whose engine config carries the floor as

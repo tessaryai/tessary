@@ -67,11 +67,13 @@ cleared by a `false_alarm` resolve stops being one.
 
 ## The learned rate, and what it cannot see
 
-Each call site learns its reference from its first 200 scored conversations, then freezes it. It is
-compared with its own past, not with a shipped number. The consequence is plain: a call site that
-frustrates users from its first day learns that as its normal and is flagged only if it gets worse.
-A call site too quiet to reach 200 conversations inside the 28-day replay window is never judged, and
-its Tuning row says `learning n/200`.
+Each call site starts being judged once its reference holds `min_baseline_conversations` (100), and
+the reference keeps learning each later hour until it holds `freeze_baseline_conversations` (1,000),
+then stops moving. A blob without `freeze_baseline_conversations` freezes the reference the moment
+judging starts. The reference is its own past, not a shipped number. The consequence is plain: a call
+site that frustrates users from its first day learns that as its normal and is flagged only if it gets
+worse. A call site too quiet to reach 100 conversations inside the 28-day replay window is never
+judged, and its Tuning row says `learning n/100`.
 
 ## What a case says, and what a resolve does
 

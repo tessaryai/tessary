@@ -112,7 +112,8 @@ class FrustrationRateReplayIntegrationTest {
         String pid = project("fr-rise");
         ClassifierRow signal = frustration(pid);
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations of reference at 5%
+        // Judged from 100 (four hours), and every later hour is added to the reference until 1,000.
+        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
         seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-quiet", start, 0, 2, 10, 0.0); // 20 conversations: still learning
         assess(pid, signal, "orphan", "conv-orphan", null, start, false, VERSION);
@@ -126,21 +127,22 @@ class FrustrationRateReplayIntegrationTest {
         CarriedState chat = state(pid, "cs-chat");
         ToolErrorRate baseline = chat.baseline();
         assertNotNull(baseline);
-        assertEquals(210, baseline.calls());
-        assertEquals(FrustrationConfig.defaults().stateEpoch(), chat.stateEpoch());
+        assertEquals(390, baseline.calls(), "still learning: every hour so far is in the reference");
+        assertEquals(
+                FrustrationConfig.of(new ObjectMapper(), signal.configJson()).stateEpoch(), chat.stateEpoch());
 
         FrustrationTuningView view = tuning.view(pid, signal);
         assertEquals(0.40, view.threshold());
         assertEquals(10_000L, view.arlTarget());
         assertEquals(4.0, view.minDecisionInterval());
-        assertEquals(200, view.minBaselineConversations());
+        assertEquals(100, view.minBaselineConversations());
         assertEquals(VERSION, view.scorerVersion());
         assertEquals(1, view.unassignedConversations());
         assertEquals(2, view.callSites().size());
         FrustrationCallSiteView alarming = view.callSites().get(0);
         assertEquals("cs-chat", alarming.callSiteId());
         assertEquals(FrustrationCallSiteView.ALARMING, alarming.state());
-        assertEquals(210L, alarming.baselineConversations());
+        assertEquals(390L, alarming.baselineConversations());
         assertNotNull(alarming.baselineRate());
         assertNotNull(alarming.decisionInterval());
         assertTrue(alarming.statistic() >= alarming.decisionInterval());

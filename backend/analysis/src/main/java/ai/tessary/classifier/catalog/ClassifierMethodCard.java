@@ -225,7 +225,8 @@ public final class ClassifierMethodCard {
             outside the chat never flags. A session stops being scored at its first flag.
 
             **Compares against** the rate that call site learned as its own normal over its first
-            sessions, a fitted number and not a stretch of traffic. A call site that was frustrating
+            sessions, and may keep learning for a while after judging starts; either way it is a fitted
+            number and not a stretch of traffic. A call site that was frustrating
             from the start learned that as normal and is flagged only for getting worse. A resolve
             restarts the accumulator and re-learns the rate from the traffic after it.
 
@@ -269,8 +270,8 @@ public final class ClassifierMethodCard {
             call but absent from the retrieved documents counts as unsupported.
 
             **Compares against** the rate that call site learned as its own normal, a fitted number and not a
-            stretch of traffic. It is judged from its first 200 traces and keeps learning until 1,000, then
-            stops moving. The model's false-alarm rate depends on the domain, and the learned rate absorbs
+            stretch of traffic. It is judged from its first `min_baseline_traces` traces (100 by default) and
+            keeps learning until `learningUntil` (1,000 by default), then stops moving. The model's false-alarm rate depends on the domain, and the learned rate absorbs
             it. A call site that answered badly from the start learned that as normal and is flagged only for
             getting worse. Only a rise is reported.
 
