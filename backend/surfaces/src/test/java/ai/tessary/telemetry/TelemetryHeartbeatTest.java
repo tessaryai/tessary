@@ -26,10 +26,11 @@ import ai.tessary.usage.UsageUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
@@ -62,10 +63,16 @@ class TelemetryHeartbeatTest {
 
     private static final String HELD_DIGEST = "a5ad23f7a2d98249588a2f21a305f8e3741bba450fd6216bde505cb9c4bee98a";
 
-    private static JsonSchema homePingSchema() throws IOException {
+    private static Schema homePingSchema() throws IOException {
         try (InputStream in = TelemetryHeartbeatTest.class.getResourceAsStream("/telemetry/home-ping.v1.schema.json")) {
-            return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7).getSchema(in);
+            return SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_7)
+                    .getSchema(in);
         }
+    }
+
+    /** networknt 3.x reads through Jackson 3, so the Jackson 2 node crosses over as JSON text. */
+    private static List<Error> violations(JsonNode node) throws IOException {
+        return homePingSchema().validate(node.toString(), InputFormat.JSON);
     }
 
     private TelemetryHeartbeat heartbeat(
@@ -121,7 +128,7 @@ class TelemetryHeartbeatTest {
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
 
-        Set<ValidationMessage> violations = homePingSchema().validate(sent);
+        List<Error> violations = violations(sent);
         assertTrue(violations.isEmpty(), "home would answer 400: " + violations);
         assertEquals(1, sent.get("contract_version").asInt());
         assertEquals(INSTANCE_ID, sent.get("instance_id").asText());
@@ -187,7 +194,7 @@ class TelemetryHeartbeatTest {
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
         assertFalse(sent.has("counts"));
-        assertTrue(homePingSchema().validate(sent).isEmpty());
+        assertTrue(violations(sent).isEmpty());
         assertNull(heartbeat(new TelemetryProperties(), instanceIds, client).counts());
     }
 
@@ -241,7 +248,7 @@ class TelemetryHeartbeatTest {
                         new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
                 .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
 
-        assertTrue(homePingSchema().validate(payload).isEmpty());
+        assertTrue(violations(payload).isEmpty());
     }
 
     @Test
@@ -253,7 +260,7 @@ class TelemetryHeartbeatTest {
         old.put("app_version", "dev");
         old.put("timestamp", "2026-09-13T07:20:00Z");
 
-        Set<ValidationMessage> violations = homePingSchema().validate(old);
+        List<Error> violations = violations(old);
 
         assertTrue(violations.toString().contains("ping_seq"), violations.toString());
         assertTrue(violations.toString().contains("sent_at"), violations.toString());
@@ -297,7 +304,7 @@ class TelemetryHeartbeatTest {
         assertEquals(
                 PriceBookFetcher.SUPPORTED_SCHEMA,
                 sent.path("price_book").path("schema_max").asInt());
-        assertTrue(homePingSchema().validate(sent).isEmpty());
+        assertTrue(violations(sent).isEmpty());
     }
 
     /**
