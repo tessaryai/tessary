@@ -41,7 +41,9 @@ The agent needs both credentials and egress, since it clones a repository and ca
 
 ## What the run returns
 
-A report, immutable once written. It carries four things.
+A report, immutable once written. It carries five things, and every kind of case gets the same shape.
+
+**A one-sentence summary** of why the metric moved, written for a reader who was not watching. It is the line under the case in Triage.
 
 **A verdict**, one of five:
 
@@ -55,9 +57,11 @@ A report, immutable once written. It carries four things.
 
 Three of these are structural: the agent did not get worse, something around it moved. **Grader definition changed** is the one whose label needs unpacking: it means the criteria an output is judged against changed, and a run reaches that verdict only after locating the change in your repository, citing the commit and the diff hunk.
 
-**Hypotheses, each with its receipts.** Every hypothesis carries the trace identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that was not actually measured is dropped, and a hypothesis whose citations were all invented survives with no receipts rather than with fabricated ones.
+**Causes, each with its receipts.** A cause has a short title and three plain-language parts: what changed, how that caused the movement, and what to do next. Its confidence is `high` when it is proven, meaning a located change lines up with the traces, and `medium` or `low` when it is a lead. The case page cards every proven cause, and shows the leads only when nothing was proven. Every cause carries the trace identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that was not actually measured is dropped, and a cause whose citations were all invented survives with no receipts rather than with fabricated ones.
 
-**An assessment of every check that was measured**, including the ones ruled out. The agent is the judge of those measurements and the prompt demands an explicit assessment of each, because fixed thresholds ruled causes in and out wrongly often enough to poison the verdict. An invented check identifier is dropped the same way an invented trace identifier is.
+None of the plain-language parts carry trace identifiers, queries, or statistics. Those live in the identifiers, shown as links, and in the written investigation.
+
+**An assessment of every check that was measured**, including the ones ruled out, each asked as a plain question such as "Did the serving model change?". The agent is the judge of those measurements and the prompt demands an explicit assessment of each, because fixed thresholds ruled causes in and out wrongly often enough to poison the verdict. An invented check identifier is dropped the same way an invented trace identifier is.
 
 **A written investigation**, in full, alongside the summary.
 
@@ -67,7 +71,7 @@ Three of these are structural: the agent did not get worse, something around it 
 
 ### On a frustration case
 
-A frustration finding has no before-and-after comparison to explain. It says users at one call site became frustrated with the agent more often than that call site's learned rate, and it cites the frustrated sessions. So a run on one returns a different report: the causes behind those sessions, grouped by what the agent did wrong rather than by what the users said.
+A frustration finding has no before-and-after comparison to explain. It says users at one call site became frustrated with the agent more often than that call site's learned rate, and it cites the frustrated sessions. So a run on one explains those sessions instead: its causes are grouped by what the agent did wrong rather than by what the users said.
 
 The verdict is one of two:
 
@@ -76,7 +80,7 @@ The verdict is one of two:
 | `causes_identified` | Causes identified. |
 | `no_cause_found` | No cause found. |
 
-Each cause names what the agent did, how many of the frustrated sessions show it, the sessions and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and a suggested fix. Every cited session is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no session is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
+Each cause names what the agent did, how that frustrated users, how many of the frustrated sessions show it, the sessions and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and what to do. Every cited session is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no session is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
 
 ### On a groundedness case
 
@@ -88,7 +92,7 @@ The agent is handed the newest flagged answers the finding cites, each with its 
 - The prompt asks for more than the documents hold.
 - The answer merges or misreads the documents.
 
-Each cause names what the agent did, how many traces with a flagged answer show it, the traces that support it, where in your repository it comes from when a diff, prompt text, or retrieval code lines up with it, and a suggested fix. The checks on a frustration report apply here with traces in place of sessions: a trace the agent cites that the finding does not is dropped, a cause left with no trace is dropped, and a report with no cause left reads `no_cause_found`.
+Each cause names what the agent did, how that left the answers unsupported, how many traces with a flagged answer show it, the traces that support it, where in your repository it comes from when a diff, prompt text, or retrieval code lines up with it, and what to do. The checks on a frustration report apply here with traces in place of sessions: a trace the agent cites that the finding does not is dropped, a cause left with no trace is dropped, and a report with no cause left reads `no_cause_found`.
 
 On the case page, each cause has a button such as **Show 12 answers** that narrows the case's **Flagged answers** list to the answers behind that cause. [Run RCA on the case](/classifiers/groundedness#run-rca-on-the-case) covers reading the report.
 

@@ -4,32 +4,25 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Info } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useProjectApi, useTenant } from "../tenant/TenantContext";
-import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn, type BadgeTone } from "../ui";
+import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn } from "../ui";
 import { Markdown } from "./components/PayloadViewer";
-import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning } from "./rcaLabels";
+import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning, shiftKind, type CauseKind } from "./rcaLabels";
+import { CauseCard } from "./components/CauseCard";
 import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
-import type { RcaCause, RcaHypothesis, RcaRuledOutCheck } from "../api/types";
+import type { RcaReport as RcaReportView, RcaRuledOutCheck } from "../api/types";
 
 /**
  * One RCA report — the immutable per-finding drill-in behind the case page's "Run RCA" action.
- * Reads top-to-bottom the way the analysis ran: the movement, the verdict + summary, the checklist
- * of structural causes with the analysis's call on each (shown even when all were ruled out — the
- * eliminated boring causes are what make the hypotheses trustworthy), then ranked hypotheses whose
- * evidence links open the real traces, then the agent's full write-up. A frustration report has no
- * hypotheses: it ranks causes, what the agent did that frustrated users, with the sessions that show it.
- * A groundedness report ranks causes the same way, with the traces whose answers were flagged.
+ * Reads top-to-bottom: the movement, the verdict and its one-sentence summary, the proven causes on the
+ * same card the case page uses, the checklist of structural causes with the analysis's call on each
+ * (shown even when all were ruled out — the eliminated boring causes are what make the causes
+ * trustworthy), the agent's full write-up with all of its evidence, and last the leads it could not prove.
  */
 
 const METRIC_LABEL: Record<string, string> = {
   frustration: "Frustrated sessions",
   groundedness: "Flagged answers",
-};
-
-const CONFIDENCE_TONE: Record<string, BadgeTone> = {
-  high: "error",
-  medium: "warning",
-  low: "neutral",
 };
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
@@ -75,7 +68,8 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
                 {state.glyph}
               </span>
               <div className="min-w-0">
-                <span className="text-body font-medium text-fg font-mono">{c.check}</span>
+                <span className="text-body font-medium text-fg">{c.question ?? c.check}</span>
+                {c.question && <span className="block font-mono text-label text-subtle">{c.check}</span>}
                 <p className="text-small text-muted mt-0.5">{c.detail}</p>
                 {c.measurement && (
                   <pre className="text-label text-subtle font-mono mt-1.5 whitespace-pre-wrap break-words">
@@ -91,121 +85,51 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
   );
 }
 
-function HypothesisCard({ hypothesis, rank, exploreBase }: { hypothesis: RcaHypothesis; rank: number; exploreBase: string }) {
-  return (
-    <Card className="border border-border">
-      <div className="px-3.5 py-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-label text-subtle tabular-nums">#{rank}</span>
-          <span className="text-body font-medium text-fg">{hypothesis.title}</span>
-          <Badge tone={CONFIDENCE_TONE[hypothesis.confidence]}>{hypothesis.confidence} confidence</Badge>
-        </div>
-        <p className="text-small text-muted mt-1.5">{hypothesis.rationale}</p>
-        {hypothesis.evidence_trace_ids.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap mt-2.5">
-            <span className="text-label uppercase text-subtle">Evidence</span>
-            {hypothesis.evidence_trace_ids.map((traceId) => (
-              <Link
-                key={traceId}
-                to={`${exploreBase}?trace=${encodeURIComponent(traceId)}`}
-                className="font-mono text-label text-link hover:text-link-hover hover:underline"
-                title={traceId}
-              >
-                trace …{traceId.slice(-8)}
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
+/** Which movement a report's causes explain. The report carries no detector blob, so this reads its kind,
+ *  measure and the sign of the move. */
+function reportCauseKind(r: RcaReportView): CauseKind {
+  if (r.report_kind === "frustration_causes") return "frustration";
+  if (r.report_kind === "groundedness_causes") return "groundedness";
+  const shift = shiftKind(r.metric, r.delta > 0);
+  if (shift) return shift;
+  if (r.metric === "leak_count") return "secret_leak";
+  if (r.metric === "malformed_rate") return "malformed";
+  if (r.metric.includes("error")) return "tool_error";
+  return "other";
 }
 
-const ATTRIBUTION_LABEL: Record<string, string> = {
-  prompt: "Prompt",
-  code: "Code",
-  tool: "Tool",
-  model: "Model",
-};
-
-/** Where a cause comes from in the repo, or nothing when the analysis could not tie it to a line. */
-function AttributionLine({ cause }: { cause: RcaCause }) {
-  const a = cause.attribution;
-  if (!a || !ATTRIBUTION_LABEL[a.kind]) {
-    return <span className="text-small text-subtle">Not tied to a line in the repo</span>;
-  }
-  return (
-    <div className="min-w-0">
-      <span className="text-small text-fg">{ATTRIBUTION_LABEL[a.kind]}</span>
-      {a.path && (
-        <span className="font-mono text-label text-muted ml-1.5 break-all">
-          {a.path}
-          {a.commit ? ` @ ${a.commit.slice(0, 8)}` : ""}
-        </span>
-      )}
-      {a.excerpt && (
-        <pre className="text-label text-subtle font-mono mt-1 whitespace-pre-wrap break-words">{a.excerpt}</pre>
-      )}
-    </div>
-  );
+function affectedUnit(kind: CauseKind): [string, string] {
+  if (kind === "frustration") return ["frustrated session", "frustrated sessions"];
+  if (kind === "groundedness") return ["flagged answer", "flagged answers"];
+  return ["flagged trace", "flagged traces"];
 }
 
-/** The ranked causes of a frustration or groundedness report: what the agent did, how many sessions (or
- *  traces with a flagged answer) show it, where it comes from, and the sessions and traces to read. */
-function CausesTable({ causes, base, byTrace }: { causes: RcaCause[]; base: string; byTrace: boolean }) {
+function CauseList({
+  title,
+  causes,
+  kind,
+  base,
+  repoRead,
+}: {
+  title: string;
+  causes: RcaReportView["causes"];
+  kind: CauseKind;
+  base: string;
+  repoRead: boolean;
+}) {
   return (
     <div>
-      <div className="text-h3 text-fg mb-2">Causes</div>
+      <div className="text-h3 text-fg mb-2">{title}</div>
       <div className="flex flex-col gap-2.5">
         {causes.map((c, i) => (
-          <Card key={`${c.title}-${i}`} className="border border-border">
-            <div className="px-3.5 py-3 flex flex-col gap-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-label text-subtle tabular-nums">#{i + 1}</span>
-                <span className="text-body font-medium text-fg">{c.title}</span>
-                <Badge tone={CONFIDENCE_TONE[c.confidence]}>{c.confidence} confidence</Badge>
-                <span className="text-small text-muted tabular-nums">
-                  {byTrace
-                    ? `${c.traces_affected} ${c.traces_affected === 1 ? "trace" : "traces"}`
-                    : `${c.sessions_affected} ${c.sessions_affected === 1 ? "session" : "sessions"}`}
-                </span>
-              </div>
-              <p className="text-small text-muted m-0">{c.what_the_agent_did}</p>
-              <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-[120px_1fr]">
-                <span className="text-label uppercase text-subtle">Comes from</span>
-                <AttributionLine cause={c} />
-                {c.fix_suggestion && (
-                  <>
-                    <span className="text-label uppercase text-subtle">Fix</span>
-                    <span className="text-small text-fg">{c.fix_suggestion}</span>
-                  </>
-                )}
-                <span className="text-label uppercase text-subtle">Evidence</span>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {c.evidence_session_ids.map((id) => (
-                    <Link
-                      key={`s-${id}`}
-                      to={`${base}/sessions/${encodeURIComponent(id)}`}
-                      className="font-mono text-label text-link hover:text-link-hover hover:underline"
-                      title={id}
-                    >
-                      session …{id.slice(-8)}
-                    </Link>
-                  ))}
-                  {c.evidence_trace_ids.map((id) => (
-                    <Link
-                      key={`t-${id}`}
-                      to={`${base}/explore?trace=${encodeURIComponent(id)}`}
-                      className="font-mono text-label text-link hover:text-link-hover hover:underline"
-                      title={id}
-                    >
-                      {byTrace ? "trace" : "turn"} …{id.slice(-8)}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
+          <CauseCard
+            key={`${c.title}-${i}`}
+            cause={c}
+            kind={kind}
+            basePath={base}
+            affected={affectedUnit(kind)}
+            repoRead={repoRead}
+          />
         ))}
       </div>
     </div>
@@ -261,6 +185,9 @@ export function RcaReport() {
   const worse = r.delta < 0;
   const frustration = r.report_kind === "frustration_causes";
   const groundedness = r.report_kind === "groundedness_causes";
+  const kind = reportCauseKind(r);
+  const proven = r.causes.filter((c) => c.confidence === "high");
+  const leads = r.causes.filter((c) => c.confidence !== "high");
   const subtitle = frustration || groundedness
     ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
         groundedness ? "Flagged answers" : "Frustrated sessions"
@@ -370,20 +297,17 @@ export function RcaReport() {
             </Card>
           )}
 
-          {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
-
-          {r.causes.length > 0 && <CausesTable causes={r.causes} base={base} byTrace={groundedness} />}
-
-          {r.hypotheses.length > 0 && (
-            <div>
-              <div className="text-h3 text-fg mb-2">Hypotheses</div>
-              <div className="flex flex-col gap-2.5">
-                {r.hypotheses.map((h, i) => (
-                  <HypothesisCard key={i} hypothesis={h} rank={i + 1} exploreBase={`${base}/explore`} />
-                ))}
-              </div>
-            </div>
+          {proven.length > 0 && (
+            <CauseList
+              title={proven.length === 1 ? "Cause" : "Causes"}
+              causes={proven}
+              kind={kind}
+              base={base}
+              repoRead={r.repo_available !== false}
+            />
           )}
+
+          {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
 
           {r.detailed_report && (
             <Card className="border border-border">
@@ -394,6 +318,16 @@ export function RcaReport() {
                 </div>
               </div>
             </Card>
+          )}
+
+          {leads.length > 0 && (
+            <CauseList
+              title="Leads not proven"
+              causes={leads}
+              kind={kind}
+              base={base}
+              repoRead={r.repo_available !== false}
+            />
           )}
         </div>
       )}

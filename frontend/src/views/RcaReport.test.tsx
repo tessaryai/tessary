@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * RcaReport's ranked causes: a groundedness report counts each cause in traces with a flagged answer and
- * links those traces, and a frustration report counts sessions and links the sessions and their turns.
+ * RcaReport's causes: proven ones first on the case page's card, leads last under their own heading. A
+ * groundedness cause counts flagged answers and links its traces; a frustration cause counts sessions and
+ * links the sessions and their turns.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -70,28 +71,43 @@ function renderReport(role: "owner" | "member" = "member") {
 /** Each evidence link's label and where it goes, in page order. */
 function evidenceLinks() {
   return screen
-    .getAllByRole("link", { name: /^(trace|turn|session) …/ })
-    .map((a) => [a.textContent, a.getAttribute("href")]);
+    .getAllByRole("link")
+    .map((a) => [a.textContent, a.getAttribute("href")])
+    .filter(([, href]) => /\/(traces|sessions)\//.test(href ?? ""));
 }
 
-const EXPLORE = "/orgs/acme/projects/default/explore?trace=";
+const TRACES = "/orgs/acme/projects/default/traces/";
 
 describe("RcaReport", () => {
-  it("counts a groundedness report's causes in traces and links the traces", async () => {
+  it("counts a groundedness report's causes in flagged answers and links the traces", async () => {
     renderReport();
 
     await screen.findByText("The retriever still serves the old pricing and policy pages");
     screen.getByText(/^Call site support-agent · Flagged answers rose to 6\.4% from a learned 2\.1% · .+ onward$/);
-    expect(screen.getByText("3 traces")).toBeTruthy();
-    expect(screen.getByText("2 traces")).toBeTruthy();
+    expect(screen.getByText("3 flagged answers")).toBeTruthy();
+    expect(screen.getByText("2 flagged answers")).toBeTruthy();
     expect(screen.queryByText(/\d+ sessions?$/)).toBeNull();
     expect(evidenceLinks()).toEqual([
-      ["trace …t-1", `${EXPLORE}t-1`],
-      ["trace …t-2", `${EXPLORE}t-2`],
-      ["trace …t-3", `${EXPLORE}t-3`],
-      ["trace …t-4", `${EXPLORE}t-4`],
-      ["trace …t-5", `${EXPLORE}t-5`],
+      ["t-1", `${TRACES}t-1`],
+      ["t-2", `${TRACES}t-2`],
+      ["t-3", `${TRACES}t-3`],
+      ["t-4", `${TRACES}t-4`],
+      ["t-5", `${TRACES}t-5`],
     ]);
+  });
+
+  /** Catches a lead read as the answer: it sits under its own heading, below the write-up, labelled as a lead. */
+  it("puts the proven cause first and the lead under Leads not proven", async () => {
+    renderReport();
+
+    const proven = await screen.findByText("The retriever still serves the old pricing and policy pages");
+    const leadsHeading = screen.getByText("Leads not proven");
+    const lead = screen.getByText("The system prompt asks for a complete answer every time");
+    expect(proven.compareDocumentPosition(leadsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(leadsHeading.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Why answers went unsupported")).toBeTruthy();
+    expect(screen.getByText("Why it might be")).toBeTruthy();
+    expect(screen.getByText("To confirm")).toBeTruthy();
   });
 
   it("counts a frustration report's causes in sessions and links the sessions and their turns", async () => {
@@ -105,13 +121,13 @@ describe("RcaReport", () => {
         {
           title: "The agent repeats the same clarifying question",
           confidence: "high",
-          what_the_agent_did: "Asked for the order number after the user gave it.",
-          fix_suggestion: "Read the order number from the conversation before asking.",
+          what_changed: "Asked for the order number after the user gave it.",
+          how_it_caused_this: "Users had to repeat themselves.",
+          next_step: "Read the order number from the conversation before asking.",
           attribution: null,
           evidence_session_ids: ["session-0000aa01", "session-0000aa02"],
           evidence_trace_ids: ["trace-0000bb01"],
-          sessions_affected: 4,
-          traces_affected: 1,
+          affected_count: 4,
         },
       ],
     };
@@ -119,12 +135,12 @@ describe("RcaReport", () => {
 
     await screen.findByText("The agent repeats the same clarifying question");
     screen.getByText(/^Call site support-agent · Frustrated sessions rose to 5\.2% from a learned 1\.8% · .+ onward$/);
-    expect(screen.getByText("4 sessions")).toBeTruthy();
-    expect(screen.queryByText("1 trace")).toBeNull();
+    expect(screen.getByText("4 frustrated sessions")).toBeTruthy();
+    expect(screen.getByText("Why users got frustrated")).toBeTruthy();
     expect(evidenceLinks()).toEqual([
-      ["session …0000aa01", "/orgs/acme/projects/default/sessions/session-0000aa01"],
-      ["session …0000aa02", "/orgs/acme/projects/default/sessions/session-0000aa02"],
-      ["turn …0000bb01", `${EXPLORE}trace-0000bb01`],
+      ["session-…", "/orgs/acme/projects/default/sessions/session-0000aa01"],
+      ["session-…", "/orgs/acme/projects/default/sessions/session-0000aa02"],
+      ["trace-00…", `${TRACES}trace-0000bb01`],
     ]);
   });
 
@@ -136,15 +152,18 @@ describe("RcaReport", () => {
           ...GROUNDEDNESS_REPORT.causes[0],
           attribution: { kind: "prompt", path: "agent/system.md", commit: "c0ffee1234abcd", excerpt: null },
         },
-        { ...GROUNDEDNESS_REPORT.causes[1], attribution: { kind: "code", path: null, commit: null, excerpt: null } },
+        {
+          ...GROUNDEDNESS_REPORT.causes[1],
+          attribution: { kind: "code", path: "rag/retrieve.py", commit: null, excerpt: null },
+        },
       ],
     };
     renderReport();
 
-    expect(await screen.findByText("agent/system.md @ c0ffee12")).toBeTruthy();
+    expect(await screen.findByText("agent/system.md @ c0ffee1")).toBeTruthy();
+    expect(screen.getByText("rag/retrieve.py")).toBeTruthy();
     expect(screen.getByText("Prompt")).toBeTruthy();
     expect(screen.getByText("Code")).toBeTruthy();
-    expect(screen.queryByText("Not tied to a line in the repo")).toBeNull();
   });
 
   it("re-runs the analysis as a new report and opens it", async () => {

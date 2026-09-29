@@ -12,7 +12,7 @@ The stages are separate on purpose. Each answers a different question with a dif
 | Ingest | What happened? | An ingest endpoint and a per-project bearer token | Sessions, traces, and spans in the store |
 | Classifiers | Did something move? | Spans tagged with `tessary.call_site.id`, and enough traffic for `duration_drift`, `cost_drift` and `tool_error` to build a reference | A finding, plus references to the traces it was seen in |
 | Triage | Does the claim hold? | A configured LLM (large language model) provider, a running sandbox, and automatic triage turned on for your organization, which is off by default | A case, or a closed finding |
-| Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, hypotheses with cited traces, and the checks it ruled out |
+| Root-cause analysis | What change caused it? | A case, plus a connected repository when you want answers about the code | A verdict, a one-sentence summary, causes with cited traces, and the checks it ruled out |
 
 <Note>
   Tessary Cloud differs from a self-hosted instance in three ways:
@@ -62,7 +62,7 @@ Triage needs three things the ingest and classifier stages do not: an LLM provid
 
 Detection says something moved. Root-cause analysis says what changed. Pressing **Run RCA** on a case hands the finding behind it to an agent session in a fresh sandbox, with the finding's dossier as files, a live connection back to your instance's MCP (Model Context Protocol) surface for the evidence, and a clone of your repository when one is connected.
 
-The run returns a verdict, hypotheses with the traces that support each one, and an explicit assessment of every check it measured, including the ones it ruled out. Without a connected repository it still runs, with a ceiling: it can show what changed in production and not what changed in the code.
+The run returns a verdict, a one-sentence summary, the causes it found with the traces that support each one, and an explicit assessment of every check it measured, including the ones it ruled out. Without a connected repository it still runs, with a ceiling: it can show what changed in production and not what changed in the code.
 
 [Root-cause analysis](/concepts/root-cause-analysis) covers what the agent is given, what it is deliberately not told, and how its output is validated before it becomes a report.
 

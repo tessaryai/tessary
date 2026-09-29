@@ -430,7 +430,7 @@ class E2bRcaSandboxTest {
      */
     @Test
     void theRunsCredentialIsReleasedWhetherTheRunSucceedsOrFails() throws Exception {
-        String completed = envelope("{\"hypotheses\":[]}");
+        String completed = envelope("{\"causes\":[]}");
         for (Launcher launcher : java.util.List.<Launcher>of(bodyJson -> completed, bodyJson -> {
             throw new IOException("launcher went away");
         })) {

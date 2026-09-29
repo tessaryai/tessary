@@ -27,7 +27,7 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.Pipeline;
 import ai.tessary.pipeline.PipelineService;
 import ai.tessary.query.QueryService;
-import ai.tessary.rca.RcaDtos.Hypothesis;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -186,7 +186,14 @@ class McpCaseToolsTest {
                 "## Why\nThe judge model changed.", rca.get("detailed_report").asText());
         assertEquals(
                 "Model swap on 2026-08-14",
-                rca.get("hypotheses").get(0).get("title").asText());
+                rca.get("causes").get(0).get("title").asText());
+        assertEquals(
+                "The provider rotated the default.",
+                rca.get("causes").get(0).get("what_changed").asText());
+        assertFalse(rca.has("hypotheses"), "every case type answers in causes now");
+        assertEquals(
+                "Did the traffic mix change?",
+                rca.get("ruled_out").get(0).get("question").asText());
         assertEquals("traffic_mix", rca.get("ruled_out").get(0).get("check").asText());
         assertTrue(rca.get("ruled_out").get(0).get("passed").asBoolean());
     }
@@ -341,10 +348,21 @@ class McpCaseToolsTest {
                 "model_change",
                 "The judge model changed mid-window.",
                 List.of(RuledOutCheck.assessed(
-                        "traffic_mix", RuledOutCheck.Assessment.RULED_OUT, "Mix held flat.", "chi2 = 0.4")),
-                List.of(new Hypothesis(
-                        "Model swap on 2026-08-14", "high", "The provider rotated the default.", List.of("tr-1"))),
-                List.of(),
+                        "traffic_mix",
+                        "Did the traffic mix change?",
+                        RuledOutCheck.Assessment.RULED_OUT,
+                        "Mix held flat.",
+                        "chi2 = 0.4")),
+                List.of(new Cause(
+                        "Model swap on 2026-08-14",
+                        "high",
+                        "The provider rotated the default.",
+                        null,
+                        null,
+                        null,
+                        List.of("tr-1"),
+                        List.of(),
+                        0)),
                 "## Why\nThe judge model changed.",
                 "agentic",
                 true,

@@ -70,15 +70,14 @@ public final class CaseDtos {
              *  joining it — or null if nobody has. */
             @JsonProperty("locked_at") @Nullable String lockedAt,
             /**
-             * The leading hypothesis's title from the finished RCA behind this case, or null where none
-             * has run, none finished, or the run reached no hypothesis. Null is the common case, not a
+             * The one-sentence summary of the finished RCA behind this case, or null where none has run,
+             * none finished, or the run wrote no summary and found no cause. Null is the common case, not a
              * gap: most cases have never been analyzed.
              */
             @Nullable String cause,
             /**
              * That run's verdict, carried beside {@code cause} because the two can disagree: an
-             * {@code inconclusive} run still names a leading hypothesis, and showing that as the cause
-             * would state an attribution the analysis declined to make.
+             * {@code inconclusive} run still summarizes its leads.
              */
             @JsonProperty("rca_verdict") @Nullable String rcaVerdict) {
 
@@ -117,7 +116,7 @@ public final class CaseDtos {
                     row.findingCount(),
                     row.latestFindingId(),
                     row.lockedAt(),
-                    lead == null ? null : lead.cause(),
+                    lead == null ? null : lead.summary(),
                     lead == null ? null : lead.verdict());
         }
     }
@@ -250,7 +249,7 @@ public final class CaseDtos {
      * @param rcaReportId the most recent RCA on this case's subject, if one has run. A report
      *     still running has an id here and nothing in {@code rca} yet, which is how a client
      *     knows to poll.
-     * @param rca that report in full — verdict, hypotheses, the ruled-out checklist, and the
+     * @param rca that report in full — verdict, causes, the ruled-out checklist, and the
      *     agent's write-up — inlined once finished, null while pending or when there is none.
      *     Inlined rather than left as a bare id: the report is the answer to "why is this case
      *     open," and pointing at it would cost a second round trip for the UI and a second gated

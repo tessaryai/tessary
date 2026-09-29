@@ -215,7 +215,7 @@ class RcaControllerTest {
     }
 
     /**
-     * Triage queue captions: a running analysis is not a conclusion, a finished verdict reaches its case, and an
+     * Triage queue captions: a running analysis is not a conclusion, a finished summary reaches its case, and an
      * empty page never reaches Postgres as {@code IN ()}.
      */
     @Test
@@ -231,17 +231,18 @@ class RcaControllerTest {
                 report.jobId(),
                 "done",
                 RcaReportRow.Verdict.MODEL_CHANGE,
-                "summary",
+                "A canary model served the flagged traces.",
                 "[]",
-                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"rationale\":\"r\","
-                        + "\"evidence_trace_ids\":[]}]",
-                null,
+                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"evidence_trace_ids\":[]}]",
                 "## r",
                 true);
         jobs.markDone(report.jobId());
 
         assertEquals(
-                Map.of(caseId, new RcaReportRepository.CaseLead(RcaReportRow.Verdict.MODEL_CHANGE, "A canary model")),
+                Map.of(
+                        caseId,
+                        new RcaReportRepository.CaseLead(
+                                RcaReportRow.Verdict.MODEL_CHANGE, "A canary model served the flagged traces.")),
                 reports.leadsByCase(projectId, List.of(caseId)));
         assertEquals(Map.of(), reports.leadsByCase(projectId, List.of()));
     }

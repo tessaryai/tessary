@@ -12,7 +12,7 @@ as the Docker backend's agent image.
   through the SDK. Required by `rca.js` and `triage.js`.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
   `evidence.json`, `checklist.md`) → read-only agent run wired to the platform's MCP surface → emit
-  verdict + hypotheses + the markdown investigation. It reads every trace it cites through MCP, so
+  verdict + summary + causes + the markdown investigation. It reads every trace it cites through MCP, so
   the door is required; the clone is OPTIONAL and adds `./repo/` for the projects that have an
   integration. Read-only by permission rule: it may never edit the clone. (Node builtins only.)
 - `triage.js` — the Layer-2 ruling: materialize the finding's two-file dossier (`finding.md`,

@@ -3640,6 +3640,10 @@
       },
       "Cause" : {
         "properties" : {
+          "affected_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "attribution" : {
             "anyOf" : [
               {
@@ -3665,34 +3669,38 @@
             },
             "type" : "array"
           },
-          "fix_suggestion" : {
-            "type" : "string"
+          "how_it_caused_this" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           },
-          "sessions_affected" : {
-            "format" : "int32",
-            "type" : "integer"
+          "next_step" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           },
           "title" : {
             "type" : "string"
           },
-          "traces_affected" : {
-            "format" : "int32",
-            "type" : "integer"
-          },
-          "what_the_agent_did" : {
-            "type" : "string"
+          "what_changed" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
+          "affected_count",
           "attribution",
           "confidence",
           "evidence_session_ids",
           "evidence_trace_ids",
-          "fix_suggestion",
-          "sessions_affected",
+          "how_it_caused_this",
+          "next_step",
           "title",
-          "traces_affected",
-          "what_the_agent_did"
+          "what_changed"
         ],
         "type" : "object"
       },
@@ -5865,32 +5873,6 @@
         },
         "type" : "object"
       },
-      "Hypothesis" : {
-        "properties" : {
-          "confidence" : {
-            "type" : "string"
-          },
-          "evidence_trace_ids" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          },
-          "rationale" : {
-            "type" : "string"
-          },
-          "title" : {
-            "type" : "string"
-          }
-        },
-        "required" : [
-          "confidence",
-          "evidence_trace_ids",
-          "rationale",
-          "title"
-        ],
-        "type" : "object"
-      },
       "ImplicitInvariant" : {
         "properties" : {
           "applies_to" : { },
@@ -7856,12 +7838,6 @@
           "engine" : {
             "type" : "string"
           },
-          "hypotheses" : {
-            "items" : {
-              "$ref" : "#/components/schemas/Hypothesis"
-            },
-            "type" : "array"
-          },
           "id" : {
             "type" : "string"
           },
@@ -7933,7 +7909,6 @@
           "delta",
           "detailed_report",
           "engine",
-          "hypotheses",
           "id",
           "job_id",
           "metric",
@@ -8328,6 +8303,12 @@
           },
           "passed" : {
             "type" : "boolean"
+          },
+          "question" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -8335,7 +8316,8 @@
           "check",
           "detail",
           "measurement",
-          "passed"
+          "passed",
+          "question"
         ],
         "type" : "object"
       },

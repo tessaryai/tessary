@@ -11,7 +11,6 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.prompt.PromptCraft;
 import ai.tessary.rca.RcaDtos.Cause;
-import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.KeyScope;
@@ -23,6 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -62,22 +62,22 @@ public class AgenticRcaEngine {
     /** A side this thin makes a percentage a handful of individual traces rather than a rate. */
     private static final int SMALL_SIDE = 5;
 
-    /** The agent's final-output contract: verdict, hypotheses with receipts, one assessment per
-     *  measured checklist id, and the markdown writeup. */
     /** Where this lane's prose lives: {@code prompt-craft/rca/}. */
     private static final String RCA = "rca";
 
+    /** The agent's final-output contract: verdict, causes with receipts, one assessment per measured
+     *  checklist id, and the markdown writeup. Frustration and groundedness return the same cause shape. */
     static final String JSON_SCHEMA = PromptCraft.text(RCA, "response_schema.json");
 
     /**
-     * The eight rules of a root-cause investigation, verbatim in the prompt.
+     * The nine rules of a root-cause investigation, verbatim in the prompt.
      *
      * <p>They are the agreed specification for this layer, not prompt tuning: what an RCA is for and what
      * it is allowed to conclude (rules 1 and 2), the order that keeps it cheap and honest (3, 4), the
      * standard of proof (5), what the repository is and is not (6), the obligation that makes a
      * report actionable rather than a story (7), and what to do if the run is forced
      * to stop before finishing (8), so a truncated run reports a low-confidence verdict rather than
-     * silence.
+     * silence, and who the case-page fields are written for (9).
      */
     private static final String RULES = PromptCraft.text(RCA, "rules.md");
 
@@ -87,7 +87,7 @@ public class AgenticRcaEngine {
      */
     private static final String FRUSTRATION_RULES = PromptCraft.text(RCA, "frustration/rules.md");
 
-    /** A frustration run's output contract: ranked causes with session receipts instead of hypotheses. */
+    /** A frustration run's output contract: causes with session receipts. */
     static final String FRUSTRATION_JSON_SCHEMA = PromptCraft.text(RCA, "frustration/response_schema.json");
 
     /**
@@ -109,12 +109,11 @@ public class AgenticRcaEngine {
     /** What the run concluded — {@link RcaSynthesisOutput}-validated. */
     public record Result(
             String verdict,
-            String summary,
-            List<Hypothesis> hypotheses,
-            /** Ranked causes; empty unless the report is a frustration or groundedness one. */
+            @Nullable String summary,
+            /** Proven first, then by sessions or traces affected. */
             List<Cause> causes,
             List<ChecklistAssessment> checklist,
-            String detailedReport,
+            @Nullable String detailedReport,
             /** Whether this run actually had the repo to read. Recorded per report, because the
              *  ceiling belongs to the run, not to whether a repo is connected when someone reads it. */
             boolean repoAvailable) {}
@@ -270,14 +269,13 @@ public class AgenticRcaEngine {
                 log.warn("rca agentic project={} job={} returned no detailed_report", job.projectId(), job.id());
             }
             log.info(
-                    "rca agentic project={} job={} kind={} verdict={} downgraded={} hypotheses={} causes={}"
+                    "rca agentic project={} job={} kind={} verdict={} downgraded={} causes={}"
                             + " assessed={}/{} repo={}",
                     job.projectId(),
                     job.id(),
                     report.reportKind(),
                     parsed.verdict(),
                     parsed.verdictNote() != null,
-                    parsed.hypotheses().size(),
                     parsed.causes().size(),
                     parsed.checklist().size(),
                     measuredChecks.size(),
@@ -285,12 +283,11 @@ public class AgenticRcaEngine {
             String detailed = parsed.detailedReport() == null ? parsed.summary() : parsed.detailedReport();
             if (parsed.verdictNote() != null) {
                 // The downgrade must be visible where the engineer reads, not only in a log line.
-                detailed = parsed.verdictNote() + "\n\n" + detailed;
+                detailed = detailed == null ? parsed.verdictNote() : parsed.verdictNote() + "\n\n" + detailed;
             }
             return new Result(
                     parsed.verdict(),
                     parsed.summary(),
-                    parsed.hypotheses(),
                     parsed.causes(),
                     parsed.checklist(),
                     detailed,
@@ -382,7 +379,8 @@ public class AgenticRcaEngine {
                     .append(" commit history to walk. That lowers the ceiling on this run and does not stop it:")
                     .append(" establish what changed in production and when, from the traces themselves, and")
                     .append(" state plainly in the report that the code side is unread. Do NOT assert anything")
-                    .append(" about a prompt, a config or a commit you had no way to open.\n\n");
+                    .append(" about a prompt, a config or a commit you had no way to open; set every attribution")
+                    .append(" kind to `unknown`.\n\n");
         }
 
         sb.append("THE CHECKLIST IS YOURS TO JUDGE. dossier/checklist.md carries raw numbers only — no")
@@ -409,7 +407,7 @@ public class AgenticRcaEngine {
                 .append(" through MCP, or a repo artifact. If you catch yourself writing \"must have been\" or")
                 .append(" \"presumably\", stop and fetch the evidence. If it cannot be read, say so and weigh")
                 .append(" `inconclusive` — never paper over the gap with an inference.\n")
-                .append("- Hypotheses may cite ONLY trace ids that appear in this finding's own evidence refs")
+                .append("- Causes may cite ONLY trace ids that appear in this finding's own evidence refs")
                 .append(" (either side); an id outside them is discarded as hallucinated.\n")
                 .append("- traffic_shift claims the WORK changed, not the behaviour. Prove both halves:")
                 .append(" characterize the baseline side's traces AND the flagged side's from their actual")
@@ -423,7 +421,7 @@ public class AgenticRcaEngine {
                 .append("- model_change: cite which model serves the flagged traces and which served the")
                 .append(" baseline ones.\n")
                 .append("The platform enforces the comparative half of this: a traffic_shift or")
-                .append(" behavior_change verdict whose hypotheses cite no baseline-side trace id is downgraded")
+                .append(" behavior_change verdict whose causes cite no baseline-side trace id is downgraded")
                 .append(" to inconclusive on receipt.\n\n");
 
         sb.append("SAMPLE SIZE: this finding cites ")
@@ -433,7 +431,7 @@ public class AgenticRcaEngine {
                 .append(" flagged-side trace(s).");
         if (baselineTraces < SMALL_SIDE || flaggedTraces < SMALL_SIDE) {
             sb.append(" At that size any rate you compute is a handful of individual traces, not a rate —")
-                    .append(" read and name each one individually, cap every hypothesis's confidence at")
+                    .append(" read and name each one individually, cap every cause's confidence at")
                     .append(" \"medium\", and state the sufficiency limit plainly in the report.");
         }
         sb.append(" A side with zero refs is a real state for several detectors (their reference is a fitted")
@@ -449,8 +447,10 @@ public class AgenticRcaEngine {
                 .append(" You run against a hard wall-clock budget — go deep on the strongest signal, not wide")
                 .append(" on everything.\n\n");
 
-        sb.append("Produce 1-4 hypotheses for what the classifier saw, most likely first, each citing the")
-                .append(" trace ids that best evidence it (comparative verdicts need both sides). Set verdict to")
+        sb.append("Produce 0-4 `causes` for what the classifier saw, high first, each citing the trace ids")
+                .append(" that best evidence it (comparative verdicts need both sides). `high` means proven by")
+                .append(" rule 5; anything less is a lead. `attribution` names the prompt, code, tool or model")
+                .append(" line behind a cause, with path, commit and excerpt, or kind `unknown`. Set verdict to")
                 .append(" \"behavior_change\" when the outputs genuinely changed/regressed, \"traffic_shift\"")
                 .append(" when the flagged cohort is dominated by a different kind of traffic rather than worse")
                 .append(" behaviour, \"definition_change\" when you VERIFIED that the grader's criteria changed,")
@@ -468,7 +468,7 @@ public class AgenticRcaEngine {
                 .append(" section (a markdown table mapping every load-bearing claim to its evidence: trace id,")
                 .append(" repo path/commit, or query — a claim you cannot put in that table does not belong in")
                 .append(" the report) followed by a \"## What would settle it\" section naming the one")
-                .append(" experiment that would confirm or refute your leading hypothesis.\n\n");
+                .append(" experiment that would confirm or refute your leading cause.\n\n");
 
         sb.append("Finish by returning the JSON object required by the schema, and nothing else — the harness")
                 .append(" collects it through the structured-output tool, so do not wrap it in prose.");
@@ -539,7 +539,8 @@ public class AgenticRcaEngine {
         }
         sb.append("\n\n");
 
-        sb.append("OUTPUT: `causes`, most sessions first. Each cites `evidence_session_ids` from this finding's")
+        sb.append("OUTPUT: `causes`, high first, then most sessions. `high` means the sessions prove it; anything")
+                .append(" less is a lead. Each cites `evidence_session_ids` from this finding's")
                 .append(" witness session refs (unknown ids are dropped, and a cause left with none is dropped)")
                 .append(" and `evidence_trace_ids` from its witness trace refs. `attribution` names the prompt,")
                 .append(" code, tool or model line behind the cause, with path, commit and excerpt, or kind")
@@ -617,7 +618,8 @@ public class AgenticRcaEngine {
         }
         sb.append("\n\n");
 
-        sb.append("OUTPUT: `causes`, most traces first. Each cites `evidence_trace_ids` from this finding's")
+        sb.append("OUTPUT: `causes`, high first, then most traces. `high` means the traces prove it; anything")
+                .append(" less is a lead. Each cites `evidence_trace_ids` from this finding's")
                 .append(" witness trace refs (unknown ids are dropped, and a cause left with none is dropped).")
                 .append(" `attribution` names the prompt, code, tool or model line behind the cause, with path,")
                 .append(" commit and excerpt, or kind `unknown`. Set verdict \"causes_identified\" when a cause")

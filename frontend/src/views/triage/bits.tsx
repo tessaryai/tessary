@@ -118,24 +118,14 @@ function Dotted({ colour, label }: { colour: string; label: string }) {
 /**
  * What a finished RCA concluded, as one line — or null where none has finished.
  *
- * <p>The verdict gates the WORDING, not whether there is any. An `inconclusive` run still reaches a
- * leading hypothesis, and the two wrong answers are at opposite extremes: printing that hypothesis
- * after "caused by" asserts an attribution the analysis explicitly declined to make, and printing
- * "No cause located" throws away the most useful sentence on the page to say almost nothing. So an
- * inconclusive run is hedged rather than suppressed — the reader gets the explanation and its
- * epistemic status in the same breath.
- *
- * <p>Only a run that reached NO hypothesis at all says so plainly, because then there genuinely is
- * nothing to hedge. A run with a verdict but no hypothesis falls back to the verdict's own label,
- * which is a category ("Traffic mix shifted") and reads as one.
+ * <p>The line is the run's one-sentence summary, printed as written: the summary itself says whether a
+ * cause was proven, so a prefix would only repeat it. A run with no summary falls back to the verdict's
+ * own label, which is a category ("Traffic mix shifted") and reads as one. An inconclusive run with no
+ * summary says so plainly.
  */
-export function causeLine(c: Pick<Case, "cause" | "rca_verdict">): { hedged: boolean; text: string } | null {
+export function causeLine(c: Pick<Case, "cause" | "rca_verdict">): string | null {
   if (c.rca_verdict == null) return null;
-  if (c.cause == null) {
-    const label = RCA_VERDICT_LABEL[c.rca_verdict];
-    return label && c.rca_verdict !== "inconclusive"
-      ? { hedged: false, text: label }
-      : { hedged: false, text: "No cause located" };
-  }
-  return { hedged: c.rca_verdict === "inconclusive" || c.rca_verdict === "no_cause_found", text: c.cause };
+  if (c.cause != null) return c.cause;
+  const label = RCA_VERDICT_LABEL[c.rca_verdict];
+  return label && c.rca_verdict !== "inconclusive" && c.rca_verdict !== "no_cause_found" ? label : "No cause located";
 }

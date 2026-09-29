@@ -2773,17 +2773,16 @@ export interface components {
             platforms: components["schemas"]["PlatformDescriptor"][];
         };
         Cause: {
+            /** Format: int32 */
+            affected_count: number;
             attribution: components["schemas"]["Attribution"] | null;
             confidence: string;
             evidence_session_ids: string[];
             evidence_trace_ids: string[];
-            fix_suggestion: string;
-            /** Format: int32 */
-            sessions_affected: number;
+            how_it_caused_this: string | null;
+            next_step: string | null;
             title: string;
-            /** Format: int32 */
-            traces_affected: number;
-            what_the_agent_did: string;
+            what_changed: string | null;
         };
         Chain: {
             call_site_ids: string[];
@@ -3296,12 +3295,6 @@ export interface components {
             is4xxClientError?: boolean;
             is5xxServerError?: boolean;
         };
-        Hypothesis: {
-            confidence: string;
-            evidence_trace_ids: string[];
-            rationale: string;
-            title: string;
-        };
         ImplicitInvariant: {
             applies_to: unknown;
             /** @enum {string} */
@@ -3755,7 +3748,6 @@ export interface components {
             delta: number;
             detailed_report: string | null;
             engine: string;
-            hypotheses: components["schemas"]["Hypothesis"][];
             id: string;
             job_id: string;
             metric: string;
@@ -3875,6 +3867,7 @@ export interface components {
             detail: string;
             measurement: string | null;
             passed: boolean;
+            question: string | null;
         };
         Runtime: {
             /** Format: double */

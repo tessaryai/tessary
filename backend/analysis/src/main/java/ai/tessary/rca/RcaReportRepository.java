@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.tenant.Ids;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -31,9 +33,11 @@ public class RcaReportRepository {
     private static final String FROM = "FROM rca_report r JOIN job j ON j.id = r.job_id";
 
     private final JdbcClient jdbc;
+    private final ObjectMapper mapper;
 
-    public RcaReportRepository(JdbcClient jdbc) {
+    public RcaReportRepository(JdbcClient jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
+        this.mapper = mapper;
     }
 
     /** Insert the pending report shell for a job, no-op when a concurrent trigger already inserted it
@@ -115,13 +119,13 @@ public class RcaReportRepository {
                 .list();
     }
 
-    /** What a finished RCA gives a case row: its verdict, and the leading hypothesis or cause if it reached one. */
+    /** What a finished RCA gives a case row: its verdict and its one-sentence summary. */
     public record CaseLead(
-            @Nullable String verdict, @Nullable String cause) {}
+            @Nullable String verdict, @Nullable String summary) {}
 
     /**
-     * What a finished RCA concluded about each of {@code caseIds} — its verdict and the leading
-     * hypothesis title — as the Triage queue reads it. ONE query for a whole page, served by
+     * What a finished RCA concluded about each of {@code caseIds} — its verdict and summary — as the
+     * Triage queue reads it. ONE query for a whole page, served by
      * {@code ix_rca_report_finding} through the {@code finding} join, rather than a report fetch per
      * row: Triage lists every live case, and a per-row read would put an RCA lookup behind the app's
      * first screen.
@@ -140,15 +144,20 @@ public class RcaReportRepository {
     public Map<String, CaseLead> leadsByCase(String projectId, Collection<String> caseIds) {
         if (caseIds.isEmpty()) return Map.of();
         Map<String, CaseLead> out = new HashMap<>();
-        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, r.verdict,"
-                        + " COALESCE(r.hypotheses -> 0 ->> 'title', r.causes -> 0 ->> 'title') AS cause "
+        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, r.verdict, r.summary, r.report_kind, r.causes,"
+                        + " r.hypotheses "
                         + FROM + " JOIN finding f ON f.id = r.finding_id"
                         + " WHERE r.project_id = :pid AND f.case_id IN (:caseIds) AND j.status = 'done'"
                         + " ORDER BY f.case_id, r.created_at DESC")
                 .param("pid", projectId)
                 .param("caseIds", caseIds)
-                .query((rs, n) ->
-                        out.put(rs.getString("case_id"), new CaseLead(rs.getString("verdict"), rs.getString("cause"))))
+                .query((rs, n) -> {
+                    List<Cause> causes = RcaDtos.causesOf(
+                            mapper, rs.getString("report_kind"), rs.getString("causes"), rs.getString("hypotheses"));
+                    return out.put(
+                            rs.getString("case_id"),
+                            new CaseLead(rs.getString("verdict"), RcaDtos.summaryOf(rs.getString("summary"), causes)));
+                })
                 .list();
         return out;
     }
@@ -180,13 +189,12 @@ public class RcaReportRepository {
             @Nullable String verdict,
             @Nullable String summary,
             @Nullable String ruledOutJson,
-            @Nullable String hypothesesJson,
             @Nullable String causesJson,
             @Nullable String detailedReport,
             @Nullable Boolean repoAvailable) {
         jdbc.sql("""
                 UPDATE rca_report SET status = :status, verdict = :verdict, summary = :summary,
-                    ruled_out = :ruledOut::jsonb, hypotheses = :hypotheses::jsonb, causes = :causes::jsonb,
+                    ruled_out = :ruledOut::jsonb, causes = :causes::jsonb,
                     detailed_report = :detailedReport, repo_available = :repoAvailable,
                     completed_at = :now
                 WHERE job_id = :jobId
@@ -195,7 +203,6 @@ public class RcaReportRepository {
                 .param("verdict", verdict)
                 .param("summary", summary)
                 .param("ruledOut", ruledOutJson)
-                .param("hypotheses", hypothesesJson)
                 .param("causes", causesJson)
                 .param("detailedReport", detailedReport)
                 .param("repoAvailable", repoAvailable)

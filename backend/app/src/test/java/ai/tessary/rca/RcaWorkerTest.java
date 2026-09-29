@@ -4,6 +4,7 @@ package ai.tessary.rca;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -21,7 +22,6 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaDtos.RuledOutCheck.Assessment;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
@@ -173,10 +173,21 @@ class RcaWorkerTest {
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.BEHAVIOR_CHANGE,
                         "The prompt was rewritten.",
-                        List.of(new Hypothesis("stricter prompt", "high", "because", List.of(failingTrace))),
-                        List.of(),
+                        List.of(new RcaDtos.Cause(
+                                "stricter prompt",
+                                "high",
+                                "because",
+                                null,
+                                null,
+                                null,
+                                List.of(failingTrace),
+                                List.of(),
+                                1)),
                         List.of(new ChecklistAssessment(
-                                "serving_model", "explains", "commit abc123 moved the call site to a new model")),
+                                "serving_model",
+                                "Did the serving model change?",
+                                "explains",
+                                "commit abc123 moved the call site to a new model")),
                         "## Investigation",
                         true));
 
@@ -188,13 +199,15 @@ class RcaWorkerTest {
         assertEquals(RcaReportRow.Verdict.BEHAVIOR_CHANGE, report.verdict());
         assertEquals("The prompt was rewritten.", report.summary());
         assertEquals("## Investigation", report.detailedReport());
-        assertTrue(report.hypotheses().contains("stricter prompt"));
+        assertTrue(report.causes().contains("stricter prompt"));
+        assertNull(report.hypotheses(), "a metric run stores its causes where every other kind does");
 
         // Each stored item carries the agent's call and the numbers it judged; a skipped check survives as unknown.
         Map<String, RuledOutCheck> checks = storedChecks(report);
         RuledOutCheck model = checks.get("serving_model");
         assertEquals(Assessment.EXPLAINS, model.assessment());
         assertEquals("commit abc123 moved the call site to a new model", model.detail());
+        assertEquals("Did the serving model change?", model.question());
         assertTrue(model.measurement().contains("serving model"), model.measurement());
         assertFalse(model.passed());
 
@@ -316,21 +329,20 @@ class RcaWorkerTest {
 
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Ignores the attached file",
+                "medium",
                 "Answers from memory when the user attaches a file.",
-                2,
-                1,
-                List.of(sessionA, sessionB),
-                List.of(turnA),
-                new RcaDtos.Attribution("prompt", "agent/system.md", "abc123", "Answer briefly."),
+                "The user has to paste the file's contents again.",
                 "Tell the agent to read attachments first.",
-                "medium");
+                new RcaDtos.Attribution("prompt", "agent/system.md", "abc123", "Answer briefly."),
+                List.of(turnA),
+                List.of(sessionA, sessionB),
+                2);
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "The agent ignores attachments.",
-                        List.of(),
                         List.of(cause),
-                        List.of(new ChecklistAssessment("failing_cohort_shape", "ruled_out", "no concentration")),
+                        List.of(new ChecklistAssessment("failing_cohort_shape", null, "ruled_out", "no concentration")),
                         "## Investigation",
                         true));
 
@@ -361,7 +373,6 @@ class RcaWorkerTest {
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
         assertEquals(List.of(cause), view.causes());
-        assertTrue(view.hypotheses().isEmpty());
     }
 
     /**
@@ -400,21 +411,20 @@ class RcaWorkerTest {
 
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Retrieval returns one document",
+                "medium",
                 "Answers past what the single retrieved document says.",
-                0,
-                2,
-                List.of(),
-                List.of(flaggedA, flaggedB),
-                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                null,
                 "Retrieve more documents.",
-                "medium");
+                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                List.of(flaggedA, flaggedB),
+                List.of(),
+                2);
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "Retrieval returns one document.",
-                        List.of(),
                         List.of(cause),
-                        List.of(new ChecklistAssessment("failing_cohort_shape", "ruled_out", "no concentration")),
+                        List.of(new ChecklistAssessment("failing_cohort_shape", null, "ruled_out", "no concentration")),
                         "## Investigation",
                         true));
 
@@ -449,7 +459,6 @@ class RcaWorkerTest {
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
         assertEquals(List.of(cause), view.causes());
-        assertTrue(view.hypotheses().isEmpty());
     }
 
     /**
@@ -586,8 +595,7 @@ class RcaWorkerTest {
 
     private void stubEngine(String verdict, List<ChecklistAssessment> checklist) {
         when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
-                .thenReturn(new AgenticRcaEngine.Result(
-                        verdict, "summary", List.of(), List.of(), checklist, "## report", true));
+                .thenReturn(new AgenticRcaEngine.Result(verdict, "summary", List.of(), checklist, "## report", true));
     }
 
     private static Map<String, RuledOutCheck> storedChecks(RcaReportRow report) {

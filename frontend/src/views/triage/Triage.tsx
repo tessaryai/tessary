@@ -166,8 +166,7 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
             another — and it is the second thing scanned, not part of the first. */}
         {cause && (
           <span className="block truncate text-muted mt-0.75 text-small">
-            {cause.hedged && <span className="text-subtle">Likely: </span>}
-            {cause.text}
+            {cause}
           </span>
         )}
         <span className="flex items-center text-muted gap-2 mt-0.5 text-small">

@@ -78,12 +78,11 @@ If a session's traces have passed your retention period, the page says the trace
 
 Select **Run RCA** on the case. Root-cause analysis reads every frustrated session the finding cites and, with a connected repository, your code. It returns one of two verdicts: **Causes identified** or **No cause found**.
 
-Each cause shows:
+The case page cards each proven cause, one with high confidence. When no cause is proven, it says so, gives the summary, and shows the leads, each with its confidence: medium or low. Each cause shows:
 
-- What the agent did, and how many sessions show it.
-- A confidence: high, medium, or low.
-- Where it comes from: a prompt, code, a tool, the model, or unknown, with the file, commit, and excerpt when one lines up.
-- A suggested fix.
+- **What the agent did**, **Why users got frustrated**, and **What to do**. On a lead, the last two read **Why it might be** and **To confirm**.
+- How many sessions show it.
+- Where it comes from: a prompt, code, a tool, or the model, with the file, commit, and excerpt when one lines up.
 - The sessions and turns that show it. On the case, the **Show** link on a cause, such as **Show 12 sessions**, narrows the session list to that cause.
 
 [Root-cause analysis](/concepts/root-cause-analysis#on-a-frustration-case) covers how the report checks its own citations.
