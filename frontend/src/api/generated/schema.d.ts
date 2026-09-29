@@ -2469,6 +2469,23 @@ export interface components {
                     registeredAsParallelCapable?: boolean;
                     unnamedModule?: {
                         annotations?: unknown[];
+                        classLoader?: {
+                            defaultAssertionStatus?: boolean;
+                            definedPackages?: {
+                                annotations?: unknown[];
+                                declaredAnnotations?: unknown[];
+                                implementationTitle?: string;
+                                implementationVendor?: string;
+                                implementationVersion?: string;
+                                name?: string;
+                                sealed?: boolean;
+                                specificationTitle?: string;
+                                specificationVendor?: string;
+                                specificationVersion?: string;
+                            }[];
+                            name?: string;
+                            registeredAsParallelCapable?: boolean;
+                        };
                         declaredAnnotations?: unknown[];
                         descriptor?: {
                             automatic?: boolean;
@@ -2484,6 +2501,23 @@ export interface components {
                 registeredAsParallelCapable?: boolean;
                 unnamedModule?: {
                     annotations?: unknown[];
+                    classLoader?: {
+                        defaultAssertionStatus?: boolean;
+                        definedPackages?: {
+                            annotations?: unknown[];
+                            declaredAnnotations?: unknown[];
+                            implementationTitle?: string;
+                            implementationVendor?: string;
+                            implementationVersion?: string;
+                            name?: string;
+                            sealed?: boolean;
+                            specificationTitle?: string;
+                            specificationVendor?: string;
+                            specificationVersion?: string;
+                        }[];
+                        name?: string;
+                        registeredAsParallelCapable?: boolean;
+                    };
                     declaredAnnotations?: unknown[];
                     descriptor?: {
                         automatic?: boolean;
@@ -3974,6 +4008,23 @@ export interface components {
                     registeredAsParallelCapable?: boolean;
                     unnamedModule?: {
                         annotations?: unknown[];
+                        classLoader?: {
+                            defaultAssertionStatus?: boolean;
+                            definedPackages?: {
+                                annotations?: unknown[];
+                                declaredAnnotations?: unknown[];
+                                implementationTitle?: string;
+                                implementationVendor?: string;
+                                implementationVersion?: string;
+                                name?: string;
+                                sealed?: boolean;
+                                specificationTitle?: string;
+                                specificationVendor?: string;
+                                specificationVersion?: string;
+                            }[];
+                            name?: string;
+                            registeredAsParallelCapable?: boolean;
+                        };
                         declaredAnnotations?: unknown[];
                         descriptor?: {
                             automatic?: boolean;
@@ -3989,6 +4040,23 @@ export interface components {
                 registeredAsParallelCapable?: boolean;
                 unnamedModule?: {
                     annotations?: unknown[];
+                    classLoader?: {
+                        defaultAssertionStatus?: boolean;
+                        definedPackages?: {
+                            annotations?: unknown[];
+                            declaredAnnotations?: unknown[];
+                            implementationTitle?: string;
+                            implementationVendor?: string;
+                            implementationVersion?: string;
+                            name?: string;
+                            sealed?: boolean;
+                            specificationTitle?: string;
+                            specificationVendor?: string;
+                            specificationVersion?: string;
+                        }[];
+                        name?: string;
+                        registeredAsParallelCapable?: boolean;
+                    };
                     declaredAnnotations?: unknown[];
                     descriptor?: {
                         automatic?: boolean;
