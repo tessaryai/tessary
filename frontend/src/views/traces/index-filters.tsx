@@ -73,6 +73,8 @@ export type FacetKey = "status" | "kind" | "call_site";
 export type TraceQueryState = {
   range: TraceTimeRange;
   facets: Record<FacetKey, string | null>;
+  /** The submitted search, "" for none. */
+  q: string;
 };
 
 const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site"];
@@ -95,6 +97,7 @@ export function useTraceQueryState(): {
   state: TraceQueryState;
   setRange: (r: TraceTimeRange) => void;
   setFacet: (key: FacetKey, value: string | null) => void;
+  setSearch: (q: string) => void;
   clearAll: () => void;
   activeCount: number;
 } {
@@ -105,7 +108,7 @@ export function useTraceQueryState(): {
       FacetKey,
       string | null
     >;
-    return { range: parseRange(params), facets };
+    return { range: parseRange(params), facets, q: params.get("q") ?? "" };
   }, [params]);
 
   // Mutations preserve params this bar does not own (?trace=, ?view=, ?span=).
@@ -143,10 +146,20 @@ export function useTraceQueryState(): {
     [write],
   );
 
+  const setSearch = useCallback(
+    (q: string) =>
+      write((next) => {
+        if (q) next.set("q", q);
+        else next.delete("q");
+      }),
+    [write],
+  );
+
   const clearAll = useCallback(
     () =>
       write((next) => {
         FACET_KEYS.forEach((k) => next.delete(k));
+        next.delete("q");
         next.delete("range");
         next.delete("from");
         next.delete("to");
@@ -157,7 +170,70 @@ export function useTraceQueryState(): {
   const activeCount =
     FACET_KEYS.filter((k) => state.facets[k]).length + (params.get("range") ? 1 : 0);
 
-  return { state, setRange, setFacet, clearAll, activeCount };
+  return { state, setRange, setFacet, setSearch, clearAll, activeCount };
+}
+
+// ---- kept for the tab ------------------------------------------------------
+
+/** The params that are the reader's view of the list, as opposed to what is open over it (?trace=). */
+const KEPT_PARAMS = [...FACET_KEYS, "q", "range", "from", "to", "groupBy"];
+
+function keptOf(params: URLSearchParams): URLSearchParams {
+  const kept = new URLSearchParams();
+  for (const k of KEPT_PARAMS) {
+    const v = params.get(k);
+    if (v != null) kept.set(k, v);
+  }
+  return kept;
+}
+
+/**
+ * Keeps the filters for the tab, so leaving the page and coming back does not reset them.
+ *
+ * <p>The URL stays the source of truth; this only copies its filter params to `sessionStorage` and
+ * puts them back when the page opens on a bare URL, the sidebar's plain `/traces`. A URL that brings
+ * its own filters, a Vitals or Classifiers deep link, wins and becomes the kept view. Per tab rather
+ * than per browser: a new tab starts clean, a reload does not.
+ *
+ * <p>Returns false until the restored filters are in the URL, so the page never fetches the
+ * unfiltered list only to throw it away. That is a wait on the URL itself, not on the navigate call:
+ * the router applies the change as a transition, a render or more after it is asked for.
+ */
+export function useKeptTraceView(scope: string): boolean {
+  const [params, setParams] = useSearchParams();
+  const key = `tessary:traces:view:${scope}`;
+  const [pending, setPending] = useState<URLSearchParams | null>(() => {
+    if (keptOf(params).toString() !== "") return null;
+    try {
+      const saved = keptOf(new URLSearchParams(sessionStorage.getItem(key) ?? ""));
+      return saved.toString() !== "" ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+  const ready = pending == null || keptOf(params).toString() !== "";
+
+  // Once, on arrival: every later change to the URL is the reader's own. A plain effect, since the
+  // router drops a navigate made from a layout effect on first mount.
+  useEffect(() => {
+    if (!pending) return;
+    const next = new URLSearchParams(params);
+    pending.forEach((v, k) => next.set(k, v));
+    setParams(next, { replace: true });
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    // Settled; from here a URL with no filters is one the reader cleared, not one still arriving.
+    if (pending) setPending(null);
+    try {
+      sessionStorage.setItem(key, keptOf(params).toString());
+    } catch {
+      // Storage unavailable — the view just isn't kept.
+    }
+  }, [key, params, pending, ready]);
+
+  return ready;
 }
 
 // ---- auto refresh ----------------------------------------------------------

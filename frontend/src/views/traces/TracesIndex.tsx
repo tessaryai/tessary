@@ -44,6 +44,7 @@ import {
   rangeLabel,
   resolveRange,
   useAutoRefresh,
+  useKeptTraceView,
   useTraceQueryState,
   type FacetOption,
 } from "./index-filters";
@@ -82,17 +83,23 @@ const KIND_OPTIONS: FacetOption[] = [
   { value: "guardrail", label: "guardrail" },
 ];
 
+/** Puts the tab's kept filters back before the list's first fetch; see {@link useKeptTraceView}. */
 export function TracesIndex() {
+  const api = useProjectApi();
+  return useKeptTraceView(api.base) ? <TracesList /> : null;
+}
+
+function TracesList() {
   const { visible, toggle, reset } = useColumnConfig();
-  const [query, setQuery] = useState("");
-  // Submitted separately from the typed value: `q` is a server-side filter, so
-  // firing it per keystroke would be a query per character.
-  const [submittedQuery, setSubmittedQuery] = useState("");
+
   // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
   // the URL; removing a chip removes its param.
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, setRange, setFacet, clearAll, activeCount } = useTraceQueryState();
-  const { range, facets } = state;
+  const { state, setRange, setFacet, setSearch, clearAll, activeCount } = useTraceQueryState();
+  const { range, facets, q: submittedQuery } = state;
+  // The box holds what is typed; the URL holds what was submitted. `q` is a server-side filter, so
+  // firing it per keystroke would be a query per character.
+  const [query, setQuery] = useState(submittedQuery);
 
   // Bumped by ↻ and by each auto-refresh tick. Re-resolves a rolling range
   // against a fresh `now` and evicts every page already fetched, so the feed
@@ -113,7 +120,6 @@ export function TracesIndex() {
 
   const clearAllFilters = () => {
     setQuery("");
-    setSubmittedQuery("");
     clearAll();
   };
 
@@ -246,7 +252,7 @@ export function TracesIndex() {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              setSubmittedQuery(query.trim());
+              setSearch(query.trim());
             }
           }}
           aria-label="Filter traces"
@@ -322,7 +328,7 @@ export function TracesIndex() {
             <FilterChip label={`call site: ${facets.call_site}`} onRemove={() => setFacet("call_site", null)} />
           )}
           {submittedQuery && (
-            <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSubmittedQuery("")} />
+            <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSearch("")} />
           )}
           {filtered && (
             <button
