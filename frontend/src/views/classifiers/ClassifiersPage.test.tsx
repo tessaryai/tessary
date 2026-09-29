@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The classifiers page: every finding with its ruling, split by whether triage closed it. The bugs
- * worth catching: a closed finding shown as open (or the reverse), an open count that miscounts cases
- * against findings still waiting, a row or case link that opens the wrong page, and a failed catalog
- * read claiming nothing is switched on.
+ * The classifiers page: every open finding with its ruling, counted in the heading. The bugs worth
+ * catching: a closed finding shown as open, an open count that miscounts, a row or case link that
+ * opens the wrong page, and a failed catalog read claiming nothing is switched on.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +81,7 @@ describe("ClassifiersPage", () => {
     expect(await screen.findByText("findings unavailable")).toBeTruthy();
   });
 
-  it("splits open findings from those triage closed", async () => {
+  it("counts the open findings in the heading, and leaves the closed ones off", async () => {
     api.listBehaviorFindings.mockResolvedValue({
       findings: [
         finding("a"),
@@ -93,28 +92,21 @@ describe("ClassifiersPage", () => {
     renderPage();
 
     await screen.findByText("Finding a");
-    expect(within(section("Open")).queryByText("Finding b")).toBeNull();
-    expect(within(section("Closed by triage")).getByText("Finding b")).toBeTruthy();
+    expect(within(section("Open")).getByText("2")).toBeTruthy();
+    expect(within(section("Open")).getByText("Finding c")).toBeTruthy();
+    expect(screen.queryByText("Finding b")).toBeNull();
     expect(within(section("Open")).getByText("Triage failed").className).toContain("text-error");
-    expect(within(section("Closed by triage")).getByText("Closed · negative").className).toContain("text-subtle");
-    expect(screen.getByRole("link", { name: "Triage" }).getAttribute("href")).toBe("/orgs/acme/projects/default/triage");
-
-    fireEvent.click(within(section("Closed by triage")).getByText("Finding b"));
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/findings/b");
+    expect(screen.queryByText(/awaiting triage/)).toBeNull();
   });
 
-  it.each([
-    [[finding("a")], "One finding, awaiting triage."],
-    [[finding("a"), finding("b")], "2 findings, awaiting triage."],
-    [[opened("a")], "One case opened."],
-    [[opened("a"), opened("b")], "2 cases opened."],
-    [[opened("a"), finding("b")], "1 case opened · 1 awaiting triage."],
-    [[opened("a"), opened("b"), finding("c")], "2 cases opened · 1 awaiting triage."],
-  ])("counts the open section's cases against what still waits: %#", async (findings, subtitle) => {
-    api.listBehaviorFindings.mockResolvedValue({ findings });
+  it("reads as empty when every finding is closed", async () => {
+    api.listBehaviorFindings.mockResolvedValue({
+      findings: [finding("b", { triageStatus: "done", triageVerdict: "negative", triageAction: "closed" })],
+    });
     renderPage();
 
-    expect(await screen.findByText(subtitle)).toBeTruthy();
+    expect(await screen.findByText(/No findings/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Open" })).toBeNull();
   });
 
   it("opens a finding from its row, and its case from the case link without opening the finding", async () => {
