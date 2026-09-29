@@ -424,7 +424,9 @@ tasks:
       - tmux kill-session -t {{.SESSION}} 2>/dev/null || true
       # DC_DEV_ALL, not DC_DEV — see the note on those vars: the base file alone cannot see the
       # profiling overlay's pyroscope container, which would then outlive `dev:stop` on :4040.
-      - "{{.DC_DEV_ALL}} down --remove-orphans"
+      # `--profile '*'` for the same reason: `down` skips any service whose profile is not active,
+      # so the `launcher` sandbox-runner that `task dev` starts would survive, holding the network.
+      - "{{.DC_DEV_ALL}} --profile '*' down --remove-orphans"
 
   dev:logs:
     desc: Tail combined logs from the dev stack.
