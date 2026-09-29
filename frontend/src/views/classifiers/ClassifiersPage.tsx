@@ -15,11 +15,12 @@
  * finding rather than reopening this one, so there is no re-open to wait on. So this page is a record
  * of what has been decided, not a pile of what has not.
  *
- * <h2>The two sections</h2>
- * Open findings (pending, in flight, or sound and now a case) and closed history. `status` and
- * `triage_action` agree by construction now — a ruling sets both in the same write — so the split
- * reads `isClosedByTriage` for the reason it always did: it is closing that decides the section, not
- * the bare fact of the status word.
+ * <h2>Open findings only</h2>
+ * Pending, in flight, or sound and now a case, counted in the heading. Each row's Triage cell says
+ * which, so the heading carries no rollup of its own. Closed findings are left off until the page has
+ * an open/closed filter. `status` and `triage_action` agree by construction now — a ruling sets both
+ * in the same write — so the split reads `isClosedByTriage`: it is closing that decides, not the bare
+ * fact of the status word.
  *
  * <h2>The title is the classifier's own sentence</h2>
  * There is deliberately no "reading" column restating the shift. Each detector writes its finding's
@@ -78,13 +79,10 @@ export function ClassifiersPage() {
   const enabled = enabledDetectors(classifiers);
   const frustration = classifiers.find((c) => c.detector === FRUSTRATION_DETECTOR);
 
-  const { live, closed } = useMemo(() => {
-    const findings = allQ.data?.findings ?? [];
-    return {
-      live: findings.filter((f) => !isClosedByTriage(f)),
-      closed: findings.filter(isClosedByTriage),
-    };
-  }, [allQ.data]);
+  const live = useMemo(
+    () => (allQ.data?.findings ?? []).filter((f) => !isClosedByTriage(f)),
+    [allQ.data],
+  );
 
   return (
     <div style={CONTAINER}>
@@ -116,7 +114,7 @@ export function ClassifiersPage() {
         */}
       {classifiersQ.isError && <ErrorNote error={classifiersQ.error} />}
 
-      {allQ.data && live.length === 0 && closed.length === 0 && (
+      {allQ.data && live.length === 0 && (
         <p className="text-body text-subtle" style={{ maxWidth: 520 }}>
           No findings. A classifier creates a finding when a whole population moves, not when one trace
           looks odd, so an empty page is the healthy state.
@@ -124,37 +122,12 @@ export function ClassifiersPage() {
       )}
 
       {live.length > 0 && (
-        <Section title="Open" subtitle={openSubtitle(live)}>
+        <Section title="Open" count={live.length}>
           <FindingTable findings={live} onOpen={(id) => navigate(findingPath(id))} />
         </Section>
       )}
-
-      {closed.length > 0 && (
-        <Section
-          title="Closed by triage"
-          subtitle="Ruled a measurement artifact, or unsettled on the evidence. Each one re-opens by itself if its cause keeps firing."
-        >
-          <FindingTable findings={closed} onOpen={(id) => navigate(findingPath(id))} />
-        </Section>
-      )}
-
-      {live.length > 0 && (
-        <p className="text-small text-subtle">
-          A finding triage rules sound opens a case in <Link to="../triage">Triage</Link>, which is
-          where the work is picked up.
-        </p>
-      )}
     </div>
   );
-}
-
-/** What the open section is, counted by the one distinction that changes what you do next. */
-function openSubtitle(findings: BehaviorFinding[]): string {
-  const opened = findings.filter((f) => f.triageVerdict === "positive").length;
-  const waiting = findings.length - opened;
-  if (opened === 0) return waiting === 1 ? "One finding, awaiting triage." : `${waiting} findings, awaiting triage.`;
-  if (waiting === 0) return opened === 1 ? "One case opened." : `${opened} cases opened.`;
-  return `${opened} ${opened === 1 ? "case" : "cases"} opened · ${waiting} awaiting triage.`;
 }
 
 function findingPath(id: string): string {

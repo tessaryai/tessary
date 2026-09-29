@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
+import { Badge } from "./Badge";
 import { cn } from "./cn";
 
 export type Crumb = { label: ReactNode; to?: string };
@@ -103,10 +104,13 @@ export function PageBody({
 export function Section({
   title,
   subtitle,
+  count,
   children,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
+  /** How many items the section holds, drawn as a pill beside the title. */
+  count?: number;
   children: ReactNode;
 }) {
   return (
@@ -114,7 +118,12 @@ export function Section({
       {title && (
         <div className="flex items-center justify-between gap-4 mb-3">
           <div>
-            {title && <h2 className="text-h2 text-fg">{title}</h2>}
+            {title && (
+              <div className="flex items-center gap-2">
+                <h2 className="text-h2 text-fg">{title}</h2>
+                {count != null && <Badge className="tabular-nums">{count}</Badge>}
+              </div>
+            )}
             {subtitle && <p className="text-small text-muted mt-1">{subtitle}</p>}
           </div>
         </div>

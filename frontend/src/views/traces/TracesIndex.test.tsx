@@ -100,6 +100,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 const lastListCall = () => api.listTraces.mock.calls.at(-1)?.[0];
@@ -150,6 +151,7 @@ describe("filters", () => {
     fireEvent.keyDown(box, { key: "Enter" });
 
     await waitFor(() => expect(lastListCall().q).toBe("refund"));
+    expect(currentParams().get("q")).toBe("refund");
     fireEvent.click(screen.getByRole("button", { name: "Remove filter search: refund" }));
     await waitFor(() => expect(lastListCall().q).toBeUndefined());
   });
@@ -200,6 +202,84 @@ describe("filters", () => {
     expect(screen.getByText("No call site has been seen in the loaded traces yet.")).toBeTruthy();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("group", { name: "Call site" })).toBeNull();
+  });
+});
+
+describe("kept for the tab", () => {
+  it("puts the filters back when the page reopens on a bare URL, before the first fetch", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?status=error&range=7d" });
+    await waitFor(() => expect(currentParams().get("status")).toBe("error"));
+    cleanup();
+    api.listTraces.mockClear();
+
+    renderRoute(<TracesIndex />, { route: "/traces?trace=tr-9" });
+    await waitFor(() => expect(currentParams().get("status")).toBe("error"));
+    expect(currentParams().get("range")).toBe("7d");
+    expect(currentParams().get("trace")).toBe("tr-9");
+    expect(api.listTraces.mock.calls.length).toBeGreaterThan(0);
+    expect(api.listTraces.mock.calls.map(([filters]) => filters.status)).toEqual(["error"]);
+  });
+
+  it("keeps the search, in the box as well as the list", async () => {
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
+    const box = screen.getByRole("textbox", { name: "Filter traces" });
+    fireEvent.change(box, { target: { value: "refund & returns" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(currentParams().get("q")).toBe("refund & returns"));
+    cleanup();
+    api.listTraces.mockClear();
+
+    renderRoute(<TracesIndex />, { route: "/traces" });
+    await screen.findByText("search: refund & returns");
+    expect((screen.getByRole("textbox", { name: "Filter traces" }) as HTMLInputElement).value).toBe("refund & returns");
+    expect(api.listTraces.mock.calls.map(([filters]) => filters.q)).toEqual(["refund & returns"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() => expect(currentParams().has("q")).toBe(false));
+    cleanup();
+    renderRoute(<TracesIndex />, { route: "/traces" });
+    await screen.findByText("checkout-agent");
+    expect(currentParams().has("q")).toBe(false);
+  });
+
+  it("keeps grouping by session", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?groupBy=session" });
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalled());
+    cleanup();
+
+    renderRoute(<TracesIndex />, { route: "/traces" });
+    await waitFor(() => expect(currentParams().get("groupBy")).toBe("session"));
+  });
+
+  it("lets a link's own filters win, and keeps a cleared view cleared", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?status=error" });
+    await waitFor(() => expect(currentParams().get("status")).toBe("error"));
+    cleanup();
+
+    renderRoute(<TracesIndex />, { route: "/traces?call_site=checkout" });
+    await screen.findByText("call site: checkout");
+    expect(currentParams().has("status")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter call site: checkout" }));
+    await waitFor(() => expect(currentParams().has("call_site")).toBe(false));
+    cleanup();
+
+    renderRoute(<TracesIndex />, { route: "/traces" });
+    await screen.findByText("checkout-agent");
+    expect(currentParams().toString()).toBe("");
+  });
+
+  it("keeps each project's view to itself", async () => {
+    renderRoute(<TracesIndex />, { route: "/traces?status=error" });
+    await waitFor(() => expect(currentParams().get("status")).toBe("error"));
+    cleanup();
+
+    const base = api.base;
+    api.base = "/api/orgs/acme/projects/other";
+    renderRoute(<TracesIndex />, { route: "/traces" });
+    await screen.findByText("checkout-agent");
+    expect(currentParams().has("status")).toBe(false);
+    api.base = base;
   });
 });
 

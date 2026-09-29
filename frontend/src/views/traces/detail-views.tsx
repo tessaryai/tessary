@@ -39,11 +39,14 @@ export function ConversationView({
   spans,
   focusId,
   flagged = false,
+  showPrior = true,
 }: {
   spans: Span[];
   focusId: string | null;
   /** Draw the turn's question as the message a classifier fired on. */
   flagged?: boolean;
+  /** Offer the fold of earlier messages; off where the page already shows those turns. */
+  showPrior?: boolean;
 }) {
   const plan = useMemo(() => planConversation(spans), [spans]);
   const tools = useMemo(() => planTools(spans), [spans]);
@@ -71,7 +74,7 @@ export function ConversationView({
 
   return (
     <div className="flex flex-col gap-4.5">
-      <PriorContext messages={plan.prior} />
+      {showPrior && <PriorContext messages={plan.prior} />}
 
       {/* The question the turn is answering. */}
       {root && question.length > 0 && chrome(root, <ChatItems items={question} flagged={flagged} />)}
@@ -449,9 +452,12 @@ function TraceDivider({ trace, first }: { trace: TraceListItem; first: boolean }
 
 /**
  * The session's whole conversation, end to end — every trace's turn in order, with a divider between
- * them rather than a table of traces. Each trace's own {@link ConversationView} is reused completely
- * unchanged; verdicts are per-trace judgment and out of scope for a session read, so each call gets an
- * empty list rather than a session-wide verdicts fetch this view does not have.
+ * them rather than a table of traces. Each trace's own {@link ConversationView} is reused; verdicts are
+ * per-trace judgment and out of scope for a session read, so each call gets an empty list rather than a
+ * session-wide verdicts fetch this view does not have.
+ *
+ * Only the first trace offers its earlier messages. A later trace's history is the traces drawn above
+ * it, so its fold would repeat them; the first one's can be real, when capture began mid-session.
  */
 export function SessionConversationView({
   traces,
@@ -481,6 +487,7 @@ export function SessionConversationView({
             spans={spansByTrace.get(t.id) ?? []}
             focusId={focusId}
             flagged={flaggedTraceId === t.id}
+            showPrior={i === 0}
           />
         </div>
       ))}

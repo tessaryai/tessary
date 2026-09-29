@@ -91,6 +91,22 @@ describe("SessionDetail", () => {
     expect(api.getSession).toHaveBeenCalledWith("sess-1");
   });
 
+  it("offers earlier messages only on the first trace, since later turns' history is drawn above them", async () => {
+    const history = (...said: string[]) => said.map((content, k) => ({ role: k % 2 ? "assistant" : "user", content }));
+    api.getSessionSpans.mockResolvedValue(
+      spans({
+        spans: [
+          span({ id: "a-root", trace_id: "tr-a", kind: "agent", name: "turn one", started_at: "2026-09-25T10:00:00Z", input: j(history("before capture", "noted", "first question")) }),
+          span({ id: "b-root", trace_id: "tr-b", kind: "agent", name: "turn two", started_at: "2026-09-25T10:01:00Z", input: j(history("before capture", "noted", "first question", "first answer", "second question")) }),
+        ],
+      }),
+    );
+    renderSession();
+
+    await screen.findByText("second question");
+    expect(screen.getAllByRole("button", { name: /earlier message/ }).map((b) => b.textContent)).toEqual(["Show 2 earlier messages"]);
+  });
+
   it("opens the first trace in Tree and folds the rest, one click each", async () => {
     renderSession("?view=tree");
 
