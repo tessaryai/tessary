@@ -36,7 +36,7 @@ class ProjectModelSettingsTest {
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String SONNET_5 = "anthropic.claude-sonnet-5";
     private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5";
-    private static final String PLATFORM_JEV = "PLATFORM:typesafe/jev-latest";
+    private static final String PLATFORM_JEV = "PLATFORM:~typesafe/jev-latest";
 
     private ProjectModelSettingRepository repo;
     private ProviderCredentialRepository credentials;
@@ -193,7 +193,7 @@ class ProjectModelSettingsTest {
     @Test
     void theFrustrationLaneOffersOnlyJevAndTypeSafeLeadsIt() {
         assertEquals(
-                List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest", PLATFORM_JEV),
+                List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest", PLATFORM_JEV),
                 LanePriority.modelKeys(ModelLane.FRUSTRATION));
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             assertTrue(
@@ -209,7 +209,7 @@ class ProjectModelSettingsTest {
 
         configured(ModelProvider.OPENROUTER);
         assertEquals(
-                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "~typesafe/jev-latest"),
                 settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
 
         configured(ModelProvider.BEDROCK);
@@ -224,7 +224,7 @@ class ProjectModelSettingsTest {
         platformOffered = true;
 
         assertEquals(
-                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.PLATFORM, "typesafe/jev-latest"),
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.PLATFORM, "~typesafe/jev-latest"),
                 settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
     }
 
@@ -234,7 +234,7 @@ class ProjectModelSettingsTest {
         platformOffered = true;
 
         assertEquals(
-                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "~typesafe/jev-latest"),
                 settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow(),
                 "the platform provider is last, so an unpinned lane runs on the org's own key");
     }
@@ -243,17 +243,17 @@ class ProjectModelSettingsTest {
     void aPinnedOpenRouterBeatsTypeSafeOnTheFrustrationLane() {
         when(repo.findByProject(PID))
                 .thenReturn(
-                        List.of(row(ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD)));
+                        List.of(row(ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest", ServiceTier.STANDARD)));
 
         assertEquals(
-                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "typesafe/jev-latest"),
+                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.OPENROUTER, "~typesafe/jev-latest"),
                 settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
     }
 
     @Test
     void aDecisionModelIsRefusedOnTheAgentLanes() {
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
-            for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:typesafe/jev-latest")) {
+            for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest")) {
                 TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, jev));
                 assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), lane + " " + jev);
             }
@@ -271,8 +271,8 @@ class ProjectModelSettingsTest {
 
     @Test
     void aDecisionModelSavesOnTheFrustrationLaneWithNoTierOrEffort() {
-        settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest");
-        verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:typesafe/jev-latest", ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest");
+        verify(repo).upsert(PID, ModelLane.FRUSTRATION, "OPENROUTER:~typesafe/jev-latest", ServiceTier.STANDARD, null);
     }
 
     @Test

@@ -424,6 +424,8 @@ public final class ModelCatalog {
                     true),
             // TypeSafe's Jev decision model, direct and over OpenRouter. Only the moving pointer is
             // offered: the provider echoes the version that answered, which is what gets recorded.
+            // OpenRouter spells that pointer with a leading ~ and answers 400 "does not exist" to
+            // typesafe/jev-latest without it.
             new CatalogEntry(
                     ModelProvider.TYPESAFE,
                     "TypeSafe",
@@ -437,7 +439,7 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "TypeSafe",
-                    "typesafe/jev-latest",
+                    "~typesafe/jev-latest",
                     "Jev (latest)",
                     false,
                     NO_EFFORT,
@@ -460,7 +462,7 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.PLATFORM,
                     "TypeSafe",
-                    "typesafe/jev-latest",
+                    "~typesafe/jev-latest",
                     "Jev (latest)",
                     false,
                     NO_EFFORT,
@@ -491,7 +493,8 @@ public final class ModelCatalog {
     /**
      * The book prefix every Jev call is priced under, whichever gateway carried it. The book has no
      * {@code openrouter/typesafe/...} key, so the OpenRouter route prices its already-namespaced
-     * {@code typesafe/jev-latest} as is rather than through {@link #pricingId}'s {@code openrouter/} case.
+     * {@code ~typesafe/jev-latest} as {@code typesafe/jev-latest} rather than through
+     * {@link #pricingId}'s {@code openrouter/} case.
      */
     public static final String DECISION_PRICING_PREFIX = "typesafe/";
 
@@ -524,11 +527,13 @@ public final class ModelCatalog {
 
     /**
      * The id a decision model is priced under: {@code typesafe/<bare id>} on every gateway. OpenRouter's
-     * and the platform provider's names are already {@code typesafe/jev-latest}, so they pass through
-     * unchanged rather than via {@link #pricingId}'s {@code openrouter/} case, which names no book key.
+     * and the platform provider's names are already namespaced, so they only lose OpenRouter's
+     * {@code ~} latest-pointer mark rather than going via {@link #pricingId}'s {@code openrouter/} case,
+     * which names no book key.
      */
     public static String decisionPricingId(ModelProvider provider, String modelName) {
-        return provider == ModelProvider.TYPESAFE ? pricingId(provider, modelName) : modelName;
+        if (provider == ModelProvider.TYPESAFE) return pricingId(provider, modelName);
+        return modelName.startsWith("~") ? modelName.substring(1) : modelName;
     }
 
     public static Optional<CatalogEntry> find(ModelProvider provider, String modelName) {

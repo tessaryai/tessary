@@ -53,8 +53,8 @@ const SETTINGS = {
         {
           provider: "OPENROUTER",
           label: "OpenRouter",
-          model_keys: ["OPENROUTER:typesafe/jev-latest"],
-          default_model_key: "OPENROUTER:typesafe/jev-latest",
+          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
         {
           provider: "TYPESAFE",

@@ -58,7 +58,7 @@ class JevDecisionClientLiveIT {
     @Test
     void openRouter_scoresAnAnnoyedTurnHighAndANeutralOneLow() {
         assumeTrue(present("OPENROUTER_API_KEY"));
-        scoresBothTurns(ModelProvider.OPENROUTER, "typesafe/jev-latest", System.getenv("OPENROUTER_API_KEY"));
+        scoresBothTurns(ModelProvider.OPENROUTER, "~typesafe/jev-latest", System.getenv("OPENROUTER_API_KEY"));
     }
 
     private void scoresBothTurns(ModelProvider provider, String model, String key) {

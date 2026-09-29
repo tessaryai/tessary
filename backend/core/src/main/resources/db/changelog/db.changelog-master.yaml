@@ -109,3 +109,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0027-platform-pause-reasons.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0028-openrouter-jev-latest-key.sql
+      relativeToChangelogFile: false

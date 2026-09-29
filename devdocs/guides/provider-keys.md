@@ -78,9 +78,10 @@ A decision model answers a typed question about a piece of text in one call, rat
 The Frustration classifier uses TypeSafe's Jev this way. Two keys can carry that call:
 
 - a **TypeSafe** key, which calls `jev-latest` at `https://api.typesafe.ai/v1/systemone`;
-- an **OpenRouter** key, which calls `typesafe/jev-latest` at
-  `https://openrouter.ai/api/alpha/decisions`. The same key keeps serving chat models on the RCA
-  and Triage lanes.
+- an **OpenRouter** key, which calls `~typesafe/jev-latest` at
+  `https://openrouter.ai/api/alpha/decisions`. The `~` is OpenRouter's mark for a latest pointer;
+  without it OpenRouter answers 400, "Model typesafe/jev-latest does not exist". The same key
+  keeps serving chat models on the RCA and Triage lanes.
 
 Which one runs is the **Frustration** lane on the Models page, in its own "Decision models"
 section. The lane offers a provider select and nothing else: each provider serves one decision model,
@@ -90,12 +91,12 @@ model cannot be saved on RCA or Triage (`ModelConfigError.MODEL_NOT_OFFERED_FOR_
 override on either credential replaces the host; a trailing `/v1` is dropped, since neither decision
 path sits under it.
 
-A build that supplies `PLATFORM` adds it last on the lane, as `PLATFORM:typesafe/jev-latest`, and
+A build that supplies `PLATFORM` adds it last on the lane, as `PLATFORM:~typesafe/jev-latest`, and
 resolves it through its own `DecisionProviderResolver` (the open one never resolves it). The enable
 dialog then offers it with no key field.
 
 Each call is booked in the usage ledger, on the org's own key or, for `PLATFORM`, as platform-funded,
-and priced from the price book under `typesafe/jev-latest` on every route: the book has no OpenRouter-specific Jev rate, so an OpenRouter
+and priced from the price book under `typesafe/jev-latest` on every route (the `~` is dropped for the lookup): the book has no OpenRouter-specific Jev rate, so an OpenRouter
 markup, if any, is not in the booked figure. OpenRouter's own reported cost is kept with the call's
 raw response for audit. Only `jev-latest` is offered, with no pinned versions; the version that
 answered each call is recorded with it.

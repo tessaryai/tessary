@@ -78,8 +78,8 @@ const SETTINGS = {
         {
           provider: "OPENROUTER",
           label: "OpenRouter",
-          model_keys: ["OPENROUTER:typesafe/jev-latest"],
-          default_model_key: "OPENROUTER:typesafe/jev-latest",
+          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
       ],
       effective_model_key: null,
@@ -147,7 +147,7 @@ describe("FrustrationEnableModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(onEnabled).toHaveBeenCalled());
-    expect(calls).toEqual(["lane frustration OPENROUTER:typesafe/jev-latest", "enable clf-1 true"]);
+    expect(calls).toEqual(["lane frustration OPENROUTER:~typesafe/jev-latest", "enable clf-1 true"]);
   });
 
   it("runs on the deployment's own provider with no key when the org has no key of its own", async () => {
@@ -161,8 +161,8 @@ describe("FrustrationEnableModal", () => {
             {
               provider: "PLATFORM",
               label: "Tessary AI",
-              model_keys: ["PLATFORM:typesafe/jev-latest"],
-              default_model_key: "PLATFORM:typesafe/jev-latest",
+              model_keys: ["PLATFORM:~typesafe/jev-latest"],
+              default_model_key: "PLATFORM:~typesafe/jev-latest",
             },
           ],
         },
@@ -179,7 +179,7 @@ describe("FrustrationEnableModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(onEnabled).toHaveBeenCalled());
-    expect(calls).toEqual(["lane frustration PLATFORM:typesafe/jev-latest", "enable clf-1 true"]);
+    expect(calls).toEqual(["lane frustration PLATFORM:~typesafe/jev-latest", "enable clf-1 true"]);
   });
 
   it("shows the key field when the other, unconfigured provider is chosen", async () => {
