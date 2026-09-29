@@ -71,8 +71,7 @@ class FrustrationConfigTest {
         assertNotEquals(
                 existing.stateEpoch(),
                 FrustrationConfig.of(
-                                MAPPER,
-                                "{\"min_baseline_conversations\":200,\"freeze_baseline_conversations\":1000}")
+                                MAPPER, "{\"min_baseline_conversations\":200,\"freeze_baseline_conversations\":1000}")
                         .stateEpoch(),
                 "where learning stops is part of what a judged hour meant");
     }
