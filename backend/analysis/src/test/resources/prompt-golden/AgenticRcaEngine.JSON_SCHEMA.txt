@@ -1,7 +1,7 @@
 {
   "type": "object",
   "properties": {
-    "summary": {"type": "string", "description": "One short paragraph: what happened and the change that caused it — or that no change was located."},
+    "summary": {"type": "string", "description": "One plain sentence: why the metric moved, covering every high cause, or that no cause is proven."},
     "verdict": {"type": "string", "enum": ["behavior_change", "traffic_shift", "definition_change", "model_change", "inconclusive"]},
     "checklist": {
       "type": "array",
@@ -10,38 +10,52 @@
         "type": "object",
         "properties": {
           "check": {"type": "string", "description": "The check id, exactly as it appears in dossier/checklist.md."},
+          "question": {"type": "string", "description": "The check as a plain question, e.g. 'Did the serving model change?'"},
           "assessment": {
             "type": "string",
             "enum": ["ruled_out", "contributing", "explains", "unknown"],
             "description": "ruled_out: measured and does not explain any of the movement. contributing: part of the story. explains: accounts for the movement on its own. unknown: the evidence does not settle it."
           },
-          "detail": {"type": "string", "description": "Why you assessed it that way, citing what you checked."}
+          "detail": {"type": "string", "description": "One plain sentence answering the question."}
         },
-        "required": ["check", "assessment", "detail"]
+        "required": ["check", "question", "assessment", "detail"]
       }
     },
-    "hypotheses": {
+    "causes": {
       "type": "array",
-      "description": "1-4 root-cause hypotheses, most likely first. Empty is a legitimate answer when you located no change and nothing survives as a lead.",
+      "description": "0-4 causes, high first. Empty is a legitimate answer when you located no change and nothing survives as a lead.",
       "items": {
         "type": "object",
         "properties": {
-          "title": {"type": "string"},
-          "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-          "rationale": {"type": "string"},
+          "title": {"type": "string", "description": "One plain sentence, at most 15 words, naming what changed."},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"], "description": "high = proven: a located change lines up with the traces on both sides. medium / low = a lead."},
+          "what_changed": {"type": "string", "description": "1-2 plain sentences."},
+          "how_it_caused_this": {"type": "string", "description": "1-2 plain sentences linking the change to the metric that moved."},
+          "next_step": {"type": "string", "description": "high: is this a real regression, and what to do. medium / low: what would confirm it."},
+          "attribution": {
+            "type": ["object", "null"],
+            "properties": {
+              "kind": {"type": "string", "enum": ["prompt", "code", "tool", "model", "unknown"]},
+              "path": {"type": ["string", "null"]},
+              "commit": {"type": ["string", "null"]},
+              "excerpt": {"type": ["string", "null"]}
+            },
+            "required": ["kind"]
+          },
           "evidence_trace_ids": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Trace ids from this finding's own evidence refs (either side) that evidence this. A traffic_shift or behavior_change hypothesis set must include at least one baseline-side id — that verdict compares the baseline against the flagged evidence, and an uncited comparison is downgraded."
-          }
+            "description": "Trace ids from this finding's own evidence refs (either side). A traffic_shift or behavior_change verdict needs at least one baseline-side id across the causes, or it is downgraded."
+          },
+          "affected_count": {"type": "integer", "description": "How many flagged traces show it."}
         },
-        "required": ["title", "confidence", "rationale", "evidence_trace_ids"]
+        "required": ["title", "confidence", "what_changed", "how_it_caused_this", "next_step", "attribution", "evidence_trace_ids", "affected_count"]
       }
     },
     "detailed_report": {
       "type": "string",
-      "description": "The full investigation as markdown: what was checked, in code and in traces, and how the evidence supports the verdict. Must end with an '## Evidence audit' section — a table mapping every load-bearing claim to its evidence (a trace id, a repo path/commit, or a query) — and a '## What would settle it' section naming the next experiment."
+      "description": "The full investigation as markdown: what was checked, in code and in traces, and how the evidence supports the verdict. All evidence goes here. Must end with an '## Evidence audit' section — a table mapping every load-bearing claim to its evidence (a trace id, a repo path/commit, or a query) — and a '## What would settle it' section naming the next experiment."
     }
   },
-  "required": ["summary", "verdict", "checklist", "hypotheses", "detailed_report"]
+  "required": ["summary", "verdict", "checklist", "causes", "detailed_report"]
 }

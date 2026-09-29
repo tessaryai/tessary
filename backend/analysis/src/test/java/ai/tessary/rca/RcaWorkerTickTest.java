@@ -107,7 +107,6 @@ class RcaWorkerTickTest {
                         isNull(),
                         isNull(),
                         isNull(),
-                        isNull(),
                         isNull());
 
         worker.run(JOB);

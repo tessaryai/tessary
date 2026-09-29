@@ -120,25 +120,23 @@ const FIX_1 = "Remove the old folders from the index sources and rebuild the ind
 const TITLE_2 = "The system prompt asks for a complete answer every time";
 const FIX_2 = "Tell the agent to say when the documents don't answer the question.";
 const NO_REPO =
-  "These causes describe what the agent did. They aren't linked to a prompt or code because no repository was connected. Connect a repository and run RCA again to find them.";
+  "These causes aren't linked to a prompt or code because no repository was connected. Connect a repository and run RCA again to find them.";
 
 describe("CasePage, groundedness", () => {
-  it("ranks the causes, draws the rate, and filters the answers to the cause pressed", async () => {
+  it("cards the proven cause, draws the rate, and filters the answers to the cause pressed", async () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Answers on support-agent became less grounded" });
-    expect(
-      screen.getByText(
-        "Tessary identified 2 likely causes from the 58 flagged answers and the agent's repository.",
-      ),
-    ).toBeTruthy();
-    // Each cause's title, then its fix, in the report's order.
-    expect(
-      screen.getAllByText(new RegExp(`^(${[TITLE_1, FIX_1, TITLE_2, FIX_2].join("|")})$`)).map((e) => e.textContent),
-    ).toEqual([TITLE_1, `Suggested fix: ${FIX_1}`, TITLE_2, `Suggested fix: ${FIX_2}`]);
+    expect(screen.getByText(TITLE_1)).toBeTruthy();
+    expect(screen.getByText(FIX_1)).toBeTruthy();
+    expect(screen.getByText("Why answers went unsupported")).toBeTruthy();
+    expect(screen.getByText("What to do")).toBeTruthy();
+    expect(screen.getByText("support-agent/retrieval/index.yaml @ a41c0de")).toBeTruthy();
+    // The second cause is a lead, and a lead is not shown beside a proven cause.
+    expect(screen.queryByText(TITLE_2)).toBeNull();
+    expect(screen.queryByText(FIX_2)).toBeNull();
     expect(screen.getAllByRole("button", { name: /^Show \d+ answers$/ }).map((b) => b.textContent)).toEqual([
       "Show 3 answers",
-      "Show 2 answers",
     ]);
     expect(screen.queryByText(NO_REPO)).toBeNull();
 
@@ -154,12 +152,12 @@ describe("CasePage, groundedness", () => {
     const answers = screen.getByRole("list", { name: "Flagged answers" });
     within(answers).getByRole("button", { name: /Refunds are available for up to 60 days/ });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 2 answers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 answers" }));
 
-    await within(answers).findByRole("button", { name: /The API allows 1,000 requests/ });
+    await within(answers).findByRole("button", { name: /The old policy page/ });
     expect(within(answers).queryByRole("button", { name: /Refunds are available for up to 60 days/ })).toBeNull();
-    expect(within(answers).queryByRole("button", { name: /The old policy page/ })).toBeNull();
-    expect(within(filter).getByRole("button", { name: "Cause 2 · 2" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(answers).queryByRole("button", { name: /The API allows 1,000 requests/ })).toBeNull();
+    expect(within(filter).getByRole("button", { name: "Cause 1 · 3" }).getAttribute("aria-pressed")).toBe("true");
 
     expect(screen.getByRole("button", { name: "Re-run RCA" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Resolve case" })).toBeTruthy();
@@ -196,7 +194,6 @@ describe("CasePage, groundedness", () => {
     renderPage();
 
     await screen.findByText(NO_REPO);
-    expect(screen.queryByText("support-agent/retrieval/index.yaml")).toBeNull();
-    expect(screen.getByText("Tessary identified 2 likely causes from the 58 flagged answers.")).toBeTruthy();
+    expect(screen.queryByText(/support-agent\/retrieval\/index\.yaml/)).toBeNull();
   });
 });

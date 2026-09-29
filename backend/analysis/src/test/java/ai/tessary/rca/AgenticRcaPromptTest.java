@@ -115,7 +115,7 @@ class AgenticRcaPromptTest {
         Function<Boolean, String> groundedness = repo -> AgenticRcaEngine.buildGroundednessPrompt(
                 report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", repo, 12);
         return Stream.of(
-                Arguments.of("metric", metric, false),
+                Arguments.of("metric", metric, true),
                 Arguments.of("frustration", frustration, true),
                 Arguments.of("groundedness", groundedness, true));
     }
@@ -154,10 +154,10 @@ class AgenticRcaPromptTest {
     @Test
     void aThinSideCapsConfidence() {
         assertTrue(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 2, 40).contains("cap every hypothesis"),
+                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 2, 40).contains("cap every cause"),
                 "a two-trace baseline must cap confidence");
         assertFalse(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 40, 40).contains("cap every hypothesis"),
+                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 40, 40).contains("cap every cause"),
                 "a well-evidenced finding gets no cap");
     }
 
@@ -186,7 +186,7 @@ class AgenticRcaPromptTest {
         List<String> required = new ArrayList<>();
         cause.path("required").forEach(n -> required.add(n.asText()));
         assertTrue(required.contains("evidence_trace_ids"), required.toString());
-        assertTrue(required.contains("traces_affected"), required.toString());
+        assertTrue(required.contains("affected_count"), required.toString());
         assertFalse(cause.path("properties").has("evidence_session_ids"), "no session receipts");
         assertFalse(AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA.contains("session"));
     }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Triage, the front door. The bugs worth catching: a row that opens another case, a lens that shows
- * the wrong bucket or cannot be left, an empty lens that says nothing, the analysis's hedged cause
+ * the wrong bucket or cannot be left, an empty lens that says nothing, the analysis's summary
  * printed as a certainty, and a pulse strip that disagrees with Vitals about spend or latency.
  */
 import { cleanup, fireEvent, screen } from "@testing-library/react";
@@ -70,11 +70,31 @@ const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/d
 const lens = (name: RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
 
 describe("the open cases", () => {
-  it("lists each case with its hedged cause and where it happened, and opens the one pressed", async () => {
+  /** Catches a "Likely:" prefix on a summary that already says whether anything was proven. */
+  it("prints the summary as the analysis wrote it, proven or not", async () => {
+    api.getTriage.mockResolvedValue(
+      triage({
+        cases: [
+          kase("p", { rca_verdict: "behavior_change", cause: "The prompt dropped the sku field." }),
+          kase("u", { rca_verdict: "inconclusive", cause: "No change was located." }),
+        ],
+      }),
+    );
+    renderPage();
+
+    const p = (await screen.findByText("Case p")).closest("button")!;
+    const u = screen.getByText("Case u").closest("button")!;
+    expect(p.textContent).toContain("The prompt dropped the sku field.");
+    expect(u.textContent).toContain("No change was located.");
+    expect(p.textContent).not.toContain("Likely:");
+    expect(u.textContent).not.toContain("Likely:");
+  });
+
+  it("lists each case with its summary and where it happened, and opens the one pressed", async () => {
     renderPage();
 
     const a = (await screen.findByText("Case a")).closest("button")!;
-    expect(a.textContent).toContain("Likely: a prompt change");
+    expect(a.textContent).toContain("a prompt change");
     expect(a.textContent).toContain("CASE-a");
     expect(a.textContent).toContain("support-agent");
     expect(a.textContent).toContain("5m ago");

@@ -16,3 +16,6 @@
    prompt line to change.
 8. **If forced to stop before finishing, return your best causes, marked low-confidence**, and say
    which sessions you had not read.
+9. **Write every field but `detailed_report` for a reader with no context.** Plain words: no
+   trace ids, span names, queries, tool calls or statistics. Evidence goes in the id lists and in
+   `detailed_report`.

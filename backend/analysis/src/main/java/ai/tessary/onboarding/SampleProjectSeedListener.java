@@ -31,7 +31,7 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.media.MediaStore;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.rca.RcaDtos.Hypothesis;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaReportRow;
 import ai.tessary.storage.MediaRefRepository;
@@ -532,6 +532,7 @@ public class SampleProjectSeedListener {
         List<RuledOutCheck> ruledOut = List.of(
                 RuledOutCheck.assessed(
                         "model_change",
+                        "Did the serving model or its price change?",
                         RuledOutCheck.Assessment.RULED_OUT,
                         "classify_intent ran gpt-4o-mini for the whole window, priced against the same"
                                 + " price-book version throughout — no model or rate change lines up with the"
@@ -539,6 +540,7 @@ public class SampleProjectSeedListener {
                         "model=gpt-4o-mini, unchanged"),
                 RuledOutCheck.assessed(
                         "traffic_shift",
+                        "Did the traffic mix change?",
                         RuledOutCheck.Assessment.RULED_OUT,
                         "Call volume grew smoothly across the whole 14-day window (more traffic on recent"
                                 + " days, as expected for a live project) with no discontinuity at " + onsetDate
@@ -546,6 +548,7 @@ public class SampleProjectSeedListener {
                         "no volume discontinuity at onset"),
                 RuledOutCheck.assessed(
                         "definition_change",
+                        "Did classify_intent's own prompt or config change?",
                         RuledOutCheck.Assessment.RULED_OUT,
                         "classify_intent's own prompt and configuration did not change. What did move: its"
                                 + " input tokens, from roughly " + Math.round(preInputTokens) + " to roughly "
@@ -554,16 +557,19 @@ public class SampleProjectSeedListener {
                                 + " site itself.",
                         "input tokens ~" + Math.round(preInputTokens) + " -> ~" + Math.round(postInputTokens)));
 
-        List<Hypothesis> hypotheses = List.of(new Hypothesis(
-                "Upstream context-assembly drift in assemble_ticket_context",
-                "high",
-                "assemble_ticket_context is the immediately preceding span in every one of these traces."
-                        + " Its own output started including the full prior ticket-thread history — several"
-                        + " prior messages restated verbatim — instead of just the current message, right at"
-                        + " " + onsetDate + ". classify_intent reads that assembled context as its input,"
-                        + " so its own token count roughly doubled without its prompt or model changing at"
-                        + " all.",
-                stat.sampleTraceIdsPost()));
+        List<Cause> causes = List.of(new Cause(
+                "The step before classify_intent started sending it the whole ticket thread",
+                Cause.HIGH,
+                "On " + onsetDate + ", assemble_ticket_context began including every earlier message in the"
+                        + " ticket thread, not just the customer's latest one.",
+                "classify_intent reads that context as its input, so it now pays for about twice as many input"
+                        + " tokens per call. Its own prompt and model did not change.",
+                "A real cost regression, not a traffic change. Send classify_intent only the latest message, or"
+                        + " cap the thread history assemble_ticket_context forwards.",
+                null,
+                stat.sampleTraceIdsPost(),
+                List.of(),
+                stat.sampleTraceIdsPost().size()));
 
         String detailedReport = caseADetailedReport(stat, onsetDate, preInputTokens, postInputTokens, ratio);
 
@@ -585,14 +591,12 @@ public class SampleProjectSeedListener {
                 RcaReportRow.Verdict.BEHAVIOR_CHANGE,
                 String.format(
                         Locale.ROOT,
-                        "classify_intent's cost per call rose %.2f× on %s, driven by input tokens roughly"
-                                + " doubling while output stayed flat. Traced upstream: assemble_ticket_context"
-                                + " started forwarding the full ticket-thread history instead of only the"
-                                + " current message, which is what classify_intent actually pays to read.",
+                        "classify_intent costs %.2f× more per call since %s because the step before it started"
+                                + " sending it the whole ticket thread.",
                         ratio,
                         onsetDate),
                 writeJson(ruledOut),
-                writeJson(hypotheses),
+                writeJson(causes),
                 detailedReport,
                 RcaReportRow.Engine.AGENTIC,
                 Instant.now().minusSeconds(600).toString(),

@@ -148,10 +148,10 @@ class AgenticRcaEngineTest {
         // frustration parser would drop it and downgrade the verdict.
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"One document per answer\","
                 + "\"verdict\":\"causes_identified\",\"detailed_report\":\"## r\",\"checklist\":[],"
-                + "\"causes\":[{\"title\":\"Retrieves one document\",\"what_the_agent_did\":\"w\","
-                + "\"traces_affected\":2,\"evidence_trace_ids\":[\"tr-1\"],"
+                + "\"causes\":[{\"title\":\"Retrieves one document\",\"what_changed\":\"w\","
+                + "\"affected_count\":2,\"evidence_trace_ids\":[\"tr-1\"],"
                 + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
-                + "\"excerpt\":\"top_k=1\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}]}");
+                + "\"excerpt\":\"top_k=1\"},\"next_step\":\"f\",\"confidence\":\"medium\"}]}");
         AgenticRcaEngine engine = new AgenticRcaEngine(
                 props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
         Map<String, String> dossier = Map.of("finding.md", "# f");
@@ -176,17 +176,16 @@ class AgenticRcaEngineTest {
                 new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "One document per answer",
-                        List.of(),
                         List.of(new RcaDtos.Cause(
                                 "Retrieves one document",
+                                "medium",
                                 "w",
-                                0,
-                                2,
-                                List.of(),
-                                List.of("tr-1"),
-                                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                                null,
                                 "f",
-                                "medium")),
+                                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                                List.of("tr-1"),
+                                List.of(),
+                                2)),
                         List.of(),
                         "## r",
                         false),
@@ -203,7 +202,7 @@ class AgenticRcaEngineTest {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl("https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
-        // behavior_change is comparative, the finding has a baseline side, and no hypothesis cites it.
+        // behavior_change is comparative, the finding has a baseline side, and no cause cites it.
         RecordingSandbox sandbox = new RecordingSandbox(
                 "{\"summary\":\"The flagged side changed\",\"verdict\":\"behavior_change\",\"checklist\":[]}");
         AgenticRcaEngine engine = new AgenticRcaEngine(
@@ -217,7 +216,7 @@ class AgenticRcaEngineTest {
         assertEquals(AgenticRcaEngine.buildPrompt(report, "fnd-1", false, 1, 2), sent.prompt());
         assertEquals(AgenticRcaEngine.JSON_SCHEMA, sent.jsonSchema());
         assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, result.verdict());
-        assertEquals(List.of(), result.hypotheses());
+        assertEquals(List.of(), result.causes());
         assertTrue(result.detailedReport().startsWith("> **Verdict downgraded by the platform.**"));
         assertTrue(result.detailedReport().endsWith("\n\nThe flagged side changed"));
     }
@@ -242,7 +241,7 @@ class AgenticRcaEngineTest {
         assertEquals(AgenticRcaEngine.FRUSTRATION_JSON_SCHEMA, sent.jsonSchema());
         assertEquals(
                 new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), List.of(), "## d", false),
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false),
                 result);
     }
 

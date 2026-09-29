@@ -140,12 +140,11 @@ Causes are grouped by why the answers went beyond their documents, for example:
 - The prompt asks for more than the documents hold.
 - The answer merges or misreads the documents.
 
-Each cause shows:
+The case page cards each proven cause, one with high confidence. When no cause is proven, it says so, gives the summary, and shows the leads, each with its confidence: medium or low. Each cause shows:
 
-- What the agent did.
-- A confidence: high, medium, or low.
-- Where it comes from: a prompt, code, a tool, the model, or unknown, with the file, commit, and excerpt when one lines up.
-- A **Suggested fix**.
+- **What the agent did**, **Why answers went unsupported**, and **What to do**. On a lead, the last two read **Why it might be** and **To confirm**.
+- How many flagged answers show it.
+- Where it comes from: a prompt, code, a tool, or the model, with the file, commit, and excerpt when one lines up.
 - The traces that show it. On the case, the **Show** button on a cause, such as **Show 12 answers**, narrows the **Flagged answers** list to that cause. The buttons above the list, such as **All · 48** and **Cause 1 · 12**, switch between causes.
 
 [Root-cause analysis](/concepts/root-cause-analysis#on-a-groundedness-case) covers how the report checks its own citations.

@@ -29,7 +29,7 @@ class RcaSynthesisOutputTest {
     @Test
     void parsesDetailedReportAndDropsHallucinatedReceipts() {
         String text = "{\"summary\":\"s\",\"verdict\":\"behavior_change\",\"detailed_report\":\"## Investigation\","
-                + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
                 + "\"evidence_trace_ids\":[\"tr-prior\",\"tr-degraded\",\"tr-invented\"]}]}";
 
         RcaSynthesisOutput.Parsed out =
@@ -38,7 +38,7 @@ class RcaSynthesisOutputTest {
         assertEquals(RcaReportRow.Verdict.BEHAVIOR_CHANGE, out.verdict());
         assertEquals("## Investigation", out.detailedReport());
         // Both windows' ids are citable; only the invented one drops.
-        assertEquals(List.of("tr-prior", "tr-degraded"), out.hypotheses().get(0).evidenceTraceIds());
+        assertEquals(List.of("tr-prior", "tr-degraded"), out.causes().get(0).evidenceTraceIds());
         assertNull(out.verdictNote());
     }
 
@@ -47,7 +47,7 @@ class RcaSynthesisOutputTest {
         // The failure guarded: a traffic_shift "proven" from degraded-window traces alone, the prior window inferred.
         for (String verdict : List.of(RcaReportRow.Verdict.TRAFFIC_SHIFT, RcaReportRow.Verdict.BEHAVIOR_CHANGE)) {
             String text = "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\","
-                    + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
+                    + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
                     + "\"evidence_trace_ids\":[\"tr-degraded\"]}]}";
 
             RcaSynthesisOutput.Parsed out =
@@ -62,7 +62,7 @@ class RcaSynthesisOutputTest {
     @Test
     void crossWindowVerdictWithPriorEvidenceStands() {
         String text = "{\"summary\":\"s\",\"verdict\":\"traffic_shift\",\"detailed_report\":\"## r\","
-                + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
                 + "\"evidence_trace_ids\":[\"tr-prior\",\"tr-degraded\"]}]}";
 
         RcaSynthesisOutput.Parsed out =
@@ -76,7 +76,7 @@ class RcaSynthesisOutputTest {
     void emptyPriorWindowExemptsTheCrossWindowBurden() {
         // Nothing citable on the prior side, so demanding a citation would make the verdict unreachable.
         String text = "{\"summary\":\"s\",\"verdict\":\"traffic_shift\",\"detailed_report\":\"## r\","
-                + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
                 + "\"evidence_trace_ids\":[\"tr-degraded\"]}]}";
 
         RcaSynthesisOutput.Parsed out =
@@ -92,7 +92,7 @@ class RcaSynthesisOutputTest {
         for (String verdict : List.of(RcaReportRow.Verdict.DEFINITION_CHANGE, RcaReportRow.Verdict.MODEL_CHANGE)) {
             RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
                     MAPPER,
-                    "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"hypotheses\":[]}",
+                    "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"causes\":[]}",
                     Set.of("tr-prior"),
                     Set.of(),
                     CHECKS,
@@ -103,7 +103,7 @@ class RcaSynthesisOutputTest {
 
     @Test
     void keepsAssessmentsOfMeasuredChecksAndDropsInventedOnes() {
-        String text = "{\"summary\":\"s\",\"verdict\":\"behavior_change\",\"hypotheses\":[],\"checklist\":["
+        String text = "{\"summary\":\"s\",\"verdict\":\"behavior_change\",\"causes\":[],\"checklist\":["
                 + "{\"check\":\"serving_model\",\"assessment\":\"ruled_out\",\"detail\":\"whitespace bump\"},"
                 + "{\"check\":\"failing_cohort_shape\",\"assessment\":\"explains\",\"detail\":\"40% errored\"},"
                 + "{\"check\":\"vibe_check\",\"assessment\":\"explains\",\"detail\":\"invented\"}]}";
@@ -118,7 +118,7 @@ class RcaSynthesisOutputTest {
 
     @Test
     void unrecognizedAssessmentBecomesUnknownRatherThanASilentPass() {
-        String text = "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"hypotheses\":[],\"checklist\":["
+        String text = "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"causes\":[],\"checklist\":["
                 + "{\"check\":\"failing_cohort_shape\",\"assessment\":\"probably fine\",\"detail\":\"d\"}]}";
 
         RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(MAPPER, text, NO_PRIOR, Set.of(), CHECKS, "proj");
@@ -134,7 +134,7 @@ class RcaSynthesisOutputTest {
     void unexpectedFieldsAnywhereInTheTreeDoNotSinkTheRun() {
         String text = "{\"summary\":\"s\",\"verdict\":\"model_change\",\"detailed_report\":\"## r\","
                 + "\"confidence_overall\":\"high\","
-                + "\"hypotheses\":[{\"title\":\"t\",\"confidence\":\"high\",\"rationale\":\"r\","
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
                 + "\"evidence_trace_ids\":[\"tr-degraded\"],\"supporting_commits\":[\"abc123\"]}],"
                 + "\"checklist\":[{\"check\":\"serving_model\",\"assessment\":\"explains\",\"detail\":\"d\","
                 + "\"weight\":0.8}]}";
@@ -144,7 +144,7 @@ class RcaSynthesisOutputTest {
 
         assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, out.verdict());
         assertEquals("## r", out.detailedReport());
-        assertEquals(List.of("tr-degraded"), out.hypotheses().get(0).evidenceTraceIds());
+        assertEquals(List.of("tr-degraded"), out.causes().get(0).evidenceTraceIds());
         assertEquals(1, out.checklist().size());
     }
 
@@ -155,7 +155,7 @@ class RcaSynthesisOutputTest {
     void aReplyWrappedInProseAndAFenceIsStillRead() {
         String text = "Here is the completed analysis:\n\n```json\n"
                 + "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"detailed_report\":\"## r\","
-                + "\"hypotheses\":[],\"checklist\":[]}\n```";
+                + "\"causes\":[],\"checklist\":[]}\n```";
 
         RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(MAPPER, text, NO_PRIOR, Set.of(), CHECKS, "proj");
 
@@ -192,27 +192,29 @@ class RcaSynthesisOutputTest {
     }
 
     /**
-     * Optional fields null or blank degrade rather than fail: blank summary falls back to the reply, blank report to
-     * none, untitled hypothesis dropped, missing confidence reads low, missing lists read empty, a checkless
-     * assessment dropped, and a repeat does not override the first.
+     * Optional fields null or blank degrade rather than fail: blank summary falls back to the first cause's title,
+     * blank report to none, untitled cause dropped, missing confidence reads low, missing lists read empty, a
+     * checkless assessment dropped, and a repeat does not override the first.
      */
     @Test
     void aSparseMetricReplyDegradesFieldByField() {
         String reply = "{\"summary\":\"  \",\"verdict\":null,\"detailed_report\":\"  \","
-                + "\"hypotheses\":[{\"title\":null},{\"title\":\"Canary model\",\"confidence\":null,"
-                + "\"rationale\":null,\"evidence_trace_ids\":null}],"
+                + "\"causes\":[{\"title\":null},{\"title\":\"Canary model\",\"confidence\":null,"
+                + "\"what_changed\":null,\"evidence_trace_ids\":null}],"
                 + "\"checklist\":[{\"check\":null,\"assessment\":\"explains\"},"
                 + "{\"check\":\"serving_model\",\"assessment\":\"explains\",\"detail\":null},"
                 + "{\"check\":\"serving_model\",\"assessment\":\"ruled_out\",\"detail\":\"second\"}]}";
 
         RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(MAPPER, reply, NO_PRIOR, Set.of(), CHECKS, "proj");
 
-        assertEquals(reply, out.summary());
+        assertEquals("Canary model", out.summary());
         assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, out.verdict());
         assertNull(out.detailedReport());
-        assertEquals(List.of(new RcaDtos.Hypothesis("Canary model", "low", "", List.of())), out.hypotheses());
         assertEquals(
-                List.of(new RcaSynthesisOutput.ChecklistAssessment("serving_model", Assessment.EXPLAINS, "")),
+                List.of(new RcaDtos.Cause("Canary model", "low", null, null, null, null, List.of(), List.of(), 0)),
+                out.causes());
+        assertEquals(
+                List.of(new RcaSynthesisOutput.ChecklistAssessment("serving_model", null, Assessment.EXPLAINS, "")),
                 out.checklist());
     }
 
@@ -229,19 +231,19 @@ class RcaSynthesisOutputTest {
         RcaSynthesisOutput.Parsed frustration =
                 RcaSynthesisOutput.parseFrustration(MAPPER, frustrationReply, TURNS, SESSIONS, COHORT, "proj");
 
-        assertEquals(frustrationReply, frustration.summary());
+        assertEquals("Asks twice", frustration.summary());
         assertNull(frustration.detailedReport());
         assertEquals(
                 List.of(new RcaDtos.Cause(
                         "Asks twice",
-                        "",
-                        1,
-                        0,
-                        List.of("s-1"),
-                        List.of(),
+                        "low",
+                        null,
+                        null,
+                        null,
                         new RcaDtos.Attribution(RcaDtos.Attribution.UNKNOWN, null, null, null),
-                        "",
-                        "low")),
+                        List.of(),
+                        List.of("s-1"),
+                        1)),
                 frustration.causes());
 
         RcaSynthesisOutput.Parsed groundedness = RcaSynthesisOutput.parseGroundedness(
@@ -252,7 +254,8 @@ class RcaSynthesisOutputTest {
                 COHORT,
                 "proj");
         assertEquals(
-                List.of(new RcaDtos.Cause("One document", "", 0, 1, List.of(), List.of("tr-1"), null, "", "low")),
+                List.of(new RcaDtos.Cause(
+                        "One document", "low", null, null, null, null, List.of("tr-1"), List.of(), 1)),
                 groundedness.causes());
 
         assertEquals(
@@ -274,10 +277,15 @@ class RcaSynthesisOutputTest {
     private static final Set<String> COHORT = Set.of("failing_cohort_shape");
 
     private static String cause(String title, int affected, String sessions, String traces) {
-        return "{\"title\":\"" + title + "\",\"what_the_agent_did\":\"w\",\"sessions_affected\":" + affected
+        return cause(title, "medium", affected, sessions, traces);
+    }
+
+    private static String cause(String title, String confidence, int affected, String sessions, String traces) {
+        return "{\"title\":\"" + title + "\",\"confidence\":\"" + confidence + "\",\"what_changed\":\"w\","
+                + "\"how_it_caused_this\":\"h\",\"next_step\":\"n\",\"affected_count\":" + affected
                 + ",\"evidence_session_ids\":[" + sessions + "],\"evidence_trace_ids\":[" + traces + "],"
                 + "\"attribution\":{\"kind\":\"prompt\",\"path\":\"agent/prompt.md\",\"commit\":\"abc123\","
-                + "\"excerpt\":\"Never ask twice.\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}";
+                + "\"excerpt\":\"Never ask twice.\"}}";
     }
 
     private static String frustration(String verdict, String... causes) {
@@ -295,11 +303,12 @@ class RcaSynthesisOutputTest {
                 RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
 
         assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
-        assertTrue(out.hypotheses().isEmpty(), "a frustration report writes causes, not hypotheses");
         RcaDtos.Cause c = out.causes().get(0);
         assertEquals(List.of("s-1"), c.evidenceSessionIds(), "unknown and repeated session ids are dropped");
         assertEquals(List.of("tr-1"), c.evidenceTraceIds(), "a trace outside the flagged turns is dropped");
-        assertEquals(1, c.tracesAffected(), "the flagged turns it cites");
+        assertEquals("w", c.whatChanged());
+        assertEquals("h", c.howItCausedThis());
+        assertEquals("n", c.nextStep());
         assertEquals("prompt", c.attribution().kind());
         assertEquals("agent/prompt.md", c.attribution().path());
         assertNull(out.verdictNote());
@@ -329,7 +338,7 @@ class RcaSynthesisOutputTest {
         // The metric lane never accepts the frustration pair.
         RcaSynthesisOutput.Parsed metric = RcaSynthesisOutput.parse(
                 MAPPER,
-                "{\"summary\":\"s\",\"verdict\":\"causes_identified\",\"hypotheses\":[]}",
+                "{\"summary\":\"s\",\"verdict\":\"causes_identified\",\"causes\":[]}",
                 NO_PRIOR,
                 Set.of(),
                 CHECKS,
@@ -351,16 +360,16 @@ class RcaSynthesisOutputTest {
         assertEquals(
                 List.of("Big", "Undercounted", "Small"),
                 out.causes().stream().map(RcaDtos.Cause::title).toList());
-        assertEquals(3, out.causes().get(1).sessionsAffected(), "a cause affects at least the sessions it cites");
+        assertEquals(3, out.causes().get(1).affectedCount(), "a cause affects at least the sessions it cites");
     }
 
     @Test
     void anUnknownAttributionKindAndConfidenceAreNormalised() {
         String text = frustration(
                 "causes_identified",
-                "{\"title\":\"t\",\"what_the_agent_did\":\"w\",\"sessions_affected\":1,"
+                "{\"title\":\"t\",\"what_changed\":\"w\",\"affected_count\":1,"
                         + "\"evidence_session_ids\":[\"s-1\"],\"evidence_trace_ids\":[],"
-                        + "\"attribution\":{\"kind\":\"vibes\",\"path\":\"\"},\"fix_suggestion\":\"f\","
+                        + "\"attribution\":{\"kind\":\"vibes\",\"path\":\"\"},\"next_step\":\"f\","
                         + "\"confidence\":\"certain\"}");
 
         RcaDtos.Cause c = RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj")
@@ -376,19 +385,19 @@ class RcaSynthesisOutputTest {
     private static final Set<String> FLAGGED = Set.of("tr-1", "tr-2", "tr-3");
 
     private static String groundedCause(String title, int affected, String traces) {
-        return "{\"title\":\"" + title + "\",\"what_the_agent_did\":\"w\",\"traces_affected\":" + affected
+        return "{\"title\":\"" + title + "\",\"what_changed\":\"w\",\"affected_count\":" + affected
                 + ",\"evidence_trace_ids\":[" + traces + "],"
                 + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
-                + "\"excerpt\":\"top_k=1\"},\"fix_suggestion\":\"f\",\"confidence\":\"medium\"}";
+                + "\"excerpt\":\"top_k=1\"},\"next_step\":\"f\",\"confidence\":\"medium\"}";
     }
 
     @Test
     void aGroundednessCauseCitingNoFlaggedTraceIsDroppedEvenWithSessions() {
         String text = frustration(
                 "causes_identified",
-                "{\"title\":\"Sessions only\",\"what_the_agent_did\":\"w\",\"traces_affected\":4,"
+                "{\"title\":\"Sessions only\",\"what_changed\":\"w\",\"affected_count\":4,"
                         + "\"evidence_session_ids\":[\"s-1\"],\"evidence_trace_ids\":[\"tr-9\"],"
-                        + "\"fix_suggestion\":\"f\",\"confidence\":\"high\"}",
+                        + "\"next_step\":\"f\",\"confidence\":\"high\"}",
                 groundedCause("Real", 1, "\"tr-2\""));
 
         RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parseGroundedness(MAPPER, text, FLAGGED, COHORT, "proj");
@@ -423,6 +432,65 @@ class RcaSynthesisOutputTest {
         assertEquals(
                 List.of("Big", "Undercounted", "Small"),
                 out.causes().stream().map(RcaDtos.Cause::title).toList());
-        assertEquals(3, out.causes().get(1).tracesAffected(), "a cause affects at least the traces it cites");
+        assertEquals(3, out.causes().get(1).affectedCount(), "a cause affects at least the traces it cites");
+    }
+
+    /**
+     * Catches a large lead outranking a smaller proven cause: the case page cards proven causes and the summary
+     * covers them, so a lead stored first would be read as the answer.
+     */
+    @Test
+    void provenCausesRankAheadOfLargerLeads() {
+        String text = frustration(
+                "causes_identified",
+                cause("Big lead", "low", 9, "\"s-1\"", ""),
+                cause("Medium lead", "medium", 9, "\"s-2\"", ""),
+                cause("Small proven", "high", 1, "\"s-3\"", ""));
+
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parseFrustration(MAPPER, text, TURNS, SESSIONS, COHORT, "proj");
+
+        assertEquals(
+                List.of("Small proven", "Medium lead", "Big lead"),
+                out.causes().stream().map(RcaDtos.Cause::title).toList());
+
+        String metric = "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"causes\":["
+                + "{\"title\":\"Lead\",\"confidence\":\"medium\",\"affected_count\":40},"
+                + "{\"title\":\"Proven\",\"confidence\":\"high\",\"affected_count\":3}]}";
+        assertEquals(
+                List.of("Proven", "Lead"),
+                RcaSynthesisOutput.parse(MAPPER, metric, NO_PRIOR, Set.of(), CHECKS, "proj").causes().stream()
+                        .map(RcaDtos.Cause::title)
+                        .toList());
+    }
+
+    /**
+     * Catches the raw reply reaching the Triage caption: a blank summary with nothing to fall back on is stored as
+     * no summary, never as the agent's JSON.
+     */
+    @Test
+    void aBlankSummaryWithNoCauseIsNoSummaryRatherThanTheReply() {
+        String reply = "{\"summary\":\"\",\"verdict\":\"inconclusive\",\"causes\":[]}";
+
+        assertNull(RcaSynthesisOutput.parse(MAPPER, reply, NO_PRIOR, Set.of(), CHECKS, "proj")
+                .summary());
+        assertNull(RcaSynthesisOutput.parseFrustration(
+                        MAPPER, "{\"verdict\":\"no_cause_found\"}", TURNS, SESSIONS, COHORT, "proj")
+                .summary());
+    }
+
+    /** Catches the agent's plain-language check question being dropped, which leaves the page showing a raw id. */
+    @Test
+    void aChecklistQuestionIsKept() {
+        String text = "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"causes\":[],\"checklist\":["
+                + "{\"check\":\"serving_model\",\"question\":\"Did the serving model change?\","
+                + "\"assessment\":\"ruled_out\",\"detail\":\"No.\"},"
+                + "{\"check\":\"failing_cohort_shape\",\"question\":\" \",\"assessment\":\"unknown\","
+                + "\"detail\":\"d\"}]}";
+
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(MAPPER, text, NO_PRIOR, Set.of(), CHECKS, "proj");
+
+        assertEquals("Did the serving model change?", out.checklist().get(0).question());
+        assertNull(out.checklist().get(1).question(), "a blank question is no question");
     }
 }

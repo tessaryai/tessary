@@ -9,9 +9,9 @@ import org.jspecify.annotations.Nullable;
  * columns are the snapshot taken at trigger time — trigger-time truth, never recomputed, so a report
  * still reads correctly after the finding it analysed has been resolved (and reports written before
  * {@code finding_id} existed analysed a CUSUM mover, which is why that column is nullable).
- * {@code ruledOut}/{@code hypotheses}/{@code causes} are jsonb blobs of {@link RcaDtos.RuledOutCheck}/
- * {@link RcaDtos.Hypothesis}/{@link RcaDtos.Cause}; {@code causes} is set only on a report that
- * {@linkplain ReportKind#namesCauses names causes}, which writes no hypotheses. {@code status} is stamped
+ * {@code ruledOut}/{@code causes} are jsonb blobs of {@link RcaDtos.RuledOutCheck}/{@link RcaDtos.Cause},
+ * every report kind writing the same cause shape. {@code hypotheses} is read only: a metric report written
+ * before that stored its causes there, in an older shape {@link RcaDtos#causesOf} maps. {@code status} is stamped
  * by the worker at completion; the wire view reads the live queue status off the joined {@code job} row
  * (see {@link RcaReportRepository}), so an exhaustion-swept job can never leave a report reading
  * "claimed" forever.
@@ -80,7 +80,7 @@ public record RcaReportRow(
         }
 
         /** True for the kinds that rank causes against a learned rate rather than explain a movement: no
-         *  baseline side, no two-sided checklist, and no hypotheses. */
+         *  baseline side and no two-sided checklist. */
         public static boolean namesCauses(String reportKind) {
             return FRUSTRATION_CAUSES.equals(reportKind) || GROUNDEDNESS_CAUSES.equals(reportKind);
         }

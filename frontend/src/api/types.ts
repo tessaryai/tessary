@@ -170,8 +170,7 @@ export type ModelRateView = S["ModelRateView"];
 // ---- RCA: root-cause analysis of one finding ----
 export type RcaReport = S["RcaReportView"];
 export type RcaRuledOutCheck = S["RuledOutCheck"];
-export type RcaHypothesis = S["Hypothesis"];
-/** One cause a frustration report found: what the agent did, and the frustrated sessions that show it. */
+/** One cause an RCA found, the same shape for every case type: what changed, how it caused this, what next. */
 export type RcaCause = S["Cause"];
 
 // ---- PII redaction ----

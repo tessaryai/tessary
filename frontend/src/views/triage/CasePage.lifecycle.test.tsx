@@ -86,23 +86,58 @@ const ANSWER_REPORT: RcaReport = {
   ...GROUNDEDNESS_REPORT,
   report_kind: "attribution",
   verdict: "model_change",
-  causes: [],
-  hypotheses: [
+  summary: "The call site got slower because the serving model changed and inputs grew.",
+  causes: [
     {
       title: "The serving model changed under the call site",
       confidence: "high",
-      rationale: "The failures start at the model rollout.",
+      what_changed: "A new model version started serving this call site.",
+      how_it_caused_this: "The new model takes longer on the same inputs.",
+      next_step: "A real regression. Pin the previous model.",
+      attribution: null,
       evidence_trace_ids: ["trace-0123456789"],
+      evidence_session_ids: [],
+      affected_count: 12,
     },
-    { title: "Traffic moved to longer inputs", confidence: "low", rationale: "Inputs grew.", evidence_trace_ids: [] },
+    {
+      title: "Customers started pasting whole order histories",
+      confidence: "high",
+      what_changed: "Inputs grew to include order histories.",
+      how_it_caused_this: "Longer inputs take longer to read.",
+      next_step: "Expected traffic. Nothing to fix.",
+      attribution: null,
+      evidence_trace_ids: [],
+      evidence_session_ids: [],
+      affected_count: 4,
+    },
+    {
+      title: "Traffic moved to longer inputs",
+      confidence: "low",
+      what_changed: "Inputs grew.",
+      how_it_caused_this: "Maybe slower.",
+      next_step: "Compare input lengths on both sides.",
+      attribution: null,
+      evidence_trace_ids: [],
+      evidence_session_ids: [],
+      affected_count: 0,
+    },
   ],
   ruled_out: [
-    { check: "model_swap", assessment: "explains", detail: "Model id changed.", measurement: null, passed: false },
-    { check: "input_length", assessment: "contributing", detail: "Longer inputs.", measurement: null, passed: false },
-    { check: "grader_drift", assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
-    { check: "traffic_mix", assessment: "unknown", detail: "Not measured.", measurement: null, passed: false },
-  ] as RcaReport["ruled_out"],
+    {
+      check: "model_swap",
+      question: "Did the serving model change?",
+      assessment: "explains",
+      detail: "Model id changed.",
+      measurement: null,
+      passed: false,
+    },
+    { check: "input_length", question: null, assessment: "contributing", detail: "Longer inputs.", measurement: null, passed: false },
+    { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
+    { check: "traffic_mix", question: null, assessment: "unknown", detail: "Not measured.", measurement: null, passed: false },
+  ],
 };
+
+const LEADS_ONLY = ANSWER_REPORT.causes.map((k) => ({ ...k, confidence: "medium" }));
 
 const span = (i: number, over: Partial<EvidenceSpan> = {}) =>
   ({
@@ -410,47 +445,64 @@ describe("running RCA", () => {
 });
 
 describe("the answer and the working behind it", () => {
-  it("cards the leading hypothesis, then counts and lists every check and the weaker leads", async () => {
+  /** Catches a second proven cause hidden behind the first, and a lead shown beside proven causes as if it were one. */
+  it("cards every proven cause with labelled rows, keeps leads off the page, and asks each check as a question", async () => {
     api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText("Serving model changed")).toBeTruthy();
-    expect(screen.getByText("The failures start at the model rollout.")).toBeTruthy();
+    expect(screen.getByText("The serving model changed under the call site")).toBeTruthy();
+    expect(screen.getByText("Customers started pasting whole order histories")).toBeTruthy();
+    expect(screen.queryByText("Traffic moved to longer inputs")).toBeNull();
+    expect(screen.getAllByText("What changed")).toHaveLength(2);
+    expect(screen.getAllByText("Why it changed")).toHaveLength(2);
+    expect(screen.getAllByText("What it means")).toHaveLength(2);
+    expect(screen.getByText("The new model takes longer on the same inputs.")).toBeTruthy();
+    expect(screen.getByText("12 flagged traces")).toBeTruthy();
     expect(screen.getByRole("link", { name: "trace-01…" }).getAttribute("href")).toBe(
       "/orgs/acme/projects/default/traces/trace-0123456789",
     );
+    expect(screen.getByRole("link", { name: "Read the full analysis" }).getAttribute("href")).toBe(
+      "/orgs/acme/projects/default/rca/rca-1",
+    );
+    expect(screen.queryByText("No cause proven")).toBeNull();
+
     expect(screen.getByText("4 explanations tested, 1 eliminated.")).toBeTruthy();
+    expect(screen.getByText("Did the serving model change?")).toBeTruthy();
+    expect(screen.getByText("model_swap")).toBeTruthy();
     const assessments = ["explains", "contributing", "ruled out", "unknown"].map(
       (a) => (screen.getByText(a) as HTMLElement).style.color,
     );
     expect(assessments).toEqual(["var(--color-error)", "var(--color-warning)", "var(--color-subtle)", "var(--color-muted)"]);
-    expect(screen.getByText("Traffic moved to longer inputs").closest("summary")).toBeTruthy();
   });
 
-  it("shows the summary when the run reached no hypothesis, and draws no working block", async () => {
+  /** Catches leads presented as the answer when nothing was proven. */
+  it("says no cause is proven, gives the summary, and labels every lead as a lead", async () => {
     api.getCase.mockResolvedValue(
-      plainCase({
-        rca: { ...ANSWER_REPORT, hypotheses: [], ruled_out: [], verdict: "inconclusive", summary: "Nothing moved." },
-        rca_report_id: "rca-1",
-      }),
+      plainCase({ rca: { ...ANSWER_REPORT, causes: LEADS_ONLY, verdict: "inconclusive" }, rca_report_id: "rca-1" }),
     );
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText("Nothing moved.")).toBeTruthy();
-    expect(screen.getByText("Inconclusive")).toBeTruthy();
+    expect(screen.getByText("No cause proven")).toBeTruthy();
+    expect(screen.getByText(ANSWER_REPORT.summary!)).toBeTruthy();
+    expect(screen.getByText("Traffic moved to longer inputs")).toBeTruthy();
+    expect(screen.getAllByText("Why it might be")).toHaveLength(3);
+    expect(screen.getAllByText("To confirm")).toHaveLength(3);
+    expect(screen.queryByText("What it means")).toBeNull();
+  });
+
+  /** Catches an empty Why block, or the raw reply, when the run wrote no summary and found no cause. */
+  it("falls back to the verdict when the run found no cause and wrote no summary", async () => {
+    api.getCase.mockResolvedValue(
+      plainCase({ rca: { ...ANSWER_REPORT, causes: [], ruled_out: [], summary: null }, rca_report_id: "rca-1" }),
+    );
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText("No cause proven")).toBeTruthy();
+    expect(screen.getByText("Serving model changed")).toBeTruthy();
     expect(screen.queryByText("What else was checked")).toBeNull();
-  });
-
-  it("says nothing when the run reached no hypothesis and wrote no summary", async () => {
-    api.getCase.mockResolvedValue(
-      plainCase({ rca: { ...ANSWER_REPORT, hypotheses: [], ruled_out: [], summary: null }, rca_report_id: "rca-1" }),
-    );
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.queryByText("Why")).toBeNull();
   });
 
   it("says a failed run did not finish, rather than showing an empty answer", async () => {
@@ -462,12 +514,15 @@ describe("the answer and the working behind it", () => {
     expect(screen.queryByText("The serving model changed under the call site")).toBeNull();
   });
 
-  it("puts the cause on its own line, hedged when the verdict is", async () => {
-    api.getCase.mockResolvedValue(plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }));
+  /** Catches the summary repeated under the headline, where it competed with the Why block. */
+  it("does not repeat the summary under the headline", async () => {
+    api.getCase.mockResolvedValue(
+      plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }),
+    );
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText("a model rollout").textContent).toBe("Likely: a model rollout");
+    expect(screen.queryByText(/a model rollout/)).toBeNull();
   });
 });
 
@@ -533,7 +588,7 @@ describe("the activity", () => {
 });
 
 describe("a frustration case", () => {
-  it("ranks its causes by session, shows where in the repo, and filters the sessions to the cause pressed", async () => {
+  it("cards its proven cause, shows where in the repo, and filters the sessions to the cause pressed", async () => {
     api.getCase.mockResolvedValue(frustrationCase());
     api.getFrustratedSessions.mockResolvedValue({
       rows: [conversation("f-1", "Why do you keep asking me the same thing?")],
@@ -545,12 +600,11 @@ describe("a frustration case", () => {
     renderPage();
     await heading("Users on support-agent grew frustrated");
 
-    expect(
-      screen.getByText("Tessary identified 2 likely causes from the 40 frustrated sessions and the agent's repository."),
-    ).toBeTruthy();
-    expect(screen.getByText("agent/prompt.md")).toBeTruthy();
+    expect(screen.getByText("The agent loops on refund questions")).toBeTruthy();
+    expect(screen.getByText("What the agent did")).toBeTruthy();
+    expect(screen.getByText("Why users got frustrated")).toBeTruthy();
+    expect(screen.getByText("agent/prompt.md @ c0ffee1")).toBeTruthy();
     expect(screen.getByText("Always retry.")).toBeTruthy();
-    expect(screen.getByText("c0ffee12…")).toBeTruthy();
     expect(screen.getByText("Share of sessions with a user frustrated with the agent")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Show \d+ sessions?$/ }).map((b) => b.textContent)).toEqual([
       "Show 1 session",
@@ -580,7 +634,7 @@ describe("a frustration case", () => {
     await heading("Users on support-agent grew frustrated");
 
     expect(screen.getByText("No shared cause.")).toBeTruthy();
-    expect(screen.getByText("No cause found")).toBeTruthy();
+    expect(screen.getByText("No cause proven")).toBeTruthy();
   });
 
   it("draws no cause card for a summary-less run with no causes", async () => {

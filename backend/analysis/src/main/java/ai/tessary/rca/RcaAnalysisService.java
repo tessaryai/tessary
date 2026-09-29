@@ -13,7 +13,6 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaChecklist.Measurement;
 import ai.tessary.rca.RcaDtos.Cause;
-import ai.tessary.rca.RcaDtos.Hypothesis;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -143,7 +142,6 @@ public class RcaAnalysisService {
                 result.verdict(),
                 result.summary(),
                 merge(measurements, result.checklist()),
-                result.hypotheses(),
                 result.causes(),
                 result.detailedReport(),
                 result.repoAvailable());
@@ -231,7 +229,7 @@ public class RcaAnalysisService {
             out.add(
                     a == null
                             ? RuledOutCheck.unassessed(m.check(), m.finding())
-                            : RuledOutCheck.assessed(m.check(), a.assessment(), a.detail(), m.finding()));
+                            : RuledOutCheck.assessed(m.check(), a.question(), a.assessment(), a.detail(), m.finding()));
         }
         return out;
     }
@@ -243,9 +241,8 @@ public class RcaAnalysisService {
     private void complete(
             RcaJobRow job,
             String verdict,
-            String summary,
+            @Nullable String summary,
             List<RuledOutCheck> checks,
-            List<Hypothesis> hypotheses,
             List<Cause> causes,
             @Nullable String detailedReport,
             boolean repoAvailable) {
@@ -255,18 +252,16 @@ public class RcaAnalysisService {
                 verdict,
                 summary,
                 writeJson(checks),
-                writeJson(hypotheses),
                 causes.isEmpty() ? null : writeJson(causes),
                 detailedReport,
                 repoAvailable);
         log.info(
-                "rca done project={} subject={}:{} metric={} verdict={} hypotheses={} causes={}",
+                "rca done project={} subject={}:{} metric={} verdict={} causes={}",
                 job.projectId(),
                 job.subjectKind(),
                 job.subjectId(),
                 job.metric(),
                 verdict,
-                hypotheses.size(),
                 causes.size());
     }
 

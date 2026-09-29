@@ -123,7 +123,7 @@ while the rise lasts a new finding can file each hour, as Malformed Output's do.
 The evidence is the rate's two sides: every trace scored on the call site since onset as `member`, and
 every flagged one as `witness`, a trace row followed by a span row for each flagged answer in it.
 Neither is capped. On a case, RCA writes a `groundedness_causes` report: causes grouped by what the
-agent did that left its answers unsupported, most traces first, each citing the traces that show it.
+agent did that left its answers unsupported, proven first and then most traces, each citing the traces that show it.
 
 ## What a resolve does
 

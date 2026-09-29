@@ -639,15 +639,13 @@ public class CaseService {
     /**
      * The already-loaded report as the caption the header reads. Unfinished runs conclude nothing.
      *
-     * <p>The VIEW rather than the row: the row's hypotheses are a raw jsonb string, and the view has
+     * <p>The VIEW rather than the row: the row's causes are a raw jsonb string, and the view has
      * already parsed them for the body of the page. Deriving the header's caption from the same object
      * the reader sees below it is also what keeps the two from ever disagreeing.
      */
     private static @Nullable CaseLead leadOf(@Nullable RcaReportView rca) {
         if (rca == null || !JobRow.Status.DONE.equals(rca.status())) return null;
-        return new CaseLead(
-                rca.verdict(),
-                rca.hypotheses().isEmpty() ? null : rca.hypotheses().get(0).title());
+        return new CaseLead(rca.verdict(), rca.summary());
     }
 
     /** The most recent RCA on the FINDING behind this case. RCA is a finding-analysis lane now, so
@@ -661,7 +659,7 @@ public class CaseService {
     }
 
     /**
-     * That report as the wire view (verdict, hypotheses, ruled-out checklist, the agent's markdown), or null
+     * That report as the wire view (verdict, causes, ruled-out checklist, the agent's markdown), or null
      * while it is still running.
      *
      * <p><b>Running is the one state that stays a bare id.</b> A pending or claimed report is a shell: the

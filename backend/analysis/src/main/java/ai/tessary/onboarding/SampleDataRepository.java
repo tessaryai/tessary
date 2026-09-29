@@ -201,11 +201,11 @@ public class SampleDataRepository {
         jdbc.sql("""
                 INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label,
                     call_site_id, metric, window_from, window_split, window_to, current_value,
-                    prior_value, delta, status, verdict, summary, ruled_out, hypotheses,
+                    prior_value, delta, status, verdict, summary, ruled_out, causes,
                     detailed_report, engine, created_at, completed_at, finding_id)
                 VALUES (:id, :pid, :jobId, :subjectKind, :subjectId, :label, :csid,
                     :metric, :windowFrom, :windowSplit, :windowTo, :current, :prior, :delta,
-                    'done', :verdict, :summary, :ruledOut::jsonb, :hypotheses::jsonb,
+                    'done', :verdict, :summary, :ruledOut::jsonb, :causes::jsonb,
                     :detailedReport, :engine, :created, :completed, :findingId)
                 """)
                 .param("id", r.id())
@@ -225,7 +225,7 @@ public class SampleDataRepository {
                 .param("verdict", r.verdict())
                 .param("summary", r.summary())
                 .param("ruledOut", r.ruledOut())
-                .param("hypotheses", r.hypotheses())
+                .param("causes", r.causes())
                 .param("detailedReport", r.detailedReport())
                 .param("engine", r.engine())
                 .param("created", r.createdAt())
@@ -611,7 +611,7 @@ public class SampleDataRepository {
             String verdict,
             String summary,
             @Nullable String ruledOut,
-            @Nullable String hypotheses,
+            @Nullable String causes,
             @Nullable String detailedReport,
             String engine,
             String createdAt,
