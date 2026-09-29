@@ -11,9 +11,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.SpecificationVersion;
 import com.networknt.schema.resource.SchemaLoader;
-import com.sun.net.httpserver.HttpServer;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -179,18 +183,12 @@ class MalformedOutputDetectorTest {
     void refSchemasAreNeverFetched_treatedAsNoneDeclared(@TempDir Path dir) throws Exception {
         String served = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}";
         AtomicInteger hits = new AtomicInteger();
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/", exchange -> {
-            hits.incrementAndGet();
-            byte[] body = served.getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream out = exchange.getResponseBody()) {
-                out.write(body);
-            }
-        });
-        server.start();
+        ServerSocket server = new ServerSocket(0, 8, InetAddress.getLoopbackAddress());
+        Thread acceptor = new Thread(() -> serveUntilClosed(server, served, hits), "ref-schema-server");
+        acceptor.setDaemon(true);
+        acceptor.start();
         try {
-            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/schema.json";
+            String url = "http://127.0.0.1:" + server.getLocalPort() + "/schema.json";
             Path file = Files.writeString(dir.resolve("schema.json"), served);
             MalformedOutputDetector d = detector(Map.of(
                     "cs-http", "{\"$ref\":\"" + url + "\"}",
@@ -207,7 +205,31 @@ class MalformedOutputDetectorTest {
             fetching.getSchema("{\"$ref\":\"" + url + "\"}").initializeValidators();
             assertEquals(1, hits.get(), "control: a fetching registry does reach the server");
         } finally {
-            server.stop(0);
+            server.close();
+            acceptor.join(2_000);
+        }
+    }
+
+    /** Answers every request with {@code body}, counting each accepted connection as a hit. */
+    private static void serveUntilClosed(ServerSocket server, String body, AtomicInteger hits) {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        while (!server.isClosed()) {
+            try (Socket client = server.accept()) {
+                hits.incrementAndGet();
+                BufferedReader head =
+                        new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
+                // Skip the request line and headers; the reply never depends on them.
+                String line = head.readLine();
+                while (line != null && !line.isEmpty()) line = head.readLine();
+                OutputStream out = client.getOutputStream();
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + bytes.length
+                                + "\r\nConnection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                out.write(bytes);
+                out.flush();
+            } catch (IOException e) {
+                return;
+            }
         }
     }
 
