@@ -271,13 +271,13 @@ class JevDecisionClientTest {
 
     /** A key with no funds left is fixed only by a top-up, so retrying it or skipping turns silently helps no one. */
     @Test
-    void a402_isRejectedWithoutRetrying() throws Exception {
+    void a402_isNoCreditWithoutRetrying() throws Exception {
         stub(response(402, "{\"error\":\"insufficient credits\"}"));
 
         TessaryException e = assertThrows(
                 TessaryException.class, () -> client().decide("p1", "frustration", openrouter(), request()));
 
-        assertSame(DecisionError.PROVIDER_REJECTED, e.error());
+        assertSame(DecisionError.PROVIDER_NO_CREDIT, e.error());
         assertEquals(List.of(), sleeps);
         sent(1);
     }

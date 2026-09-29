@@ -2,6 +2,8 @@
 package ai.tessary.llm.decisions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.TessaryProperties;
@@ -112,6 +114,51 @@ class DecisionProviderResolverTest {
         }
 
         assertEquals(Optional.empty(), resolver.resolve(PID, ModelLane.FRUSTRATION), why);
+        assertFalse(resolver.hasProvider(PID, ModelLane.FRUSTRATION), why);
+    }
+
+    @Test
+    void aKeyedCredentialIsAProvider() {
+        ProviderCredential cred = typesafe(box.seal("ts-key"), null);
+        when(orgs.orgIdFor(PID)).thenReturn(ORG);
+        when(credentials.findByOrg(ORG)).thenReturn(List.of(cred));
+        when(credentials.findByOrgAndProvider(ORG, ModelProvider.TYPESAFE)).thenReturn(Optional.of(cred));
+
+        assertTrue(resolver.hasProvider(PID, ModelLane.FRUSTRATION));
+    }
+
+    /**
+     * A deployment's resolver refuses to resolve its own provider when the org has no credit. Having a
+     * provider is a different question, so enabling Frustration must not inherit that refusal.
+     */
+    @Test
+    void theDeploymentsOwnProviderIsAProviderEvenWhenItsResolverRefusesForCredit() {
+        when(orgs.orgIdFor(PID)).thenReturn(ORG);
+        when(credentials.findByOrg(ORG)).thenReturn(List.of());
+        ProjectModelSettings settings =
+                new ProjectModelSettings(settingRows, credentials, orgs, catalog, offeringPlatform());
+        DecisionProviderResolver deployment = new DecisionProviderResolver(settings, credentials, box, orgs) {
+            @Override
+            public Optional<DecisionTarget> resolve(String projectId, ModelLane lane) {
+                throw new IllegalStateException("no credit left");
+            }
+        };
+
+        assertTrue(deployment.hasProvider(PID, ModelLane.FRUSTRATION));
+    }
+
+    private static PlatformProviderSupplier offeringPlatform() {
+        return new PlatformProviderSupplier() {
+            @Override
+            public boolean available(String orgId) {
+                return true;
+            }
+
+            @Override
+            public Optional<SuppliedProvider> describe(String orgId) {
+                return Optional.of(new SuppliedProvider("Tessary AI", null));
+            }
+        };
     }
 
     @Test

@@ -87,7 +87,7 @@ const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
   no_credit: {
     label: "No credit left",
     explained:
-      "This organization has used all of its credit for the provider this classifier runs on, so no messages are being scored. Add a key of your own under Settings, Providers, then retry.",
+      "This organization has used all of its credit on the provider this classifier runs on, so no messages are being scored. Top up that provider, or add another key under Settings, Providers, then retry.",
   },
   platform_unavailable: {
     label: "Provider unavailable",

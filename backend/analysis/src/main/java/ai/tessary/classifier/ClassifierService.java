@@ -453,17 +453,17 @@ public class ClassifierService {
      * Enable or disable a signal definition. Guarded by {@link #get} first, so a withheld
      * built-in 404s instead of being written and then 404ing on the read back.
      *
-     * <p>Frustration spends the org's own provider credit, so enabling it without a key its lane can
-     * run on is refused with {@link ClassifierError#PROVIDER_REQUIRED} rather than accepted and paused on
-     * the first sweep. A lane on the deployment's own provider with no credit left is refused with the
-     * deployment's own error, which the resolver throws. Any enable clears a pause: it is how a person says "try again", and the next
+     * <p>Frustration calls a provider, so enabling it without one its lane can run on is refused with
+     * {@link ClassifierError#PROVIDER_REQUIRED} rather than accepted and paused on the first sweep. Credit is
+     * not asked about: on and able to run are separate, and a provider with no credit left pauses the sweep
+     * as {@code no_credit}. Any enable clears a pause: it is how a person says "try again", and the next
      * sweep pauses again if the provider still refuses.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
         ClassifierRow row = get(projectId, id); // tenant + existence + capability guard
         if (enabled
                 && BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
-                && decisionProviders.resolve(projectId, ModelLane.FRUSTRATION).isEmpty()) {
+                && !decisionProviders.hasProvider(projectId, ModelLane.FRUSTRATION)) {
             throw new TessaryException(ClassifierError.PROVIDER_REQUIRED, row.name());
         }
         if (signals.setEnabled(projectId, id, enabled) == 0) {
