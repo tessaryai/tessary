@@ -35,6 +35,8 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code POST /user_management/authenticate} (grant_type=refresh_token)</li>
  *   <li>{@code POST /user_management/invitations} — sends an invitation email</li>
  *   <li>{@code POST /user_management/invitations/{id}/revoke} — revokes a pending invitation</li>
+ *   <li>{@code GET /user_management/sessions/logout?...} — the browser is sent here to end the
+ *       AuthKit session</li>
  * </ul>
  *
  * <p>The {@code /authenticate} endpoint authenticates by carrying the API key as
@@ -73,6 +75,12 @@ public class WorkOsClient implements AuthProvider {
                 + "&provider=authkit"
                 + (state != null && !state.isBlank() ? "&state=" + enc(state) : "");
         return BASE + "/user_management/authorize?" + qs;
+    }
+
+    @Override
+    public String signOutUrl(@Nullable String sessionId, String returnTo) {
+        if (sessionId == null) return returnTo;
+        return BASE + "/user_management/sessions/logout?session_id=" + enc(sessionId) + "&return_to=" + enc(returnTo);
     }
 
     /** Exchange an authorization code for tokens + user. */

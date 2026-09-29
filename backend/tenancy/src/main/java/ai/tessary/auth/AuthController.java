@@ -52,7 +52,8 @@ import org.springframework.web.servlet.view.RedirectView;
  * <pre>
  *   GET  /auth/login?returnTo=...  → 302 to WorkOS AuthKit (returnTo stashed in a cookie)
  *   GET  /auth/callback?code=...   → exchange code, seal session cookie, 302 to returnTo
- *   GET  /auth/logout              → expire cookie, 302 to frontend home
+ *   POST /auth/logout              → expire cookie, name where the browser goes next (the
+ *                                    provider's own sign-out when it keeps a session)
  *   GET  /auth/me                  → current user + memberships, or 401 ApiResponse envelope
  *   POST /auth/signup {email,password} → create + sign in a local account, 200
  *   POST /auth/login  {email,password} → sign in a local account, 200
@@ -258,7 +259,8 @@ public class AuthController {
                 r.refreshToken(),
                 r.accessTokenExpiresAt().toString(),
                 user.workosUserId(),
-                r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId());
+                r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId(),
+                r.sessionId());
         String setCookie = buildCookie(
                         authProps.getCookieName(),
                         cipher.seal(session),
@@ -352,7 +354,8 @@ public class AuthController {
                 r.refreshToken(),
                 r.accessTokenExpiresAt().toString(),
                 user.workosUserId(),
-                r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId());
+                r.organizationId() != null ? r.organizationId() : defaultOrg.workosOrgId(),
+                r.sessionId());
         String setCookie = buildCookie(
                         authProps.getCookieName(),
                         cipher.seal(session),
@@ -394,16 +397,28 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout() {
+    public ResponseEntity<?> logout(HttpServletRequest req) {
         // POST-only: a GET logout endpoint could be triggered by <img src> or
         // any cross-site navigation. Max-Age=0 same name/path tells the
         // browser to drop the cookie. We return a small JSON body and let the
         // frontend navigate; sending a 302 in a fetch() response would chase
         // the browser into an opaque redirect.
+        SealedSession session = readSession(req);
+        String sessionId = session != null ? session.sessionId() : null;
+        String next = provider.signOutUrl(sessionId, authProps.getFrontendUrl());
+        log.info("auth/logout: signed out, provider session id {}", sessionId != null ? "present" : "absent");
         String kill = buildCookie(authProps.getCookieName(), "", Duration.ZERO).toString();
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, kill)
-                .body(ApiResponse.ok(Map.of("frontendUrl", authProps.getFrontendUrl())));
+                .body(ApiResponse.ok(Map.of("frontendUrl", next)));
+    }
+
+    private @Nullable SealedSession readSession(HttpServletRequest req) {
+        if (req.getCookies() == null) return null;
+        for (Cookie c : req.getCookies()) {
+            if (authProps.getCookieName().equals(c.getName())) return cipher.unseal(c.getValue());
+        }
+        return null;
     }
 
     @GetMapping("/me")

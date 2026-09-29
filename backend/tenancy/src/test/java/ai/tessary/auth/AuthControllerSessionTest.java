@@ -267,7 +267,8 @@ class AuthControllerSessionTest {
         assertEquals(location, res.getHeader("Location"), "a malformed return-to falls back to the frontend");
         Cookie session = Objects.requireNonNull(cookie(res, "sid"));
         assertEquals(
-                new SealedSession("rt_1", EXPIRES.toString(), "wos_1", sessionOrg), cipher.unseal(session.getValue()));
+                new SealedSession("rt_1", EXPIRES.toString(), "wos_1", sessionOrg, null),
+                cipher.unseal(session.getValue()));
         assertEquals(
                 session.getValue() + " maxAge=604800 path=/ secure=true httpOnly=true sameSite=Lax",
                 describe(session),
@@ -320,9 +321,26 @@ class AuthControllerSessionTest {
 
     @Test
     void logout_expiresTheSessionCookieAndNamesTheFrontend() throws Exception {
+        when(provider.signOutUrl(null, "https://app.example.com/")).thenReturn("https://app.example.com/");
+
         MockHttpServletResponse res = mvc.perform(post("/auth/logout"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.frontendUrl").value("https://app.example.com/"))
+                .andReturn()
+                .getResponse();
+
+        assertEquals(KILLED, describe(cookie(res, "sid")));
+    }
+
+    @Test
+    void logout_sendsTheBrowserThroughTheProvidersSignOutForTheSealedSession() throws Exception {
+        String sealed = cipher.seal(new SealedSession("rt_1", EXPIRES.toString(), "wos_1", "org_1", "session_1"));
+        when(provider.signOutUrl("session_1", "https://app.example.com/"))
+                .thenReturn("https://idp.example/logout?session_id=session_1");
+
+        MockHttpServletResponse res = mvc.perform(post("/auth/logout").cookie(new Cookie("sid", sealed)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.frontendUrl").value("https://idp.example/logout?session_id=session_1"))
                 .andReturn()
                 .getResponse();
 

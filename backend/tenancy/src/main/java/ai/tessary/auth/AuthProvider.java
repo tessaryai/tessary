@@ -2,7 +2,10 @@
 package ai.tessary.auth;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -56,6 +59,15 @@ public interface AuthProvider {
     }
 
     /**
+     * Where the browser goes to finish signing out. A provider that keeps its own sign-in session
+     * (WorkOS AuthKit) must end it here too, or the next sign-in is answered from that session
+     * without asking and the user lands straight back in the app.
+     */
+    default String signOutUrl(@Nullable String sessionId, String returnTo) {
+        return returnTo;
+    }
+
+    /**
      * Create an account from an email/password pair. Defaults to a clean 4xx via
      * {@link AuthException} so a stray {@code POST /auth/signup} while a redirect-flow provider
      * (WorkOS) is active fails predictably instead of needing every implementation to know about
@@ -104,6 +116,29 @@ public interface AuthProvider {
                             ? null
                             : body.path("organization_id").asText());
         }
+
+        /**
+         * The provider's session id, the {@code sid} claim of a WorkOS access token. The signature
+         * is not checked: the token came straight from the provider's authenticate response over
+         * TLS, and the id is only ever handed back to that provider. Null for a token that is not a
+         * JWT, such as {@link PasswordAuthProvider}'s placeholder.
+         */
+        public @Nullable String sessionId() {
+            if (accessToken == null) return null;
+            String[] parts = accessToken.split("\\.", -1);
+            if (parts.length != 3) return null;
+            try {
+                byte[] payload = Base64.getUrlDecoder().decode(parts[1]);
+                JsonNode sid = JWT_READER
+                        .readTree(new String(payload, StandardCharsets.UTF_8))
+                        .path("sid");
+                return sid.isTextual() ? sid.asText() : null;
+            } catch (IllegalArgumentException | java.io.IOException e) {
+                return null;
+            }
+        }
+
+        private static final ObjectMapper JWT_READER = new ObjectMapper();
 
         public @Nullable String displayName() {
             if (firstName == null && lastName == null) return email;

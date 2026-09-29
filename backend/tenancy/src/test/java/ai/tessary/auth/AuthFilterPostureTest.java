@@ -248,7 +248,7 @@ class AuthFilterPostureTest {
         // to exactly what it was before that refactor.
         var cipher = mock(SessionCipher.class);
         var session = new SealedSession(
-                "refresh-token", java.time.Instant.now().plusSeconds(3600).toString(), "workos-user-1", null);
+                "refresh-token", java.time.Instant.now().plusSeconds(3600).toString(), "workos-user-1", null, null);
         when(cipher.unseal(org.mockito.ArgumentMatchers.any())).thenReturn(session);
 
         var users = mock(PrincipalRepository.class);
@@ -334,7 +334,7 @@ class AuthFilterPostureTest {
             @org.jspecify.annotations.Nullable String expiresAt,
             String workosUserId) {
         return new jakarta.servlet.http.Cookie(
-                "sid", CIPHER.seal(new SealedSession(refreshToken, expiresAt, workosUserId, "org_old")));
+                "sid", CIPHER.seal(new SealedSession(refreshToken, expiresAt, workosUserId, "org_old", "session_old")));
     }
 
     static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> untrustedCookies() {
@@ -416,7 +416,9 @@ class AuthFilterPostureTest {
                 new TenantContext("usr_1", "ada@example.com", null, null, null, null),
                 req.getAttribute(TenantContext.ATTRIBUTE));
         jakarta.servlet.http.Cookie reissued = java.util.Objects.requireNonNull(res.getCookie("sid"));
-        assertEquals(new SealedSession("rt_2", FAR_FUTURE, sealedUser, sealedOrg), CIPHER.unseal(reissued.getValue()));
+        assertEquals(
+                new SealedSession("rt_2", FAR_FUTURE, sealedUser, sealedOrg, "session_old"),
+                CIPHER.unseal(reissued.getValue()));
         assertEquals(
                 "maxAge=604800 path=/ secure=true httpOnly=true sameSite=Lax",
                 "maxAge=" + reissued.getMaxAge() + " path=" + reissued.getPath() + " secure=" + reissued.getSecure()
