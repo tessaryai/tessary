@@ -310,7 +310,8 @@ public class AuthFilter extends OncePerRequestFilter {
                     r.refreshToken(),
                     r.accessTokenExpiresAt().toString(),
                     r.workosUserId() != null ? r.workosUserId() : old.workosUserId(),
-                    r.organizationId() != null ? r.organizationId() : old.organizationId());
+                    r.organizationId() != null ? r.organizationId() : old.organizationId(),
+                    r.sessionId() != null ? r.sessionId() : old.sessionId());
             // Tomcat's Cookie.setAttribute("SameSite", ...) path is unreliable
             // combined with ResponseEntity; emit Set-Cookie via ResponseCookie.
             ResponseCookie c = ResponseCookie.from(authProps.getCookieName(), cipher.seal(fresh))

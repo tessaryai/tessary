@@ -108,6 +108,41 @@ class WorkOsClientTest {
     }
 
     @Test
+    void signOutUrl_endsTheAuthKitSessionThenReturnsToTheApp_orGoesStraightBackWithoutOne() {
+        assertEquals(
+                "https://api.workos.com/user_management/sessions/logout?session_id=session_1"
+                        + "&return_to=https%3A%2F%2Fapp.example.com%2F",
+                client().signOutUrl("session_1", "https://app.example.com/"));
+        assertEquals("https://app.example.com/", client().signOutUrl(null, "https://app.example.com/"));
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            nullValues = "NULL",
+            value = {
+                "'{\"sub\":\"wos_1\",\"sid\":\"session_1\"}', session_1",
+                "'{\"sub\":\"wos_1\"}', NULL",
+                "'{\"sid\":7}', NULL"
+            })
+    void sessionId_isTheSidClaimOfAJwtAccessToken(String claims, @org.jspecify.annotations.Nullable String sid) {
+        java.util.Base64.Encoder b64 = java.util.Base64.getUrlEncoder().withoutPadding();
+        String jwt = b64.encodeToString("{\"alg\":\"RS256\"}".getBytes(StandardCharsets.UTF_8)) + "."
+                + b64.encodeToString(claims.getBytes(StandardCharsets.UTF_8)) + ".sig";
+
+        assertEquals(sid, tokenResult(jwt).sessionId());
+    }
+
+    @ParameterizedTest
+    @CsvSource(nullValues = "NULL", value = {"local-session", "a.!!!.c", "a.e30.c.d", "NULL"})
+    void sessionId_isNullForATokenThatIsNotAJwt(@org.jspecify.annotations.Nullable String token) {
+        assertEquals(null, tokenResult(token).sessionId());
+    }
+
+    private static AuthResult tokenResult(@org.jspecify.annotations.Nullable String accessToken) {
+        return new AuthResult(accessToken, null, Instant.EPOCH, "wos_1", null, null, null, null, null);
+    }
+
+    @Test
     void authenticateWithCode_sendsTheSecretInTheBodyAndParsesTheSession() throws Exception {
         answer(200, """
                 {"access_token":"at_1","refresh_token":"rt_1","expires_in":120,"organization_id":"org_9",

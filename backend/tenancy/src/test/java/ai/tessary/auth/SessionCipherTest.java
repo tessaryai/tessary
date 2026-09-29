@@ -34,7 +34,7 @@ class SessionCipherTest {
     }
 
     private static SealedSession sample() {
-        return new SealedSession("ref_XYZ", "2026-05-12T12:00:00Z", "user_42", "org_1");
+        return new SealedSession("ref_XYZ", "2026-05-12T12:00:00Z", "user_42", "org_1", "session_1");
     }
 
     @Test
