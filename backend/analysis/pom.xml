@@ -63,12 +63,13 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <!-- HELD at 1.x. 3.x removes com.networknt.schema.resource.DisallowSchemaLoader, which is
-                 how MalformedOutputDetector blocks REMOTE $ref resolution: a stored call-site schema
-                 must never make the classifier fetch a URL. 3.x replaces it with a ResourceLoader
-                 SPI, and getting that wrong silently re-enables network fetches rather than failing
-                 loudly — so the bump needs a deliberate migration with a test proving a remote $ref
-                 still refuses to resolve, not a version edit. -->
+            <!-- 3.x has no DisallowSchemaLoader. MalformedOutputDetector blocks every IRI on its
+                 SchemaLoader instead (fetchRemoteResources(false) plus block(iri -> true)): a stored
+                 call-site schema must never make the classifier fetch a URL or read a file.
+                 MalformedOutputDetectorTest#refSchemasAreNeverFetched_treatedAsNoneDeclared proves it
+                 against a live local server, so a later bump that re-enables fetching fails loudly.
+                 3.x reads through Jackson 3 (tools.jackson), already on the app classpath via
+                 logstash-logback-encoder; it adds jackson-dataformat-yaml 3.x to the image. -->
             <version>3.0.7</version>
         </dependency>
         <dependency>

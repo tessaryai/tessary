@@ -8,13 +8,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.substrate.CallSiteSchemaReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
+import com.networknt.schema.resource.SchemaLoader;
+import com.sun.net.httpserver.HttpServer;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Unit coverage for the Malformed Output built-in: schema violations and non-JSON outputs fire,
@@ -158,13 +169,72 @@ class MalformedOutputDetectorTest {
         assertTrue(ds.get(1).fired(), "a violating bare array payload fires");
     }
 
+    /**
+     * SSRF guard: an agent-authored schema whose $ref points anywhere outside itself (IMDS, a local
+     * port, the host's files) must never be fetched. A live local server serves a schema the output
+     * violates, so a fetch would both show up as a hit and make the detector fire. The control half
+     * proves the harness can see a fetch: networknt's remote fetcher, pointed at the same server, hits it.
+     */
     @Test
-    void remoteRefSchemaIsNeverFetched_treatedAsNoneDeclared() {
-        // SSRF guard: an agent-authored schema pointing $ref at IMDS (or any remote IRI) must not
-        // trigger a network fetch — DisallowSchemaLoader makes it fail compile, i.e. quiet skip.
-        MalformedOutputDetector d = detector(Map.of("cs-1", "{\"$ref\":\"http://169.254.169.254/latest/meta-data\"}"));
-        List<Detection> ds = d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}")), null);
-        assertFalse(ds.get(0).fired(), "a remote-$ref schema is uncompilable, never fetched");
+    void refSchemasAreNeverFetched_treatedAsNoneDeclared(@TempDir Path dir) throws Exception {
+        String served = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}";
+        AtomicInteger hits = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            hits.incrementAndGet();
+            byte[] body = served.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/schema.json";
+            Path file = Files.writeString(dir.resolve("schema.json"), served);
+            MalformedOutputDetector d = detector(Map.of(
+                    "cs-http", "{\"$ref\":\"" + url + "\"}",
+                    "cs-file", "{\"$ref\":\"" + file.toUri() + "\"}"));
+            List<Detection> ds =
+                    d.detectBatch(List.of(obs("cs-http", "{\"answer\":42}"), obs("cs-file", "{\"answer\":42}")), null);
+
+            assertFalse(ds.get(0).fired(), "an http $ref schema is uncompilable, never fetched");
+            assertFalse(ds.get(1).fired(), "a file: $ref schema is uncompilable, never read");
+            assertEquals(0, hits.get(), "the detector made no request");
+
+            SchemaRegistry fetching = SchemaRegistry.withDefaultDialect(
+                    SpecificationVersion.DRAFT_2020_12, b -> b.schemaLoader(SchemaLoader.getRemoteFetcher()));
+            fetching.getSchema("{\"$ref\":\"" + url + "\"}").initializeValidators();
+            assertEquals(1, hits.get(), "control: a fetching registry does reach the server");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void refsInsideTheSchemaStillResolve() {
+        MalformedOutputDetector d = detector(Map.of(
+                "cs-1",
+                "{\"$id\":\"https://example.com/answer\",\"$defs\":{\"answer\":{\"type\":\"string\"}},"
+                        + "\"type\":\"object\",\"properties\":{\"answer\":{\"$ref\":\"#/$defs/answer\"}}}"));
+        List<Detection> ds =
+                d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}"), obs("cs-1", "{\"answer\":\"yes\"}")), null);
+        assertTrue(ds.get(0).fired(), "a $ref into the schema's own $defs is enforced");
+        assertFalse(ds.get(1).fired());
+    }
+
+    @Test
+    void violationFieldCollapsesArrayIndexes() {
+        MalformedOutputDetector d = detector(Map.of(
+                "cs-1",
+                "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":"
+                        + "{\"type\":\"object\",\"properties\":{\"sku\":{\"type\":\"string\"}},"
+                        + "\"required\":[\"qty\"]}}}}"));
+        Detection fired = d.detect(obs("cs-1", "{\"items\":[{\"sku\":\"a\",\"qty\":1},{\"sku\":2}]}"), null);
+        String evidence = Objects.requireNonNull(fired.evidenceJson());
+        assertTrue(evidence.contains("\"field\":\"items[].sku\""), evidence);
+        assertTrue(evidence.contains("\"path\":\"$.items[].sku\""), evidence);
+        assertTrue(evidence.contains("\"field\":\"items[].qty\""), "required names the missing property: " + evidence);
     }
 
     /**
