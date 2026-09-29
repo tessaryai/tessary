@@ -41,7 +41,7 @@
         <java.version>25</java.version>
         <!-- Formatting toolchain (build-time only; never on the runtime classpath). Declared here
              rather than in `app` because Spotless is bound for EVERY module below. -->
-        <spotless.version>3.10.1</spotless.version>
+        <spotless.version>3.10.2</spotless.version>
         <palantir-java-format.version>2.91.0</palantir-java-format.version>
         <docker.api.version>1.44</docker.api.version>
         <error-prone.version>2.50.0</error-prone.version>
