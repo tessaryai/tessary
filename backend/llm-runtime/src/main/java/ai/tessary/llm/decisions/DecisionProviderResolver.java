@@ -60,7 +60,7 @@ public class DecisionProviderResolver {
                 || credentials
                         .findByOrgAndProvider(orgId, provider)
                         .map(ProviderCredential::apiKeySealed)
-                        .filter(sealed -> !sealed.isBlank())
+                        .filter(key -> !key.isBlank())
                         .isPresent();
     }
 
