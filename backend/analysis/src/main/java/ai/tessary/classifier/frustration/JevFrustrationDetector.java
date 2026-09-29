@@ -268,7 +268,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (outcome == null) continue;
             sent.add(new Sent(eligibleTurns.get(i), eligible.get(i), eligibleFacts.get(i), outcome));
         }
-        boolean rejected = sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()));
+        boolean rejected =
+                sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()));
         if (rejected || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
             // The platform provider's key is the deployment's, so its refusal or empty balance is not the org's
             // to fix. The org's own credit running out is no_credit, the same pause as the deployment's provider.
