@@ -110,20 +110,31 @@ class ModelCatalogTest {
     }
 
     @Test
+    void decisionPricingIdPricesEveryJevRouteUnderTheSameBookKey() {
+        assertEquals("typesafe/jev-latest", ModelCatalog.decisionPricingId(ModelProvider.TYPESAFE, "jev-latest"));
+        assertEquals(
+                "typesafe/jev-latest",
+                ModelCatalog.decisionPricingId(ModelProvider.OPENROUTER, "~typesafe/jev-latest"));
+        assertEquals(
+                "typesafe/jev-latest", ModelCatalog.decisionPricingId(ModelProvider.PLATFORM, "~typesafe/jev-latest"));
+    }
+
+    @Test
     void mergeLiveDropsPinnedJevVersionsFromAnOpenRouterListing_keepingTheStaticEntry() {
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
                 ModelProvider.OPENROUTER,
                 List.of(
-                        new ProviderModel("typesafe/jev-latest", "TypeSafe: Jev", "TypeSafe"),
-                        new ProviderModel("typesafe/jev-1.13-20260917", "TypeSafe: Jev 1.13", "TypeSafe")));
+                        new ProviderModel("~typesafe/jev-latest", "TypeSafe: Jev Latest", "TypeSafe"),
+                        new ProviderModel("typesafe/jev-1.13", "TypeSafe: Jev 1.13", "TypeSafe"),
+                        new ProviderModel("typesafe/jev-router", "TypeSafe: Jev Router", "TypeSafe")));
 
         List<String> jev = merged.stream()
                 .map(ModelCatalog.CatalogEntry::modelName)
-                .filter(n -> n.startsWith("typesafe/"))
+                .filter(n -> n.contains("typesafe/"))
                 .toList();
-        assertEquals(List.of("typesafe/jev-latest"), jev);
+        assertEquals(List.of("~typesafe/jev-latest"), jev);
         assertTrue(merged.stream()
-                .filter(e -> e.modelName().equals("typesafe/jev-latest"))
+                .filter(e -> e.modelName().equals("~typesafe/jev-latest"))
                 .allMatch(ModelCatalog.CatalogEntry::decision));
     }
 }

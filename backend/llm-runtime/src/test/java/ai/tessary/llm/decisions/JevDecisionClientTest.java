@@ -87,7 +87,7 @@ class JevDecisionClientTest {
     private static DecisionTarget openrouter() {
         return new DecisionTarget(
                 ModelProvider.OPENROUTER,
-                "typesafe/jev-latest",
+                "~typesafe/jev-latest",
                 DecisionTarget.endpointFor(ModelProvider.OPENROUTER, null),
                 "or-key");
     }
@@ -95,7 +95,7 @@ class JevDecisionClientTest {
     private static DecisionTarget platform() {
         return new DecisionTarget(
                 ModelProvider.PLATFORM,
-                "typesafe/jev-latest",
+                "~typesafe/jev-latest",
                 URI.create("https://openrouter.ai/api/alpha/decisions"),
                 "platform-key");
     }
@@ -186,7 +186,7 @@ class JevDecisionClientTest {
                 .recordDecisionCall(
                         eq("p1"),
                         eq("frustration"),
-                        eq("typesafe/jev-latest"),
+                        eq("~typesafe/jev-latest"),
                         eq(false),
                         eq(1000),
                         eq(12),
@@ -206,7 +206,7 @@ class JevDecisionClientTest {
                 .recordDecisionCall(
                         eq("p1"),
                         eq("frustration"),
-                        eq("typesafe/jev-latest"),
+                        eq("~typesafe/jev-latest"),
                         eq(true),
                         eq(1000),
                         eq(12),
@@ -219,7 +219,7 @@ class JevDecisionClientTest {
     void requestBody_isModelStateAndQuestionsInTheDocumentedShape() throws Exception {
         ObjectNode body = client().requestBody(openrouter(), request());
 
-        assertEquals("typesafe/jev-latest", body.path("model").asText());
+        assertEquals("~typesafe/jev-latest", body.path("model").asText());
         assertEquals(
                 "that is wrong again",
                 body.path("state").path("current_user_message").asText());

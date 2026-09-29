@@ -91,8 +91,8 @@ const SETTINGS: ModelSettingsResponse = {
         {
           provider: "OPENROUTER",
           label: "OpenRouter",
-          model_keys: ["OPENROUTER:typesafe/jev-latest"],
-          default_model_key: "OPENROUTER:typesafe/jev-latest",
+          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
       ],
       effective_model_key: "TYPESAFE:jev-latest",
@@ -103,7 +103,7 @@ const SETTINGS: ModelSettingsResponse = {
   catalog_models: [
     entry("OPENROUTER", "openai/gpt-5.6-terra", { agentic: true }),
     entry("TYPESAFE", "jev-latest", { decision: true }),
-    entry("OPENROUTER", "typesafe/jev-latest", { decision: true }),
+    entry("OPENROUTER", "~typesafe/jev-latest", { decision: true }),
   ],
   rates: [],
   settings: [],

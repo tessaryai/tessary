@@ -106,8 +106,8 @@ public final class LanePriority {
     private static final String GLM_5_3_FLASH = "GLM:glm-5.3-flash";
     // TypeSafe's Jev decision model, direct and over OpenRouter.
     private static final String JEV = "TYPESAFE:jev-latest";
-    private static final String OR_JEV = "OPENROUTER:typesafe/jev-latest";
-    private static final String PLATFORM_JEV = "PLATFORM:typesafe/jev-latest";
+    private static final String OR_JEV = "OPENROUTER:~typesafe/jev-latest";
+    private static final String PLATFORM_JEV = "PLATFORM:~typesafe/jev-latest";
 
     /**
      * Last on every lane, because the entry stands for "whatever model this endpoint serves" rather

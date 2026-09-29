@@ -490,7 +490,7 @@ class JevFrustrationDetectorTest {
         when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
                 .thenReturn(Optional.of(new DecisionTarget(
                         ModelProvider.PLATFORM,
-                        "typesafe/jev-latest",
+                        "~typesafe/jev-latest",
                         URI.create("https://openrouter.ai/api/alpha/decisions"),
                         "platform-key")));
         client.fail("t-broke", DecisionError.PROVIDER_NO_CREDIT);
@@ -542,7 +542,7 @@ class JevFrustrationDetectorTest {
             when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
                     .thenReturn(Optional.of(new DecisionTarget(
                             ModelProvider.PLATFORM,
-                            "typesafe/jev-latest",
+                            "~typesafe/jev-latest",
                             URI.create("https://openrouter.ai/api/alpha/decisions"),
                             "platform-key")));
             client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
