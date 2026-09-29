@@ -8,8 +8,10 @@ import org.springframework.http.HttpStatus;
  * to TypeSafe's Jev directly, over OpenRouter, or on the deployment's own provider.
  */
 public enum DecisionError implements ErrorCode {
-    /** 401, 402 or 403: the key was refused or has no funds. Retrying cannot help until that changes. */
+    /** 401 or 403: the key was refused. Retrying cannot help until it changes. */
     PROVIDER_REJECTED(HttpStatus.BAD_GATEWAY, "Decision provider %s rejected the key (HTTP %s)"),
+    /** 402: the key has no credit left. Retrying cannot help until it is topped up. */
+    PROVIDER_NO_CREDIT(HttpStatus.BAD_GATEWAY, "Decision provider %s has no credit left on the key (HTTP %s)"),
     /** 429, 5xx or a transport failure that outlasted every retry. */
     PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "Decision provider %s is unavailable: %s"),
     /** Any other 4xx: the provider refused this request, and sending it again would be refused too. */

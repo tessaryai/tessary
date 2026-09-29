@@ -38,7 +38,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>429, 5xx and transport failures are retried with exponential back-off and jitter, honouring
  * {@code Retry-After}; 401, 402 and 403 are not, since only a new key, or funds on it, can change the
- * answer.
+ * answer. 402 is its own error, so a key with no credit reads differently from a refused one.
  *
  * <p>A call on {@link ModelProvider#PLATFORM} is booked platform-funded: the deployment pays the provider
  * and recovers it from the org's credit. Every other call is on the org's own key.
@@ -199,7 +199,10 @@ public class JevDecisionClient implements DecisionClient {
             }
             int status = response.statusCode();
             if (status / 100 == 2) return response.body();
-            if (status == 401 || status == 402 || status == 403) {
+            if (status == 402) {
+                throw new TessaryException(DecisionError.PROVIDER_NO_CREDIT, target.provider(), status);
+            }
+            if (status == 401 || status == 403) {
                 throw new TessaryException(DecisionError.PROVIDER_REJECTED, target.provider(), status);
             }
             if (status == 429 || status >= 500) {

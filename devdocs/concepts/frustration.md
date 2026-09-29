@@ -15,15 +15,17 @@ The scorer is TypeSafe's Jev, called on the org's own OpenRouter or TypeSafe key
 eligible user turn. That spends the org's credit, so the built-in seeds disabled (catalog
 `defaultEnabled = false`, migration `0022` for rows that existed before) and a person turns it on
 through the enable modal, which takes the key and sets the `frustration` lane. Enabling without a key
-the lane can run on is refused (`PROVIDER_REQUIRED`). A key the provider refuses, or no key at all,
-pauses the classifier (`provider_rejected`, `no_provider`); a paused sweep sends nothing and skips what
-it passes, and saving the key or pressing Retry lifts the pause.
+the lane can run on is refused (`PROVIDER_REQUIRED`); credit is not checked at enable. A key the
+provider refuses, a key with no funds left, or no key at all pauses the classifier (`provider_rejected`,
+`no_credit`, `no_provider`); a paused sweep sends nothing and skips what it passes, and saving the key or
+pressing Retry lifts the pause.
 
 A build that supplies `PLATFORM` (see [provider-keys.md](../guides/provider-keys.md)) can also run the
 lane on its own key, last in the lane's order, so an org's own key always wins. Those calls are booked
-platform-funded. An org with no credit left for it pauses as `no_credit`, and a refusal of the
-deployment's key pauses as `platform_unavailable`, which also logs an error for the operator. This
-build supplies no `PLATFORM`, so neither pause happens here.
+platform-funded. An org with no credit left for it pauses as `no_credit`, the same pause as its own key
+running dry, and a refusal of the deployment's key, or that key running dry, pauses as
+`platform_unavailable`, which also logs an error for the operator. This build supplies no `PLATFORM`,
+so `platform_unavailable` never happens here.
 
 It is not a per-observation LLM call in the catalog's cost sense: it is a hosted classifier call, and
 only a filtered subset of turns reaches it.

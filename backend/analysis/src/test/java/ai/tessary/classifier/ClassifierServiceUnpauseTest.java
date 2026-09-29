@@ -70,6 +70,21 @@ class ClassifierServiceUnpauseTest {
         verify(signals, never()).unpause(PID, "cls-f");
     }
 
+    /** Enabling asks whether the lane has a provider, not whether it has credit: a sweep pauses it as no_credit. */
+    @Test
+    void enablingFrustrationOnAProviderWithNoCreditLeftIsAccepted() {
+        when(projects.findById(PID))
+                .thenReturn(Optional.of(new Project(PID, ORG, "p", "P", null, "t0", null, null, true, null)));
+        when(signals.findById(PID, "cls-f")).thenReturn(Optional.of(frustration()));
+        when(signals.setEnabled(PID, "cls-f", true)).thenReturn(1);
+        when(decisionProviders.hasProvider(PID, ModelLane.FRUSTRATION)).thenReturn(true);
+        when(decisionProviders.resolve(PID, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+
+        service.setEnabled(PID, "cls-f", true);
+
+        verify(signals).setEnabled(PID, "cls-f", true);
+    }
+
     private static ClassifierRow frustration() {
         return new ClassifierRow(
                 "cls-f",

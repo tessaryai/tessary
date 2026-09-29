@@ -4,7 +4,7 @@ package ai.tessary.classifier;
 import java.time.Instant;
 
 /**
- * Why a classifier that calls a provider on the org's own key has stopped calling it, and since when.
+ * Why a classifier that calls a provider has stopped calling it, and since when.
  * A paused sweep sends nothing and advances past what it skipped; the next sweep past
  * {@code tessary.frustration.credential-retry-seconds} checks the key again.
  *
@@ -19,7 +19,10 @@ public record ClassifierPause(String reason, Instant pausedAt) {
     /** No key is configured for any provider the classifier's lane offers. */
     public static final String NO_PROVIDER = "no_provider";
 
-    /** The lane runs on the deployment's own provider and the org has no credit left for it. */
+    /**
+     * The org has no credit left on the provider the lane runs on: its own key answered 402, or the
+     * deployment's own provider has no credit left for the org. Both read the same way to the org.
+     */
     public static final String NO_CREDIT = "no_credit";
 
     /**

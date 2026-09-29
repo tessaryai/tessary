@@ -100,16 +100,18 @@ markup, if any, is not in the booked figure. OpenRouter's own reported cost is k
 raw response for audit. Only `jev-latest` is offered, with no pinned versions; the version that
 answered each call is recorded with it.
 
-A rejected key, or one with no funds (HTTP 401, 402 or 403), fails with `DECISION.PROVIDER_REJECTED` and
-is not retried.
+A rejected key (HTTP 401 or 403) fails with `DECISION.PROVIDER_REJECTED`, and a key with no funds (HTTP
+402) with `DECISION.PROVIDER_NO_CREDIT`. Neither is retried.
 
 The Providers page marks TypeSafe "Used by Frustration" (the catalog's `used_by` on that platform),
 since that is the only thing its key does. Enabling Frustration without a key its lane can run on is
-refused with `CLASSIFIER.PROVIDER_REQUIRED`; the Catalog's enable dialog picks the provider, takes the
-key when the org has none, and sets the lane before it enables. When the provider later refuses the
-key, or the key is deleted, the classifier pauses (`readiness` reads `provider_rejected` or
+refused with `CLASSIFIER.PROVIDER_REQUIRED`; credit is not checked, so a provider with no funds left
+still enables. The Catalog's enable dialog picks the provider, takes the key when the org has none, and
+sets the lane before it enables. When the provider later refuses the key, the key runs out of funds, or
+the key is deleted, the classifier pauses (`readiness` reads `provider_rejected`, `no_credit` or
 `no_provider`, shown on the Catalog row and rail) and sends nothing until the key works again. On
-`PLATFORM` the two pauses are `no_credit` and `platform_unavailable` instead. Saving
+`PLATFORM`, an org out of credit also pauses as `no_credit`, and a refusal of the deployment's own key
+pauses as `platform_unavailable`. Saving
 the key the lane runs on lifts the pause at once, as does the rail's Retry or any re-enable; otherwise
 the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
 

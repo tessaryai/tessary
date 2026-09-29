@@ -472,6 +472,35 @@ class JevFrustrationDetectorTest {
         }
     }
 
+    /** An own key out of credit reads the same as the deployment's provider out of credit: no_credit, not a bad key. */
+    @Test
+    void anOwnKeyWithNoCreditPausesAsNoCredit() {
+        client.fail("t-broke", DecisionError.PROVIDER_NO_CREDIT);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-broke", "conv-a")));
+
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(ClassifierPause.NO_CREDIT, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
+    }
+
+    /** The deployment's key running dry is the deployment's to fix, so the org is not told it has no credit. */
+    @Test
+    void theDeploymentsKeyWithNoCreditPausesAsPlatformUnavailable() {
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
+                .thenReturn(Optional.of(new DecisionTarget(
+                        ModelProvider.PLATFORM,
+                        "typesafe/jev-latest",
+                        URI.create("https://openrouter.ai/api/alpha/decisions"),
+                        "platform-key")));
+        client.fail("t-broke", DecisionError.PROVIDER_NO_CREDIT);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-broke", "conv-a")));
+
+        assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
+    }
+
     /** Out of platform credit is not "no key": the org has a provider, and adding a key is one of two ways out. */
     @Test
     void aResolverReportingNoPlatformCreditPausesAsNoCreditAndSendsNothing() {

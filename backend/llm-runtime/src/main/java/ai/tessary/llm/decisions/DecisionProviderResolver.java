@@ -23,6 +23,9 @@ import java.util.Optional;
  * {@link ModelProvider#PLATFORM} can extend this class and resolve that provider to a target of its
  * own. It may throw an exception implementing {@link ai.tessary.llm.PlatformCreditExhausted} when the
  * org has no credit left for it. This build never resolves {@code PLATFORM}: no credential row backs it.
+ *
+ * <p>{@link #hasProvider} answers only whether the lane has somewhere to run and never calls
+ * {@link #resolve}, so a subclass's credit check cannot reach it.
  */
 public class DecisionProviderResolver {
 
@@ -40,6 +43,25 @@ public class DecisionProviderResolver {
         this.credentials = credentials;
         this.secretBox = secretBox;
         this.orgResolver = orgResolver;
+    }
+
+    /**
+     * Whether the lane has a provider to run on: the org holds a key for it, or it is the deployment's
+     * own. Opens no key and asks nothing about credit, which is the difference from {@link #resolve}.
+     */
+    public boolean hasProvider(String projectId, ModelLane lane) {
+        String orgId = orgResolver.orgIdFor(projectId);
+        if (orgId == null) return false;
+        Optional<ProjectModelSettings.ResolvedDecisionModel> model = settings.resolveDecisionModel(projectId, lane);
+        if (model.isEmpty()) return false;
+        ModelProvider provider = model.get().provider();
+        // ProjectModelSettings offers PLATFORM only when the deployment supplies it to this org.
+        return provider == ModelProvider.PLATFORM
+                || credentials
+                        .findByOrgAndProvider(orgId, provider)
+                        .map(ProviderCredential::apiKeySealed)
+                        .filter(key -> !key.isBlank())
+                        .isPresent();
     }
 
     public Optional<DecisionTarget> resolve(String projectId, ModelLane lane) {

@@ -49,6 +49,7 @@ public class StubDecisionClientConfig {
                         "jev-latest",
                         URI.create("https://api.typesafe.ai/v1/systemone"),
                         "k")));
+        when(resolver.hasProvider(any(), any())).thenReturn(true);
         return resolver;
     }
 

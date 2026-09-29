@@ -154,13 +154,19 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
      * A call's outcome: an answer, or the failure that ended it.
      *
      * @param answer set on success
-     * @param failure set on failure: {@code unavailable}, {@code rejected} or {@code failed}
+     * @param failure set on failure: {@code unavailable}, {@code rejected}, {@code no_credit} or {@code failed}
      */
     public record Outcome(
             @Nullable DecisionAnswer answer, @Nullable String failure) {
         static final String UNAVAILABLE = "unavailable";
         static final String REJECTED = "rejected";
+        static final String NO_CREDIT = "no_credit";
         static final String FAILED = "failed";
+
+        /** A failure every later call on the same key would repeat, so the sweep stops sending. */
+        boolean stopsTheKey() {
+            return REJECTED.equals(failure) || NO_CREDIT.equals(failure);
+        }
     }
 
     /**
@@ -262,11 +268,15 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (outcome == null) continue;
             sent.add(new Sent(eligibleTurns.get(i), eligible.get(i), eligibleFacts.get(i), outcome));
         }
-        if (sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()))) {
-            // The platform provider's key is the deployment's, so its refusal is not the org's to fix.
-            String reason = target.provider() == ModelProvider.PLATFORM
-                    ? ClassifierPause.PLATFORM_UNAVAILABLE
-                    : ClassifierPause.PROVIDER_REJECTED;
+        boolean rejected =
+                sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()));
+        if (rejected || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
+            // The platform provider's key is the deployment's, so its refusal or empty balance is not the org's
+            // to fix. The org's own credit running out is no_credit, the same pause as the deployment's provider.
+            String reason;
+            if (target.provider() == ModelProvider.PLATFORM) reason = ClassifierPause.PLATFORM_UNAVAILABLE;
+            else if (rejected) reason = ClassifierPause.PROVIDER_REJECTED;
+            else reason = ClassifierPause.NO_CREDIT;
             classifiers.pause(projectId, signal.id(), reason, now);
             return new Page(Status.ABORTED, reason, eligible.size(), sent, threshold, scorerVersion);
         }
@@ -327,7 +337,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                         synchronized (outcomes) {
                             outcomes.set(i, outcome);
                         }
-                        if (Outcome.REJECTED.equals(outcome.failure())) return;
+                        if (outcome.stopsTheKey()) return;
                         DecisionAnswer answer = outcome.answer();
                         if (answer != null && score(answer) > threshold) return;
                     }
@@ -358,6 +368,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             return new Outcome(client.decide(projectId, LANE, target, request), null);
         } catch (TessaryException e) {
             if (e.error() == DecisionError.PROVIDER_REJECTED) return new Outcome(null, Outcome.REJECTED);
+            if (e.error() == DecisionError.PROVIDER_NO_CREDIT) return new Outcome(null, Outcome.NO_CREDIT);
             if (e.error() == DecisionError.PROVIDER_UNAVAILABLE) return new Outcome(null, Outcome.UNAVAILABLE);
             return new Outcome(null, Outcome.FAILED);
         }
@@ -457,7 +468,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
 
     private static String pauseCause(@Nullable String reason) {
         if (ClassifierPause.PROVIDER_REJECTED.equals(reason)) return "the provider rejected the org's key";
-        if (ClassifierPause.NO_CREDIT.equals(reason)) return "the org has no credit left for the platform provider";
+        if (ClassifierPause.NO_CREDIT.equals(reason)) return "the org has no credit left on the provider";
         if (ClassifierPause.PLATFORM_UNAVAILABLE.equals(reason)) {
             return "the platform provider rejected the deployment's key";
         }
