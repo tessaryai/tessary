@@ -206,10 +206,19 @@ public class FrustrationRateService implements ClassifierCatchUp {
             Spell spell,
             Instant windowFrom,
             Instant at) {
-        ToolErrorDetector.Decision d = spell.decision();
         String callSite = spell.toolKey();
         String now = at.toString();
         String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
+        String onset = spell.decision().onsetAt();
+        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
+        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
+        Instant until =
+                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
+        List<String> scored =
+                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        List<FrustratedConversation> frustrated = rates.frustratedSince(
+                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        ToolErrorDetector.Decision d = ToolErrorDetector.counted(spell.decision(), frustrated.size());
         String causeKey = CauseKey.frustration(signal.id(), callSite);
         String payload = FrustrationEvidence.payload(
                 mapper, callSite, d, spell.baseline().failures(), config);
@@ -258,18 +267,8 @@ public class FrustrationRateService implements ClassifierCatchUp {
             }
         }
 
-        String onset = d.onsetAt();
-        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
-        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
-        Instant until =
-                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
         List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
-        for (String session :
-                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until)) {
-            members.add(FindingEvidenceRepository.Ref.session(session));
-        }
-        List<FrustratedConversation> frustrated = rates.frustratedSince(
-                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        for (String session : scored) members.add(FindingEvidenceRepository.Ref.session(session));
         List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>(frustrated.size() * 2);
         for (FrustratedConversation c : frustrated) {
             witnesses.add(FindingEvidenceRepository.Ref.session(c.conversationId()));

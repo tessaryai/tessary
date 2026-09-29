@@ -127,7 +127,7 @@ class GroundednessRateReplayTest {
         ToolErrorDetector.Decision derived = new ToolErrorDetector.Decision(
                 true, Direction.UP, 14.1, 11.2, 1.26, 0.02, 0.30, 28.0, 0.62, calls, 30, 640, hour(10), null);
 
-        ToolErrorDetector.Decision counted = GroundednessRateService.counted(derived, flagged);
+        ToolErrorDetector.Decision counted = ToolErrorDetector.counted(derived, flagged);
 
         assertEquals(failures, counted.failuresSinceOnset());
         assertEquals(calls, counted.callsSinceOnset());

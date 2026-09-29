@@ -160,6 +160,34 @@ public final class ToolErrorDetector {
     }
 
     /**
+     * {@code d} with its failures counted rather than recovered. {@link #failuresFromS} is exact only when every
+     * hour of the run was judged against one reference. A reference that keeps learning while it judges ({@link
+     * ToolErrorConfig#learnsWhileJudging()}) judged a run that began before it froze against several, and the
+     * recovered count is off; the classifier's own witnesses are the count. The statistic, the threshold and the
+     * onset stay the engine's.
+     */
+    public static Decision counted(Decision d, long failures) {
+        long calls = d.callsSinceOnset();
+        long counted = Math.max(0, Math.min(calls, failures));
+        double current = calls == 0 ? d.baselineRate() : (double) counted / calls;
+        return new Decision(
+                d.fired(),
+                d.direction(),
+                d.statistic(),
+                d.threshold(),
+                d.criticality(),
+                d.baselineRate(),
+                current,
+                (current - d.baselineRate()) * 100.0,
+                cohensH(d.baselineRate(), current),
+                calls,
+                counted,
+                d.baselineCalls(),
+                d.onsetAt(),
+                d.silence());
+    }
+
+    /**
      * How critical a spell is, from the accumulated evidence alone. The ranking weight and the badge.
      *
      * <p>The accumulator at the moment of the alarm carries no information about size: it just crossed

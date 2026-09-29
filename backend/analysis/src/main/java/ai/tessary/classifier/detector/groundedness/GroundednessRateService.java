@@ -211,7 +211,7 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 rates.flaggedSince(projectId, signal.id(), scorerVersion, callSite, windowFrom, since, until);
         long flaggedTraces =
                 flagged.stream().map(FlaggedAnswer::traceId).distinct().count();
-        ToolErrorDetector.Decision d = counted(spell.decision(), flaggedTraces);
+        ToolErrorDetector.Decision d = ToolErrorDetector.counted(spell.decision(), flaggedTraces);
 
         FindingRepository.Recorded recorded = findings.recordRecomputedRate(
                 Ids.ulid(),
@@ -263,33 +263,5 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 .field("criticality", d.criticality())
                 .field("evidenceStored", stored)
                 .log();
-    }
-
-    /**
-     * {@code d} with its flagged traces counted rather than recovered. The engine derives a run's failures
-     * from its accumulator ({@link ToolErrorDetector#failuresFromS}), which is exact only when every hour of the
-     * run was judged against one reference. This reference keeps learning while it judges, so a run that began
-     * before it froze was judged against several, and the derived count is off; the witnesses are the count.
-     * The statistic, the threshold and the onset are the engine's own.
-     */
-    static ToolErrorDetector.Decision counted(ToolErrorDetector.Decision d, long flaggedTraces) {
-        long calls = d.callsSinceOnset();
-        long failures = Math.max(0, Math.min(calls, flaggedTraces));
-        double current = calls == 0 ? d.baselineRate() : (double) failures / calls;
-        return new ToolErrorDetector.Decision(
-                d.fired(),
-                d.direction(),
-                d.statistic(),
-                d.threshold(),
-                d.criticality(),
-                d.baselineRate(),
-                current,
-                (current - d.baselineRate()) * 100.0,
-                ToolErrorDetector.cohensH(d.baselineRate(), current),
-                calls,
-                failures,
-                d.baselineCalls(),
-                d.onsetAt(),
-                d.silence());
     }
 }
