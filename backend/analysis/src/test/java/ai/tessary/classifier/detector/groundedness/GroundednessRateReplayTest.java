@@ -36,7 +36,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The rate test over groundedness tallies: a trace is a trial and a flagged answer a failure, on {@link
- * GroundednessConfig}'s defaults (judged from 200 traces, learning until 1,000, {@code h} floor 4, one false alarm
+ * GroundednessConfig}'s defaults (judged from 100 traces, learning until 1,000, {@code h} floor 4, one false alarm
  * per 50,000 traces). Two flags in one trace counting once is the tally query's, held in {@code
  * GroundednessRateIntegrationTest}.
  */
@@ -78,9 +78,9 @@ class GroundednessRateReplayTest {
     }
 
     @Test
-    void aCallSiteStillBelow200TracesIsNotJudged() {
-        Sweep sweep = sweep(series(new ArrayList<>(), 0, 9, 0.50));
-        assertTrue(sweep.advanced().isEmpty(), "180 traces is still learning");
+    void aCallSiteStillBelow100TracesIsNotJudged() {
+        Sweep sweep = sweep(series(new ArrayList<>(), 0, 4, 0.50));
+        assertTrue(sweep.advanced().isEmpty(), "80 traces is still learning");
         assertTrue(sweep.spells().isEmpty());
     }
 
@@ -127,7 +127,7 @@ class GroundednessRateReplayTest {
         ToolErrorDetector.Decision derived = new ToolErrorDetector.Decision(
                 true, Direction.UP, 14.1, 11.2, 1.26, 0.02, 0.30, 28.0, 0.62, calls, 30, 640, hour(10), null);
 
-        ToolErrorDetector.Decision counted = GroundednessRateService.counted(derived, flagged);
+        ToolErrorDetector.Decision counted = ToolErrorDetector.counted(derived, flagged);
 
         assertEquals(failures, counted.failuresSinceOnset());
         assertEquals(calls, counted.callsSinceOnset());

@@ -36,12 +36,13 @@ import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * The rate test over frustration-shaped tallies: a conversation is a trial, a frustrated one a failure, and the
- * shared engine runs on {@link FrustrationConfig}'s defaults (a 200-conversation reference, a floor of 4 on
- * {@code h}, a 10,000-conversation false-alarm budget).
+ * shared engine runs on the operating point the catalog seeds (judged from 100 conversations, learning until 1,000,
+ * a floor of 4 on {@code h}, a 10,000-conversation false-alarm budget).
  */
 class FrustrationRateReplayTest {
 
-    private static final FrustrationConfig CONFIG = FrustrationConfig.defaults();
+    private static final FrustrationConfig CONFIG =
+            FrustrationConfig.of(new ObjectMapper(), "{\"freeze_baseline_conversations\":1000}");
     private static final String CALL_SITE = "cs-support-chat";
     private static final Instant START = Instant.parse("2026-08-01T00:00:00Z");
     private static final int PER_HOUR = 20;
@@ -72,18 +73,22 @@ class FrustrationRateReplayTest {
 
     @Test
     void aCallSiteStillLearningIsNotJudged() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 9, 0.50);
+        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 4, 0.50);
         Sweep sweep = sweep(s);
-        assertTrue(sweep.advanced().isEmpty(), "180 conversations is still learning");
+        assertTrue(sweep.advanced().isEmpty(), "80 conversations is still learning");
         assertTrue(sweep.spells().isEmpty());
     }
 
+    /**
+     * Once the reference is full. A rise that starts while the reference is still learning is partly learned as
+     * normal, which is the price of judging from 100 rather than waiting for 1,000.
+     */
     @Test
     void aDoublingFromFivePercentAlarmsWithinAFewHundredConversations() {
-        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 10, 0.05);
+        List<HourlyToolTally> s = series(new ArrayList<>(), 0, 50, 0.05); // a frozen reference of 1,000
         int hours = 0;
         while (sweep(s).spells().isEmpty()) {
-            series(s, 10 + hours, 1, 0.10);
+            series(s, 50 + hours, 1, 0.10);
             hours++;
             assertTrue(hours < 40, "a doubling is caught long before 800 conversations");
         }

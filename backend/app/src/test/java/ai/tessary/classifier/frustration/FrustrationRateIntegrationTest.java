@@ -99,7 +99,8 @@ class FrustrationRateIntegrationTest {
         String pid = project("fr-case");
         ClassifierRow signal = frustration(pid);
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 reference conversations at 5%
+        // Judged from 100, and every hour is added to the reference until 1,000, the risen ones included.
+        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
         seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
 
@@ -116,7 +117,7 @@ class FrustrationRateIntegrationTest {
         String title = FindingTitle.of(finding);
         assertTrue(title.matches("Frustrated sessions increased from \\d+\\.\\d% to \\d+\\.\\d% on cs-chat"), title);
         assertEquals(180, finding.sampleCount(), "sessions since onset");
-        assertEquals(210, finding.payload().path("baseline_conversations").asLong());
+        assertEquals(390, finding.payload().path("baseline_conversations").asLong());
         assertEquals(VERSION, finding.payload().path("scorer_version").asText());
 
         List<FindingEvidenceRow> all = evidence.listByFinding(pid, finding.id());
@@ -153,8 +154,8 @@ class FrustrationRateIntegrationTest {
         assertNotNull(block, "the finding page gets its frustration block");
         assertEquals(180, block.rate().nCur());
         assertEquals(72, block.rate().failuresCur());
-        assertEquals(210, block.rate().nRef());
-        assertEquals(14, block.baselineFrustrated(), "two of every thirty in the seven reference hours");
+        assertEquals(390, block.rate().nRef());
+        assertEquals(86, block.baselineFrustrated(), "two of every thirty for seven hours, then twelve for six");
         assertEquals(FrustrationDetailService.PAGE_SIZE, block.conversations().size(), "the first page");
         assertEquals("50", block.conversationsNextCursor());
         FrustratedConversationView row = block.conversations().get(0);

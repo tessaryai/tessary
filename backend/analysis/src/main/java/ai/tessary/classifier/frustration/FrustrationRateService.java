@@ -44,8 +44,9 @@ import org.springframework.transaction.support.TransactionOperations;
  * <p><b>tool_error's engine, not a copy of it</b>, as Malformed Output uses it: a conversation is a Bernoulli
  * trial on the call site of its first scored turn, and it fails when it carries an uncleared frustration flag.
  * The hourly tallies ({@link FrustrationRateRepository}) are replayed through {@link ToolErrorTrend} on
- * {@link FrustrationConfig#engine()}. The reference is learned from the first {@code min_baseline_conversations}
- * and frozen; a call site that is frustrated from its first day learns that as its normal and is flagged only
+ * {@link FrustrationConfig#engine()}. Judging starts once the reference holds {@code min_baseline_conversations},
+ * and the reference keeps learning each later hour until it holds {@code freeze_baseline_conversations}, then
+ * stops moving; a call site that is frustrated from its first day learns that as its normal and is flagged only
  * for getting worse.
  *
  * <p><b>Rebuilt every pass</b> ({@link CarriedState#rebuilding}), because a conversation flagged on a later turn
@@ -205,10 +206,19 @@ public class FrustrationRateService implements ClassifierCatchUp {
             Spell spell,
             Instant windowFrom,
             Instant at) {
-        ToolErrorDetector.Decision d = spell.decision();
         String callSite = spell.toolKey();
         String now = at.toString();
         String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
+        String onset = spell.decision().onsetAt();
+        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
+        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
+        Instant until =
+                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
+        List<String> scored =
+                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        List<FrustratedConversation> frustrated = rates.frustratedSince(
+                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        ToolErrorDetector.Decision d = ToolErrorDetector.counted(spell.decision(), frustrated.size());
         String causeKey = CauseKey.frustration(signal.id(), callSite);
         String payload = FrustrationEvidence.payload(
                 mapper, callSite, d, spell.baseline().failures(), config);
@@ -257,18 +267,8 @@ public class FrustrationRateService implements ClassifierCatchUp {
             }
         }
 
-        String onset = d.onsetAt();
-        Instant since = onset != null ? Instant.parse(onset) : windowFrom;
-        // The end of the last hour the replay folded, not now: the sessions stop where the spell's counts stop.
-        Instant until =
-                spell.lastBucket() != null ? Instant.parse(spell.lastBucket()).plus(Duration.ofHours(1)) : at;
         List<FindingEvidenceRepository.Ref> members = new ArrayList<>();
-        for (String session :
-                rates.scoredSince(projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until)) {
-            members.add(FindingEvidenceRepository.Ref.session(session));
-        }
-        List<FrustratedConversation> frustrated = rates.frustratedSince(
-                projectId, signal.id(), config.scorerVersion(), callSite, windowFrom, since, until);
+        for (String session : scored) members.add(FindingEvidenceRepository.Ref.session(session));
         List<FindingEvidenceRepository.Ref> witnesses = new ArrayList<>(frustrated.size() * 2);
         for (FrustratedConversation c : frustrated) {
             witnesses.add(FindingEvidenceRepository.Ref.session(c.conversationId()));

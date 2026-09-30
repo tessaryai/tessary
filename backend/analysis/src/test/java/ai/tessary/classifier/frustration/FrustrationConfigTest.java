@@ -2,6 +2,7 @@
 package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,6 +38,42 @@ class FrustrationConfigTest {
         assertEquals(
                 2.0,
                 FrustrationConfig.of(MAPPER, "{\"min_decision_interval\":1}").minDecisionInterval());
+        assertEquals(
+                300,
+                FrustrationConfig.of(
+                                MAPPER, "{\"min_baseline_conversations\":300,\"freeze_baseline_conversations\":50}")
+                        .freezeBaselineConversations(),
+                "never below the minimum");
+    }
+
+    /** The seeded tuning reaches the engine: judged from 100, the reference learning until 1,000. */
+    @Test
+    void theEngineRunsOnTheParsedLearningSpan() {
+        FrustrationConfig c = FrustrationConfig.of(
+                MAPPER, "{\"min_baseline_conversations\":100,\"freeze_baseline_conversations\":1000}");
+
+        assertEquals(100, c.engine().minBaselineCalls());
+        assertEquals(1_000, c.engine().freezeBaselineCalls());
+        assertTrue(c.engine().learnsWhileJudging());
+    }
+
+    /**
+     * A row written before {@code freeze_baseline_conversations} existed freezes when judging starts, as it
+     * always did, so its state epoch is unchanged and nothing rebuilds under it.
+     */
+    @Test
+    void aBlobWithoutAFreezeFreezesWhenJudgingStarts() {
+        FrustrationConfig existing = FrustrationConfig.of(MAPPER, "{\"min_baseline_conversations\":200}");
+
+        assertEquals(200, existing.freezeBaselineConversations());
+        assertFalse(existing.engine().learnsWhileJudging());
+        assertEquals(FrustrationConfig.defaults().stateEpoch(), existing.stateEpoch());
+        assertNotEquals(
+                existing.stateEpoch(),
+                FrustrationConfig.of(
+                                MAPPER, "{\"min_baseline_conversations\":200,\"freeze_baseline_conversations\":1000}")
+                        .stateEpoch(),
+                "where learning stops is part of what a judged hour meant");
     }
 
     @Test
@@ -65,6 +102,6 @@ class FrustrationConfigTest {
     @ParameterizedTest
     @ValueSource(doubles = {0, -1, Double.NaN, Double.POSITIVE_INFINITY})
     void aNonPositiveOrNonFiniteDialIsItsDefault(double bad) {
-        assertEquals(FrustrationConfig.defaults(), new FrustrationConfig(bad, 0L, bad, bad, bad, 0));
+        assertEquals(FrustrationConfig.defaults(), new FrustrationConfig(bad, 0L, bad, bad, bad, 0, 0));
     }
 }

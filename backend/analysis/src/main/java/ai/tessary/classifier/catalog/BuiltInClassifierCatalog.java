@@ -125,8 +125,9 @@ public class BuiltInClassifierCatalog {
                             + "OpenRouter or TypeSafe key. Off by default. Scores a user message only when "
                             + "four text messages precede it, and a conversation only until its first "
                             + "detection. Each call site learns its own normal rate of frustrated "
-                            + "conversations over its first 200 and is watched from then on with the same "
-                            + "sequential test Tool Error uses; a case opens when the rate has risen above "
+                            + "conversations and is watched from its first 100 with the same sequential "
+                            + "test Tool Error uses, still learning its normal until it has seen 1,000; a "
+                            + "case opens when the rate has risen above "
                             + "that normal. A call site that is bad from day one learns that as normal and "
                             + "is flagged only if it gets worse.",
                     Kind.FRUSTRATION,
@@ -147,10 +148,11 @@ public class BuiltInClassifierCatalog {
                     // rate test's dials. arl_target and min_decision_interval are Tool Error's false-alarm
                     // budget converted from tool calls to conversations, reasoned rather than measured.
                     // EXPERIMENT(frustration-tuning): threshold, arl_target and min_decision_interval
-                    // are starting values until a null replay on real traffic settles them.
+                    // are starting values until a null replay on real traffic settles them. Judged from 100
+                    // conversations, the reference learning until 1,000, as Groundedness does in traces.
                     "{\"threshold\":0.40,\"arl_target\":10000,\"min_decision_interval\":4,"
                             + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
-                            + "\"min_baseline_conversations\":200}",
+                            + "\"min_baseline_conversations\":100,\"freeze_baseline_conversations\":1000}",
                     // null: the detector is JevFrustrationDetector, a Spring bean supplied through the
                     // DetectorSupplier seam (FrustrationDetectorSupplier), because it needs the decision
                     // client, the provider resolver and its own repositories, none of which are Deps.
@@ -230,11 +232,11 @@ public class BuiltInClassifierCatalog {
                     // Every key here is one GroundednessConfig parses. threshold is the flag cutoff on
                     // P(unsupported), the 2% false-alarm point on RAGTruth test; it is hashed into the
                     // scorer version, so changing it starts a new set of assessment rows. The rest are the
-                    // rate test's dials, in traces: judged from 200, the reference learning until 1,000,
+                    // rate test's dials, in traces: judged from 100, the reference learning until 1,000,
                     // and one false finding per 50,000 traces on a healthy call site.
                     "{\"threshold\":0.975,\"arl_target\":50000,\"min_decision_interval\":4,"
                             + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
-                            + "\"min_baseline_traces\":200,\"freeze_baseline_traces\":1000}",
+                            + "\"min_baseline_traces\":100,\"freeze_baseline_traces\":1000}",
                     // null: the detector writes its own groundedness_assessment rows, one per scored
                     // answer, so it arrives through the DetectorSupplier seam with its repository
                     // (GroundednessDetectorSupplier), as Frustration's does.

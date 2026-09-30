@@ -73,12 +73,13 @@ Only a rise is reported.
 
 ## The learned rate
 
-Each call site starts being judged once its reference holds `min_baseline_traces` (200), and the
+Each call site starts being judged once its reference holds `min_baseline_traces` (100), and the
 reference keeps learning each later hour until it holds `freeze_baseline_traces` (1,000), then stops
 moving. `arl_target` is 50,000: the traces a healthy call site runs between false alarms.
-`shift_floor` is 0.02, the model's own false-alarm rate at the default threshold. Judging from 200
-while learning to 1,000 keeps false findings during learning low and matches waiting for 1,000
-afterwards; freezing at 200 gives several times the false findings (see `GroundednessConfig`).
+`shift_floor` is 0.02, the model's own false-alarm rate at the default threshold. Judging from 100
+while learning to 1,000 keeps false findings during learning low (0.6% to 2.6% on simulated null
+traffic) and matches waiting for 1,000 afterwards; freezing at 100 roughly doubles the false findings
+(see `GroundednessConfig`).
 
 The model's false-alarm rate depends on the domain, and the learned reference is what absorbs it: a call
 site is compared with its own past, not with a shipped number. The consequence is the same as
