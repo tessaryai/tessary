@@ -4,7 +4,7 @@
  * one is already being read, a page read ahead off the previous filter's placeholder rows, and a filter
  * switch that leaves the new list scrolled to where the old one was.
  */
-import { act, cleanup, render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useListPaging } from "./useListPaging";
 
@@ -30,7 +30,6 @@ beforeEach(() => {
   window.IntersectionObserver = RecordingObserver as unknown as typeof IntersectionObserver;
 });
 afterEach(() => {
-  cleanup();
   window.IntersectionObserver = original;
 });
 

@@ -5,7 +5,7 @@
  * not called out, and a row linking to the wrong trace or session.
  */
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvidenceSpan } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { EvidenceTable } from "./EvidenceTable";
@@ -74,11 +74,6 @@ beforeEach(() => {
           );
     },
   );
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const renderTable = () => renderRoute(<EvidenceTable findingId="fnd-1" basePath="/orgs/acme/projects/default" />);

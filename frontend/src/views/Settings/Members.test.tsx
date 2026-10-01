@@ -6,7 +6,7 @@
  * sending the wrong person or role when it is used. Beside it: the instance-wide sign-up policy,
  * editable only through the organization that governs it.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { OrgInvitation, OrgMember, OrgRole, SignupPolicy } from "../../api/types-auth";
 import { ApiError } from "../../api/types";
@@ -57,12 +57,6 @@ beforeEach(() => {
   auth.removeMember.mockResolvedValue(null);
   auth.revokeInvitation.mockResolvedValue(null);
   auth.updateSignupPolicy.mockResolvedValue(POLICY);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
 });
 
 /** Let a mutation a click may have started reach the API, so "not called" means not called. */

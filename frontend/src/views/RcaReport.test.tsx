@@ -5,13 +5,11 @@
  * links the sessions and their turns.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { renderRoute } from "../test/render";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { RcaReport as RcaReportData } from "../api/types";
 import type { Me } from "../api/types-auth";
 import { AuthProvider } from "../auth/AuthContext";
-import { ToastProvider } from "../ui";
 import { RcaReport } from "./RcaReport";
 import { GROUNDEDNESS_REPORT } from "../test/groundednessFixtures";
 
@@ -40,7 +38,6 @@ vi.mock("../tenant/TenantContext", async (importOriginal) => {
 });
 
 afterEach(() => {
-  cleanup();
   report = GROUNDEDNESS_REPORT;
   api.rerunRca.mockReset();
 });
@@ -52,19 +49,11 @@ function renderReport(role: "owner" | "member" = "member") {
     orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],
     platform_staff: false,
   });
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <AuthProvider>
-          <MemoryRouter initialEntries={["/orgs/acme/projects/default/rca/rca-1"]}>
-            <Routes>
-              <Route path="/orgs/:orgSlug/projects/:projectSlug/rca/:reportId" element={<RcaReport />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </ToastProvider>
-    </QueryClientProvider>,
+  renderRoute(
+    <AuthProvider>
+      <RcaReport />
+    </AuthProvider>,
+    { route: "/orgs/acme/projects/default/rca/rca-1", path: "/orgs/:orgSlug/projects/:projectSlug/rca/:reportId" },
   );
 }
 

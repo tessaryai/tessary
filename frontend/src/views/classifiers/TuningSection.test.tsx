@@ -5,7 +5,7 @@
  * actually stored after clamping, and a false-alarm rate made up when there is not enough traffic.
  */
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { TuningSection } from "./TuningSection";
@@ -29,11 +29,6 @@ const TUNING = {
 
 beforeEach(() => {
   api.getClassifierTuning.mockResolvedValue(TUNING);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const field = (label: string) => screen.getByLabelText(label, { exact: false }) as HTMLInputElement;

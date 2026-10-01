@@ -6,7 +6,7 @@
  * key still offering actions.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKey, ApiKeyAudit } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { ApiKeys } from "./ApiKeys";
@@ -43,13 +43,6 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockImplementation(() => confirmReply);
   api.listApiKeys.mockResolvedValue([key({})]);
   api.listApiKeyAudit.mockResolvedValue([]);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
 });
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));

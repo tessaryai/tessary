@@ -4,8 +4,8 @@
  * worth catching are the wrong key or value reaching the server, the build's default misreported, and a
  * member who cannot manage capabilities being offered the switch.
  */
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CapabilityOverrideView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Features } from "./Features";
@@ -37,11 +37,6 @@ beforeEach(() => {
   ]);
   auth.setCapabilityOverride.mockResolvedValue(triage({ enabled: true, has_override: true }));
   auth.listMembers.mockImplementation(async () => [{ user_id: "u-me", role: session.role }]);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const toggle = () => screen.getByRole("switch", { name: "Automatic triage" }) as HTMLButtonElement;

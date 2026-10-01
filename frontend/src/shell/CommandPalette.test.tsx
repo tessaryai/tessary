@@ -5,7 +5,7 @@
  * command from the keyboard, and merges server search results in without letting a slow earlier
  * response overwrite a newer one. It is never a dead end: no match still offers a way out.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import type { SearchResults } from "../api/types";
@@ -34,20 +34,12 @@ vi.mock("../api/client", async (importOriginal) => {
   };
 });
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-});
-
 beforeEach(() => {
   mocks.getCapabilities.mockResolvedValue({ capabilities: { api_access_enabled: false, alerts_enabled: false } });
   mocks.search.mockResolvedValue({ hits: [] } satisfies Partial<SearchResults>);
 });
 
 afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
   window.localStorage.clear();
 });
 

@@ -3,11 +3,9 @@
  * The modal. The bug worth catching: a click inside the dialog's content closing it, when only a click
  * on the backdrop around it should.
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { Modal } from "./Modal";
-
-afterEach(cleanup);
 
 describe("Modal", () => {
   it("closes on a backdrop click, and not on a click inside", () => {

@@ -6,7 +6,7 @@
  * that points the client somewhere other than this deployment's /mcp.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpTokenView } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { McpTokens } from "./McpTokens";
@@ -39,12 +39,6 @@ beforeEach(() => {
   writeText.mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   api.listMcpTokens.mockResolvedValue([token()]);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
 });
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));

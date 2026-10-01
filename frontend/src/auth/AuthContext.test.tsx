@@ -4,8 +4,8 @@
  * session read that leaves the app spinning or lets a visitor through, a signed-out visitor sent to
  * sign in without the page they were on, and a component outside the provider failing silently.
  */
-import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "../api/types";
 import { AuthProvider, useAuth } from "./AuthContext";
@@ -19,11 +19,6 @@ const ME = { id: "u-1", email: "dana@example.com", orgs: [], platform_staff: fal
 
 beforeEach(() => {
   auth.me.mockResolvedValue(ME);
-});
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-  vi.restoreAllMocks();
 });
 
 const guarded = (route = "/orgs/acme/projects/default/traces?q=refund") =>

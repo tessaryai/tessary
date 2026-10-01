@@ -3,11 +3,9 @@
  * The Resolve dialog offers the two dispositions on a frustration or groundedness case, each with its
  * one-line explanation, and sends the chosen one; every other case resolves on the reason alone.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
-
-afterEach(cleanup);
 
 function renderForm(detector: string) {
   const onResolve = vi.fn();

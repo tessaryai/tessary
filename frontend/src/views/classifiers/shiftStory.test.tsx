@@ -6,7 +6,7 @@
  * moved the money rather than the one with the biggest percentage. Expected strings are worked by hand
  * from the rules in the source comments.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { components } from "../../api/generated/schema";
 import { PairBlock, PatternBlock, changeOf, compact, prettyKey } from "./findingCharts";
@@ -14,8 +14,6 @@ import { ShiftBehind, ShiftChart, ShiftPins, formatMeasure, measureNoun, pinsFor
 
 type Shift = components["schemas"]["ShiftDetail"];
 type Pair = components["schemas"]["Pair"];
-
-afterEach(cleanup);
 
 const q = (p50: [number | null, number | null], p95?: [number | null, number | null]): Pair[] => [
   { key: "p50", then: p50[0], now: p50[1] },

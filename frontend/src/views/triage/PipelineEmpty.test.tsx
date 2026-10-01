@@ -4,8 +4,8 @@
  * deployment's put on the clipboard, and a refused copy that says nothing (the reader then pastes
  * whatever was on their clipboard before).
  */
-import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import type { EmptyState } from "./emptyState";
 import { PipelineEmpty } from "./PipelineEmpty";
@@ -20,11 +20,6 @@ const STATE: EmptyState = {
   nodes: [node, node, node],
 };
 const ENDPOINT = `${window.location.origin}/v1/traces`;
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
 
 describe("PipelineEmpty", () => {
   it("says when the endpoint could not be copied, and shows it to copy by hand", async () => {

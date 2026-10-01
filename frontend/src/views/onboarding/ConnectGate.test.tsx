@@ -8,7 +8,7 @@
  * fails — not the seed itself, which is a backend concern.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "../../auth/AuthContext";
@@ -108,12 +108,10 @@ function renderGate(at = "/orgs/fake-org/projects/fake-project/traces", tracesRo
 }
 
 afterEach(() => {
-  cleanup();
   createApiKeyCalls = 0;
   createApiKeyImpl = () => Promise.resolve({ plaintext: "tsy_test_token" });
   projectList = [];
   status = NOT_CONNECTED_STATUS;
-  vi.restoreAllMocks();
   Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
 });
 

@@ -12,11 +12,9 @@
  * Beside it: which renderer a payload gets (conversation, JSON tree, or markdown), the Raw toggle,
  * and copy.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MediaResolverContext, PayloadBody, PayloadViewer } from "./PayloadViewer";
-
-afterEach(cleanup);
 
 const PNG_B64 = "iVBORw0KGgo=";
 

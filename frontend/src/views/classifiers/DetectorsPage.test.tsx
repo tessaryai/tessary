@@ -13,11 +13,9 @@
  * Each row's status says whether its sweep is failing, whether it has anything to judge yet, and what
  * it found in 7 days, and never reads "quiet" when the volume is unknown.
  */
-import { beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, useLocation } from "react-router-dom";
 import type {
   BehaviorFinding,
   Classifier,
@@ -26,7 +24,7 @@ import type {
   ClassifierHealth,
   GroundednessStatus,
 } from "../../api/types";
-import { ToastProvider } from "../../ui";
+import { currentLocation, renderRoute } from "../../test/render";
 import { DetectionRow, DetectorsPage } from "./DetectorsPage";
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
@@ -69,18 +67,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   };
 });
 
-beforeAll(() => {
-  // jsdom implements <dialog> but not showModal/close.
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-  };
-});
-
 afterEach(() => {
-  cleanup();
   listClassifiers.mockReset();
   setClassifierEnabled.mockReset();
   getGroundednessStatus.mockReset();
@@ -112,24 +99,7 @@ function classifier(overrides: Partial<Classifier>): Classifier {
   };
 }
 
-function Search() {
-  return <output aria-label="search">{useLocation().search}</output>;
-}
-
-function renderPage(route = "/") {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(
-    <MemoryRouter initialEntries={[route]}>
-      <QueryClientProvider client={qc}>
-        <ToastProvider>
-          <DetectorsPage />
-          <Search />
-        </ToastProvider>
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-  return qc;
-}
+const renderPage = (route = "/") => renderRoute(<DetectorsPage />, { route }).queryClient;
 
 describe("DetectorsPage", () => {
   it("names a provider pause on the row and links to Providers", async () => {
@@ -270,21 +240,13 @@ function event(overrides: Partial<ClassifierEvent>): ClassifierEvent {
 
 describe("DetectionRow", () => {
   it("stamps the row with occurred_at, not detected_at, when both are present", () => {
-    render(
-      <MemoryRouter>
-        <DetectionRow event={event({ occurred_at: OLD, detected_at: RECENT })} />
-      </MemoryRouter>,
-    );
+    renderRoute(<DetectionRow event={event({ occurred_at: OLD, detected_at: RECENT })} />);
     expect(screen.queryByText(ago(OLD))).not.toBeNull();
     expect(screen.queryByText("just now")).toBeNull();
   });
 
   it("falls back to detected_at when occurred_at is null (a row from before migration 0012)", () => {
-    render(
-      <MemoryRouter>
-        <DetectionRow event={event({ occurred_at: null, detected_at: OLD })} />
-      </MemoryRouter>,
-    );
+    renderRoute(<DetectionRow event={event({ occurred_at: null, detected_at: OLD })} />);
     expect(screen.queryByText(ago(OLD))).not.toBeNull();
   });
 });
@@ -475,7 +437,7 @@ describe("the detail rail", () => {
       ...over,
     }) as BehaviorFinding;
   const rail = () => screen.getByRole("dialog", { name: "Cost drift detail" });
-  const search = () => screen.getByLabelText("search").textContent;
+  const search = () => currentLocation().replace(/^\//, "");
 
   it("opens on the row pressed and closes back to the catalog", async () => {
     listClassifiers.mockResolvedValue([COST]);
