@@ -25,6 +25,7 @@ import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -41,12 +42,9 @@ import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -59,7 +57,7 @@ import org.springframework.web.context.WebApplicationContext;
  * page's block carries the first page. Another project's finding and groundedness classifier are 404 under the
  * caller's project, and an RCA report on another finding narrows the list to nothing.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class GroundednessFlaggedAnswersIntegrationTest {
 
     private static final String CALL_SITE = "cs-rag";
@@ -68,14 +66,6 @@ class GroundednessFlaggedAnswersIntegrationTest {
     private static final String SECOND = "It arrives within two business days by bank transfer.";
     private static final String ANSWER = FIRST + " " + SECOND;
     private static final String DOCUMENT = "Card refunds reach the customer within five to ten business days.";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        r.add("workos.api-key", () -> "");
-        r.add("workos.client-id", () -> "");
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;

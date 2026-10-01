@@ -251,7 +251,6 @@ class VitalsServiceIntegrationTest {
         return service.compute(projectId, 7, VitalsRepository.Dimension.CALL_SITE);
     }
 
-    /** Fold the timers in and roll up synchronously; the scheduler is off, so this is the only rollup. */
     private static Group groupFor(Vitals v, String key) {
         Group g =
                 v.groups().stream().filter(x -> key.equals(x.key())).findFirst().orElse(null);

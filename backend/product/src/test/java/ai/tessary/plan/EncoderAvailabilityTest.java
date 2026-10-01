@@ -110,7 +110,7 @@ class EncoderAvailabilityTest {
 
         EncoderAvailability.Snapshot s = encoder.refresh();
 
-        assertFalse(s.available(), "another model's heads, or a body that is not JSON, is not this model");
+        assertFalse(s.available(), "a 200 that does not list the groundedness head is not this model");
         assertEquals("healthz answered 200 without the groundedness head", s.reason());
     }
 

@@ -84,7 +84,12 @@ function renderList(
   filter?: { rcaReport: string; index: number },
 ) {
   renderRoute(
-    <FrustratedConversations findingId="f-1" first={{ rows, nextCursor, total }} filter={filter} basePath="/orgs/acme/projects/default" />,
+    <FrustratedConversations
+      findingId="f-1"
+      first={{ rows, nextCursor, total }}
+      filter={filter}
+      basePath="/orgs/acme/projects/default"
+    />,
   );
 }
 

@@ -29,6 +29,13 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * A hand-written stand-in for the JDK {@link HttpClient}: answers each request by its exact URI from a script, and
+ * records every request it was sent. The last scripted answer for a URI repeats; an unscripted URI fails the test,
+ * unless the client was built by {@code answering} or {@code failingWith}, which answer every URI the same way. An
+ * answer is a response, an {@code IOException} or {@code InterruptedException} to throw, or a {@link Deferred}
+ * computed when the request arrives.
+ */
 public final class ScriptedHttpClient extends HttpClient {
 
     @FunctionalInterface

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * CasePage: the groundedness story's causes, rate and cause-filtered answers, the verbs that close a case, the RCA run and its in-flight
- * and failed states, the answer and the working behind it, the failures a page at a time, and a
- * frustration case's causes. The bugs worth catching: a verb sent for the wrong case or offered before
- * there is a report to justify it, a run that can be pressed twice, a failed run that reads as an
- * empty one, and a cause's "Show" that filters nothing.
+ * CasePage: the groundedness story's causes, rate and cause-filtered answers, the verbs that close a
+ * case, the RCA run and its in-flight and failed states, the answer and the working behind it, the
+ * failures a page at a time, and a frustration case's causes. The bugs worth catching: a verb sent for
+ * the wrong case or offered before there is a report to justify it, a run that can be pressed twice, a
+ * failed run that reads as an empty one, and a cause's "Show" that filters nothing.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -23,7 +23,12 @@ import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
 import { ToastProvider } from "../../ui";
 import { CasePage } from "./CasePage";
-import { FLAGGED_ANSWER, GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT } from "../../test/groundednessFixtures";
+import {
+  FLAGGED_ANSWER,
+  GROUNDEDNESS_CASE_DETAIL,
+  GROUNDEDNESS_DETAIL,
+  GROUNDEDNESS_REPORT,
+} from "../../test/groundednessFixtures";
 
 const OWNER: Me = {
   id: "user-1",

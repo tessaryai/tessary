@@ -72,7 +72,13 @@ function renderList(
   filter?: { rcaReport: string; index: number },
 ) {
   renderRoute(
-    <FlaggedAnswers findingId="f-1" first={{ rows, nextCursor }} traces={traces} filter={filter} basePath="/orgs/acme/projects/default" />,
+    <FlaggedAnswers
+      findingId="f-1"
+      first={{ rows, nextCursor }}
+      traces={traces}
+      filter={filter}
+      basePath="/orgs/acme/projects/default"
+    />,
   );
 }
 

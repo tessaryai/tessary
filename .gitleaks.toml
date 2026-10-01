@@ -53,10 +53,6 @@ description = "a run-scoped throwaway Postgres password literal for a stack that
 paths = ['''^scripts/check\-notice\-coverage\.sh$''']
 
 [[allowlists]]
-description = "fixtures for the GitHub PAT service: ghp_ placeholders too short to be tokens"
-paths = ['''^backend/substrate/src/test/java/ai/tessary/git/github/GithubTokenServicePatTest\.java$''']
-
-[[allowlists]]
 description = "Javadoc names the PEM header it parses; no key material"
 paths = ['''^backend/substrate/src/main/java/ai/tessary/git/github/GithubTokenService\.java$''']
 

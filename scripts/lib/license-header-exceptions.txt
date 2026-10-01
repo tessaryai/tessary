@@ -23,7 +23,7 @@
 #     get the header like any other source file.
 #   - Test fixtures: audited for anything binary-adjacent or otherwise unable to carry a header:
 #     none found among files carrying an in-scope extension. The secret-scan fixture files
-#     (SecretLeakDetectorTest.java, GithubTokenServicePatTest.java,
+#     (SecretLeakDetectorTest.java, GithubTokenServiceTest.java,
 #     GithubTokenServiceKeyTest.java) are ordinary compilable Java source with fixture STRING
 #     content inside — they take the header exactly like any other test file.
 #   - Generated files: audited for "DO NOT EDIT" / "@generated" / "auto-generated" markers across

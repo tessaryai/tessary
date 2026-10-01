@@ -49,10 +49,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * <p>Against Postgres: the escalate-once marker is a conditional update, and the detector filter runs before the row
  * limit so a noisy sibling cannot push leads off the page.
  *
- * <p>Automatic Layer-2 escalation: off by default, bounded when on. Both regressions are silent and show up only on the
- * bill, so the assertions count jobs. Against Postgres because the bound is a query: the budget counts {@code job}
- * rows in a rolling window, and eligibility must exclude escalated, human-ruled and exemplar-less findings before the
- * limit.
+ * <p>Automatic Layer-2 escalation: off by default. Its regressions are silent and show up only on the bill, so the
+ * assertions count jobs. Against Postgres because eligibility is a query: it must exclude escalated, human-ruled and
+ * exemplar-less findings before the limit.
  */
 @SpringBootTest
 class TriageEscalationIntegrationTest {

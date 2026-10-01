@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * FindingPage: groundedness's rate and flagged answers, the shift and rate headers, a finding with no figure, triage's
- * ruling and its receipts, and the verbs. The bugs worth catching: a verb sent for another finding or
- * offered on a ruled one, a dead triage run that reads as the button doing nothing, a failing-trace
- * link that resolves somewhere else, and a ruling that hides the scripts a reader could re-run.
+ * FindingPage: groundedness's rate and flagged answers, the shift and rate headers, a finding with no
+ * figure, triage's ruling and its receipts, and the verbs. The bugs worth catching: a verb sent for
+ * another finding or offered on a ruled one, a dead triage run that reads as the button doing nothing,
+ * a failing-trace link that resolves somewhere else, and a ruling that hides the scripts a reader
+ * could re-run.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";

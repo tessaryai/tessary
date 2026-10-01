@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/** A loopback HTTP/1.1 responder on a bare socket, because forbidden-apis bans {@code com.sun.net.httpserver}. */
 public final class LoopbackHttpStub implements AutoCloseable {
 
     public record Request(String line, Map<String, String> headers, String body) {
@@ -61,7 +62,7 @@ public final class LoopbackHttpStub implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        Thread.interrupted();
+        Thread.interrupted(); // an interrupt a test left set would abort the join below
         socket.close();
         try {
             acceptor.join(2_000);
