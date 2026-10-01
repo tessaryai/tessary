@@ -111,6 +111,11 @@ class AgenticRcaEngineTest {
         }
     }
 
+    private AgenticRcaEngine engine(RcaProperties props, RcaSandbox sandbox) {
+        return new AgenticRcaEngine(
+                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
+    }
+
     /** No git integration: the run is evidence-only. */
     private static GitIntegrationRepository noRepo() {
         return new GitIntegrationRepository(mock(JdbcClient.class)) {
@@ -127,23 +132,7 @@ class AgenticRcaEngineTest {
         props.getAgentic().setMcpBaseUrl("https://tessary.test/");
         RcaJobRow job = new RcaJobRow("job-1", "proj-1", "fnd-1", "finding", "fnd-1", "groundedness_rate", "user-1");
         RcaReportRow report = groundednessReport();
-        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN))
-                .thenReturn(new ApiKeyService.Issued(
-                        new ApiKey(
-                                "key-1",
-                                "proj-1",
-                                "user-1",
-                                "rca-job-1",
-                                "tsk_",
-                                "hash",
-                                "2026-05-08T01:00:00Z",
-                                null,
-                                null,
-                                "admin",
-                                null,
-                                null,
-                                null),
-                        "tsk_plain"));
+        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         // tr-1 is a flagged trace of this finding; a groundedness cause cites traces and no sessions, so the
         // frustration parser would drop it and downgrade the verdict.
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"One document per answer\","
@@ -152,8 +141,7 @@ class AgenticRcaEngineTest {
                 + "\"affected_count\":2,\"evidence_trace_ids\":[\"tr-1\"],"
                 + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
                 + "\"excerpt\":\"top_k=1\"},\"next_step\":\"f\",\"confidence\":\"medium\"}]}");
-        AgenticRcaEngine engine = new AgenticRcaEngine(
-                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
+        AgenticRcaEngine engine = engine(props, sandbox);
         Map<String, String> dossier = Map.of("finding.md", "# f");
 
         AgenticRcaEngine.Result result =
@@ -205,8 +193,7 @@ class AgenticRcaEngineTest {
         // behavior_change is comparative, the finding has a baseline side, and no cause cites it.
         RecordingSandbox sandbox = new RecordingSandbox(
                 "{\"summary\":\"The flagged side changed\",\"verdict\":\"behavior_change\",\"checklist\":[]}");
-        AgenticRcaEngine engine = new AgenticRcaEngine(
-                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
+        AgenticRcaEngine engine = engine(props, sandbox);
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         AgenticRcaEngine.Result result = engine.run(
@@ -229,8 +216,7 @@ class AgenticRcaEngineTest {
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"s\",\"verdict\":\"no_cause_found\","
                 + "\"detailed_report\":\"## d\",\"checklist\":[],\"causes\":[]}");
-        AgenticRcaEngine engine = new AgenticRcaEngine(
-                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
+        AgenticRcaEngine engine = engine(props, sandbox);
         RcaReportRow report = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
 
         AgenticRcaEngine.Result result =
@@ -296,8 +282,7 @@ class AgenticRcaEngineTest {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl(mcpBaseUrl);
         RecordingSandbox sandbox = new RecordingSandbox("{}");
-        AgenticRcaEngine engine = new AgenticRcaEngine(
-                props, List.of(sandbox), noRepo(), mock(GitProviderFactory.class), apiKeys, new ObjectMapper());
+        AgenticRcaEngine engine = engine(props, sandbox);
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         TessaryException e = assertThrows(

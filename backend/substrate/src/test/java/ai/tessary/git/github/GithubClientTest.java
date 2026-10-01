@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
-import static ai.tessary.git.github.ScriptedHttpClient.response;
+import static ai.tessary.git.github.GithubFixtures.secretBox;
+import static ai.tessary.testsupport.ScriptedHttpClient.response;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitProviderClient.RepoAccess;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
-import java.util.Base64;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -34,14 +34,6 @@ class GithubClientTest {
     private final ScriptedHttpClient http = new ScriptedHttpClient();
     private final GithubClient client =
             new GithubClient(new GithubTokenService(new GithubAppProperties(), box, mapper), mapper, http);
-
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 9);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
 
     private GitIntegrationRow repo(String name) {
         return new GitIntegrationRow(
@@ -74,17 +66,29 @@ class GithubClientTest {
 
     /**
      * A refusal keeps its access verdict through the real round trip; any other non-2xx, or a 2xx whose body
-     * is not JSON, is a provider failure rather than a verdict about access.
+     * is not JSON, is a provider failure rather than a verdict about access. GitHub answers 404 both for a
+     * repository that does not exist and for a private one a fine-grained token was never granted, so the 404
+     * message carries both readings; 401 names the provider that did the rejecting, and 403 the repo it refused.
      */
     @ParameterizedTest
     @CsvSource(
             delimiter = '|',
-            value = {"404|{}|REPO_UNREACHABLE", "500|{}|PROVIDER_CALL_FAILED", "200|not json|PROVIDER_CALL_FAILED"})
-    void verifyAccess_anUnreadableAnswerIsTyped(int status, String body, GitError expected) {
+            value = {
+                "401|{}|CREDENTIALS_REJECTED|GitHub rejected these credentials. Check the token has not expired or"
+                        + " been revoked",
+                "403|{}|REPO_ACCESS_DENIED|These credentials cannot read acme/web. Grant the token Contents: read on"
+                        + " this repository, or enter a repository it already covers",
+                "404|{}|REPO_UNREACHABLE|No repository at acme/web that these credentials can read. Check the owner"
+                        + " and repository name, and that the token grants Contents: read on it",
+                "500|{}|PROVIDER_CALL_FAILED|github API call failed: HTTP 500",
+                "200|not json|PROVIDER_CALL_FAILED|github API call failed: non-JSON response"
+            })
+    void verifyAccess_anUnreadableAnswerIsTyped(int status, String body, GitError expected, String message) {
         http.on(BASE + "/repos/acme/web", response(status, body));
 
         TessaryException e = assertThrows(TessaryException.class, () -> client.verifyAccess(repo("web")));
         assertEquals(expected, e.error());
+        assertEquals(message, e.getMessage());
     }
 
     @ParameterizedTest

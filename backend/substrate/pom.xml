@@ -60,6 +60,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
         <!-- OTLP protobuf message types (ExportTraceServiceRequest, ResourceSpans, Span,
              KeyValue, AnyValue, ...) AND the generated TraceServiceGrpc service stub. Already on the
              runtime classpath transitively via spring-boot-starter-opentelemetry
