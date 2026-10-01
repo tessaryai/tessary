@@ -148,7 +148,14 @@ public class ClassifierWorker {
         this.executor = executor;
     }
 
-    @Scheduled(fixedDelayString = "${tessary.classifier.heartbeat-ms:60000}")
+    /**
+     * The scheduled heartbeat. {@code tessary.classifier.initial-delay-ms} defaults to 0, so the first tick runs at
+     * startup; a test suite that drives {@code tick()} itself delays it past the run, since a long heartbeat alone
+     * still fires once at startup.
+     */
+    @Scheduled(
+            fixedDelayString = "${tessary.classifier.heartbeat-ms:60000}",
+            initialDelayString = "${tessary.classifier.initial-delay-ms:0}")
     public void tick() {
         // Spring's built-in @Scheduled observability already opens a span for this invocation
         // (visible in Tempo as "task signalWorker.tick"), but that span never reaches MDC on the

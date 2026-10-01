@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.SubstrateProperties;
@@ -44,5 +45,17 @@ class CorrelationBackfillerTest {
         ILoggingEvent warn = log.first(Level.WARN);
         assertNull(warn.getThrowableProxy(), "no stack trace, and no message, on the egressing line");
         assertEquals(List.of("IllegalStateException"), List.of(warn.getArgumentArray()));
+    }
+
+    /** The scheduled tick is the pass: each one asks every resolver statement for one batch. */
+    @Test
+    void aTickRunsOnePass() {
+        when(spans.backfillCorrelation(500)).thenReturn(0);
+        when(spans.markCorrelationNone(500)).thenReturn(0);
+
+        new CorrelationBackfiller(spans, new SubstrateProperties()).tick();
+
+        verify(spans).backfillCorrelation(500);
+        verify(spans).markCorrelationNone(500);
     }
 }

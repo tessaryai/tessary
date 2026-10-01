@@ -1,0 +1,15 @@
+# Layered over the main application.yaml for every test context in this module, below any
+# @SpringBootTest(properties) or @TestPropertySource, and outside the context cache key, so it adds no
+# Spring context.
+#
+# Parks the two background sweeps that act on test data while a test is still seeding it. A test that
+# needs either calls it directly (ClassifierWorker#tick, TraceRollupReaper#sweepOnce). Left on a timer,
+# the classifier heartbeat swept a test's project mid-seed and advanced the cursor the test then read,
+# and the reaper re-armed traces a fixture had claimed but not yet recomputed, so they never settled.
+tessary:
+  classifier:
+    heartbeat-ms: 86400000
+    initial-delay-ms: 86400000
+  ingest:
+    substrate:
+      rollup-reap-interval-ms: 86400000

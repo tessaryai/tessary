@@ -519,7 +519,7 @@ public final class SubstrateV2Fixtures {
             traces.applyBatchTimers(
                     projectId, List.of(new TraceV2Repository.TimerUpdate(traceId, minStarted, maxEnded, hasRoot)));
         }
-        return claimAndRecompute(projectId, List.of(traceId)).get(0);
+        return claimAndRecompute(projectId, traceId);
     }
 
     public boolean rollup(
@@ -528,19 +528,22 @@ public final class SubstrateV2Fixtures {
                 projectId,
                 List.of(new TraceV2Repository.TimerUpdate(
                         traceId, startedAt.toString(), endedAt == null ? null : endedAt.toString(), hasRoot)));
-        return claimAndRecompute(projectId, List.of(traceId)).get(0);
+        return claimAndRecompute(projectId, traceId);
     }
 
-    private List<Boolean> claimAndRecompute(String projectId, List<String> traceIds) {
-        jdbc().sql("UPDATE trace SET rollup_due_at = NULL WHERE project_id = :pid AND id IN (:tids)")
+    /**
+     * One trace's claim and recompute, back to back. Claiming a batch up front and recomputing it afterwards leaves
+     * every trace still waiting in exactly the state {@code TraceV2Repository#reap} re-arms (unsettled, no deadline,
+     * never rolled up), and a re-armed trace recomputes as unsettled.
+     */
+    private boolean claimAndRecompute(String projectId, String traceId) {
+        jdbc().sql("UPDATE trace SET rollup_due_at = NULL WHERE project_id = :pid AND id = :tid")
                 .param("pid", projectId)
-                .param("tids", traceIds)
+                .param("tid", traceId)
                 .update();
-        return traceIds.stream()
-                .map(traceId -> traces.recompute(projectId, traceId)
-                        .map(TraceV2Repository.Recomputed::settled)
-                        .orElse(false))
-                .toList();
+        return traces.recompute(projectId, traceId)
+                .map(TraceV2Repository.Recomputed::settled)
+                .orElse(false);
     }
 
     public record ToolCallTurn(
@@ -595,9 +598,11 @@ public final class SubstrateV2Fixtures {
         payloads.upsertAll(payloadRows);
         insertToolCalls(toolCalls);
         traces.applyBatchTimers(projectId, timers);
-        claimAndRecompute(
-                projectId,
-                timers.stream().map(TraceV2Repository.TimerUpdate::traceId).toList());
+        for (TraceV2Repository.TimerUpdate timer : timers) {
+            if (!claimAndRecompute(projectId, timer.traceId())) {
+                throw new IllegalStateException("seeded trace " + timer.traceId() + " did not settle");
+            }
+        }
     }
 
     // ---- side tables ------------------------------------------------------------------------------
