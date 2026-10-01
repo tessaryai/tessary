@@ -19,12 +19,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 
 /** A rollup pass over claims the database answers in every way it can: written, vanished, or failed. */
 @ExtendWith(MockitoExtension.class)
+@Isolated
 class TraceRollupWorkerTest {
 
     @Mock

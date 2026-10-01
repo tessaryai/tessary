@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -32,6 +33,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  * The redaction service over an in-memory rule store: the write-path guard's parallel fan-out and every way
  * it can be cut short, the reconciliation of built-in rules onto a project, and the playground's refusals.
  */
+@Isolated
 class RedactionServiceTest {
 
     private static final String PID = "proj-1";

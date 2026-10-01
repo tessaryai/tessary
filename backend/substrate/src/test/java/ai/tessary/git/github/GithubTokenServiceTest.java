@@ -31,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -41,6 +42,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * paginated list endpoints, and the OAuth code exchange that proves who completed an install. Every host is a
  * TEST-NET-3 address so {@code UrlGuard} passes without DNS.
  */
+@Isolated
 class GithubTokenServiceTest {
 
     private static final String HOST = "203.0.113.10";

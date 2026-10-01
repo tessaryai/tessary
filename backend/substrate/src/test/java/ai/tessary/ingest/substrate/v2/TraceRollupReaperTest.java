@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
@@ -29,6 +30,7 @@ import org.slf4j.LoggerFactory;
  * stopped running both look, from every trace surface, exactly like nothing being wrong.
  */
 @ExtendWith(MockitoExtension.class)
+@Isolated
 class TraceRollupReaperTest {
 
     @Mock
