@@ -13,7 +13,9 @@ import ai.tessary.redaction.RedactionEngine.CompiledRule;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
+@Isolated
 class RedactionEngineTest {
 
     private static CompiledRule rule(String name, String regex, String replacement) {

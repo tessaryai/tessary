@@ -17,11 +17,13 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /** A rollup pass over claims the database answers in every way it can: written, vanished, or failed. */
 @ExtendWith(MockitoExtension.class)
+@Isolated
 class TraceRollupWorkerTest {
 
     @Mock

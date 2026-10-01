@@ -242,6 +242,10 @@
                      test that had been passing behind the enterprise tier would have gone on
                      passing for the wrong reason. A test that wants a capability in a non-default
                      state now writes an org_feature_flag row or stubs FeatureFlags. -->
+                <configuration>
+                    <forkCount>2</forkCount>
+                    <reuseForks>true</reuseForks>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
@@ -22,6 +23,7 @@ import org.springframework.boot.info.BuildProperties;
 
 /** The boot-time import of the vendored rate file, against a price-book store that answers on cue. */
 @ExtendWith(MockitoExtension.class)
+@Isolated
 class PriceBookImporterTest {
 
     @Mock
