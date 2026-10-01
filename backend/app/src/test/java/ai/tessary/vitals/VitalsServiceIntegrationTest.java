@@ -20,7 +20,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,7 +72,7 @@ class VitalsServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
     @Test
@@ -94,7 +93,7 @@ class VitalsServiceIntegrationTest {
         leaf = fx.withUsage(leaf, 1_000_000L, 0L);
         fx.withCost(leaf, "2.00", "0", null, null, "inferred");
 
-        settle(pid, traceId, RAN, RAN.plusSeconds(5));
+        fx.rollup(pid, traceId, RAN, RAN.plusSeconds(5), true);
 
         Group total = compute(pid).total();
         assertEquals(
@@ -116,7 +115,7 @@ class VitalsServiceIntegrationTest {
         span = fx.withPreviews(span, null, null, "cs-a");
         // Usage known, rate unknown: cost stays null and cost_source says why.
         fx.withUsage(span, 500_000L, 500_000L);
-        settle(pid, traceId, RAN, RAN.plusSeconds(2));
+        fx.rollup(pid, traceId, RAN, RAN.plusSeconds(2), true);
 
         Group total = compute(pid).total();
         assertEquals(1, total.cost().unpricedCalls(), "surfaced as unpriced");
@@ -136,7 +135,7 @@ class VitalsServiceIntegrationTest {
         // in production).
         fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "tool", RAN.plusSeconds(1), RAN.plusSeconds(60));
         // The trace's own end is the root's.
-        settle(pid, traceId, RAN, RAN.plusSeconds(10));
+        fx.rollup(pid, traceId, RAN, RAN.plusSeconds(10), true);
 
         Group total = compute(pid).total();
         assertEquals(1, total.duration().turns(), "one turn");
@@ -150,7 +149,7 @@ class VitalsServiceIntegrationTest {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", RAN, null);
         fx.withPreviews(root, null, null, "cs-y");
-        settle(pid, traceId, RAN, null);
+        fx.rollup(pid, traceId, RAN, null, true);
 
         Group total = compute(pid).total();
         assertEquals(0, total.duration().turns(), "it contributes no duration");
@@ -193,7 +192,7 @@ class VitalsServiceIntegrationTest {
                 null,
                 null,
                 "cs-healthy");
-        settle(pid, finished, RAN, RAN.plusSeconds(2));
+        fx.rollup(pid, finished, RAN, RAN.plusSeconds(2), true);
 
         for (int i = 0; i < 2; i++) {
             String stuck = SubstrateV2Fixtures.traceId();
@@ -202,7 +201,7 @@ class VitalsServiceIntegrationTest {
                     null,
                     null,
                     "cs-hanging");
-            settle(pid, stuck, RAN, null);
+            fx.rollup(pid, stuck, RAN, null, true);
         }
 
         Vitals v = compute(pid);
@@ -233,7 +232,7 @@ class VitalsServiceIntegrationTest {
                 .model("gpt-4o")
                 .usage(10L, 5L)
                 .write();
-        settle(fix.project().id(), traceId, RAN, RAN.plusSeconds(1));
+        fx.rollup(fix.project().id(), traceId, RAN, RAN.plusSeconds(1), true);
 
         Vitals byModel = java.util.Objects.requireNonNull(
                 controller.vitals(ctx, org, proj, 0, " Model ").data());
@@ -253,20 +252,6 @@ class VitalsServiceIntegrationTest {
     }
 
     /** Fold the timers in and roll up synchronously; the scheduler is off, so this is the only rollup. */
-    private void settle(String pid, String traceId, Instant startedAt, @Nullable Instant endedAt) {
-        traces.applyBatchTimers(
-                pid,
-                List.of(new TraceV2Repository.TimerUpdate(
-                        traceId, startedAt.toString(), endedAt == null ? null : endedAt.toString(), true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
-    }
-
     private static Group groupFor(Vitals v, String key) {
         Group g =
                 v.groups().stream().filter(x -> key.equals(x.key())).findFirst().orElse(null);

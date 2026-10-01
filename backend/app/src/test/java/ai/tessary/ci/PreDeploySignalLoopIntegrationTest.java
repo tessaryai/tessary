@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.gate.PreDeployCheckDtos.PreDeployCheckView;
 import ai.tessary.gate.PreDeployCheckRepository;
@@ -24,9 +23,9 @@ import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
@@ -104,24 +103,15 @@ class PreDeploySignalLoopIntegrationTest {
     void newSignalDiscoveryRegistersSurfaceScopedPreDeployCheck_idempotently() {
         String pid =
                 TenantFixture.bootstrap(tenants, "predeploy-loop").project().id();
-        String now = Instant.now().toString();
 
         // Implicates two surfaces. Regex, the detector user-authored signals run on.
-        String classifierId = Ids.ulid();
-        signals.insert(new ClassifierRow(
-                classifierId,
+        String classifierId = ClassifierRows.insert(
+                signals,
                 pid,
                 "tool_failure_probe",
                 "Tool Failure Probe",
-                "A probe signal scoped to the tool + agent-loop surfaces.",
                 "regex",
-                "{\"surfaces\":[\"tool_definition\",\"agent_loop\"],\"phrases\":[\"upstream exploded\"]}",
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
+                "{\"surfaces\":[\"tool_definition\",\"agent_loop\"],\"phrases\":[\"upstream exploded\"]}");
 
         SpanRef tool = seedFailingToolSpan(pid, "upstream exploded", "HTTP 500 upstream");
 
@@ -161,23 +151,9 @@ class PreDeploySignalLoopIntegrationTest {
     void signalWithNoSurfaceMappingRegistersNothing() {
         String pid =
                 TenantFixture.bootstrap(tenants, "predeploy-noop").project().id();
-        String now = Instant.now().toString();
 
         // No explicit surfaces and no learned failure mode: a no-op.
-        signals.insert(new ClassifierRow(
-                Ids.ulid(),
-                pid,
-                "unmapped_probe",
-                "Unmapped Probe",
-                null,
-                "regex",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
+        ClassifierRows.insert(signals, pid, "unmapped_probe", "Unmapped Probe", "regex", null);
 
         seedFailingToolSpan(pid, "upstream exploded", "boom");
 
@@ -198,22 +174,7 @@ class PreDeploySignalLoopIntegrationTest {
     void registrationKeepsOnlyRealSurfacesAtTheSeveritysIntensityAndTheLifecycleRoundTrips() {
         String pid =
                 TenantFixture.bootstrap(tenants, "predeploy-direct").project().id();
-        String now = Instant.now().toString();
-        String classifierId = Ids.ulid();
-        signals.insert(new ClassifierRow(
-                classifierId,
-                pid,
-                "direct_probe",
-                "Direct Probe",
-                null,
-                "regex",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
+        String classifierId = ClassifierRows.insert(signals, pid, "direct_probe", "Direct Probe", "regex", null);
         var critical = ClassifierDiscovery.of(
                 pid,
                 classifierId,
@@ -312,22 +273,7 @@ class PreDeploySignalLoopIntegrationTest {
     void theChecksEndpointsServeOnlyAnOrgHoldingTheCiIntegrationEntitlement() {
         var fix = TenantFixture.bootstrap(tenants, "predeploy-http");
         String pid = fix.project().id();
-        String now = Instant.now().toString();
-        String classifierId = Ids.ulid();
-        signals.insert(new ClassifierRow(
-                classifierId,
-                pid,
-                "http_probe",
-                "HTTP Probe",
-                null,
-                "regex",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
+        String classifierId = ClassifierRows.insert(signals, pid, "http_probe", "HTTP Probe", "regex", null);
         preDeployChecks.registerForSignal(ClassifierDiscovery.of(
                 pid, classifierId, "http_probe", "{\"surfaces\":[\"prompt\"]}", Severity.CRITICAL));
         TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);

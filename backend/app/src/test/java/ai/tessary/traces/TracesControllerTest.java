@@ -74,7 +74,7 @@ class TracesControllerTest {
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
     private record Tenant(TenantContext ctx, String org, String proj, String pid) {}
@@ -110,7 +110,7 @@ class TracesControllerTest {
                 "tool",
                 t0.plusMillis(100),
                 t0.plusSeconds(1));
-        rollUp(t.pid(), traceId, t0);
+        fx.rollup(t.pid(), traceId, t0, null, true);
 
         var page = ok(controller.list(
                 t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null));
@@ -174,11 +174,11 @@ class TracesControllerTest {
 
         String quiet = SubstrateV2Fixtures.traceId();
         fx.span(t.pid(), quiet, SubstrateV2Fixtures.spanId(), null, "tool", t0.plusSeconds(20), t0.plusSeconds(21));
-        rollUp(t.pid(), quiet, t0);
+        fx.rollup(t.pid(), quiet, t0, null, true);
 
         String unpriced = SubstrateV2Fixtures.traceId();
         fx.withUsage(fx.llmSpan(t.pid(), unpriced, t0.plusSeconds(10)), 400L, 100L);
-        rollUp(t.pid(), unpriced, t0);
+        fx.rollup(t.pid(), unpriced, t0, null, true);
 
         var byId = ok(controller.list(
                         t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null))
@@ -328,7 +328,7 @@ class TracesControllerTest {
                 t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "retriever", t0.plusSeconds(2), null);
         seeds.toolCall(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, tool.id()), "search", "Timeout", t0);
         seeds.retrievedDoc(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, retrieval.id()), "passage", 1, null, t0);
-        rollUp(t.pid(), traceId, t0);
+        fx.rollup(t.pid(), traceId, t0, null, true);
 
         var detail = ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId));
 
@@ -359,18 +359,6 @@ class TracesControllerTest {
         assertNull(view.attributes(), "the attribute bag is not an object to show");
         assertEquals("in", view.input(), "the rest of the payload still renders");
         assertTrue(view.payloadAvailable());
-    }
-
-    private void rollUp(String pid, String traceId, Instant startedAt) {
-        traces.applyBatchTimers(
-                pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
     }
 
     private static <T> T ok(ai.tessary.web.ApiResponse<T> response) {

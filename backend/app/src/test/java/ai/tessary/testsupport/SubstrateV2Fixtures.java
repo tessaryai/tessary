@@ -266,51 +266,9 @@ public final class SubstrateV2Fixtures {
             @Nullable Long cacheReadTokens,
             @Nullable Long cacheWriteTokens,
             @Nullable Long reasoningTokens) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                row.callSiteId(),
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheWriteTokens,
-                reasoningTokens,
-                row.inputCost(),
-                row.outputCost(),
-                row.cacheReadCost(),
-                row.cacheWriteCost(),
-                row.costSource(),
-                row.priceBookVersion(),
-                row.inputPreview(),
-                row.outputPreview(),
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated = copyOf(row)
+                .usage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens)
+                .build();
         spans.upsertAll(List.of(updated));
         return updated;
     }
@@ -325,51 +283,9 @@ public final class SubstrateV2Fixtures {
             @Nullable String cacheReadCost,
             @Nullable String cacheWriteCost,
             String costSource) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                row.callSiteId(),
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                row.inputTokens(),
-                row.outputTokens(),
-                row.cacheReadTokens(),
-                row.cacheWriteTokens(),
-                row.reasoningTokens(),
-                inputCost,
-                outputCost,
-                cacheReadCost,
-                cacheWriteCost,
-                costSource,
-                row.priceBookVersion(),
-                row.inputPreview(),
-                row.outputPreview(),
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated = copyOf(row)
+                .cost(inputCost, outputCost, cacheReadCost, cacheWriteCost, costSource)
+                .build();
         spans.upsertAll(List.of(updated));
         return updated;
     }
@@ -377,53 +293,143 @@ public final class SubstrateV2Fixtures {
     /** Re-write a span with the previews and call site the rollup copies from the root onto the trace. */
     public SpanRow withPreviews(
             SpanRow row, @Nullable String inputPreview, @Nullable String outputPreview, @Nullable String callSiteId) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                callSiteId,
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                row.inputTokens(),
-                row.outputTokens(),
-                row.cacheReadTokens(),
-                row.cacheWriteTokens(),
-                row.reasoningTokens(),
-                row.inputCost(),
-                row.outputCost(),
-                row.cacheReadCost(),
-                row.cacheWriteCost(),
-                row.costSource(),
-                row.priceBookVersion(),
-                inputPreview,
-                outputPreview,
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated =
+                copyOf(row).previews(inputPreview, outputPreview, callSiteId).build();
         spans.upsertAll(List.of(updated));
         return updated;
+    }
+
+    public static SpanRowCopy copyOf(SpanRow row) {
+        return new SpanRowCopy(row);
+    }
+
+    public static final class SpanRowCopy {
+
+        private final SpanRow row;
+        private @Nullable String parentSpanId;
+        private boolean isLogicalRoot;
+        private @Nullable String callSiteId;
+        private @Nullable Long inputTokens;
+        private @Nullable Long outputTokens;
+        private @Nullable Long cacheReadTokens;
+        private @Nullable Long cacheWriteTokens;
+        private @Nullable Long reasoningTokens;
+        private @Nullable String inputCost;
+        private @Nullable String outputCost;
+        private @Nullable String cacheReadCost;
+        private @Nullable String cacheWriteCost;
+        private String costSource;
+        private @Nullable String inputPreview;
+        private @Nullable String outputPreview;
+
+        private SpanRowCopy(SpanRow row) {
+            this.row = row;
+            this.parentSpanId = row.parentSpanId();
+            this.isLogicalRoot = row.isLogicalRoot();
+            this.callSiteId = row.callSiteId();
+            this.inputTokens = row.inputTokens();
+            this.outputTokens = row.outputTokens();
+            this.cacheReadTokens = row.cacheReadTokens();
+            this.cacheWriteTokens = row.cacheWriteTokens();
+            this.reasoningTokens = row.reasoningTokens();
+            this.inputCost = row.inputCost();
+            this.outputCost = row.outputCost();
+            this.cacheReadCost = row.cacheReadCost();
+            this.cacheWriteCost = row.cacheWriteCost();
+            this.costSource = row.costSource();
+            this.inputPreview = row.inputPreview();
+            this.outputPreview = row.outputPreview();
+        }
+
+        public SpanRowCopy parent(String parentSpanId) {
+            this.parentSpanId = parentSpanId;
+            this.isLogicalRoot = false;
+            return this;
+        }
+
+        public SpanRowCopy usage(
+                @Nullable Long inputTokens,
+                @Nullable Long outputTokens,
+                @Nullable Long cacheReadTokens,
+                @Nullable Long cacheWriteTokens,
+                @Nullable Long reasoningTokens) {
+            this.inputTokens = inputTokens;
+            this.outputTokens = outputTokens;
+            this.cacheReadTokens = cacheReadTokens;
+            this.cacheWriteTokens = cacheWriteTokens;
+            this.reasoningTokens = reasoningTokens;
+            return this;
+        }
+
+        public SpanRowCopy cost(
+                @Nullable String inputCost,
+                @Nullable String outputCost,
+                @Nullable String cacheReadCost,
+                @Nullable String cacheWriteCost,
+                String costSource) {
+            this.inputCost = inputCost;
+            this.outputCost = outputCost;
+            this.cacheReadCost = cacheReadCost;
+            this.cacheWriteCost = cacheWriteCost;
+            this.costSource = costSource;
+            return this;
+        }
+
+        public SpanRowCopy previews(
+                @Nullable String inputPreview, @Nullable String outputPreview, @Nullable String callSiteId) {
+            this.inputPreview = inputPreview;
+            this.outputPreview = outputPreview;
+            this.callSiteId = callSiteId;
+            return this;
+        }
+
+        public SpanRow build() {
+            return new SpanRow(
+                    row.projectId(),
+                    row.traceId(),
+                    row.id(),
+                    parentSpanId,
+                    row.path(),
+                    row.sessionId(),
+                    row.userId(),
+                    row.projectVersionId(),
+                    callSiteId,
+                    row.traceName(),
+                    row.kind(),
+                    row.name(),
+                    isLogicalRoot,
+                    row.status(),
+                    row.level(),
+                    row.errorType(),
+                    row.errorMessage(),
+                    row.startedAt(),
+                    row.endedAt(),
+                    row.latencyMs(),
+                    row.ttftMs(),
+                    row.providedModelName(),
+                    row.modelId(),
+                    inputTokens,
+                    outputTokens,
+                    cacheReadTokens,
+                    cacheWriteTokens,
+                    reasoningTokens,
+                    inputCost,
+                    outputCost,
+                    cacheReadCost,
+                    cacheWriteCost,
+                    costSource,
+                    row.priceBookVersion(),
+                    inputPreview,
+                    outputPreview,
+                    row.correlationState(),
+                    row.pathState(),
+                    row.eventTs(),
+                    row.isDeleted(),
+                    null,
+                    null,
+                    null,
+                    null);
+        }
     }
 
     /**
@@ -513,6 +519,15 @@ public final class SubstrateV2Fixtures {
             traces.applyBatchTimers(
                     projectId, List.of(new TraceV2Repository.TimerUpdate(traceId, minStarted, maxEnded, hasRoot)));
         }
+        return claimAndRecompute(projectId, List.of(traceId)).get(0);
+    }
+
+    public boolean rollup(
+            String projectId, String traceId, Instant startedAt, @Nullable Instant endedAt, boolean hasRoot) {
+        traces.applyBatchTimers(
+                projectId,
+                List.of(new TraceV2Repository.TimerUpdate(
+                        traceId, startedAt.toString(), endedAt == null ? null : endedAt.toString(), hasRoot)));
         return claimAndRecompute(projectId, List.of(traceId)).get(0);
     }
 

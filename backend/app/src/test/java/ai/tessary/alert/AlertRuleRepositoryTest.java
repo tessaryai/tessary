@@ -4,9 +4,9 @@ package ai.tessary.alert;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -34,21 +34,7 @@ class AlertRuleRepositoryTest {
     void everyColumnRoundTripsAndAnUpdatePreservesSwitchesAnchorsAndCreation() {
         var fix = TenantFixture.bootstrap(tenants, "alert-rule-repo");
         String pid = fix.project().id();
-        String cls = Ids.ulid();
-        classifiers.insert(new ClassifierRow(
-                cls,
-                pid,
-                "k-" + cls,
-                "k",
-                null,
-                "keyword",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z"));
+        String cls = ClassifierRows.insertKeyedByName(classifiers, pid, "k", "keyword");
         AlertRuleRow inserted = new AlertRuleRow(
                 Ids.ulid(),
                 pid,

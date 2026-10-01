@@ -81,7 +81,7 @@ class SessionsControllerTest {
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
         var fix = TenantFixture.bootstrap(tenants, "sessions-api");
         ctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
         org = fix.org().slug();
@@ -107,7 +107,7 @@ class SessionsControllerTest {
                 null,
                 null,
                 "inferred");
-        rollUp(first, t0);
+        fx.rollup(pid, first, t0, null, true);
 
         String second = SubstrateV2Fixtures.traceId();
         fx.trace(pid, second, sessionId, t0.plusSeconds(60));
@@ -179,7 +179,7 @@ class SessionsControllerTest {
                         .write(),
                 100L,
                 50L);
-        rollUp(t1, t0);
+        fx.rollup(pid, t1, t0, null, true);
 
         String t2 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t2, sessionId, t0.plusSeconds(30));
@@ -194,7 +194,7 @@ class SessionsControllerTest {
                         .write(),
                 200L,
                 75L);
-        rollUp(t2, t0.plusSeconds(30));
+        fx.rollup(pid, t2, t0.plusSeconds(30), null, true);
 
         String t3 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t3, sessionId, t0.plusSeconds(60));
@@ -209,7 +209,7 @@ class SessionsControllerTest {
                         .write(),
                 10L,
                 5L);
-        rollUp(t3, t0.plusSeconds(60));
+        fx.rollup(pid, t3, t0.plusSeconds(60), null, true);
 
         var page = ok(controller.list(ctx, org, proj, 50, null, "totals"));
         SessionDtos.SessionListItem item = page.sessions().stream()
@@ -416,18 +416,6 @@ class SessionsControllerTest {
         assertTrue(
                 got.spans().stream().noneMatch(s -> trimmedTrace.equals(s.traceId())),
                 "the spans describe the same capped traces the detail read lists");
-    }
-
-    private void rollUp(String traceId, Instant startedAt) {
-        traces.applyBatchTimers(
-                pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
     }
 
     private static <T> T ok(ApiResponse<T> response) {
