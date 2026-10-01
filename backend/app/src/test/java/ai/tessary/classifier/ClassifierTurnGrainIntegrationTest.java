@@ -17,6 +17,7 @@ import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.ClassifierSweeps;
 import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Frustration is {@link ClassifierModelModule.Grain#TURN}: one user message per turn, though a turn lands as many
@@ -68,6 +70,9 @@ class ClassifierTurnGrainIntegrationTest {
 
     @Autowired
     CapabilityFixture capabilities;
+
+    @Autowired
+    JdbcClient jdbc;
 
     private SubstrateV2Fixtures fx;
 
@@ -236,13 +241,17 @@ class ClassifierTurnGrainIntegrationTest {
                 false)));
     }
 
-    /** A few plain ticks: enough for a newly seeded turn to be swept, without asserting it fired. */
+    /** Ticks until the sweep has read past the newest span, without asserting it fired. */
     private void sweepOnce(String pid) {
+        ClassifierRow frustration =
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow();
         for (int tick = 0; tick < 5; tick++) {
             service.seedBuiltIns(pid);
             worker.tick();
-            sleep(150);
+            ClassifierSweeps.awaitDone(jdbc, pid, frustration.id());
+            if (ClassifierSweeps.sweptToNewestSpan(jdbc, pid, frustration.id())) return;
         }
+        fail("the sweep never read past the newest span");
     }
 
     private List<ClassifierEventView> sweepUntilDetected(String pid) {
@@ -253,24 +262,14 @@ class ClassifierTurnGrainIntegrationTest {
             if (frustration == null) {
                 frustration = ClassifierRows.byKey(signals, pid, "frustration").orElse(null);
             }
-            if (frustration != null
-                    && !service.eventsForClassifier(pid, frustration.id(), null, 100)
-                            .isEmpty()) {
+            if (frustration == null) continue;
+            ClassifierSweeps.awaitDone(jdbc, pid, frustration.id());
+            if (!service.eventsForClassifier(pid, frustration.id(), null, 100).isEmpty()) {
                 // One more tick, so a leaked extra candidate lands and fails the count.
-                worker.tick();
-                sleep(200);
+                sweepOnce(pid);
                 return service.eventsForClassifier(pid, frustration.id(), null, 100);
             }
-            sleep(100);
         }
         return fail("frustration never detected — the sweep did not reach the turn root");
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }
