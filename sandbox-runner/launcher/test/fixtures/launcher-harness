@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * Starting the REAL server.js as a child process and talking to it, shared by the launcher tests.
+ * No extension, so node --test skips it.
+ */
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+const SERVER_JS = path.join(__dirname, '..', '..', 'server.js');
+
+function spawnLauncher(env) {
+  return spawn('node', [SERVER_JS], { env: { ...process.env, ...env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+// PORT=0 hands the choice to the OS and the launcher logs back the port it actually bound, so
+// tests can never collide on a guessed one. Returns that port alongside the child.
+async function startLauncher(env) {
+  const child = spawnLauncher(env);
+  let timer;
+  const port = await new Promise((resolve, reject) => {
+    let out = '';
+    const onData = (d) => {
+      out += d.toString();
+      const bound = /listening on :(\d+)/.exec(out);
+      if (bound) { child.stdout.off('data', onData); resolve(Number(bound[1])); }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', (d) => { out += d.toString(); });
+    child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
+    timer = setTimeout(() => reject(new Error(`launcher did not start in time: ${out}`)), 5000);
+  }).finally(() => clearTimeout(timer));
+  return { child, port };
+}
+
+function postJson(port, urlPath, body, apiKey) {
+  return new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const req = http.request(
+      { host: '127.0.0.1', port, path: urlPath, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, Authorization: `Bearer ${apiKey}` } },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      },
+    );
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+function tempDir(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+// The per-run timing is the only field that varies; everything else in the body is pinned.
+function withoutElapsed(body) {
+  assert.equal(typeof body.elapsed_ms, 'number');
+  const { elapsed_ms: _elapsed, ...rest } = body;
+  return rest;
+}
+
+module.exports = { spawnLauncher, startLauncher, postJson, tempDir, withoutElapsed };

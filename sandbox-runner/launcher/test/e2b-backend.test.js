@@ -17,58 +17,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
-
-const SERVER_JS = path.join(__dirname, '..', 'server.js');
+const { startLauncher, postJson, tempDir } = require('./fixtures/launcher-harness');
 
 // Every /rca and /triage request now carries its own `credential` object — see
 // docker-backend.test.js's identical constant for why.
 const BEDROCK_CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
-
-// PORT=0 hands the choice to the OS and the launcher logs back the port it actually bound, so
-// tests can never collide on a guessed one. Returns that port alongside the child.
-async function startLauncher(env) {
-  const child = spawn('node', [SERVER_JS], {
-    env: { ...process.env, ...env, PORT: '0' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const port = await new Promise((resolve, reject) => {
-    let out = '';
-    const onData = (d) => {
-      out += d.toString();
-      const bound = /listening on :(\d+)/.exec(out);
-      if (bound) { child.stdout.off('data', onData); resolve(Number(bound[1])); }
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', (d) => { out += d.toString(); });
-    child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
-    setTimeout(() => reject(new Error(`launcher did not start in time: ${out}`)), 5000);
-  });
-  return { child, port };
-}
-
-function postJson(port, urlPath, body, apiKey) {
-  return new Promise((resolve, reject) => {
-    const data = Buffer.from(JSON.stringify(body));
-    const req = http.request(
-      { host: '127.0.0.1', port, path: urlPath, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, Authorization: `Bearer ${apiKey}` } },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
-      },
-    );
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
-}
-
-function tempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
 
 const LOCALHOST_URLS = [
   'http://localhost',

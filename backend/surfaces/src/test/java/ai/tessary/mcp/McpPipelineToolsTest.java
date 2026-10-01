@@ -1,33 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.ctx;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.model.Pipeline;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.query.QueryService;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,8 +29,6 @@ import org.junit.jupiter.params.provider.CsvSource;
  * filters.
  */
 class McpPipelineToolsTest {
-
-    private static final String PROJECT_ID = "proj-1";
 
     /** Two call sites (with and without traffic stats) and two failure modes differing on every filtered axis. */
     private static final String PIPELINE_JSON = """
@@ -75,45 +62,17 @@ class McpPipelineToolsTest {
             """;
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private McpToolRegistry registry;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() throws Exception {
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        PipelineService pipelines = mock(PipelineService.class);
-        when(pipelines.getPipeline(PROJECT_ID)).thenReturn(mapper.readValue(PIPELINE_JSON, Pipeline.class));
-
-        this.registry = new McpToolRegistry(
-                pipelines,
-                projects,
-                mock(QueryService.class),
-                mock(SpanRepository.class),
-                mock(SpanPayloadRepository.class),
-                mock(TraceV2Repository.class),
-                mock(SessionReadService.class),
-                mock(FindingService.class),
-                mock(CaseService.class));
-        this.dispatcher = new McpDispatcher(registry, mapper);
+        this.mcp = registryWith()
+                .pipeline(mapper.readValue(PIPELINE_JSON, Pipeline.class))
+                .build();
     }
 
-    private static TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    @SuppressWarnings("unchecked")
     private JsonNode call(String tool, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + tool + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r =
-                dispatcher.dispatch(new JsonRpc.Request("2.0", IntNode.valueOf(1), "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        Map<String, Object> result = (Map<String, Object>) Objects.requireNonNull(r.result());
-        assertEquals(Boolean.FALSE, result.get("isError"), () -> "tool error: " + result.get("content"));
-        return mapper.valueToTree(result.get("structuredContent"));
+        return structured(mcp.callTool(tool, argsJson));
     }
 
     /** The agent starts from {@code get_project}, so the pack roll-up and judge runtime ride on it. */
@@ -211,7 +170,7 @@ class McpPipelineToolsTest {
     @Test
     @SuppressWarnings("NullAway") // deliberate: a null context is what the guard exists for
     void aHandlerWithNoBoundProjectRefusesBeforeReadingAnything() {
-        McpTool getProject = Objects.requireNonNull(registry.tool("get_project"));
+        McpTool getProject = Objects.requireNonNull(mcp.registry().tool("get_project"));
         TenantContext noProject = new TenantContext("user-1", null, "org-1", null, "member", "tok-1");
 
         McpTool.ToolException nullCtx = assertThrows(
@@ -227,7 +186,7 @@ class McpPipelineToolsTest {
     @Test
     @SuppressWarnings("NullAway") // a null argument map is the input the guard handles
     void aHandlerCalledWithANullArgumentMapReadsItAsNoFilter() {
-        McpTool listFailureModes = Objects.requireNonNull(registry.tool("list_failure_modes"));
+        McpTool listFailureModes = Objects.requireNonNull(mcp.registry().tool("list_failure_modes"));
 
         Object result = listFailureModes.handler().apply(ctx(), null);
 

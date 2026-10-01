@@ -18,42 +18,21 @@
  */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+const { runLane } = require('./fixtures/run-lane');
 
-test('triage.js exits fast and clean when opencode is unreachable, instead of hanging', () => {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-exit-test-work-'));
-  const inputPath = path.join(workDir, 'input.json');
-  fs.writeFileSync(
-    inputPath,
-    JSON.stringify({
-      files: { 'finding.md': 'a finding to rule on' },
-      prompt: 'rule on this finding',
-      json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
-      model: 'anthropic/claude-sonnet-5',
-      mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
-      timeout_ms: 5000,
-      system_prompt: 'You are the triage agent.',
-    }),
-  );
+const TRIAGE_INPUT = {
+  files: { 'finding.md': 'a finding to rule on' },
+  prompt: 'rule on this finding',
+  system_prompt: 'You are the triage agent.',
+};
 
-  const start = Date.now();
-  const result = spawnSync(
-    process.execPath,
-    [path.join(__dirname, '..', 'triage.js'), inputPath],
-    {
-      // An empty PATH is what makes the `opencode` lookup fail with ENOENT — agent-stream.js's
-      // spawnOpencodeServer spawns the bare name `opencode`, resolved against the child's PATH. node
-      // itself is found via process.execPath, an absolute path, so the empty PATH cannot break
-      // the spawn of this test's own child process.
-      env: { WORK_DIR: workDir, PATH: '' },
-      timeout: 15_000,
-      encoding: 'utf8',
-    },
-  );
-  const elapsedMs = Date.now() - start;
+test('triage.js exits fast and clean when opencode is unreachable, instead of hanging', async (t) => {
+  // An empty PATH is what makes the `opencode` lookup fail with ENOENT — agent-stream.js's
+  // spawnOpencodeServer spawns the bare name `opencode`, resolved against the child's PATH. node
+  // itself is found via process.execPath, an absolute path, so the empty PATH cannot break
+  // the spawn of this test's own child process.
+  const { result, elapsedMs, cleanup } = await runLane('triage.js', TRIAGE_INPUT, { pathFor: () => '' });
+  t.after(cleanup);
 
   assert.notEqual(result.signal, 'SIGTERM', 'must exit on its own well inside the 15s spawn timeout, not be killed by it');
   assert.ok(elapsedMs < 15_000, `expected a fast exit, took ${elapsedMs}ms`);
@@ -71,8 +50,6 @@ test('triage.js exits fast and clean when opencode is unreachable, instead of ha
     /still alive/,
     'the unref\'d exit guard is a backstop for a leak — it must never fire on a run that cleaned up after itself',
   );
-
-  fs.rmSync(workDir, { recursive: true, force: true });
 });
 
 /**
@@ -83,39 +60,11 @@ test('triage.js exits fast and clean when opencode is unreachable, instead of ha
  * the pipes before runAgent returns, so the guard never fires and the child is gone.
  */
 function runTriageAgainstStubbornOpencode(reply) {
-  const { makeFakeOpencodeBin } = require('./fixtures/fake-opencode');
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-exit-test-work-'));
-  const recordDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-exit-test-record-'));
-  const binDir = makeFakeOpencodeBin(fs.mkdtempSync(path.join(os.tmpdir(), 'lane-exit-test-bin-')));
-  const inputPath = path.join(workDir, 'input.json');
-  fs.writeFileSync(
-    inputPath,
-    JSON.stringify({
-      files: { 'finding.md': 'a finding to rule on' },
-      prompt: 'rule on this finding',
-      json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
-      model: 'anthropic/claude-sonnet-5',
-      mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
-      timeout_ms: 5000,
-      system_prompt: 'You are the triage agent.',
-    }),
-  );
-
-  const start = Date.now();
-  const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'triage.js'), inputPath], {
-    env: {
-      WORK_DIR: workDir,
-      PATH: binDir, // only the fake: a real opencode on the host must not be the one started
-      FAKE_OPENCODE_RECORD_DIR: recordDir,
-      FAKE_OPENCODE_IGNORE_SIGTERM: '1',
-      FAKE_OPENCODE_REPLY: reply,
-    },
-    timeout: 15_000,
-    encoding: 'utf8',
+  return runLane('triage.js', TRIAGE_INPUT, {
+    reply,
+    env: { FAKE_OPENCODE_IGNORE_SIGTERM: '1' },
+    pathFor: (bin) => bin, // only the fake: a real opencode on the host must not be the one started
   });
-  const elapsedMs = Date.now() - start;
-  const pids = fs.readdirSync(recordDir).map((f) => JSON.parse(fs.readFileSync(path.join(recordDir, f), 'utf8')).pid);
-  return { result, elapsedMs, pids, cleanup: () => [workDir, recordDir, binDir].forEach((d) => fs.rmSync(d, { recursive: true, force: true })) };
 }
 
 function isAlive(pid) {
@@ -136,16 +85,16 @@ function assertCleanExit({ result, elapsedMs, pids }) {
   assert.equal(isAlive(pids[0]), false, 'the opencode child is gone, not orphaned');
 }
 
-test('triage.js exits clean after a failed run even when opencode ignores SIGTERM', (t) => {
-  const run = runTriageAgainstStubbornOpencode('');
+test('triage.js exits clean after a failed run even when opencode ignores SIGTERM', async (t) => {
+  const run = await runTriageAgainstStubbornOpencode('');
   t.after(run.cleanup);
   assertCleanExit(run);
   assert.equal(run.result.status, 1, 'a run that never produced a ruling exits 1');
   assert.match(JSON.parse(run.result.stdout).error, /opencode produced no usable reply/);
 });
 
-test('triage.js exits clean after a successful run even when opencode ignores SIGTERM', (t) => {
-  const run = runTriageAgainstStubbornOpencode('{"verdict":"positive"}');
+test('triage.js exits clean after a successful run even when opencode ignores SIGTERM', async (t) => {
+  const run = await runTriageAgainstStubbornOpencode('{"verdict":"positive"}');
   t.after(run.cleanup);
   assertCleanExit(run);
   assert.equal(run.result.status, 0, run.result.stderr);

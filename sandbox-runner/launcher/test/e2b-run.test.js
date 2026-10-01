@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { withoutElapsed } = require('./fixtures/launcher-harness');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 const FAKE_E2B = path.join(__dirname, 'fixtures', 'fake-e2b');
@@ -64,13 +65,6 @@ async function runOnce(mode, route = '/rca', extraEnv = {}, payload = PAYLOAD) {
   } finally {
     child.kill();
   }
-}
-
-// The per-run timing is the only field that varies; everything else in the body is pinned.
-function withoutElapsed(body) {
-  assert.equal(typeof body.elapsed_ms, 'number');
-  const { elapsed_ms: _elapsed, ...rest } = body;
-  return rest;
 }
 
 test('a successful E2B run keeps the credential off the microVM disk, returns the output, and kills the sandbox', async () => {

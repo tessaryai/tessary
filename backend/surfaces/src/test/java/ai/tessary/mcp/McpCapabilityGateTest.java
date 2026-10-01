@@ -1,35 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.MAPPER;
+import static ai.tessary.mcp.McpToolHarness.ctx;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.req;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.query.QueryService;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
-import java.util.ArrayList;
+import ai.tessary.model.Pipeline;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -51,9 +36,6 @@ import org.junit.jupiter.api.Test;
  * registration instead of shipping.
  */
 class McpCapabilityGateTest {
-
-    private static final String PROJECT_ID = "proj-1";
-    private static final String ORG_ID = "org-1";
 
     /**
      * The tools deleted from this surface. Named here so that re-adding one under its old name fails a
@@ -115,11 +97,9 @@ class McpCapabilityGateTest {
             "get_span",
             "get_trace");
 
-    private final ObjectMapper mapper = new ObjectMapper();
-
     @Test
     void everyOrgIsOfferedExactlyTheOpenTools() throws Exception {
-        Set<String> offered = fixture().listToolNames();
+        Set<String> offered = registryWith().pipeline(Pipeline.empty()).build().listToolNames();
 
         assertEquals(OPEN_TOOLS, offered, "every org should be offered exactly the open set");
         assertEquals(19, offered.size(), "the surface is 19 tools, all open");
@@ -133,7 +113,8 @@ class McpCapabilityGateTest {
      */
     @Test
     void theSurfaceHasNoWriteToolAndNoneOfTheRemovedSix() throws Exception {
-        Set<String> everything = fixture().listToolNames();
+        Set<String> everything =
+                registryWith().pipeline(Pipeline.empty()).build().listToolNames();
 
         for (String name : everything) {
             for (String prefix : WRITE_PREFIXES) {
@@ -155,9 +136,9 @@ class McpCapabilityGateTest {
      */
     @Test
     void instructionsStateTheSurfaceIsReadOnly() throws Exception {
-        Fixture f = fixture();
+        McpToolHarness mcp = registryWith().pipeline(Pipeline.empty()).build();
 
-        JsonRpc.Response r = f.dispatcher.dispatch(f.req(1, "initialize", mapper.readTree("{}")), f.ctx());
+        JsonRpc.Response r = mcp.dispatcher().dispatch(req(1, "initialize", MAPPER.readTree("{}")), ctx());
         assertNotNull(r);
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
@@ -167,63 +148,5 @@ class McpCapabilityGateTest {
         assertTrue(
                 instructions.contains("read-only"),
                 "the read-only statement is not conditional on the offer: " + instructions);
-    }
-
-    // ------------------------------------------------------------------ fixture
-
-    private record Fixture(McpDispatcher dispatcher, ObjectMapper mapper) {
-
-        TenantContext ctx() {
-            return new TenantContext("user-1", null, ORG_ID, PROJECT_ID, "member", "tok-1");
-        }
-
-        JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-            return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-        }
-
-        Set<String> listToolNames() {
-            JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-            assertNotNull(r);
-            assertNull(Objects.requireNonNull(r).error(), "tools/list should not be a JSON-RPC error");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = (Map<String, Object>) Objects.requireNonNull(r.result());
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-            List<String> names = new ArrayList<>();
-            for (Map<String, Object> t : tools)
-                names.add(Objects.requireNonNull(t.get("name")).toString());
-            return Set.copyOf(names);
-        }
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> callTool(String name, String argsJson) throws Exception {
-            JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-            JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-            assertNotNull(r);
-            assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-            return (Map<String, Object>) Objects.requireNonNull(r.result());
-        }
-    }
-
-    private Fixture fixture() {
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, ORG_ID, "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-
-        PipelineService pipeline = mock(PipelineService.class);
-        when(pipeline.getPipeline(PROJECT_ID)).thenReturn(ai.tessary.model.Pipeline.empty());
-
-        var registry = new McpToolRegistry(
-                pipeline,
-                projects,
-                mock(QueryService.class),
-                mock(SpanRepository.class),
-                mock(SpanPayloadRepository.class),
-                mock(TraceV2Repository.class),
-                mock(SessionReadService.class),
-                mock(FindingService.class),
-                mock(CaseService.class));
-        return new Fixture(new McpDispatcher(registry, mapper), mapper);
     }
 }

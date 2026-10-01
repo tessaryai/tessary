@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * rca.js or triage.js run the way the launcher runs them: a real process over a real input.json, with
+ * test/fixtures/fake-opencode on PATH as `opencode`. No extension, so node --test skips it.
+ *
+ * Async, so tests that each wait out a 5s guard can run side by side. `pathFor(binDir)` sets the
+ * child's whole PATH: the default puts the fake ahead of the host's, `(bin) => bin` admits only the
+ * fake, and `() => ''` leaves opencode unreachable.
+ */
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { makeFakeOpencodeBin } = require('./fake-opencode');
+
+const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+
+async function runLane(script, input, {
+  reply = '{"verdict":"supported"}',
+  env = {},
+  pathFor = (bin) => `${bin}${path.delimiter}${process.env.PATH}`,
+} = {}) {
+  const workDir = tmp('lanes-work-');
+  const recordDir = tmp('lanes-record-');
+  const binDir = makeFakeOpencodeBin(tmp('lanes-bin-'));
+  const inputDir = tmp('lanes-input-');
+  const inputPath = path.join(inputDir, 'input.json');
+  fs.writeFileSync(inputPath, JSON.stringify({
+    prompt: 'investigate',
+    json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
+    model: 'anthropic/claude-sonnet-5',
+    mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
+    timeout_ms: 5000,
+    ...input,
+  }));
+  const start = Date.now();
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, '..', '..', script), inputPath], {
+      env: {
+        WORK_DIR: workDir,
+        PATH: pathFor(binDir),
+        FAKE_OPENCODE_RECORD_DIR: recordDir,
+        FAKE_OPENCODE_REPLY: reply,
+        ...(process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {}),
+        ...env,
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (d) => { stdout += d; });
+    child.stderr.setEncoding('utf8').on('data', (d) => { stderr += d; });
+    const killer = setTimeout(() => child.kill('SIGTERM'), 15_000);
+    child.on('error', (e) => { clearTimeout(killer); reject(e); });
+    child.on('close', (status, signal) => { clearTimeout(killer); resolve({ status, signal, stdout, stderr }); });
+  });
+  const elapsedMs = Date.now() - start;
+  const records = fs.readdirSync(recordDir).map((f) => JSON.parse(fs.readFileSync(path.join(recordDir, f), 'utf8')));
+  return {
+    result,
+    workDir,
+    elapsedMs,
+    configs: records.map((r) => r.config),
+    pids: records.map((r) => r.pid),
+    cleanup: () => [workDir, recordDir, binDir, inputDir].forEach((d) => fs.rmSync(d, { recursive: true, force: true })),
+  };
+}
+
+module.exports = { runLane };

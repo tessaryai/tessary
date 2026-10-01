@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.payload;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.span;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,30 +18,20 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.open.errors.QueryError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.pipeline.PipelineService;
 import ai.tessary.query.QueryDataset;
 import ai.tessary.query.QueryDtos;
 import ai.tessary.query.QueryRepository;
 import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanKey;
 import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.traces.SessionDtos;
 import ai.tessary.traces.SessionReadService;
 import ai.tessary.traces.TraceDtos;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,9 +39,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -60,15 +59,12 @@ import org.mockito.ArgumentCaptor;
  */
 class McpSubstrateReadToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
-
-    private final ObjectMapper mapper = new ObjectMapper();
     private TraceV2Repository traces;
     private SessionReadService sessions;
     private QueryService queries;
     private SpanRepository spans;
     private SpanPayloadRepository payloads;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
@@ -77,22 +73,13 @@ class McpSubstrateReadToolsTest {
         this.queries = mock(QueryService.class);
         this.spans = mock(SpanRepository.class);
         this.payloads = mock(SpanPayloadRepository.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-17T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-
-        var registry = new McpToolRegistry(
-                mock(PipelineService.class),
-                projects,
-                queries,
-                spans,
-                payloads,
-                traces,
-                sessions,
-                mock(FindingService.class),
-                mock(CaseService.class));
-        this.dispatcher = new McpDispatcher(registry, mapper);
+        this.mcp = registryWith()
+                .query(queries)
+                .spans(spans)
+                .payloads(payloads)
+                .traces(traces)
+                .sessions(sessions)
+                .build();
     }
 
     // ---- registration --------------------------------------------------------------------------
@@ -103,7 +90,7 @@ class McpSubstrateReadToolsTest {
      */
     @Test
     void listSessions_offersNoSortArgument() {
-        JsonNode properties = schemaOf("list_sessions").get("properties");
+        JsonNode properties = mcp.schemaOf("list_sessions").get("properties");
         Set<String> args = new java.util.HashSet<>();
         properties.fieldNames().forEachRemaining(args::add);
         assertEquals(Set.of("limit", "cursor"), args, "a sessions page takes paging and nothing else");
@@ -117,7 +104,7 @@ class McpSubstrateReadToolsTest {
      */
     @Test
     void listTraces_typedFiltersMapOntoTheRepositoryQuery() throws Exception {
-        structured(callTool("list_traces", """
+        structured(mcp.callTool("list_traces", """
                 {"model":"claude-sonnet-5","kind":"llm","call_site_id":"cs-1",
                  "status":"error","q":"broken","range":{"from":"2026-08-10T00:00:00Z","to":"2026-08-17T00:00:00Z"}}
                 """));
@@ -147,7 +134,7 @@ class McpSubstrateReadToolsTest {
         when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(rows);
 
-        JsonNode body = structured(callTool("list_traces", "{\"limit\":500}"));
+        JsonNode body = structured(mcp.callTool("list_traces", "{\"limit\":500}"));
 
         ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
         verify(traces).list(eq(PROJECT_ID), any(), any(), limit.capture(), any(), any(), any());
@@ -165,10 +152,10 @@ class McpSubstrateReadToolsTest {
                         summary("t-2", "2026-08-17T09:00:00Z", 0),
                         summary("t-3", "2026-08-17T08:00:00Z", 0)));
 
-        JsonNode first = structured(callTool("list_traces", "{\"limit\":2}"));
+        JsonNode first = structured(mcp.callTool("list_traces", "{\"limit\":2}"));
         String cursor = first.get("next_cursor").asText();
 
-        structured(callTool("list_traces", "{\"limit\":2,\"cursor\":\"" + cursor + "\"}"));
+        structured(mcp.callTool("list_traces", "{\"limit\":2,\"cursor\":\"" + cursor + "\"}"));
 
         ArgumentCaptor<String> beforeSort = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> beforeStartedAt = ArgumentCaptor.forClass(String.class);
@@ -194,7 +181,7 @@ class McpSubstrateReadToolsTest {
      */
     @Test
     void listTraces_unreadableCursorSilentlyRestartsAtPageOne() throws Exception {
-        structured(callTool("list_traces", "{\"cursor\":\"not-a-cursor\"}"));
+        structured(mcp.callTool("list_traces", "{\"cursor\":\"not-a-cursor\"}"));
 
         ArgumentCaptor<String> beforeStartedAt = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> beforeId = ArgumentCaptor.forClass(String.class);
@@ -214,7 +201,7 @@ class McpSubstrateReadToolsTest {
                 .thenReturn(List.of(
                         summary("t-1", "2026-08-17T10:00:00Z", 2), summary("t-2", "2026-08-17T09:00:00Z", null)));
 
-        JsonNode body = structured(callTool("list_traces", "{\"limit\":2}"));
+        JsonNode body = structured(mcp.callTool("list_traces", "{\"limit\":2}"));
         JsonNode row = body.get("traces").get(0);
         assertTrue(body.get("next_cursor").isNull(), "exactly a page's worth means the page was the last one");
         JsonNode unrolled = body.get("traces").get(1);
@@ -244,7 +231,7 @@ class McpSubstrateReadToolsTest {
     @Test
     void listSpans_everyTypedFilterIsAllowListedOnTheSpansDataset() {
         Set<String> nonFilterArgs = Set.of("range", "q", "mode", "fields", "limit", "cursor");
-        JsonNode properties = schemaOf("list_spans").get("properties");
+        JsonNode properties = mcp.schemaOf("list_spans").get("properties");
         List<String> typed = new ArrayList<>();
         properties.fieldNames().forEachRemaining(name -> {
             if (!nonFilterArgs.contains(name)) typed.add(name);
@@ -268,7 +255,7 @@ class McpSubstrateReadToolsTest {
     void listSpans_mapsTypedArgsOntoTheSearchRequestAndClampsToTheMcpCap() throws Exception {
         when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage(null));
 
-        structured(callTool("list_spans", """
+        structured(mcp.callTool("list_spans", """
                 {"trace_id":"t-1","call_site_id":"cs-1","kind":"llm","name":"chat","status":"error",
                  "model_id":"anthropic/claude-sonnet-5","session_id":"sess-1",
                  "q":"refund","mode":"semantic","limit":500,"cursor":"opaque",
@@ -308,7 +295,7 @@ class McpSubstrateReadToolsTest {
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1"), span("t-1", "s-2")));
         when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of(new SpanKey("t-1", "s-1")));
 
-        JsonNode body = structured(callTool("list_spans", "{}"));
+        JsonNode body = structured(mcp.callTool("list_spans", "{}"));
         JsonNode rows = body.get("spans");
         // The cursor is QueryRepository's, passed through, so it resumes the same scan.
         assertEquals("next-page", body.get("next_cursor").asText());
@@ -336,7 +323,7 @@ class McpSubstrateReadToolsTest {
      */
     @Test
     void listSpans_unscopedPayloadRequestIsAnErrorNamingTheRule() throws Exception {
-        String text = errorText(callTool("list_spans", "{\"fields\":[\"payload\"]}"));
+        String text = errorText(mcp.callTool("list_spans", "{\"fields\":[\"payload\"]}"));
 
         assertTrue(text.contains("trace_id"), text);
         assertTrue(text.contains("24h"), text);
@@ -351,7 +338,7 @@ class McpSubstrateReadToolsTest {
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1")));
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(payload("t-1", "s-1")));
 
-        JsonNode row = structured(callTool("list_spans", "{\"trace_id\":\"t-1\",\"fields\":[\"payload\"]}"))
+        JsonNode row = structured(mcp.callTool("list_spans", "{\"trace_id\":\"t-1\",\"fields\":[\"payload\"]}"))
                 .get("spans")
                 .get(0);
 
@@ -370,7 +357,7 @@ class McpSubstrateReadToolsTest {
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1")));
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(payload("t-1", "s-1")));
 
-        JsonNode body = structured(callTool("list_spans", """
+        JsonNode body = structured(mcp.callTool("list_spans", """
                 {"fields":["payload"],"range":{"from":"2026-08-16T01:00:00Z","to":"2026-08-17T00:00:00Z"}}
                 """));
 
@@ -379,42 +366,35 @@ class McpSubstrateReadToolsTest {
                 body.get("spans").get(0).get("input").asText());
     }
 
-    @Test
-    void listSpans_payloadRequestWiderThanTheWindowIsRefusedWithTheWidthItSaw() throws Exception {
-        String text = errorText(callTool("list_spans", """
-                {"fields":["payload"],"range":{"from":"2026-08-10T00:00:00Z","to":"2026-08-17T00:00:00Z"}}
-                """));
-
-        assertTrue(text.contains("168h"), text);
-        assertTrue(text.contains("24h"), text);
+    static Stream<Arguments> refusedPayloadRequests() {
+        return Stream.of(
+                Arguments.of("wider than the window, refused with the width it saw", """
+                        {"fields":["payload"],"range":{"from":"2026-08-10T00:00:00Z","to":"2026-08-17T00:00:00Z"}}
+                        """, List.of("168h", "24h")),
+                // A half-open range is unbounded. Reading the open end as "now" would make the rule depend on the
+                // server clock.
+                Arguments.of(
+                        "an open-ended range",
+                        "{\"fields\":[\"payload\"],\"range\":{\"from\":\"2026-08-17T00:00:00Z\"}}",
+                        List.of("open at one end")),
+                // Names which bound is unreadable; the query layer never parses them, so this rule is the first reader.
+                Arguments.of(
+                        "an unparseable bound, named",
+                        "{\"fields\":[\"payload\"],\"range\":{\"from\":\"yesterday\",\"to\":\"today\"}}",
+                        List.of("range.from")),
+                Arguments.of(
+                        "an unknown fields entry, a tool error rather than ignored",
+                        "{\"trace_id\":\"t-1\",\"fields\":[\"attributes\"]}",
+                        List.of("attributes", "payload")));
     }
 
-    /**
-     * A half-open range is unbounded. Reading the open end as "now" would make the rule depend on the server clock.
-     */
-    @Test
-    void listSpans_payloadRequestWithAnOpenEndedRangeIsRefused() throws Exception {
-        String text = errorText(
-                callTool("list_spans", "{\"fields\":[\"payload\"],\"range\":{\"from\":\"2026-08-17T00:00:00Z\"}}"));
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("refusedPayloadRequests")
+    void listSpans_aPayloadRequestOutsideTheRuleIsAToolErrorNamingWhy(String why, String argsJson, List<String> named)
+            throws Exception {
+        String text = errorText(mcp.callTool("list_spans", argsJson));
 
-        assertTrue(text.contains("open at one end"), text);
-    }
-
-    /** Names which bound is unreadable; the query layer never parses them, so this rule is the first reader. */
-    @Test
-    void listSpans_payloadRequestWithAnUnparseableBoundNamesTheBound() throws Exception {
-        String text = errorText(callTool(
-                "list_spans", "{\"fields\":[\"payload\"],\"range\":{\"from\":\"yesterday\",\"to\":\"today\"}}"));
-
-        assertTrue(text.contains("range.from"), text);
-    }
-
-    @Test
-    void listSpans_unknownFieldsEntryIsAToolErrorRatherThanIgnored() throws Exception {
-        String text = errorText(callTool("list_spans", "{\"trace_id\":\"t-1\",\"fields\":[\"attributes\"]}"));
-
-        assertTrue(text.contains("attributes"), text);
-        assertTrue(text.contains("payload"), text);
+        assertTrue(named.stream().allMatch(text::contains), why + ": " + text);
     }
 
     /**
@@ -428,7 +408,7 @@ class McpSubstrateReadToolsTest {
         when(spans.listByKeys(eq(PROJECT_ID), any()))
                 .thenReturn(List.of(span("t-3", "s-3"), span("t-1", "s-1"), span("t-2", "s-2")));
 
-        JsonNode rows = structured(callTool("list_spans", "{\"mode\":\"semantic\",\"q\":\"angry customer\"}"))
+        JsonNode rows = structured(mcp.callTool("list_spans", "{\"mode\":\"semantic\",\"q\":\"angry customer\"}"))
                 .get("spans");
 
         assertEquals("s-1", rows.get(0).get("span_id").asText());
@@ -442,7 +422,7 @@ class McpSubstrateReadToolsTest {
         when(queries.search(eq(PROJECT_ID), any())).thenReturn(searchPage(null, key("t-1", "s-1"), key("t-1", "gone")));
         when(spans.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(span("t-1", "s-1")));
 
-        JsonNode rows = structured(callTool("list_spans", "{}")).get("spans");
+        JsonNode rows = structured(mcp.callTool("list_spans", "{}")).get("spans");
 
         assertEquals(1, rows.size());
         assertEquals("s-1", rows.get(0).get("span_id").asText());
@@ -454,7 +434,7 @@ class McpSubstrateReadToolsTest {
         when(queries.search(eq(PROJECT_ID), any()))
                 .thenThrow(new TessaryException(QueryError.UNKNOWN_SEARCH_MODE, "fuzzy"));
 
-        String text = errorText(callTool("list_spans", "{\"mode\":\"fuzzy\"}"));
+        String text = errorText(mcp.callTool("list_spans", "{\"mode\":\"fuzzy\"}"));
 
         assertTrue(text.contains("fuzzy"), text);
     }
@@ -490,7 +470,7 @@ class McpSubstrateReadToolsTest {
                                 null)),
                         "cursor-2"));
 
-        JsonNode body = structured(callTool("list_sessions", "{\"limit\":500,\"cursor\":\"opaque-token\"}"));
+        JsonNode body = structured(mcp.callTool("list_sessions", "{\"limit\":500,\"cursor\":\"opaque-token\"}"));
 
         // The page size is clamped by the tool, not the service, and the cursor passes through untouched.
         verify(sessions).page(PROJECT_ID, 100, "opaque-token", false);
@@ -521,7 +501,7 @@ class McpSubstrateReadToolsTest {
                         true,
                         List.of(TraceDtos.item(summary("t-1", "2026-08-17T09:00:00Z", 0))))));
 
-        JsonNode body = structured(callTool("get_session", "{\"id\":\"sess-1\"}"));
+        JsonNode body = structured(mcp.callTool("get_session", "{\"id\":\"sess-1\"}"));
 
         verify(sessions).detail(PROJECT_ID, "sess-1");
         assertEquals("sess-1", body.get("id").asText());
@@ -541,7 +521,7 @@ class McpSubstrateReadToolsTest {
     void getSession_unknownIdIsACleanToolErrorNotAn32603() throws Exception {
         when(sessions.detail(eq(PROJECT_ID), any())).thenReturn(Optional.empty());
 
-        String text = errorText(callTool("get_session", "{\"id\":\"nope\"}"));
+        String text = errorText(mcp.callTool("get_session", "{\"id\":\"nope\"}"));
 
         assertTrue(text.contains("session not found"), text);
     }
@@ -572,66 +552,6 @@ class McpSubstrateReadToolsTest {
         return new QueryRepository.SearchPage(List.copyOf(rows), nextCursor);
     }
 
-    private static SpanRow span(String traceId, String spanId) {
-        return new SpanRow(
-                PROJECT_ID,
-                traceId,
-                spanId,
-                null, // parentSpanId — a root
-                traceId + "." + spanId,
-                "sess-1",
-                "user-9",
-                null, // projectVersionId
-                "cs-1",
-                "chat turn",
-                "llm",
-                "chat claude-sonnet-5",
-                false,
-                "ok",
-                null, // level
-                null, // errorType
-                null, // errorMessage
-                "2026-08-17T09:59:59Z",
-                "2026-08-17T10:00:00Z",
-                1000L,
-                120L,
-                "claude-sonnet-5",
-                "anthropic/claude-sonnet-5",
-                100L,
-                20L,
-                null,
-                null,
-                null,
-                "0.000300000000",
-                "0.000300000000",
-                null,
-                null,
-                SpanRow.CostSource.INFERRED,
-                "litellm-2026-08-12",
-                "user: this is broken again",
-                "ok",
-                SpanRow.ResolverState.DONE,
-                SpanRow.ResolverState.RESOLVED,
-                "2026-08-17T10:00:00Z",
-                false,
-                1, // depth (generated)
-                120L, // totalTokens (generated)
-                "0.000600000000", // totalCost (generated)
-                "2026-08-17T10:00:01Z");
-    }
-
-    private static SpanPayloadRow payload(String traceId, String spanId) {
-        return new SpanPayloadRow(
-                PROJECT_ID,
-                traceId,
-                spanId,
-                "user: this is broken again, and here is the whole prompt",
-                "ok, here is the whole completion",
-                "{\"gen_ai.system\":\"anthropic\"}",
-                "{\"input_tokens\":100}",
-                "2026-08-17T10:00:00Z");
-    }
-
     private static TraceV2Repository.Summary summary(String id, String startedAt, @Nullable Integer errorCount) {
         return new TraceV2Repository.Summary(
                 id,
@@ -658,49 +578,5 @@ class McpSubstrateReadToolsTest {
                 true,
                 "user: this is broken again",
                 "ok");
-    }
-
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"), String.valueOf(result.get("content")));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
-    }
-
-    private JsonNode schemaOf(String toolName) {
-        for (JsonNode t : listedTools()) {
-            if (toolName.equals(t.get("name").asText())) return t.get("inputSchema");
-        }
-        throw new AssertionError("tool not registered: " + toolName);
-    }
-
-    private JsonNode listedTools() {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        return mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
     }
 }
