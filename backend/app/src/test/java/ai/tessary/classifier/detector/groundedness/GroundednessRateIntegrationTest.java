@@ -6,17 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.cases.CaseEventRepository;
-import ai.tessary.cases.CaseEventRow;
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
-import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository.Assessment;
 import ai.tessary.classifier.finding.BehaviorTriageEngine;
 import ai.tessary.classifier.finding.BehaviorTriageJobRow;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -30,13 +25,8 @@ import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Ids;
-import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
-import ai.tessary.testsupport.TenantFixture;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -49,7 +39,6 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * A call site whose answers became less grounded, against Postgres: one unruled finding per spell with scored traces
@@ -64,8 +53,8 @@ class GroundednessRateIntegrationTest {
 
     private static final String CALL_SITE = "cs-rag";
 
-    @Autowired
-    GroundednessAssessmentRepository assessments;
+    private static final String EVIDENCE = "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
+            + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}],\"claim\":\"unsupported sentence\"}";
 
     @Autowired
     GroundednessRateService service;
@@ -83,9 +72,6 @@ class GroundednessRateIntegrationTest {
     CaseRepository cases;
 
     @Autowired
-    CaseEventRepository events;
-
-    @Autowired
     CaseOpener caseOpener;
 
     @Autowired
@@ -95,22 +81,10 @@ class GroundednessRateIntegrationTest {
     BehaviorTriageEngine triageEngine;
 
     @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
     GroundednessAnswerClearer clearer;
 
     @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
+    RateClassifierFixture fixture;
 
     @Autowired
     SessionRepository sessions;
@@ -126,8 +100,8 @@ class GroundednessRateIntegrationTest {
 
     @Test
     void aRiseFilesOneUnruledFindingWithEveryScoredTraceAsEvidence() {
-        String pid = project("gr-rise");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-rise", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         Instant start = start();
         seedHours(pid, signal, CALL_SITE, start, 0, 7, 30, 0.05); // 210 reference traces at 5%
         seedHours(pid, signal, CALL_SITE, start, 7, 6, 30, 0.40); // then 180 at 40%
@@ -193,8 +167,8 @@ class GroundednessRateIntegrationTest {
 
     @Test
     void aTraceWithTwoFlaggedAnswersIsOneFailure() {
-        String pid = project("gr-trace");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-trace", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         Instant start = start();
         seedHours(pid, signal, CALL_SITE, start, 0, 1, 30, 0.40); // 12 flagged, 6 with two flags
 
@@ -208,8 +182,8 @@ class GroundednessRateIntegrationTest {
 
     @Test
     void aPositiveOpensACaseAndTheDossierListsTheFlaggedAnswersAtItsCallSite() {
-        String pid = project("gr-case");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-case", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         FindingRow finding = rise(pid, signal);
         CaseRow opened = open(pid, finding);
 
@@ -252,29 +226,34 @@ class GroundednessRateIntegrationTest {
 
     @Test
     void aFalseAlarmResolveClearsTheCitedAnswersAndReLearns() {
-        String pid = project("gr-false-alarm");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-false-alarm", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         FindingRow finding = rise(pid, signal);
         CaseRow opened = open(pid, finding);
         long cited = evidence.listByFinding(pid, finding.id()).stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
                 .count();
-        assertNotNull(state(pid).get("baseline_calls"), "the reference was learned before the resolve");
+        assertNotNull(
+                fixture.state("groundedness", pid, CALL_SITE).get("baseline_calls"),
+                "the reference was learned before the resolve");
 
         caseService.resolve(pid, opened.id(), "the documents were stale", "priya@example.com", "false_alarm");
 
         CaseRow resolved = cases.findById(pid, opened.id()).orElseThrow();
         assertEquals(CaseRow.State.RESOLVED, resolved.state());
         assertEquals(CaseRow.Disposition.FALSE_ALARM, resolved.disposition());
-        assertEquals(cited, clearedRows(pid), "every flagged answer of the spell, and only those");
-        assertTrue(flaggedRows(pid) > cited, "flags from before the spell are not this case's");
-        Map<String, Object> state = state(pid);
+        assertEquals(
+                cited,
+                fixture.clearedDetections("groundedness", pid),
+                "every flagged answer of the spell, and only those");
+        assertTrue(fixture.detections("groundedness", pid) > cited, "flags from before the spell are not this case's");
+        Map<String, Object> state = fixture.state("groundedness", pid, CALL_SITE);
         assertNull(state.get("baseline_calls"), "the reference is re-learned from here");
         assertNotNull(state.get("reset_at"));
         assertEquals("the documents were stale", state.get("reset_note"));
         assertEquals(
                 "{\"disposition\": \"false_alarm\", \"answers_cleared\": " + cited + "}",
-                resolvedEventDetail(pid, opened.id()));
+                fixture.resolvedEventDetail(pid, opened.id()));
 
         service.refresh(pid, signal, Instant.now());
         List<FindingRow> filed = findings.listByProject(pid, null, null, "groundedness", false, 10);
@@ -284,8 +263,8 @@ class GroundednessRateIntegrationTest {
 
     @Test
     void aFalseAlarmClearsEveryCitedAnswerPastTheFirstChunk() {
-        String pid = project("gr-clear-chunks");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-clear-chunks", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         FindingRow finding = rise(pid, signal);
         CaseRow opened = open(pid, finding);
         long citedByReplay = evidence.listByFinding(pid, finding.id()).stream()
@@ -298,7 +277,7 @@ class GroundednessRateIntegrationTest {
         for (int i = 0; i < cited - citedByReplay; i++) {
             String trace = CALL_SITE + "-extra-" + i;
             extra.add(FindingEvidenceRepository.Ref.span(trace, trace + "-a"));
-            detection(pid, signal, trace, trace + "-a", at);
+            fixture.groundednessDetection(pid, signal, trace, trace + "-a", at, EVIDENCE);
         }
         evidence.record(
                 pid,
@@ -309,26 +288,29 @@ class GroundednessRateIntegrationTest {
 
         assertEquals(cited, clearer.clear(pid, opened.id(), Instant.now().toString()));
 
-        assertEquals(cited, clearedRows(pid), "the answers past the first chunk are cleared too");
+        assertEquals(
+                cited,
+                fixture.clearedDetections("groundedness", pid),
+                "the answers past the first chunk are cleared too");
     }
 
     @Test
     void anAbsorbReLearnsTheCallSitesReference() {
-        String pid = project("gr-absorb");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-absorb", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         FindingRow finding = rise(pid, signal);
         CaseRow opened = open(pid, finding);
-        assertNotNull(state(pid).get("baseline_calls"));
+        assertNotNull(fixture.state("groundedness", pid, CALL_SITE).get("baseline_calls"));
 
         caseService.absorb(pid, opened.id(), "priya@example.com");
 
         CaseRow absorbed = cases.findById(pid, opened.id()).orElseThrow();
         assertEquals(CaseRow.State.RESOLVED, absorbed.state());
         assertEquals(CaseRow.Resolution.ABSORBED, absorbed.resolution());
-        Map<String, Object> state = state(pid);
+        Map<String, Object> state = fixture.state("groundedness", pid, CALL_SITE);
         assertNull(state.get("baseline_calls"), "the new normal is learned from the traffic after the press");
         assertEquals("Absorbed.", state.get("reset_note"));
-        assertEquals(0, clearedRows(pid), "an absorb clears no flag");
+        assertEquals(0, fixture.clearedDetections("groundedness", pid), "an absorb clears no flag");
 
         service.refresh(pid, signal, Instant.now());
         assertEquals(
@@ -345,8 +327,8 @@ class GroundednessRateIntegrationTest {
     /** A page past the last cited answer still carries the count; zero would say the finding cites nothing. */
     @Test
     void aPagePastTheLastAnswerStillCarriesTheTotal() {
-        String pid = project("gr-past-end");
-        ClassifierRow signal = groundedness(pid);
+        String pid = fixture.project("gr-past-end", Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
         FindingRow finding = rise(pid, signal);
         long cited =
                 rateRows.answerPage(pid, signal.id(), finding.id(), null, 1, 0).total();
@@ -401,49 +383,6 @@ class GroundednessRateIntegrationTest {
         return traceId != null && Integer.parseInt(traceId.substring(traceId.lastIndexOf('-') + 1)) % 2 == 0;
     }
 
-    private Map<String, Object> state(String pid) {
-        return jdbc.sql("SELECT baseline_calls, baseline_failures, reset_at, reset_note FROM groundedness_state"
-                        + " WHERE project_id = :pid AND call_site_id = :cs")
-                .param("pid", pid)
-                .param("cs", CALL_SITE)
-                .query()
-                .singleRow();
-    }
-
-    private long clearedRows(String pid) {
-        return jdbc.sql("SELECT COUNT(*) FROM groundedness_detection"
-                        + " WHERE project_id = :pid AND cleared_at IS NOT NULL")
-                .param("pid", pid)
-                .query(Long.class)
-                .single();
-    }
-
-    private long flaggedRows(String pid) {
-        return jdbc.sql("SELECT COUNT(*) FROM groundedness_detection WHERE project_id = :pid")
-                .param("pid", pid)
-                .query(Long.class)
-                .single();
-    }
-
-    private String resolvedEventDetail(String pid, String caseId) {
-        return events.listByCase(pid, caseId).stream()
-                .filter(e -> CaseEventRow.Kind.RESOLVED.equals(e.kind()))
-                .findFirst()
-                .map(CaseEventRow::detail)
-                .orElseThrow();
-    }
-
-    private String project(String slug) {
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.GROUNDEDNESS))
-                .project()
-                .id();
-    }
-
-    private ClassifierRow groundedness(String pid) {
-        classifierService.seedBuiltIns(pid);
-        return ClassifierRows.byKey(classifiers, pid, "groundedness").orElseThrow();
-    }
-
     /** {@code perHour} traces an hour; the first {@code rate} flagged, even-numbered ones on a second answer too. */
     private void seedHours(
             String pid,
@@ -460,45 +399,12 @@ class GroundednessRateIntegrationTest {
                 String trace = callSite + "-" + h + "-" + String.format(Locale.ROOT, "%02d", c);
                 boolean flagged = c < flaggedPerHour;
                 Instant at = start.plus(Duration.ofHours(h)).plusSeconds(c);
-                answer(pid, signal, trace, trace + "-a", callSite, at, flagged);
-                if (flagged && c % 2 == 0) answer(pid, signal, trace, trace + "-b", callSite, at.plusMillis(500), true);
+                fixture.groundednessAnswer(pid, signal, trace, trace + "-a", callSite, at, flagged, EVIDENCE);
+                if (flagged && c % 2 == 0) {
+                    fixture.groundednessAnswer(
+                            pid, signal, trace, trace + "-b", callSite, at.plusMillis(500), true, EVIDENCE);
+                }
             }
         }
-    }
-
-    private void answer(
-            String pid, ClassifierRow signal, String trace, String span, String callSite, Instant at, boolean flagged) {
-        assessments.insert(new Assessment(
-                Ids.ulid(),
-                pid,
-                signal.id(),
-                null,
-                trace,
-                span,
-                callSite,
-                flagged ? 0.99 : 0.10,
-                flagged,
-                VERSION,
-                at.toString()));
-        if (flagged) detection(pid, signal, trace, span, at);
-    }
-
-    private void detection(String pid, ClassifierRow signal, String trace, String span, Instant at) {
-        jdbc.sql("INSERT INTO groundedness_detection"
-                        + " (id, project_id, classifier_id, classifier_key, subject_trace_id, subject_span_id,"
-                        + " severity, confidence, evidence, subject_started_at)"
-                        + " VALUES (:id, :pid, :cid, 'groundedness', :trace, :span, 'warn', 'high',"
-                        + " CAST(:evidence AS jsonb), :at)")
-                .param("id", Ids.ulid())
-                .param("pid", pid)
-                .param("cid", signal.id())
-                .param("trace", trace)
-                .param("span", span)
-                .param(
-                        "evidence",
-                        "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
-                                + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}],\"claim\":\"unsupported sentence\"}")
-                .param("at", Timestamp.from(at))
-                .update();
     }
 }

@@ -14,12 +14,12 @@ import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
-import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.MetricBaselineRows;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -170,32 +170,8 @@ class MetricFindingResolveIntegrationTest {
         String now = Instant.now().toString();
 
         String baselineId = baselines
-                .ensure(new MetricBaselineRow(
-                        Ids.ulid(),
-                        projectId,
-                        classifierId,
-                        Measure.TURN_DURATION,
-                        BucketKind.CALL_SITE,
-                        "discover-sales-prospects",
-                        State.ARMED,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        null,
-                        now,
-                        now))
+                .ensure(MetricBaselineRows.fresh(
+                        projectId, classifierId, Measure.TURN_DURATION, "discover-sales-prospects", State.ARMED))
                 .id();
         // A day of closed windows and a part-filled next one, as any real bucket has when a human looks; absorbing
         // pins the newest closed day.

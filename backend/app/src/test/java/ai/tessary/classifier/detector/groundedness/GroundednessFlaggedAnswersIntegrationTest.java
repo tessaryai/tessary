@@ -10,10 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
-import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
-import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository.Assessment;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -29,12 +26,11 @@ import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -66,7 +62,6 @@ import org.springframework.web.context.WebApplicationContext;
 @SpringBootTest
 class GroundednessFlaggedAnswersIntegrationTest {
 
-    private static final String VERSION = GroundednessDetector.scorerVersion(GroundednessConfig.DEFAULT_THRESHOLD);
     private static final String CALL_SITE = "cs-rag";
     private static final String QUESTION = "When will my refund arrive?";
     private static final String FIRST = "The refund was issued on March 3.";
@@ -98,13 +93,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
     CapabilityFixture capabilities;
 
     @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    GroundednessAssessmentRepository assessments;
+    RateClassifierFixture fixture;
 
     @Autowired
     GroundednessRateService rates;
@@ -236,6 +225,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
         String base =
                 "/api/orgs/" + mine.org().slug() + "/projects/" + mine.project().slug();
         String myAnswers = base + "/findings/" + mine.finding().id() + "/flagged-answers";
+        mvc.perform(get(myAnswers)).andExpect(status().isUnauthorized());
         // Both projects were seeded alike, so their findings cite the same trace ids.
         String trace = page(mine.session(), myAnswers + "?limit=1")
                 .path("rows")
@@ -296,9 +286,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
         Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
         String pid = project.id();
         capabilities.grant(org.id(), Capability.GROUNDEDNESS);
-        classifierService.seedBuiltIns(pid);
-        ClassifierRow signal =
-                ClassifierRows.byKey(classifiers, pid, "groundedness").orElseThrow();
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
 
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, signal, start, 0, 7, 0.05);
@@ -320,29 +308,15 @@ class GroundednessFlaggedAnswersIntegrationTest {
 
     /** A finished groundedness RCA report on {@code findingId} carrying {@code causes}, and its job. */
     private String rcaReport(String pid, String findingId, String causes) {
-        String job = Ids.ulid();
-        String report = Ids.ulid();
-        String now = Instant.now().toString();
-        jdbc.sql("INSERT INTO job (id, project_id, kind, status, payload, created_at, updated_at)"
-                        + " VALUES (:id, :pid, 'rca', 'done', CAST('{}' AS jsonb), :now, :now)")
-                .param("id", job)
-                .param("pid", pid)
-                .param("now", now)
-                .update();
-        jdbc.sql("INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label, metric,"
-                        + " window_from, window_split, window_to, current_value, prior_value, delta, status,"
-                        + " created_at, engine, finding_id, report_kind, causes)"
-                        + " VALUES (:id, :pid, :job, 'classifier', 'groundedness', 'Groundedness', 'groundedness',"
-                        + " :now, :now, :now, 0, 0, 0, 'done', :now, 'agentic', :fid, 'groundedness_causes',"
-                        + " CAST(:causes AS jsonb))")
-                .param("id", report)
-                .param("pid", pid)
-                .param("job", job)
-                .param("now", now)
-                .param("fid", findingId)
-                .param("causes", causes)
-                .update();
-        return report;
+        return fixture.rcaReport(
+                pid,
+                findingId,
+                "classifier",
+                "groundedness",
+                "Groundedness",
+                "groundedness",
+                "groundedness_causes",
+                causes);
     }
 
     private void storeAnswer(String pid, ClassifierRow signal, String trace, String span, Instant at) {
@@ -391,35 +365,16 @@ class GroundednessFlaggedAnswersIntegrationTest {
                 String trace = CALL_SITE + "-" + h + "-" + String.format(Locale.ROOT, "%02d", c);
                 boolean flagged = c < flaggedPerHour;
                 Instant at = start.plus(Duration.ofHours(h)).plusSeconds(c);
-                assessments.insert(new Assessment(
-                        Ids.ulid(),
+                fixture.groundednessAnswer(
                         pid,
-                        signal.id(),
-                        null,
+                        signal,
                         trace,
                         trace + "-a",
                         CALL_SITE,
-                        flagged ? 0.99 : 0.10,
+                        at,
                         flagged,
-                        VERSION,
-                        at.toString()));
-                if (!flagged) continue;
-                jdbc.sql("INSERT INTO groundedness_detection"
-                                + " (id, project_id, classifier_id, classifier_key, subject_trace_id, subject_span_id,"
-                                + " severity, confidence, evidence, subject_started_at)"
-                                + " VALUES (:id, :pid, :cid, 'groundedness', :trace, :span, 'warn', 'high',"
-                                + " CAST(:evidence AS jsonb), :at)")
-                        .param("id", Ids.ulid())
-                        .param("pid", pid)
-                        .param("cid", signal.id())
-                        .param("trace", trace)
-                        .param("span", trace + "-a")
-                        .param(
-                                "evidence",
-                                "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
-                                        + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}]}")
-                        .param("at", Timestamp.from(at))
-                        .update();
+                        "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
+                                + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}]}");
             }
         }
     }

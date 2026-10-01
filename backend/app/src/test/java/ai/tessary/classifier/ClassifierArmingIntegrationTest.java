@@ -219,7 +219,7 @@ class ClassifierArmingIntegrationTest {
                 leak(pid, classifierId, "cs-a", "github-token", "high", at),
                 leak(pid, classifierId, "cs-b", "aws-access-key-id", "high", at));
 
-        List<String> filed = arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now());
+        List<String> filed = evaluateLeaks(pid, classifierId, refs);
 
         assertEquals(3, filed.size(), "two call sites and two patterns make three distinct causes");
         FindingRow awsA = facetFinding(pid, classifierId, "cs-a", "aws-access-key-id");
@@ -236,7 +236,7 @@ class ClassifierArmingIntegrationTest {
         assertEquals(
                 0, evidenceCount(awsA.id(), FindingEvidenceRow.Role.MEMBER), "and a witness set claims no enumeration");
 
-        List<String> again = arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now());
+        List<String> again = evaluateLeaks(pid, classifierId, refs);
         assertTrue(again.isEmpty(), "all three are high confidence and so already ruled; a re-sweep files nothing");
         assertEquals(3, liveFindings(pid), "and opens none beside them");
         assertEquals(2, evidenceCount(awsA.id(), FindingEvidenceRow.Role.WITNESS), "without re-adding witnesses");
@@ -249,11 +249,8 @@ class ClassifierArmingIntegrationTest {
         // A backfill. Bucketing on sweep time would file it as today's leak, or not at all at a bar of one.
         Instant happened = daysAgo(40);
 
-        List<String> filed = arming.evaluate(
-                secretLeakRow(pid, classifierId),
-                pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", happened)),
-                Instant.now());
+        List<String> filed = evaluateLeaks(
+                pid, classifierId, List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", happened)));
 
         assertEquals(1, filed.size(), "a leak discovered late is still a finding");
         FindingRow finding = findings.findById(pid, filed.get(0)).orElseThrow();
@@ -271,11 +268,10 @@ class ClassifierArmingIntegrationTest {
                 TenantFixture.bootstrap(tenants, "arming-late-case").project().id();
         String classifierId = armedSecretLeak(pid);
 
-        String findingId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String findingId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(40))),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(40))))
                 .get(0);
 
         String caseId = findings.findById(pid, findingId).orElseThrow().caseId();
@@ -299,19 +295,15 @@ class ClassifierArmingIntegrationTest {
                 .id();
         String classifierId = armedSecretLeakAnyBand(pid);
 
-        String findingId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String findingId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", hoursAgo(1))),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", hoursAgo(1))))
                 .get(0);
         assertNull(findings.findById(pid, findingId).orElseThrow().triageVerdict(), "low alone is left to triage");
 
-        List<String> late = arming.evaluate(
-                secretLeakRow(pid, classifierId),
-                pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(3))),
-                Instant.now());
+        List<String> late = evaluateLeaks(
+                pid, classifierId, List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", daysAgo(3))));
 
         assertEquals(List.of(findingId), late, "the older window refreshes the same finding");
         FindingRow after = findings.findById(pid, findingId).orElseThrow();
@@ -383,12 +375,11 @@ class ClassifierArmingIntegrationTest {
             refs.add(leak(pid, classifierId, "cs-a", "redacted-secret", "low", at.plusSeconds(i)));
         }
         assertTrue(
-                arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now())
-                        .isEmpty(),
+                evaluateLeaks(pid, classifierId, refs).isEmpty(),
                 "three low-band markers against a bar of one high is nothing, however many there are");
 
         refs.add(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", at));
-        List<String> filed = arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now());
+        List<String> filed = evaluateLeaks(pid, classifierId, refs);
 
         assertEquals(1, filed.size(), "one high-band leak is");
         FindingRow finding = findings.findById(pid, filed.get(0)).orElseThrow();
@@ -404,19 +395,13 @@ class ClassifierArmingIntegrationTest {
         Instant recent = hoursAgo(1);
         Instant older = daysAgo(3);
 
-        String findingId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
-                        pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)),
-                        Instant.now())
+        String findingId = evaluateLeaks(
+                        pid, classifierId, List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)))
                 .get(0);
         FindingRow before = findings.findById(pid, findingId).orElseThrow();
 
-        List<String> late = arming.evaluate(
-                secretLeakRow(pid, classifierId),
-                pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", older)),
-                Instant.now());
+        List<String> late = evaluateLeaks(
+                pid, classifierId, List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", older)));
 
         assertEquals(List.of(findingId), late, "an older leak of the same cause refreshes the same finding");
         FindingRow after = findings.findById(pid, findingId).orElseThrow();
@@ -435,33 +420,23 @@ class ClassifierArmingIntegrationTest {
         Instant tenDaysAgo = daysAgo(10);
         Instant recent = hoursAgo(1);
 
-        String continuing = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String continuing = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", twoDaysAgo)),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", twoDaysAgo)))
                 .get(0);
-        arming.evaluate(
-                secretLeakRow(pid, classifierId),
-                pid,
-                List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)),
-                Instant.now());
+        evaluateLeaks(pid, classifierId, List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "low", recent)));
         assertEquals(
                 windowStart(twoDaysAgo).toString(),
                 findings.findById(pid, continuing).orElseThrow().onsetAt(),
                 "one quiet day between leaks is the same spell");
 
-        String restarted = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String restarted = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", tenDaysAgo)),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", tenDaysAgo)))
                 .get(0);
-        arming.evaluate(
-                secretLeakRow(pid, classifierId),
-                pid,
-                List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", recent)),
-                Instant.now());
+        evaluateLeaks(pid, classifierId, List.of(leak(pid, classifierId, "cs-b", "aws-access-key-id", "low", recent)));
         assertEquals(
                 windowStart(recent).toString(),
                 findings.findById(pid, restarted).orElseThrow().onsetAt(),
@@ -474,13 +449,12 @@ class ClassifierArmingIntegrationTest {
         String classifierId = armedSecretLeakAnyBand(pid);
         Instant at = hoursAgo(1);
 
-        arming.evaluate(
-                secretLeakRow(pid, classifierId),
+        evaluateLeaks(
                 pid,
+                classifierId,
                 List.of(
                         leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", at),
-                        leak(pid, classifierId, "cs-b", "redacted-secret", "low", at)),
-                Instant.now());
+                        leak(pid, classifierId, "cs-b", "redacted-secret", "low", at)));
 
         FindingRow high = facetFinding(pid, classifierId, "cs-a", "aws-access-key-id");
         assertEquals(FindingRow.Status.OPEN, high.status(), "a positive ruling keeps the finding open");
@@ -507,22 +481,19 @@ class ClassifierArmingIntegrationTest {
         List<FindingEvidenceRepository.Ref> first =
                 List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", older));
 
-        String firstId = arming.evaluate(secretLeakRow(pid, classifierId), pid, first, Instant.now())
-                .get(0);
+        String firstId = evaluateLeaks(pid, classifierId, first).get(0);
         FindingRow ruled = findings.findById(pid, firstId).orElseThrow();
         assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict());
 
         assertTrue(
-                arming.evaluate(secretLeakRow(pid, classifierId), pid, first, Instant.now())
-                        .isEmpty(),
+                evaluateLeaks(pid, classifierId, first).isEmpty(),
                 "re-sweeping the window the ruling covers files nothing");
         assertEquals(1, findingsFor(pid), "and forks no duplicate of the ruled finding");
 
-        String secondId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String secondId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", hoursAgo(1))),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", hoursAgo(1))))
                 .get(0);
         assertTrue(!secondId.equals(firstId), "a newer window files a fresh finding beside the ruled one");
         assertEquals(2, findingsFor(pid));
@@ -539,38 +510,35 @@ class ClassifierArmingIntegrationTest {
         String classifierId = armedSecretLeak(pid);
         Instant day = windowStart(daysAgo(3));
 
-        String firstId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String firstId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(3_600))),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(3_600))))
                 .get(0);
         FindingRow ruled = findings.findById(pid, firstId).orElseThrow();
         assertEquals(FindingRow.TriageVerdict.POSITIVE, ruled.triageVerdict());
 
         // Detected later the same day: the ruling already covers this window.
         assertTrue(
-                arming.evaluate(
-                                secretLeakRow(pid, classifierId),
+                evaluateLeaks(
                                 pid,
+                                classifierId,
                                 List.of(leak(
                                         pid,
                                         classifierId,
                                         "cs-a",
                                         "aws-access-key-id",
                                         "high",
-                                        day.plusSeconds(5 * 3_600))),
-                                Instant.now())
+                                        day.plusSeconds(5 * 3_600))))
                         .isEmpty(),
                 "a later leak in the ruled window files nothing");
         assertEquals(1, findingsFor(pid), "and forks no second finding for the same day");
 
-        String secondId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String secondId = evaluateLeaks(
                         pid,
+                        classifierId,
                         List.of(leak(
-                                pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(DAY + 3_600))),
-                        Instant.now())
+                                pid, classifierId, "cs-a", "aws-access-key-id", "high", day.plusSeconds(DAY + 3_600))))
                 .get(0);
         assertTrue(!secondId.equals(firstId), "the next day's window files a fresh finding");
         assertEquals(2, findingsFor(pid));
@@ -594,17 +562,15 @@ class ClassifierArmingIntegrationTest {
         Instant older = windowStart(daysAgo(5)).plusSeconds(3_600);
         Instant newer = windowStart(daysAgo(2)).plusSeconds(3_600);
 
-        String firstId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String firstId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…OLD1", older)),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…OLD1", older)))
                 .get(0);
-        String secondId = arming.evaluate(
-                        secretLeakRow(pid, classifierId),
+        String secondId = evaluateLeaks(
                         pid,
-                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…NEW2", newer)),
-                        Instant.now())
+                        classifierId,
+                        List.of(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", "AKIA…NEW2", newer)))
                 .get(0);
         String caseId = findings.findById(pid, firstId).orElseThrow().caseId();
         assertNotNull(caseId);
@@ -634,8 +600,7 @@ class ClassifierArmingIntegrationTest {
         for (int i = 0; i < 55; i++) {
             refs.add(leak(pid, classifierId, "cs-a", "aws-access-key-id", "high", at.plusMillis(i)));
         }
-        String findingId = arming.evaluate(secretLeakRow(pid, classifierId), pid, refs, Instant.now())
-                .get(0);
+        String findingId = evaluateLeaks(pid, classifierId, refs).get(0);
 
         assertEquals(55, findings.findById(pid, findingId).orElseThrow().sampleCount(), "the count is not capped");
         assertEquals(50, evidenceCount(findingId, FindingEvidenceRow.Role.WITNESS), "the witnesses are");
@@ -708,8 +673,8 @@ class ClassifierArmingIntegrationTest {
                 now);
     }
 
-    private ClassifierRow secretLeakRow(String pid, String classifierId) {
-        return row(pid, classifierId, "secret_leak");
+    private List<String> evaluateLeaks(String pid, String classifierId, List<FindingEvidenceRepository.Ref> refs) {
+        return arming.evaluate(row(pid, classifierId, "secret_leak"), pid, refs, Instant.now());
     }
 
     private List<FindingEvidenceRepository.Ref> writeDetections(String pid, String classifierId, String key, int n) {
