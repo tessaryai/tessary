@@ -14,7 +14,6 @@ import ai.tessary.alert.AlertDtos.SnoozeRequest;
 import ai.tessary.alert.AlertDtos.UpsertAlertRuleRequest;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.ClassifierError;
@@ -24,6 +23,7 @@ import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -539,22 +539,6 @@ class AlertControllerTest {
     }
 
     private String seedClassifier(String pid) {
-        String now = Instant.now().toString();
-        String id = Ids.ulid();
-        classifiers.insert(new ClassifierRow(
-                id,
-                pid,
-                "frustration-" + id,
-                "frustration",
-                null,
-                "keyword",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
-        return id;
+        return ClassifierRows.insertKeyedByName(classifiers, pid, "frustration", "keyword");
     }
 }

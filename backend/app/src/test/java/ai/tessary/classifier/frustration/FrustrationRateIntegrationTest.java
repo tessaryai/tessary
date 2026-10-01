@@ -10,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
-import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -20,22 +18,14 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
-import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedConversationView;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedSessionPage;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.plan.Capability;
-import ai.tessary.tenant.Ids;
-import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
-import ai.tessary.testsupport.ClassifierRows;
-import ai.tessary.testsupport.TenantFixture;
-import java.sql.Timestamp;
-import java.time.Duration;
+import ai.tessary.testsupport.RateClassifierFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -51,9 +41,6 @@ class FrustrationRateIntegrationTest {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
-
-    @Autowired
-    FrustrationAssessmentRepository assessments;
 
     @Autowired
     FrustrationRateService service;
@@ -74,12 +61,6 @@ class FrustrationRateIntegrationTest {
     BehaviorTriageSource triageSource;
 
     @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
     FrustrationDetailService frustrationDetail;
 
     @Autowired
@@ -89,20 +70,17 @@ class FrustrationRateIntegrationTest {
     FrustrationRateRepository rates;
 
     @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
+    RateClassifierFixture fixture;
 
     @Test
     void aRiseFilesOneRuledFindingWithEverySessionAsEvidenceAndOpensItsCase() {
-        String pid = project("fr-case");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-case", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         // Judged from 100, and every hour is added to the reference until 1,000, the risen ones included.
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
-        seedHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
+        fixture.frustrationHours(pid, signal, "cs-calm", start, 0, 13, 30, 0.05);
 
         service.refresh(pid, signal, Instant.now());
 
@@ -177,9 +155,14 @@ class FrustrationRateIntegrationTest {
                 "no session on both pages");
 
         // The second cause's session and trace come off the stored report.
-        String report = rcaReport(
+        String report = fixture.rcaReport(
                 pid,
                 finding.id(),
+                "call_site",
+                "cs-chat",
+                "cs-chat",
+                "frustration_rate",
+                "frustration_causes",
                 "[{\"evidence_session_ids\":[\"conv-cs-chat-12-00\"],\"evidence_trace_ids\":[]},"
                         + "{\"evidence_session_ids\":[\"conv-cs-chat-10-00\"],"
                         + "\"evidence_trace_ids\":[\"cs-chat-11-01\"]}]");
@@ -201,16 +184,16 @@ class FrustrationRateIntegrationTest {
 
     @Test
     void aSecondPassOnTheSameSpellRefreshesTheFindingRatherThanFilingAnother() {
-        String pid = project("fr-refresh");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-refresh", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
         service.refresh(pid, signal, Instant.now());
         FindingRow before = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
 
-        seedHours(pid, signal, "cs-chat", start, 13, 1, 30, 0.40); // the spell runs on another hour
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 13, 1, 30, 0.40); // the spell runs on another hour
         service.refresh(pid, signal, Instant.now());
 
         List<FindingRow> after = findings.listByProject(pid, null, null, "frustration", false, 10);
@@ -230,41 +213,14 @@ class FrustrationRateIntegrationTest {
         assertEquals(1, cases.listLive(pid).size());
     }
 
-    /** A finished frustration RCA report on {@code findingId} carrying {@code causes}, and its job. */
-    private String rcaReport(String pid, String findingId, String causes) {
-        String job = Ids.ulid();
-        String report = Ids.ulid();
-        String now = Instant.now().toString();
-        jdbc.sql("INSERT INTO job (id, project_id, kind, status, payload, created_at, updated_at)"
-                        + " VALUES (:id, :pid, 'rca', 'done', CAST('{}' AS jsonb), :now, :now)")
-                .param("id", job)
-                .param("pid", pid)
-                .param("now", now)
-                .update();
-        jdbc.sql("INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label, metric,"
-                        + " window_from, window_split, window_to, current_value, prior_value, delta, status,"
-                        + " created_at, engine, finding_id, report_kind, causes)"
-                        + " VALUES (:id, :pid, :job, 'call_site', 'cs-chat', 'cs-chat', 'frustration_rate',"
-                        + " :now, :now, :now, 0, 0, 0, 'done', :now, 'agentic', :fid, 'frustration_causes',"
-                        + " CAST(:causes AS jsonb))")
-                .param("id", report)
-                .param("pid", pid)
-                .param("job", job)
-                .param("now", now)
-                .param("fid", findingId)
-                .param("causes", causes)
-                .update();
-        return report;
-    }
-
     /** A page past the last session still carries the count, and an unparseable score lists the session unscored. */
     @Test
     void aPagePastTheEndKeepsTheTotalAndAnUnreadableScoreIsUnscored() {
-        String pid = project("fr-past-end");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-past-end", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
-        seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
-        seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05);
+        fixture.frustrationHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40);
         service.refresh(pid, signal, Instant.now());
         FindingRow finding = findings.listByProject(pid, null, null, "frustration", false, 10)
                 .get(0);
@@ -286,73 +242,6 @@ class FrustrationRateIntegrationTest {
         assertNotNull(turn);
         assertNull(turn.score());
         assertEquals("cs-chat", turn.callSiteId());
-    }
-
-    private String project(String slug) {
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
-                .project()
-                .id();
-    }
-
-    private ClassifierRow frustration(String pid) {
-        classifierService.seedBuiltIns(pid);
-        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
-    }
-
-    /** {@code perHour} one-turn conversations an hour; the first {@code rate} flagged. */
-    private void seedHours(
-            String pid,
-            ClassifierRow signal,
-            String callSite,
-            Instant start,
-            int fromHour,
-            int hours,
-            int perHour,
-            double rate) {
-        long flaggedPerHour = Math.round(perHour * rate);
-        for (int h = fromHour; h < fromHour + hours; h++) {
-            for (int c = 0; c < perHour; c++) {
-                String trace = callSite + "-" + h + "-" + String.format(Locale.ROOT, "%02d", c);
-                boolean flagged = c < flaggedPerHour;
-                Instant at = start.plus(Duration.ofHours(h)).plusSeconds(c);
-                assessments.insert(new Assessment(
-                        Ids.ulid(),
-                        pid,
-                        signal.id(),
-                        trace,
-                        "span-" + trace,
-                        "conv-" + trace,
-                        callSite,
-                        at,
-                        flagged,
-                        VERSION,
-                        "TYPESAFE",
-                        "typesafe/jev-1.13-20260917",
-                        null,
-                        "{}",
-                        null,
-                        null,
-                        null));
-                if (flagged) flag(pid, signal, trace, "conv-" + trace, callSite, at);
-            }
-        }
-    }
-
-    private void flag(
-            String pid, ClassifierRow signal, String traceId, String conversation, String callSite, Instant at) {
-        jdbc.sql("INSERT INTO " + "frustration_detection"
-                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
-                        + " severity, confidence, evidence, subject_started_at)"
-                        + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high',"
-                        + " CAST(:evidence AS jsonb), :at)")
-                .param("id", Ids.ulid())
-                .param("pid", pid)
-                .param("cid", signal.id())
-                .param("conv", conversation)
-                .param("trace", traceId)
-                .param("evidence", "{\"score\":0.71,\"call_site_id\":\"" + callSite + "\"}")
-                .param("at", Timestamp.from(at))
-                .update();
     }
 
     /** A span ref carries a span id, a trace ref a trace id, a session ref neither. */
