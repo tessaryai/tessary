@@ -14,8 +14,12 @@ public enum DecisionError implements ErrorCode {
     PROVIDER_NO_CREDIT(HttpStatus.BAD_GATEWAY, "Decision provider %s has no credit left on the key (HTTP %s)"),
     /** 429, 5xx or a transport failure that outlasted every retry. */
     PROVIDER_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "Decision provider %s is unavailable: %s"),
-    /** Any other 4xx: the provider refused this request, and sending it again would be refused too. */
-    REQUEST_REFUSED(HttpStatus.BAD_GATEWAY, "Decision provider %s refused the request (HTTP %s)"),
+    /**
+     * Any other 4xx: the provider refused this request, and sending it again would be refused too. The
+     * last argument is the provider's own explanation, trimmed, so the log can name a model id the
+     * provider does not serve rather than only the status.
+     */
+    REQUEST_REFUSED(HttpStatus.BAD_GATEWAY, "Decision provider %s refused the request (HTTP %s): %s"),
     /** A 2xx whose body does not answer every question asked in the documented shape. */
     MALFORMED_ANSWER(HttpStatus.BAD_GATEWAY, "Decision provider %s returned an unusable answer: %s");
 
