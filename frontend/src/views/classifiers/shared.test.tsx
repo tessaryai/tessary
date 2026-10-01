@@ -4,8 +4,8 @@
  * the future or an unreadable one, a ruling with no verdict given a verdict's words, and a triage run
  * that gave up looking like one still running.
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorFinding } from "../../api/types";
 import { RunTriageButton, ago, triageState } from "./shared";
 
@@ -15,10 +15,6 @@ const MIN = 60_000;
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
-});
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
 });
 
 describe("ago", () => {

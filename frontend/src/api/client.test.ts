@@ -15,7 +15,6 @@ const fetchMock = vi.fn(
 );
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   fetchMock.mockClear();
 });
 

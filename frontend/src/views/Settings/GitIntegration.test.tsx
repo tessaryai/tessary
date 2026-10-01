@@ -8,7 +8,7 @@
  * toasts forever.
  */
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { parseRepo, tokenTemplateUrl } from "../components/ConnectRepositoryDialog";
@@ -33,12 +33,6 @@ const CONNECTED = { repoOwner: "acme", repoName: "app", defaultBranch: "main", p
 beforeEach(() => {
   api.getGitIntegration.mockResolvedValue(null);
   window.location.hash = "";
-});
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
 });
 
 describe("parseRepo", () => {

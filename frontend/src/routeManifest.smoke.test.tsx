@@ -17,7 +17,7 @@
  * that stopped resolving fails here instead of passing silently.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
@@ -36,7 +36,11 @@ import type {
 import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
-import { GROUNDEDNESS_FINDING_DETAIL } from "./test/groundednessFixtures";
+import {
+  GROUNDEDNESS_CASE_DETAIL,
+  GROUNDEDNESS_FINDING_DETAIL,
+  GROUNDEDNESS_REPORT,
+} from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
@@ -500,59 +504,24 @@ const WITNESS_EVIDENCE: EvidenceSpanPage = {
   ],
 };
 
-function detailCase(detector: string, title: string): CaseDetail["case"] {
+function caseDetail(detector: string, title: string, over: Partial<CaseDetail>): CaseDetail {
+  const base = GROUNDEDNESS_CASE_DETAIL;
   return {
-    baseline_value: null,
-    basis: "Measured against the rate fitted over the prior week.",
-    call_site_id: "extract.order",
-    cause: null,
-    current_value: null,
-    delta: null,
-    detector,
-    disposition: null,
-    finding_count: 1,
-    id: "case-1",
-    last_seen_at: T1,
-    latest_finding_id: "finding-1",
-    locked_at: null,
-    metric: detector,
-    muted_at: null,
-    muted_by: null,
-    onset_at: T0,
-    opened_at: T0,
-    rca_verdict: null,
-    reference: "CASE-7",
-    resolution: null,
-    resolution_reason: null,
-    resolved_at: null,
-    resolved_by: null,
-    severity: 3,
-    state: "open",
-    subject_id: "extract.order",
-    subject_kind: "call_site",
-    subject_label: "extract.order",
-    title,
-  };
-}
-
-function caseDetail(over: Partial<CaseDetail> & Pick<CaseDetail, "case">): CaseDetail {
-  return {
-    absorb_available: false,
-    detector_available: true,
-    events: [{ actor: null, created_at: T0, id: "ev-1", kind: "opened", summary: "Case opened" }],
-    exemplars: [],
-    frustration: null,
+    ...base,
     groundedness: null,
-    latest_finding_id: "finding-1",
-    malformed_output: null,
-    metric: null,
     rca: null,
-    rca_available: true,
     rca_report_id: null,
-    ruling: null,
-    secret_leak: null,
-    tool_error: null,
     ...over,
+    case: {
+      ...base.case,
+      call_site_id: "extract.order",
+      detector,
+      metric: detector,
+      rca_verdict: null,
+      subject_id: "extract.order",
+      subject_label: "extract.order",
+      title,
+    },
   };
 }
 
@@ -561,66 +530,38 @@ function findingDetail(
   causeKind: BehaviorFindingDetail["finding"]["causeKind"],
   over: Partial<BehaviorFindingDetail>,
 ): BehaviorFindingDetail {
+  const base = GROUNDEDNESS_FINDING_DETAIL;
   return {
-    armedWindow: null,
-    frustration: null,
+    ...base,
     groundedness: null,
-    malformedOutput: null,
-    metric: null,
-    secretLeak: null,
-    toolError: null,
+    ...over,
     finding: {
+      ...base.finding,
       callSiteId: "extract.order",
-      caseId: "case-1",
+      caseId: GROUNDEDNESS_CASE_DETAIL.case.id,
       causeKey: `${detector}:extract.order`,
       causeKind,
       detector,
-      firstSeenAt: T0,
-      humanVerdictAt: null,
-      id: "finding-1",
-      lastSeenAt: T1,
-      status: "open",
       title: `${detector} finding`,
-      traceCount: 2,
-      triageAction: null,
-      triageCitations: [],
-      triageStatus: "pending",
-      triageSummary: null,
-      triageVerdict: null,
-      triagedAt: null,
       workflowKey: "extract.order",
     },
-    ...over,
   };
 }
 
 const FINISHED_RCA: RcaReport = {
-  call_site_id: "extract.order",
-  causes: [
-    {
-      affected_count: 1,
-      attribution: null,
-      confidence: "high",
-      evidence_session_ids: [],
-      evidence_trace_ids: ["trace-3"],
-      how_it_caused_this: "Every failure follows the prompt change.",
-      next_step: null,
-      title: "Prompt change",
-      what_changed: "The prompt stopped asking for the sku field.",
-    },
-  ],
-  completed_at: T1,
-  created_at: T0,
+  ...GROUNDEDNESS_REPORT,
+  report_kind: "degradation",
+  verdict: "behavior_change",
+  metric: "tool_error_rate",
   current_value: 0.17,
+  prior_value: 0.02,
   delta: -0.15,
   detailed_report: "The order extractor dropped `sku` after the prompt change.",
-  engine: "agentic",
-  id: "rca-1",
-  job_id: "job-1",
-  metric: "tool_error_rate",
-  prior_value: 0.02,
-  repo_available: true,
-  report_kind: "degradation",
+  causes: [{ ...GROUNDEDNESS_REPORT.causes[0], affected_count: 1 }],
+  call_site_id: "extract.order",
+  subject_id: "extract.order",
+  subject_label: "extract.order",
+  summary: "The prompt change dropped the sku field.",
   ruled_out: [
     {
       assessment: "ruled_out",
@@ -631,15 +572,6 @@ const FINISHED_RCA: RcaReport = {
       question: "Did the traffic mix change?",
     },
   ],
-  status: "done",
-  subject_id: "extract.order",
-  subject_kind: "call_site",
-  subject_label: "extract.order",
-  summary: "The prompt change dropped the sku field.",
-  verdict: "behavior_change",
-  window_from: "2026-01-05T10:00:00Z",
-  window_split: T0,
-  window_to: T1,
 };
 
 const resolved = <T,>(value: T) => () => Promise.resolve(value);
@@ -656,7 +588,7 @@ const DETAIL_FIXTURES: {
     path: "cases/:caseId",
     overrides: {
       getCase: resolved(
-        caseDetail({ case: detailCase("secret_leak", "OpenAI key in extract.order output"), secret_leak: SECRET_LEAK }),
+        caseDetail("secret_leak", "OpenAI key in extract.order output", { secret_leak: SECRET_LEAK }),
       ),
       getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
     },
@@ -667,8 +599,7 @@ const DETAIL_FIXTURES: {
     path: "cases/:caseId",
     overrides: {
       getCase: resolved(
-        caseDetail({
-          case: detailCase("malformed_output", "extract.order outputs failing their schema"),
+        caseDetail("malformed_output", "extract.order outputs failing their schema", {
           malformed_output: MALFORMED_OUTPUT,
         }),
       ),
@@ -743,7 +674,7 @@ async function mountAndSettle(url: string): Promise<HTMLElement> {
   // not changed for QUIET_MS; one idle snapshot can fall between two state changes of one query. Each poll is its own
   // short act() scope: React flushes queued work, including lazy imports, as a scope exits, and one long waitFor-
   // style act parked the imports so most routes asserted against a spinner.
-  const QUIET_MS = 250;
+  const QUIET_MS = 60;
   const TIMEOUT_MS = 5000;
   const snapshotQueries = () =>
     JSON.stringify(
@@ -803,7 +734,6 @@ describe("route manifest render smoke test", () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
-    cleanup();
   });
 
   for (const view of VIEWS) {
@@ -876,7 +806,6 @@ describe("route manifest render smoke test", () => {
  */
 describe("app entry redirects", () => {
   afterEach(() => {
-    cleanup();
     currentProjectApiOverrides = {};
   });
 

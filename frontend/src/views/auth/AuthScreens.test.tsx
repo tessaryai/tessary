@@ -6,7 +6,7 @@
  * the return path lost on the way through.
  */
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { Login } from "./Login";
 import { Signup } from "./Signup";
@@ -32,11 +32,6 @@ beforeEach(() => {
   auth.mode.mockResolvedValue(FORM_MODE);
   auth.login.mockResolvedValue({});
   auth.signup.mockResolvedValue({});
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const fill = (label: string, value: string) =>

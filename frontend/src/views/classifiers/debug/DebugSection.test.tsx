@@ -5,7 +5,7 @@
  * printed wrong or an empty one claimed to hold samples.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier, ClassifierDebug } from "../../../api/types";
 import { pending, renderRoute } from "../../../test/render";
 import DebugSection from "./DebugSection";
@@ -30,11 +30,6 @@ const sketch = (count: number) => ({ count, grid_id: "g1" });
 
 beforeEach(() => {
   api.getClassifierDebug.mockResolvedValue(debug());
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const sweep = () => within(screen.getByRole("heading", { name: "Sweep" }).closest("section")!);

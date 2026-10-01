@@ -4,7 +4,7 @@
  * sample project (or shown on a real one), its way out going somewhere other than the org, and the
  * palette's Recent list recording a page that is not a top-level surface, or another project's.
  */
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../test/render";
 import { readRecents } from "./recents";
@@ -15,7 +15,6 @@ vi.mock("./Sidebar", () => ({ Sidebar: () => null }));
 vi.mock("./CommandPalette", () => ({ CommandPaletteDock: () => null }));
 
 afterEach(() => {
-  cleanup();
   window.localStorage.clear();
 });
 

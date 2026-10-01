@@ -4,6 +4,8 @@
 // matchMedia has no users, so it is not stubbed. Node also defines its own globalThis localStorage, which without
 // --localstorage-file silently returns undefined, and jsdom's assignment loses to it. DensityProvider reads
 // localStorage on first render, so both storages get an in-memory polyfill.
+import { afterEach, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 class StubObserver {
   observe(): void {}
@@ -54,3 +56,11 @@ HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
 HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
   this.removeAttribute("open");
 };
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});

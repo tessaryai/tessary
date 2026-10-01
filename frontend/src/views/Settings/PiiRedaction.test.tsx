@@ -7,7 +7,7 @@
  * what the reader typed.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import type { RedactionRuleView } from "../../api/types";
 import { renderRoute } from "../../test/render";
@@ -45,12 +45,6 @@ beforeEach(() => {
   api.listRedactionRules.mockResolvedValue({
     rules: [rule({ id: "b-1", name: "SSN", built_in: true, enabled: false, pattern: "\\\\d{3}-\\\\d{2}-\\\\d{4}", replacement: "[SSN]" }), rule({})],
   });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
 });
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));

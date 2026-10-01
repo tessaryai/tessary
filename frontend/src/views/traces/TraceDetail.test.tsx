@@ -9,7 +9,7 @@
  * from the tool_result the next call was handed, a tool that answered {"error": …} marked failed).
  * Tree nests each execution under the llm call that asked for it; Timeline scales bars to the trace.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import type { TraceDetailView } from "../../api/types";
 import { span, traceItem, type SpanView } from "../../test/fixtures";
@@ -133,10 +133,6 @@ function renderTrace(search = "") {
 
 beforeEach(() => {
   api.getTrace.mockResolvedValue(detail());
-});
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 describe("the page", () => {

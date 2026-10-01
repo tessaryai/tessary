@@ -5,15 +5,11 @@
  * flickers between the two.
  */
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSkeletonFlag } from "./useSkeletonFlag";
 
 beforeEach(() => {
   vi.useFakeTimers();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
 });
 
 const advance = (ms: number) => act(() => vi.advanceTimersByTime(ms));

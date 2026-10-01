@@ -24,8 +24,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
   window.localStorage.clear();
   delete (HTMLElement.prototype as { offsetParent?: unknown }).offsetParent;
 });

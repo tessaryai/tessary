@@ -48,6 +48,7 @@ export default defineConfig({
   // once for every test file rather than per-test.
   test: {
     environment: "jsdom",
+    pool: "vmThreads",
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",

@@ -3,8 +3,8 @@
  * New project. The bugs worth catching: a project created in another org, a name or description sent
  * with its stray whitespace (or an empty description sent as ""), and a refusal that says nothing.
  */
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../test/render";
 import { NewProject } from "./NewProject";
 
@@ -13,11 +13,6 @@ vi.mock("../api/client", () => ({ auth }));
 
 beforeEach(() => {
   auth.createProject.mockResolvedValue({ slug: "support-agent" });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const open = () => renderRoute(<NewProject />, { route: "/orgs/acme/new-project", path: "/orgs/:orgSlug/new-project" });

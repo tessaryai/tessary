@@ -5,7 +5,7 @@
  * printed as a certainty, and a pulse strip that disagrees with Vitals about spend or latency.
  */
 import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Case, TriageView, Vitals } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
@@ -59,11 +59,6 @@ beforeEach(() => {
   api.getVitals.mockResolvedValue(vitals(512.4, 4200, 28.4, -6.6));
   api.getModelSettings.mockResolvedValue({ configured_providers: ["anthropic"] });
   api.onboarding.mockResolvedValue({ stage: "case" });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/default/triage" });

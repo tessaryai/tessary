@@ -3,7 +3,7 @@
  * How long ago, as a staleness signal. The bugs worth catching: a unit boundary one off, and a time just
  * ahead of the browser's clock read as a negative age.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { relativeTime } from "./relativeTime";
 
 const NOW = new Date("2026-09-25T12:00:00Z");
@@ -11,9 +11,6 @@ const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
-});
-afterEach(() => {
-  vi.useRealTimers();
 });
 
 describe("relativeTime", () => {

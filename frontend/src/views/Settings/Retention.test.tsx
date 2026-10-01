@@ -5,8 +5,8 @@
  * override sent as a number instead of null, a no-op change that still offers Save, and a reader who
  * cannot manage retention being offered the controls.
  */
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import type { RetentionClassView, RetentionView } from "../../api/types";
 import { renderRoute } from "../../test/render";
@@ -37,11 +37,6 @@ const VIEW: RetentionView = {
 beforeEach(() => {
   api.getRetention.mockResolvedValue(VIEW);
   api.updateRetention.mockResolvedValue(VIEW);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const section = (title: string) => screen.getByText(title).closest<HTMLElement>("div.px-4")!;

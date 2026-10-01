@@ -4,8 +4,8 @@
  * a half-set quiet window saved as if it were one, a webhook URL saved with its stray whitespace, the
  * switch that turns the rule off having no name, and the Slack field showing for an org without Slack.
  */
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/types";
 import type { AlertChannel, AlertRule } from "../../api/types";
 import { renderRoute } from "../../test/render";
@@ -56,11 +56,6 @@ beforeEach(() => {
   api.setAlertRuleEnabled.mockResolvedValue(rule());
   api.createAlertChannel.mockResolvedValue(channel());
   api.deleteAlertChannel.mockResolvedValue(undefined);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
