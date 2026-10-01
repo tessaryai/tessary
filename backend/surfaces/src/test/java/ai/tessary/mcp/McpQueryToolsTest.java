@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.open.errors.QueryError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.pipeline.PipelineService;
 import ai.tessary.query.QueryDataset;
 import ai.tessary.query.QueryDtos.CountRequest;
 import ai.tessary.query.QueryDtos.FacetsRequest;
@@ -24,20 +23,10 @@ import ai.tessary.query.QueryDtos.SearchRequest;
 import ai.tessary.query.QueryDtos.TimeseriesRequest;
 import ai.tessary.query.QueryRepository;
 import ai.tessary.query.QueryService;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -50,66 +39,13 @@ import org.junit.jupiter.params.provider.CsvSource;
  */
 class McpQueryToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
-
-    private final ObjectMapper mapper = new ObjectMapper();
     private QueryService queryService;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
         this.queryService = mock(QueryService.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-06-13T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // Unused by the query tools, but the registry needs them.
-        PipelineService pipeline = mock(PipelineService.class);
-        SpanRepository spans = mock(SpanRepository.class);
-        SpanPayloadRepository payloads = mock(SpanPayloadRepository.class);
-        TraceV2Repository traces = mock(TraceV2Repository.class);
-        FindingService behaviorDrift = mock(FindingService.class);
-        var registry = new McpToolRegistry(
-                pipeline,
-                projects,
-                queryService,
-                spans,
-                payloads,
-                traces,
-                mock(SessionReadService.class),
-                behaviorDrift,
-                mock(CaseService.class));
-        this.dispatcher = new McpDispatcher(registry, mapper);
-    }
-
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    /** Re-serialized through Jackson to assert the wire JSON a client sees. */
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
+        this.mcp = registryWith().query(queryService).build();
     }
 
     // ---- registration --------------------------------------------------------------------------
@@ -156,7 +92,7 @@ class McpQueryToolsTest {
 
     @Test
     void describeDatasetPointsSpansSearchAtListSpans() throws Exception {
-        JsonNode described = structured(callTool("describe_dataset", "{\"dataset\":\"spans\"}"))
+        JsonNode described = structured(mcp.callTool("describe_dataset", "{\"dataset\":\"spans\"}"))
                 .get("datasets")
                 .get(0);
 
@@ -172,7 +108,7 @@ class McpQueryToolsTest {
      */
     @Test
     void describeDatasetCoversEveryQueryDatasetDerivedFromTheEnum() throws Exception {
-        JsonNode datasets = structured(callTool("describe_dataset", "{}")).get("datasets");
+        JsonNode datasets = structured(mcp.callTool("describe_dataset", "{}")).get("datasets");
         assertNotNull(datasets, "describe_dataset returns a datasets array");
         assertEquals(QueryDataset.values().length, datasets.size(), "one entry per dataset: " + datasets);
 
@@ -201,7 +137,7 @@ class McpQueryToolsTest {
      */
     @Test
     void describeDatasetNamesCallSiteIdFacetableOnSpans() throws Exception {
-        JsonNode datasets = structured(callTool("describe_dataset", "{\"dataset\":\"spans\"}"))
+        JsonNode datasets = structured(mcp.callTool("describe_dataset", "{\"dataset\":\"spans\"}"))
                 .get("datasets");
         assertEquals(1, datasets.size(), "asking for one dataset describes one: " + datasets);
         JsonNode spans = datasets.get(0);
@@ -217,7 +153,7 @@ class McpQueryToolsTest {
      */
     @Test
     void describeDatasetReportsStartedAtAsTheEventClockForSpansAndToolCalls() throws Exception {
-        JsonNode datasets = structured(callTool("describe_dataset", "{}")).get("datasets");
+        JsonNode datasets = structured(mcp.callTool("describe_dataset", "{}")).get("datasets");
         Map<String, String> timeColumnByDataset = new java.util.HashMap<>();
         for (JsonNode d : datasets) {
             timeColumnByDataset.put(
@@ -235,21 +171,9 @@ class McpQueryToolsTest {
         return out;
     }
 
-    private JsonNode inputSchemaOf(String toolName) {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        for (JsonNode t : tools) {
-            if (toolName.equals(t.get("name").asText())) return t.get("inputSchema");
-        }
-        throw new AssertionError(toolName + " is not listed");
-    }
-
     private List<String> datasetEnumOf(String toolName) {
         JsonNode datasets =
-                inputSchemaOf(toolName).get("properties").get("dataset").get("enum");
+                mcp.schemaOf(toolName).get("properties").get("dataset").get("enum");
         assertNotNull(datasets, toolName + " advertises a dataset enum");
         List<String> values = new java.util.ArrayList<>();
         for (JsonNode v : Objects.requireNonNull(datasets)) values.add(v.asText());
@@ -262,7 +186,7 @@ class McpQueryToolsTest {
     void queryCount_delegatesScopedAndShapesView() throws Exception {
         when(queryService.count(eq(PROJECT_ID), any(CountRequest.class))).thenReturn(7L);
         JsonNode structured = structured(
-                callTool(
+                mcp.callTool(
                         "query_count",
                         "{\"dataset\":\"spans\",\"range\":{\"from\":\"2026-06-10T00:00:00Z\"},\"filters\":{\"kind\":\"tool\"}}"));
         assertEquals(7, structured.get("count").asLong());
@@ -273,7 +197,7 @@ class McpQueryToolsTest {
         when(queryService.timeseries(eq(PROJECT_ID), any(TimeseriesRequest.class)))
                 .thenReturn(List.of(new QueryRepository.Bucket("2026-06-10T00:00:00Z", 3L)));
         JsonNode structured = structured(
-                callTool(
+                mcp.callTool(
                         "query_timeseries",
                         "{\"dataset\":\"spans\",\"interval\":\"hour\",\"range\":{\"from\":\"2026-06-10T00:00:00Z\",\"to\":\"2026-06-11T00:00:00Z\"}}"));
         JsonNode buckets = structured.get("buckets");
@@ -287,7 +211,7 @@ class McpQueryToolsTest {
         when(queryService.facets(eq(PROJECT_ID), any(FacetsRequest.class)))
                 .thenReturn(List.of(new QueryRepository.Facet("tool", 5L), new QueryRepository.Facet("llm", 2L)));
         JsonNode structured =
-                structured(callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":10}"));
+                structured(mcp.callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":10}"));
         assertEquals("kind", structured.get("field").asText());
         JsonNode facets = structured.get("facets");
         assertEquals(2, facets.size());
@@ -302,7 +226,7 @@ class McpQueryToolsTest {
                 "e1|2026-06-10T00:00:00Z|obs-1");
         when(queryService.search(eq(PROJECT_ID), any(SearchRequest.class))).thenReturn(page);
         JsonNode structured =
-                structured(callTool("query_search", "{\"dataset\":\"tool_calls\",\"q\":\"hello\",\"limit\":1}"));
+                structured(mcp.callTool("query_search", "{\"dataset\":\"tool_calls\",\"q\":\"hello\",\"limit\":1}"));
         JsonNode rows = structured.get("rows");
         assertEquals(1, rows.size());
         assertEquals("obs-1", rows.get(0).get("id").asText());
@@ -317,7 +241,7 @@ class McpQueryToolsTest {
     void badDatasetYieldsCleanToolError_not32603() throws Exception {
         when(queryService.count(eq(PROJECT_ID), any(CountRequest.class)))
                 .thenThrow(new TessaryException(QueryError.UNKNOWN_DATASET, "not_a_dataset"));
-        String text = errorText(callTool("query_count", "{\"dataset\":\"not_a_dataset\"}"));
+        String text = errorText(mcp.callTool("query_count", "{\"dataset\":\"not_a_dataset\"}"));
         assertTrue(text.contains("not_a_dataset"), text);
     }
 
@@ -325,8 +249,8 @@ class McpQueryToolsTest {
     void timeseriesMissingRangeYieldsCleanToolError() throws Exception {
         when(queryService.timeseries(eq(PROJECT_ID), any(TimeseriesRequest.class)))
                 .thenThrow(new TessaryException(QueryError.INVALID_RANGE));
-        String text =
-                errorText(callTool("query_timeseries", "{\"dataset\":\"spans\",\"interval\":\"hour\",\"range\":{}}"));
+        String text = errorText(
+                mcp.callTool("query_timeseries", "{\"dataset\":\"spans\",\"interval\":\"hour\",\"range\":{}}"));
         assertTrue(text.contains("range"), text);
     }
 
@@ -335,7 +259,7 @@ class McpQueryToolsTest {
         // The service rejects any mode but 'keyword'; the tool still returns a clean error naming it.
         when(queryService.search(eq(PROJECT_ID), any(SearchRequest.class)))
                 .thenThrow(new TessaryException(QueryError.UNKNOWN_SEARCH_MODE, "semantic"));
-        String text = errorText(callTool("query_search", "{\"dataset\":\"tool_calls\",\"mode\":\"semantic\"}"));
+        String text = errorText(mcp.callTool("query_search", "{\"dataset\":\"tool_calls\",\"mode\":\"semantic\"}"));
         assertTrue(text.contains("semantic"), text);
     }
 
@@ -343,13 +267,13 @@ class McpQueryToolsTest {
 
     @Test
     void missingRequiredDatasetIsToolError() throws Exception {
-        String text = errorText(callTool("query_count", "{}"));
+        String text = errorText(mcp.callTool("query_count", "{}"));
         assertTrue(text.contains("dataset"), text);
     }
 
     @Test
     void nonObjectFiltersIsToolError() throws Exception {
-        String text = errorText(callTool("query_count", "{\"dataset\":\"spans\",\"filters\":\"oops\"}"));
+        String text = errorText(mcp.callTool("query_count", "{\"dataset\":\"spans\",\"filters\":\"oops\"}"));
         assertTrue(text.contains("filters"), text);
     }
 
@@ -375,7 +299,7 @@ class McpQueryToolsTest {
                         + " | argument fields must be an array of strings, e.g. [\"payload\"]",
             })
     void aWronglyTypedArgumentIsAToolErrorNamingIt(String tool, String argsJson, String expected) throws Exception {
-        assertEquals(expected, errorText(callTool(tool, argsJson)));
+        assertEquals(expected, errorText(mcp.callTool(tool, argsJson)));
     }
 
     /** A fractional JSON number such as {@code 10.0}, common from models, reads as its integer value. */
@@ -385,7 +309,7 @@ class McpQueryToolsTest {
                 .thenReturn(List.of(new QueryRepository.Facet("tool", 5L)));
 
         JsonNode structured =
-                structured(callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":10.0}"));
+                structured(mcp.callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"kind\",\"top_n\":10.0}"));
 
         assertEquals(1, structured.get("facets").size(), "top_n=10.0 must reach the service as 10");
     }
@@ -395,7 +319,7 @@ class McpQueryToolsTest {
     void describeDatasetOfAnUnknownDatasetIsACleanToolError() throws Exception {
         String expected = new TessaryException(QueryError.UNKNOWN_DATASET, "nope").getMessage();
 
-        assertEquals(expected, errorText(callTool("describe_dataset", "{\"dataset\":\"nope\"}")));
+        assertEquals(expected, errorText(mcp.callTool("describe_dataset", "{\"dataset\":\"nope\"}")));
     }
 
     /** An unallowed facet field is the service's message as a tool error. */
@@ -404,7 +328,7 @@ class McpQueryToolsTest {
         TessaryException refused = new TessaryException(QueryError.UNKNOWN_FIELD, "input", "spans");
         when(queryService.facets(eq(PROJECT_ID), any(FacetsRequest.class))).thenThrow(refused);
 
-        String text = errorText(callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"input\"}"));
+        String text = errorText(mcp.callTool("query_facets", "{\"dataset\":\"spans\",\"field\":\"input\"}"));
 
         assertEquals(refused.getMessage(), text);
     }
