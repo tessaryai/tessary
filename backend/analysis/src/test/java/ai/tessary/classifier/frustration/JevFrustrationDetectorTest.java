@@ -439,6 +439,63 @@ class JevFrustrationDetectorTest {
         verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PROVIDER_REJECTED, NOW);
     }
 
+    /**
+     * A 4xx on the request itself (a model id the provider does not serve) is the same again on every
+     * later turn, so it pauses as request_refused rather than counting as one failed turn and moving the
+     * cursor past a history that was never scored. The provider's words are logged once, at WARN.
+     */
+    @Test
+    void aRefusedRequestPausesAsRequestRefusedAndLogsTheProvidersWords() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
+            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+            client.answer("t-ok", 0.9, 0.0);
+            client.fail("t-refused", DecisionError.REQUEST_REFUSED);
+            JevFrustrationDetector d = detector();
+
+            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, refused));
+            assertEquals(List.of(), d.complete(signal("{}"), page, PageAction.ABORT, 5));
+
+            assertEquals(Status.ABORTED, page.status());
+            assertEquals(ClassifierPause.REQUEST_REFUSED, page.pauseReason());
+            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.REQUEST_REFUSED, NOW);
+            verify(assessments, never()).insert(any());
+            List<String> warned = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.WARN)
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertEquals(2, warned.size(), warned.toString());
+            assertTrue(warned.get(0).startsWith("TYPESAFE refused a frustration call: "), warned.get(0));
+            assertTrue(
+                    warned.get(1).contains("request_refused") || warned.get(1).contains("refused the request"),
+                    warned.get(1));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    /** On the deployment's own provider a refused request is not the org's to fix: platform_unavailable, as a bad key is. */
+    @Test
+    void aRefusedRequestOnThePlatformProviderPausesAsPlatformUnavailable() {
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
+                .thenReturn(Optional.of(new DecisionTarget(
+                        ModelProvider.PLATFORM,
+                        "~typesafe/jev-latest",
+                        URI.create("https://openrouter.ai/api/alpha/decisions"),
+                        "platform-key")));
+        client.fail("t-refused", DecisionError.REQUEST_REFUSED);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-refused", "conv-a")));
+
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
+    }
+
     /** An aborted page records nothing and logs a pause with its reason; a silent pause reads as a quiet week. */
     @Test
     void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {

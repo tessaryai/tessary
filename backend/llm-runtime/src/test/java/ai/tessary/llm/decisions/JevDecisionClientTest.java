@@ -284,13 +284,34 @@ class JevDecisionClientTest {
 
     @Test
     void a400_isRefusedWithoutRetrying() throws Exception {
-        stub(response(400, "{}"));
+        stub(response(400, "{\"error\":{\"message\":\"Model typesafe/jev-latest does not exist\",\"code\":400}}"));
 
         TessaryException e =
                 assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
 
         assertSame(DecisionError.REQUEST_REFUSED, e.error());
+        // The provider's own words ride the message: a 400 on its own never named the model.
+        assertEquals(
+                "Decision provider TYPESAFE refused the request (HTTP 400): Model typesafe/jev-latest does not exist",
+                e.getMessage());
         sent(1);
+    }
+
+    /** A refusal's detail: the JSON error message, else the raw body, whitespace folded and capped. */
+    @Test
+    void refusal_takesTheProvidersMessageOrTheBodyAndCapsIt() {
+        JevDecisionClient c = client();
+
+        assertEquals("no detail", c.refusal(null));
+        assertEquals("no detail", c.refusal("  "));
+        assertEquals("Model x does not exist", c.refusal("{\"error\":{\"message\":\"Model x does not exist\"}}"));
+        assertEquals("bad request", c.refusal("{\"message\":\"bad request\"}"));
+        assertEquals("{\"error\":{\"code\":400}}", c.refusal("{\"error\":{\"code\":400}}"));
+        assertEquals("not json at all", c.refusal("  not\njson   at all "));
+        String longBody = "x".repeat(JevDecisionClient.REFUSAL_CHARS + 50);
+        String capped = c.refusal(longBody);
+        assertEquals(JevDecisionClient.REFUSAL_CHARS + 1, capped.length());
+        assertTrue(capped.endsWith("…"));
     }
 
     @Test

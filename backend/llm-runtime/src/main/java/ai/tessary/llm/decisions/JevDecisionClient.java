@@ -25,6 +25,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -213,8 +214,38 @@ public class JevDecisionClient implements DecisionClient {
                 backOff(target, attempt, retryAfter, "HTTP " + status);
                 continue;
             }
-            throw new TessaryException(DecisionError.REQUEST_REFUSED, target.provider(), status);
+            throw new TessaryException(
+                    DecisionError.REQUEST_REFUSED, target.provider(), status, refusal(response.body()));
         }
+    }
+
+    /** The longest a provider's refusal is carried into the exception message and the log. */
+    static final int REFUSAL_CHARS = 200;
+
+    /**
+     * What the provider said when it refused the request, for the exception message: the {@code
+     * error.message} of a JSON body, the raw body when it is not JSON, cut to {@link #REFUSAL_CHARS}. A
+     * refusal explains the request's shape or model, never echoes the state, so carrying it does not
+     * repeat customer text; the cap bounds a provider that does.
+     */
+    String refusal(@Nullable String body) {
+        if (body == null || body.isBlank()) return "no detail";
+        String text = refusalMessage(body).orElse(body).strip().replaceAll("\\s+", " ");
+        return text.length() <= REFUSAL_CHARS ? text : text.substring(0, REFUSAL_CHARS) + "…";
+    }
+
+    /** {@code error.message}, else {@code message}, of a JSON object body; empty when the body carries neither. */
+    private Optional<String> refusalMessage(String body) {
+        JsonNode node;
+        try {
+            node = mapper.readTree(body);
+        } catch (IOException notJson) {
+            return Optional.empty();
+        }
+        if (node == null || !node.isObject()) return Optional.empty();
+        JsonNode message = node.path("error").path("message");
+        if (message.isMissingNode()) message = node.path("message");
+        return message.isTextual() && !message.asText().isBlank() ? Optional.of(message.asText()) : Optional.empty();
     }
 
     private void backOff(DecisionTarget target, int attempt, @Nullable Long retryAfterMs, String cause) {

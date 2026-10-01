@@ -79,6 +79,11 @@ const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
     explained:
       "The provider rejected the stored key, so no messages are being scored. Fix the key under Settings, Providers, then retry.",
   },
+  request_refused: {
+    label: "Provider refused the request",
+    explained:
+      "The provider accepted the stored key but refused the request itself, so no messages are being scored. Usually the model this classifier is set to is not one the provider serves: check it under Settings, Models, then retry.",
+  },
   no_provider: {
     label: "No provider key",
     explained:

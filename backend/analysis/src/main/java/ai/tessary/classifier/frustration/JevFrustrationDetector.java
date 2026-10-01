@@ -154,18 +154,22 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
      * A call's outcome: an answer, or the failure that ended it.
      *
      * @param answer set on success
-     * @param failure set on failure: {@code unavailable}, {@code rejected}, {@code no_credit} or {@code failed}
+     * @param failure set on failure: {@code unavailable}, {@code rejected}, {@code refused}, {@code
+     *     no_credit} or {@code failed}
      */
     public record Outcome(
             @Nullable DecisionAnswer answer, @Nullable String failure) {
         static final String UNAVAILABLE = "unavailable";
         static final String REJECTED = "rejected";
+        /** The provider refused the request itself (a 4xx other than 401, 402, 403): same again next turn. */
+        static final String REFUSED = "refused";
+
         static final String NO_CREDIT = "no_credit";
         static final String FAILED = "failed";
 
         /** A failure every later call on the same key would repeat, so the sweep stops sending. */
         boolean stopsTheKey() {
-            return REJECTED.equals(failure) || NO_CREDIT.equals(failure);
+            return REJECTED.equals(failure) || REFUSED.equals(failure) || NO_CREDIT.equals(failure);
         }
     }
 
@@ -270,12 +274,17 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         }
         boolean rejected =
                 sent.stream().anyMatch(s -> Outcome.REJECTED.equals(s.outcome().failure()));
-        if (rejected || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
+        boolean refused =
+                sent.stream().anyMatch(s -> Outcome.REFUSED.equals(s.outcome().failure()));
+        if (rejected || refused || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
             // The platform provider's key is the deployment's, so its refusal or empty balance is not the org's
             // to fix. The org's own credit running out is no_credit, the same pause as the deployment's provider.
+            // A refused request on the org's own key is request_refused: the key works, the request does not,
+            // and the log line above carries the provider's words.
             String reason;
             if (target.provider() == ModelProvider.PLATFORM) reason = ClassifierPause.PLATFORM_UNAVAILABLE;
             else if (rejected) reason = ClassifierPause.PROVIDER_REJECTED;
+            else if (refused) reason = ClassifierPause.REQUEST_REFUSED;
             else reason = ClassifierPause.NO_CREDIT;
             classifiers.pause(projectId, signal.id(), reason, now);
             return new Page(Status.ABORTED, reason, eligible.size(), sent, threshold, scorerVersion);
@@ -370,6 +379,20 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (e.error() == DecisionError.PROVIDER_REJECTED) return new Outcome(null, Outcome.REJECTED);
             if (e.error() == DecisionError.PROVIDER_NO_CREDIT) return new Outcome(null, Outcome.NO_CREDIT);
             if (e.error() == DecisionError.PROVIDER_UNAVAILABLE) return new Outcome(null, Outcome.UNAVAILABLE);
+            if (e.error() == DecisionError.REQUEST_REFUSED) {
+                // The one failure whose cause is in the provider's answer rather than in our state: a model
+                // id it does not serve, a body shape it rejects. Said once here, with the provider's words,
+                // because the page line that follows only counts it.
+                String detail = Objects.requireNonNullElse(e.getMessage(), DecisionError.REQUEST_REFUSED.code());
+                StructuredLog.warn(log, Markers.OPS, "signal.frustration.refused")
+                        .message("%s refused a frustration call: %s", target.provider(), detail)
+                        .field("project", projectId)
+                        .field("provider", target.provider().name())
+                        .field("model", target.modelId())
+                        .field("error", detail)
+                        .log();
+                return new Outcome(null, Outcome.REFUSED);
+            }
             return new Outcome(null, Outcome.FAILED);
         }
     }
@@ -468,6 +491,9 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
 
     private static String pauseCause(@Nullable String reason) {
         if (ClassifierPause.PROVIDER_REJECTED.equals(reason)) return "the provider rejected the org's key";
+        if (ClassifierPause.REQUEST_REFUSED.equals(reason)) {
+            return "the provider refused the request itself on the org's key; see signal.frustration.refused";
+        }
         if (ClassifierPause.NO_CREDIT.equals(reason)) return "the org has no credit left on the provider";
         if (ClassifierPause.PLATFORM_UNAVAILABLE.equals(reason)) {
             return "the platform provider rejected the deployment's key";
