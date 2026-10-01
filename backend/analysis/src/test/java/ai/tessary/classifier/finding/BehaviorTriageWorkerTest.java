@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Named.named;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -15,7 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.config.ClassifierProperties;
@@ -59,7 +60,7 @@ class BehaviorTriageWorkerTest {
         when(engine.rule(eq(PROJECT), eq("f1"), any(), any()))
                 .thenThrow(new TessaryException(
                         ClassifierError.TRIAGE_RUN_INCOMPLETE, "f1", "kind=script_exit detail=agent rejected"));
-        BehaviorTriageWorker worker = worker(jobs, engine, breaker, new BriefingSource());
+        BehaviorTriageWorker worker = worker(jobs, engine, breaker, FakeTriageSource.briefing());
 
         worker.triageForTest(job("job_1", "f1"));
 
@@ -100,28 +101,41 @@ class BehaviorTriageWorkerTest {
      * back unspent; spending attempts dead-letters it, and feeding the breaker parks every org's drain.
      */
     @ParameterizedTest
-    @MethodSource("configurationGaps")
-    void aConfigurationGapParksTheJobUnspentForTheRecheckWindow(ErrorCode code) {
+    @MethodSource("refusals")
+    void aRefusalParksTheJobUnspentUntilItCanClear(TessaryException refusal, long delaySeconds) {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
-        TessaryException gap = new TessaryException(code, "bedrock", "triage");
-        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(gap);
+        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
         ClassifierProperties props = new ClassifierProperties();
         props.setTriageConfigRetrySeconds(1800);
 
-        tickableWorker(jobs, engine, breaker, new BriefingSource(), props).triageForTest(job("job_1", "f1"));
+        tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), props)
+                .triageForTest(job("job_1", "f1"));
 
-        verify(jobs).releaseWithoutAttempt("job_1", gap.getMessage(), 1800L);
+        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), delaySeconds);
         verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
         verifyNoInteractions(breaker);
     }
 
-    static Stream<Arguments> configurationGaps() {
+    static Stream<Arguments> refusals() {
         return Stream.of(
-                Arguments.of(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED),
-                Arguments.of(ModelConfigError.MISSING_CREDENTIALS),
-                Arguments.of(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED));
+                Arguments.of(gap(ClassifierError.TRIAGE_LAUNCHER_MISCONFIGURED), 1800L),
+                Arguments.of(gap(ModelConfigError.MISSING_CREDENTIALS), 1800L),
+                Arguments.of(gap(ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED), 1800L),
+                Arguments.of(
+                        named(
+                                "a refusal waiting on a person (credit to top up) holds for the re-check window, since"
+                                        + " topping up later publishes no event that would bring it back",
+                                new OutOfCredit()),
+                        1800L),
+                Arguments.of(
+                        named("a refusal that clears on its own (a busy slot) waits the delay it names", new Busy()),
+                        60L));
+    }
+
+    private static TessaryException gap(ErrorCode code) {
+        return new TessaryException(code, "bedrock", "triage");
     }
 
     /** A refusal only a person can clear, such as a provider balance at zero. */
@@ -143,41 +157,20 @@ class BehaviorTriageWorkerTest {
         }
     }
 
-    /**
-     * A refusal that waits on a person (credit to top up) holds the job for the re-check window with its
-     * attempt unspent. Retrying it on the backoff dead-letters the finding within a minute, and topping up
-     * later publishes no event that would bring it back.
-     */
     @Test
-    void aRefusalAwaitingConfigurationParksTheJobUnspentForTheRecheckWindow() {
+    @DisplayName("a job no source briefs is done, not failed — the finding was resolved while it waited")
+    void an_unclaimed_job_is_marked_done() {
         BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
-        OutOfCredit refusal = new OutOfCredit();
-        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
-        ClassifierProperties props = new ClassifierProperties();
-        props.setTriageConfigRetrySeconds(1800);
+        BehaviorTriageWorker worker =
+                worker(jobs, engine, breaker, new FakeTriageSource("behavior"), new ClaimingSource());
 
-        tickableWorker(jobs, engine, breaker, new BriefingSource(), props).triageForTest(job("job_1", "f1"));
+        worker.triageForTest(job("job_1", "f1"));
 
-        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), 1800L);
-        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
-        verifyNoInteractions(breaker);
-    }
-
-    /** A refusal that clears on its own (a busy slot) returns the job unspent after the delay it names. */
-    @Test
-    void aRetryableRefusalReturnsTheJobUnspentAfterItsOwnDelay() {
-        BehaviorTriageJobRepository jobs = mock(BehaviorTriageJobRepository.class);
-        BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
-        TriageLauncherBreaker breaker = mock(TriageLauncherBreaker.class);
-        Busy refusal = new Busy();
-        when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(refusal);
-
-        worker(jobs, engine, breaker, new BriefingSource()).triageForTest(job("job_1", "f1"));
-
-        verify(jobs).releaseWithoutAttempt("job_1", refusal.getMessage(), 60L);
-        verify(jobs, never()).markRetryable(anyString(), any(), anyLong());
+        verify(jobs).markDone("job_1");
+        // No brief: the microVM is never spawned.
+        verifyNoInteractions(engine);
         verifyNoInteractions(breaker);
     }
 
@@ -188,7 +181,7 @@ class BehaviorTriageWorkerTest {
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
         when(engine.rule(eq(PROJECT), eq("f1"), any(), any())).thenThrow(new IllegalStateException("npe in the brief"));
 
-        worker(jobs, engine, mock(TriageLauncherBreaker.class), new BriefingSource())
+        worker(jobs, engine, mock(TriageLauncherBreaker.class), FakeTriageSource.briefing())
                 .triageForTest(job("job_1", "f1"));
 
         verify(jobs).markRetryable("job_1", "npe in the brief", 2L);
@@ -203,7 +196,7 @@ class BehaviorTriageWorkerTest {
                         jobs,
                         mock(BehaviorTriageEngine.class),
                         trippedBreaker(),
-                        new BriefingSource(),
+                        FakeTriageSource.briefing(),
                         new ClassifierProperties())
                 .tick();
 
@@ -216,14 +209,14 @@ class BehaviorTriageWorkerTest {
         BehaviorTriageJobRepository sweepFails = mock(BehaviorTriageJobRepository.class);
         when(sweepFails.failExhausted(anyInt())).thenThrow(new IllegalStateException("db down"));
         BehaviorTriageEngine engine = mock(BehaviorTriageEngine.class);
-        tickableWorker(sweepFails, engine, breaker(), new BriefingSource(), new ClassifierProperties())
+        tickableWorker(sweepFails, engine, breaker(), FakeTriageSource.briefing(), new ClassifierProperties())
                 .tick();
         verify(sweepFails, never()).claimBatch(anyString(), anyInt(), anyLong(), anyInt());
 
         BehaviorTriageJobRepository claimFails = mock(BehaviorTriageJobRepository.class);
         when(claimFails.claimBatch(anyString(), anyInt(), anyLong(), anyInt()))
                 .thenThrow(new IllegalStateException("db down"));
-        tickableWorker(claimFails, engine, breaker(), new BriefingSource(), new ClassifierProperties())
+        tickableWorker(claimFails, engine, breaker(), FakeTriageSource.briefing(), new ClassifierProperties())
                 .tick();
 
         verifyNoInteractions(engine);
@@ -242,7 +235,7 @@ class BehaviorTriageWorkerTest {
                 .thenThrow(new TessaryException(ClassifierError.TRIAGE_LAUNCHER_UNAVAILABLE, "status 401"));
         TriageLauncherBreaker breaker = breaker();
 
-        tickableWorker(jobs, engine, breaker, new BriefingSource(), new ClassifierProperties())
+        tickableWorker(jobs, engine, breaker, FakeTriageSource.briefing(), new ClassifierProperties())
                 .tick();
 
         verify(jobs).releaseWithoutAttempt(eq("job_1"), anyString());
@@ -301,8 +294,8 @@ class BehaviorTriageWorkerTest {
             BehaviorTriageJobRepository jobs,
             BehaviorTriageEngine engine,
             TriageLauncherBreaker breaker,
-            TriageSource source) {
-        return new BehaviorTriageWorker(jobs, List.of(source), engine, null, null, null, null, breaker);
+            TriageSource... sources) {
+        return new BehaviorTriageWorker(jobs, List.of(sources), engine, null, null, null, null, breaker);
     }
 
     private static BehaviorTriageJobRow job(String id, String findingId) {
@@ -319,55 +312,44 @@ class BehaviorTriageWorkerTest {
                 "2026-09-16T00:00:00Z");
     }
 
-    /** Claims every job, handing back a brief so the worker always calls {@code engine.rule}. */
-    private static final class BriefingSource implements TriageSource {
-        @Override
-        public String kind() {
-            return "behavior";
-        }
-
-        @Override
-        public List<Escalatable> listAutoEscalatable(String projectId, long minObservations, int limit) {
-            return List.of();
-        }
-
-        @Override
-        public Optional<BehaviorAnalysisView> analyze(String projectId, String findingId) {
-            return Optional.empty();
-        }
-
-        @Override
-        public List<BehaviorFindingView> list(
-                String projectId,
-                @Nullable String status,
-                @Nullable String callSiteId,
-                @Nullable String detector,
-                boolean confirmedOnly) {
-            return List.of();
+    /** Claims every id it is offered, on both the read and the write arm. */
+    private static final class ClaimingSource extends FakeTriageSource {
+        ClaimingSource() {
+            super(BuiltInDetector.Kind.TOOL_ERROR);
         }
 
         @Override
         public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
-            return Optional.empty();
+            return Optional.of(new BehaviorFindingDetailView(claimed(), null, null, null, null, null, null, null));
         }
 
         @Override
         public Optional<BehaviorFindingView> resolve(
                 String projectId, String findingId, String action, @Nullable String userId) {
-            return Optional.empty();
+            return Optional.of(claimed());
         }
 
-        @Override
-        public Optional<TriageBrief> brief(BehaviorTriageJobRow job) {
-            return Optional.of(new TriageBrief(Map.of("finding.md", "the finding"), "rule on it"));
+        private static BehaviorFindingView claimed() {
+            return new BehaviorFindingView(
+                    "claimed",
+                    null,
+                    FindingRow.Cause.RATE_SHIFT,
+                    "cause",
+                    "claimed",
+                    BuiltInDetector.Kind.TOOL_ERROR,
+                    FindingRow.GLOBAL_WORKFLOW,
+                    "2026-08-01T00:00:00Z",
+                    "2026-08-02T00:00:00Z",
+                    1,
+                    FindingRow.Status.OPEN,
+                    null,
+                    null,
+                    null,
+                    List.of(),
+                    null,
+                    BehaviorFindingView.TriageStatus.PENDING,
+                    null,
+                    null);
         }
-
-        @Override
-        public void recordVerdict(
-                String projectId,
-                String findingId,
-                BehaviorTriageVerdict verdict,
-                @Nullable String citationsJson,
-                String now) {}
     }
 }

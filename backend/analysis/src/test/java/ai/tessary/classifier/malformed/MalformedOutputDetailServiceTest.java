@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingRowBuilder;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository.DetectionPage;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository.DetectionRow;
 import ai.tessary.classifier.substrate.CallSiteSchemaReads;
@@ -166,34 +167,14 @@ class MalformedOutputDetailServiceTest {
     }
 
     private static FindingRow finding(String causeKind, @Nullable String callSiteId) {
-        return new FindingRow(
-                "f",
-                "p",
-                "malformed_output",
-                "cause:f",
-                FindingRow.SubjectKind.CLASSIFIER,
-                "clf",
-                null,
-                callSiteId,
-                FindingRow.Status.OPEN,
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z",
-                null,
-                null,
-                null,
-                3,
-                "{\"cause_kind\":\"" + causeKind + "\"}",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z");
+        return FindingRowBuilder.of("malformed_output")
+                .id("f")
+                .projectId("p")
+                .causeKey("cause:f")
+                .subject(FindingRow.SubjectKind.CLASSIFIER, "clf")
+                .callSiteId(callSiteId)
+                .sampleCount(3)
+                .payload("{\"cause_kind\":\"" + causeKind + "\"}")
+                .build();
     }
 }

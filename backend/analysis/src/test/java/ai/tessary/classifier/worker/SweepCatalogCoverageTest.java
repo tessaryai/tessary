@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Every catalog kind that sweeps at a fitting tier has exactly one sweep claiming it, the invariant the registry
- * depends on and nothing else pins ({@code ClassifierWorkerLoggingTest} stubs {@code kinds()}). An unmatched kind is
+ * depends on and nothing else pins ({@code ClassifierWorkerTest} stubs {@code kinds()}). An unmatched kind is
  * inert by design, so dropping one silently stops that classifier's findings everywhere, with only a {@code
  * signal.sweep.no-handler} WARN. Sweeps are built with mocks, since {@code kinds()} is a declaration; add a new one
  * to {@link #openSweeps()}.

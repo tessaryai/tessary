@@ -9,7 +9,7 @@ import java.util.Set;
  *
  * <p>It is extracted rather than inlined for one reason: it is the whole of what a merge across
  * {@link TriageSource}s can silently get wrong, and as a static it is testable without Spring, without
- * a database and therefore on any machine. {@code FindingServiceMergeTest} holds it.
+ * a database and therefore on any machine. {@code FindingServiceTest} holds it.
  *
  * <p>It was lifted verbatim out of {@code BehaviorDriftService.findings} when it was split.
  */

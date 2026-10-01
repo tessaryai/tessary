@@ -14,11 +14,13 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.CauseKey;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingRowBuilder;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import ai.tessary.classifier.toolerror.ToolErrorTrend.Spell;
@@ -149,51 +151,29 @@ class FrustrationRateServiceTest {
     }
 
     private static FindingRow ruled(String id, @Nullable String onsetAt) {
-        return new FindingRow(
-                id,
-                PROJECT,
-                BuiltInDetector.Kind.FRUSTRATION,
-                CAUSE,
-                FindingRow.SubjectKind.CLASSIFIER,
-                "sig-1",
-                "Frustration",
-                CALL_SITE,
-                FindingRow.Status.OPEN,
-                onsetAt == null ? "" : onsetAt,
-                onsetAt == null ? "" : onsetAt,
-                null,
-                null,
-                null,
-                10,
-                "{\"cause_kind\":\"frustration_rate\"}",
-                null,
-                null,
-                null,
-                FindingRow.TriageVerdict.POSITIVE,
-                FindingRow.TriageAction.OPENED_CASE,
-                FrustrationEvidence.SUMMARY,
-                null,
-                "2026-08-02T00:00:00Z",
-                null,
-                "case-1",
-                "2026-08-02T00:00:00Z",
-                "2026-08-02T00:00:00Z");
+        return FindingRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .id(id)
+                .projectId(PROJECT)
+                .causeKey(CAUSE)
+                .subjectLabel("Frustration")
+                .callSiteId(CALL_SITE)
+                .dated("2026-08-02T00:00:00Z", "2026-08-02T00:00:00Z")
+                .onsetAt(onsetAt == null ? "" : onsetAt)
+                .lastSeenAt(onsetAt == null ? "" : onsetAt)
+                .sampleCount(10)
+                .payload("{\"cause_kind\":\"frustration_rate\"}")
+                .triageVerdict(FindingRow.TriageVerdict.POSITIVE)
+                .triaged(FrustrationEvidence.SUMMARY, "2026-08-02T00:00:00Z")
+                .caseId("case-1")
+                .build();
     }
 
     private static ClassifierRow signal() {
-        return new ClassifierRow(
-                "sig-1",
-                PROJECT,
-                "frustration",
-                "Frustration",
-                null,
-                BuiltInDetector.Kind.FRUSTRATION,
-                null,
-                true,
-                9,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "2026-08-01T00:00:00Z",
-                "2026-08-01T00:00:00Z");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .projectId(PROJECT)
+                .named("frustration", "Frustration")
+                .version(9)
+                .at("2026-08-01T00:00:00Z")
+                .build();
     }
 }

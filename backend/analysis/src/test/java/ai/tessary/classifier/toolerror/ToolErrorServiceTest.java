@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -97,19 +98,12 @@ class ToolErrorServiceTest {
     }
 
     private static ClassifierRow toolError() {
-        return new ClassifierRow(
-                "cls-1",
-                PROJECT,
-                "tool_error",
-                "Tool errors",
-                null,
-                BuiltInDetector.Kind.TOOL_ERROR,
-                "{}",
-                true,
-                8,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "now",
-                "now");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
+                .id("cls-1")
+                .projectId(PROJECT)
+                .named("tool_error", "Tool errors")
+                .config("{}")
+                .version(8)
+                .build();
     }
 }

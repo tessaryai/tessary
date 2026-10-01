@@ -24,8 +24,15 @@ public final class FindingRowBuilder {
     private @Nullable Double severity;
     private long sampleCount = 12;
     private @Nullable String payloadJson;
+    private @Nullable String evidenceCountsJson;
+    private @Nullable String escalatedAt;
     private @Nullable String triageVerdict;
+    private @Nullable String triageSummary;
+    private @Nullable String triagedAt;
     private @Nullable String humanVerdictAt;
+    private @Nullable String caseId;
+    private String createdAt = "2026-09-01T00:00:00Z";
+    private String updatedAt = "2026-09-02T00:00:00Z";
 
     private FindingRowBuilder(String classifierKey) {
         this.classifierKey = classifierKey;
@@ -81,6 +88,14 @@ public final class FindingRowBuilder {
         return this;
     }
 
+    public FindingRowBuilder dated(String onset, String lastSeen) {
+        this.onsetAt = onset;
+        this.createdAt = onset;
+        this.lastSeenAt = lastSeen;
+        this.updatedAt = lastSeen;
+        return this;
+    }
+
     public FindingRowBuilder basis(@Nullable String value) {
         this.basis = value;
         return this;
@@ -101,8 +116,29 @@ public final class FindingRowBuilder {
         return this;
     }
 
+    public FindingRowBuilder evidenceCounts(@Nullable String value) {
+        this.evidenceCountsJson = value;
+        return this;
+    }
+
+    public FindingRowBuilder escalatedAt(@Nullable String value) {
+        this.escalatedAt = value;
+        return this;
+    }
+
     public FindingRowBuilder triageVerdict(@Nullable String value) {
         this.triageVerdict = value;
+        return this;
+    }
+
+    public FindingRowBuilder triaged(String summary, String at) {
+        this.triageSummary = summary;
+        this.triagedAt = at;
+        return this;
+    }
+
+    public FindingRowBuilder caseId(@Nullable String value) {
+        this.caseId = value;
         return this;
     }
 
@@ -129,17 +165,17 @@ public final class FindingRowBuilder {
                 severity,
                 sampleCount,
                 payloadJson,
+                evidenceCountsJson,
                 null,
-                null,
-                null,
+                escalatedAt,
                 triageVerdict,
                 triageVerdict == null ? null : FindingRow.TriageAction.of(triageVerdict),
+                triageSummary,
                 null,
-                null,
-                triageVerdict == null ? null : "2026-09-02T00:00:00Z",
+                triagedAt != null ? triagedAt : triageVerdict == null ? null : "2026-09-02T00:00:00Z",
                 humanVerdictAt,
-                null,
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z");
+                caseId,
+                createdAt,
+                updatedAt);
     }
 }

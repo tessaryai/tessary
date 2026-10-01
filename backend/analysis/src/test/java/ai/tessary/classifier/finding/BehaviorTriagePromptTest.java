@@ -42,6 +42,14 @@ class BehaviorTriagePromptTest {
     private static final BehaviorTriageJobRow JOB = new BehaviorTriageJobRow(
             "job-1", "proj-1", "fnd-1", "claimed", null, null, 0, null, "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z");
 
+    private static final String DETECTIONS_HEADER = "# Flagged answers since onset\n\n"
+            + "One line per answer the classifier flagged at this call site, newest first: trace and"
+            + " span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's"
+            + " score (P(unsupported) of its strongest sentence), and each flagged sentence as"
+            + " `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The"
+            + " strongest sentence's text follows in quotes. A flagged sentence is where the model"
+            + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n";
+
     private static BehaviorTriageEngine engine() {
         return engine(new ObserverProperties());
     }
@@ -69,35 +77,15 @@ class BehaviorTriagePromptTest {
             @Nullable String callSiteId,
             @Nullable String payloadJson,
             @Nullable String evidenceCountsJson) {
-        return new FindingRow(
-                "fnd-1",
-                "proj-1",
-                classifierKey,
-                causeKey,
-                FindingRow.SubjectKind.TOOL,
-                "search_docs",
-                null,
-                callSiteId,
-                FindingRow.Status.OPEN,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z",
-                null,
-                null,
-                null,
-                128,
-                payloadJson,
-                evidenceCountsJson,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z");
+        return FindingRowBuilder.of(classifierKey)
+                .causeKey(causeKey)
+                .subject(FindingRow.SubjectKind.TOOL, "search_docs")
+                .callSiteId(callSiteId)
+                .dated("2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z")
+                .sampleCount(128)
+                .payload(payloadJson)
+                .evidenceCounts(evidenceCountsJson)
+                .build();
     }
 
     private static String findingMd(BehaviorTriageEngine engine, FindingRow row) {
@@ -195,13 +183,7 @@ class BehaviorTriagePromptTest {
                 engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
 
         assertEquals(
-                "# Flagged answers since onset\n\n"
-                        + "One line per answer the classifier flagged at this call site, newest first: trace and"
-                        + " span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's"
-                        + " score (P(unsupported) of its strongest sentence), and each flagged sentence as"
-                        + " `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The"
-                        + " strongest sentence's text follows in quotes. A flagged sentence is where the model"
-                        + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n"
+                DETECTIONS_HEADER
                         + "- trace `tr-1` span `sp-1` at 2026-08-01T12:00:00Z: score=0.9 (legacy)\n"
                         + "- trace `tr-2` span `sp-2` at 2026-08-01T11:00:00Z: (no evidence recorded)\n"
                         + "\n2 flagged answer(s), every one since onset.\n",
@@ -244,15 +226,7 @@ class BehaviorTriagePromptTest {
                 engine(new ObserverProperties(), detections).dossier(JOB, row).get("detections.md");
 
         assertEquals(
-                "# Flagged answers since onset\n\n"
-                        + "One line per answer the classifier flagged at this call site, newest first: trace and"
-                        + " span ids (the `get_trace` / `get_span` arguments), when the span ran, the answer's"
-                        + " score (P(unsupported) of its strongest sentence), and each flagged sentence as"
-                        + " `[start, end)` offsets into the answer (UTF-16 code units) with its own score. The"
-                        + " strongest sentence's text follows in quotes. A flagged sentence is where the model"
-                        + " saw no support in the retrieved documents, not proof that the sentence is wrong.\n\n"
-                        + listed
-                        + "\nThe newest 50 shown; page the rest through `get_finding_evidence`.\n",
+                DETECTIONS_HEADER + listed + "\nThe newest 50 shown; page the rest through `get_finding_evidence`.\n",
                 md);
     }
 

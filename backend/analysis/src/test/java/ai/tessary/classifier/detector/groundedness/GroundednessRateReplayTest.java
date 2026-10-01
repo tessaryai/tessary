@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.FlaggedAnswer;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -321,19 +322,11 @@ class GroundednessRateReplayTest {
     }
 
     private static ClassifierRow signal() {
-        return new ClassifierRow(
-                "sig-1",
-                "p1",
-                "groundedness",
-                "Groundedness",
-                null,
-                BuiltInDetector.Kind.GROUNDEDNESS,
-                null,
-                true,
-                7,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "2026-09-01T00:00:00Z",
-                "2026-09-01T00:00:00Z");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+                .projectId("p1")
+                .named("groundedness", "Groundedness")
+                .version(7)
+                .at("2026-09-01T00:00:00Z")
+                .build();
     }
 }
