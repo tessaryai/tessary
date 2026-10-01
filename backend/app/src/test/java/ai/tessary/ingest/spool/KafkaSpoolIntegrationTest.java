@@ -62,7 +62,10 @@ class KafkaSpoolIntegrationTest {
             new RedpandaContainer("docker.redpanda.com/redpandadata/redpanda:v25.2.1");
 
     @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
+    static void props(DynamicPropertyRegistry r) throws Exception {
+        var noRebalanceDelay =
+                REDPANDA.execInContainer("rpk", "cluster", "config", "set", "group_initial_rebalance_delay", "0");
+        assertEquals(0, noRebalanceDelay.getExitCode(), noRebalanceDelay.getStderr());
         r.add("tessary.ingest.spool.mode", () -> "kafka");
         r.add("tessary.ingest.spool.kafka.bootstrap-servers", REDPANDA::getBootstrapServers);
         r.add("tessary.ingest.spool.kafka.partitions", () -> "4");

@@ -12,62 +12,27 @@ import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * Exercises the MCP transport end-to-end through MockMvc. Auth is enabled
- * (WORKOS_* configured) so AuthFilter validates Bearer tokens against the
- * api_key table. The test bootstraps an org/project/user + issues a real
- * token via {@link ApiKeyService}, then uses that token on every request.
+ * Exercises the MCP transport end-to-end through MockMvc. Auth is enforced
+ * so AuthFilter validates Bearer tokens against the api_key table. The test
+ * bootstraps an org/project/user + issues a real token via
+ * {@link ApiKeyService}, then uses that token on every request.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class McpControllerTest {
-
-    @TempDir
-    static Path tmp;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) throws Exception {
-        Path yaml = tmp.resolve("evals.yaml");
-        Files.writeString(yaml, """
-            version: "0.0.1"
-            product_hint: "test"
-            call_sites:
-              - id: cs_test
-                use_case: test_case
-                provider: openai
-                model: gpt-4
-                shape: extract
-                shape_confidence: high
-                intent: extracts a value
-                constraints: []
-                sample_count: 1
-            graders: []
-            failure_modes: []
-            chains: []
-            taxonomy: []
-            """);
-        // Enable auth so MCP bearer-token verification runs. Say so directly rather than
-        // configuring a fake external-provider key as an indirect toggle -- see
-        // TestAuthDisabledInitializer's javadoc for why.
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;

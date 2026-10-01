@@ -28,8 +28,13 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -249,16 +254,6 @@ class QueryApiIntegrationTest {
         assertEquals(2, daily.get(0).count());
     }
 
-    @Test
-    void timeseriesRequiresExplicitRange() {
-        String pid = seedProject("query-ts-range");
-        var ctx = token(pid);
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> controller.timeseries(ctx, new TimeseriesRequest("spans", "hour", null, null)));
-        assertEquals(QueryError.INVALID_RANGE, e.error());
-    }
-
     /**
      * Decision 8: spans bucket on {@code started_at}. Both spans share one {@code created_at}, so bucketing on it
      * would collapse them.
@@ -391,16 +386,6 @@ class QueryApiIntegrationTest {
     }
 
     @Test
-    void facetsRejectsUnknownDimension() {
-        String pid = seedProject("query-facets-bad");
-        var ctx = token(pid);
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> controller.facets(ctx, new FacetsRequest("spans", "input", null, null, null)));
-        assertEquals(QueryError.UNKNOWN_FIELD, e.error());
-    }
-
-    @Test
     void searchReturnsMatchingRows() {
         String pid = seedProject("query-search");
         var ctx = token(pid);
@@ -470,17 +455,6 @@ class QueryApiIntegrationTest {
     }
 
     @Test
-    void searchRejectsSemanticModeAsUnknown() {
-        // An unknown "semantic" mode is a 400, never a silent keyword fallback.
-        String pid = seedProject("query-search-semantic");
-        var ctx = token(pid);
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> controller.search(ctx, new SearchRequest("spans", "x", "semantic", null, null, null, null)));
-        assertEquals(QueryError.UNKNOWN_SEARCH_MODE, e.error());
-    }
-
-    @Test
     void readsAreScopedToTheToprojectsOwnData() {
         String pidA = seedProject("query-tenant-a");
         String pidB = seedProject("query-tenant-b");
@@ -503,25 +477,6 @@ class QueryApiIntegrationTest {
                 .query(Long.class)
                 .single();
         assertEquals(4L, all);
-    }
-
-    @Test
-    void rejectsUnknownDataset() {
-        String pid = seedProject("query-bad-dataset");
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> controller.count(token(pid), new CountRequest("not_a_dataset", null, null)));
-        assertEquals(QueryError.UNKNOWN_DATASET, e.error());
-    }
-
-    /** {@code observations} is an unknown dataset, not a second name for {@code spans}. */
-    @Test
-    void rejectsTheRetiredObservationsAlias() {
-        String pid = seedProject("query-retired-alias");
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> controller.count(token(pid), new CountRequest("observations", null, null)));
-        assertEquals(QueryError.UNKNOWN_DATASET, e.error());
     }
 
     /**
@@ -551,23 +506,52 @@ class QueryApiIntegrationTest {
         assertEquals(page1.rows().get(0).id(), restarted.rows().get(0).id(), "an empty handle restarts at page one");
     }
 
-    /**
-     * An unallowed filter field or a non-{@code date_trunc} interval is refused by name before any SQL, so neither
-     * reaches the query as an identifier.
-     */
-    @Test
-    void anUnknownFilterFieldOrIntervalIsRefusedBeforeAnySql() {
-        var ctx = token("no-such-project");
+    static Stream<Arguments> requestsRefusedBeforeAnySql() {
+        TenantContext ctx = token("no-such-project");
         TimeRange day = new TimeRange("2026-06-10T00:00:00Z", "2026-06-11T00:00:00Z");
+        return Stream.of(
+                refused(
+                        "a timeseries without an explicit range",
+                        c -> c.timeseries(ctx, new TimeseriesRequest("spans", "hour", null, null)),
+                        QueryError.INVALID_RANGE),
+                refused(
+                        "a facet on an unknown dimension",
+                        c -> c.facets(ctx, new FacetsRequest("spans", "input", null, null, null)),
+                        QueryError.UNKNOWN_FIELD),
+                refused(
+                        "a semantic search mode, never a silent keyword fallback",
+                        c -> c.search(ctx, new SearchRequest("spans", "x", "semantic", null, null, null, null)),
+                        QueryError.UNKNOWN_SEARCH_MODE),
+                refused(
+                        "an unknown dataset",
+                        c -> c.count(ctx, new CountRequest("not_a_dataset", null, null)),
+                        QueryError.UNKNOWN_DATASET),
+                refused(
+                        "observations, a retired alias and not a second name for spans",
+                        c -> c.count(ctx, new CountRequest("observations", null, null)),
+                        QueryError.UNKNOWN_DATASET),
+                refused(
+                        "an unallowed filter field",
+                        c -> c.count(ctx, new CountRequest("spans", null, Map.of("input", "x"))),
+                        QueryError.UNKNOWN_FIELD),
+                refused(
+                        "a non-date_trunc interval",
+                        c -> c.timeseries(ctx, new TimeseriesRequest("spans", "fortnight", day, null)),
+                        QueryError.UNKNOWN_INTERVAL));
+    }
 
-        TessaryException field = assertThrows(
-                TessaryException.class,
-                () -> controller.count(ctx, new CountRequest("spans", null, Map.of("input", "x"))));
-        TessaryException interval = assertThrows(
-                TessaryException.class,
-                () -> controller.timeseries(ctx, new TimeseriesRequest("spans", "fortnight", day, null)));
+    private static Arguments refused(String name, Function<QueryController, ?> call, QueryError expected) {
+        return Arguments.of(name, call, expected);
+    }
 
-        assertEquals(QueryError.UNKNOWN_FIELD, field.error());
-        assertEquals(QueryError.UNKNOWN_INTERVAL, interval.error());
+    /**
+     * A malformed request is refused by name before any SQL, so an unallowed field or interval never reaches the query
+     * as an identifier.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("requestsRefusedBeforeAnySql")
+    void aMalformedRequestIsRefusedBeforeAnySql(String name, Function<QueryController, ?> call, QueryError expected) {
+        TessaryException e = assertThrows(TessaryException.class, () -> call.apply(controller));
+        assertEquals(expected, e.error());
     }
 }

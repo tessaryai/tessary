@@ -19,6 +19,7 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -27,20 +28,14 @@ import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * The RCA surface against a real tenant. The press is on the case ({@code POST /cases/{id}/rca}): it resolves the
  * finding behind the case and nothing else crosses into the lane, re-presses coalesce onto one report, a case whose
  * finding is gone is a 404, and reports are project-scoped.
  */
-// batch-size=0 parks the drain, as in RcaWorkerTest: the worker would otherwise claim the job before the `pending`
-// read, and @Scheduled(fixedDelay) fires at startup. Static @TestPropertySource so both classes share one cached
-// context.
-@SpringBootTest
-@TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
+@RcaParkedSpringBootTest
 class RcaControllerTest {
 
     @Autowired
