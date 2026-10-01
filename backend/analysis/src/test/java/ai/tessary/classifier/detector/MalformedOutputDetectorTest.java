@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.TestObservations;
 import ai.tessary.classifier.substrate.CallSiteSchemaReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,9 +28,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Unit coverage for the Malformed Output built-in: schema violations and non-JSON outputs fire,
@@ -56,30 +60,19 @@ class MalformedOutputDetectorTest {
     }
 
     private static SubstrateObservation obs(@Nullable String callSiteId, @Nullable String output) {
-        return new SubstrateObservation(
-                "obs-1",
-                "p",
-                "t",
-                "s",
-                null,
-                callSiteId,
-                "llm",
-                "chat",
-                null,
-                output,
-                null,
-                "2026-01-01T00:00:00Z",
-                null);
+        return TestObservations.llm("obs-1", "p", "t", "s", callSiteId, null, output, "2026-01-01T00:00:00Z");
     }
 
-    @Test
-    void schemaViolationAndNonJsonFire_conformingStaysQuiet() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void schemaViolationAndNonJsonFire_conformingStaysQuiet_bareOrInTheMessageEnvelope(boolean enveloped) {
         MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
+        Function<String, String> wrap = payload -> enveloped ? envelope(payload) : payload;
         List<Detection> ds = d.detectBatch(
                 List.of(
-                        obs("cs-1", "{\"answer\":\"yes\",\"confidence\":0.9}"),
-                        obs("cs-1", "{\"confidence\":\"high\"}"),
-                        obs("cs-1", "Sure! Here's the answer you asked for.")),
+                        obs("cs-1", wrap.apply("{\"answer\":\"yes\",\"confidence\":0.9}")),
+                        obs("cs-1", wrap.apply("{\"confidence\":\"high\"}")),
+                        obs("cs-1", wrap.apply("Sure! Here's the answer you asked for."))),
                 null);
         assertFalse(ds.get(0).fired(), "a conforming output stays quiet");
         assertTrue(ds.get(1).fired(), "a schema-violating output fires");
@@ -87,7 +80,7 @@ class MalformedOutputDetectorTest {
         assertEquals(Detection.Confidence.HIGH, ds.get(1).confidence(), "validation is a fact — always HIGH");
         String evidence = Objects.requireNonNull(ds.get(1).evidenceJson());
         assertTrue(evidence.contains("schema_violation"));
-        assertTrue(evidence.contains("answer"), "the violation names the missing required field");
+        assertTrue(evidence.contains("answer"), "the violation names the payload's missing field, not the envelope's");
         assertTrue(ds.get(2).fired(), "prose where JSON was declared fires");
         assertTrue(Objects.requireNonNull(ds.get(2).evidenceJson()).contains("not_json"));
     }
@@ -133,25 +126,6 @@ class MalformedOutputDetectorTest {
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
-    }
-
-    @Test
-    void messageEnvelopeIsUnwrapped_assistantPayloadIsWhatGetsValidated() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        List<Detection> ds = d.detectBatch(
-                List.of(
-                        obs("cs-1", envelope("{\"answer\":\"yes\",\"confidence\":0.9}")),
-                        obs("cs-1", envelope("{\"confidence\":\"high\"}")),
-                        obs("cs-1", envelope("Sure! Here's the answer you asked for."))),
-                null);
-        assertFalse(ds.get(0).fired(), "an envelope-wrapped conforming payload stays quiet");
-        assertTrue(ds.get(1).fired(), "an envelope-wrapped schema-violating payload fires");
-        assertTrue(Objects.requireNonNull(ds.get(1).evidenceJson()).contains("schema_violation"));
-        assertTrue(
-                Objects.requireNonNull(ds.get(1).evidenceJson()).contains("answer"),
-                "the violation is about the unwrapped payload, not the envelope");
-        assertTrue(ds.get(2).fired(), "envelope-wrapped prose where JSON was declared fires");
-        assertTrue(Objects.requireNonNull(ds.get(2).evidenceJson()).contains("not_json"));
     }
 
     @Test

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -178,19 +179,11 @@ class FrustrationRateReplayTest {
     }
 
     private static ClassifierRow signal() {
-        return new ClassifierRow(
-                "sig-1",
-                "p1",
-                "frustration",
-                "Frustration",
-                null,
-                BuiltInDetector.Kind.FRUSTRATION,
-                null,
-                true,
-                9,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "2026-08-01T00:00:00Z",
-                "2026-08-01T00:00:00Z");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .projectId("p1")
+                .named("frustration", "Frustration")
+                .version(9)
+                .at("2026-08-01T00:00:00Z")
+                .build();
     }
 }

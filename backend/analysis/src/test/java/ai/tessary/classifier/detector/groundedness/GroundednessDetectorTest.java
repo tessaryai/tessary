@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
+import ai.tessary.classifier.TestObservations;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.EncoderScorer;
@@ -45,20 +47,13 @@ class GroundednessDetectorTest {
     private final List<Set<String>> shapeLookups = new ArrayList<>();
     private final RecordingAssessments assessments = new RecordingAssessments();
 
-    private static final ClassifierRow SIGNAL = new ClassifierRow(
-            "cls-1",
-            "p",
-            "groundedness",
-            "Groundedness",
-            null,
-            BuiltInDetector.Kind.GROUNDEDNESS,
-            null,
-            true,
-            7,
-            true,
-            ClassifierRow.Mode.TRACKING,
-            "2026-01-01T00:00:00Z",
-            "2026-01-01T00:00:00Z");
+    private static final ClassifierRow SIGNAL = ClassifierRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+            .id("cls-1")
+            .projectId("p")
+            .named("groundedness", "Groundedness")
+            .version(7)
+            .at("2026-01-01T00:00:00Z")
+            .build();
 
     private static final class RecordingAssessments extends GroundednessAssessmentRepository {
         final List<Assessment> rows = new ArrayList<>();
@@ -99,27 +94,21 @@ class GroundednessDetectorTest {
 
     /** A fake head that returns {@code unsupportedScores} in order and records what it was sent. */
     private static EncoderScorer head(List<Double> unsupportedScores, List<Response> seen) {
-        return new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                assertEquals("groundedness", head);
-                seen.addAll(responses);
-                List<ResponseScore> out = new ArrayList<>();
-                for (int i = 0; i < responses.size(); i++) {
-                    double u = unsupportedScores.get(i);
-                    out.add(verdict(u, u / 2, responses.get(i).answer().length()));
-                }
-                return out;
+        return (head, responses) -> {
+            assertEquals("groundedness", head);
+            seen.addAll(responses);
+            List<ResponseScore> out = new ArrayList<>();
+            for (int i = 0; i < responses.size(); i++) {
+                double u = unsupportedScores.get(i);
+                out.add(verdict(u, u / 2, responses.get(i).answer().length()));
             }
+            return out;
         };
     }
 
     private static EncoderScorer never(String why) {
-        return new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                throw new AssertionError(why);
-            }
+        return (head, responses) -> {
+            throw new AssertionError(why);
         };
     }
 
@@ -131,47 +120,30 @@ class GroundednessDetectorTest {
                     .filter(e -> ids.contains(e.getKey()))
                     .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         };
-        return new GroundednessDetector(
-                head(unsupportedScores, new ArrayList<>()), shapes, evidence, assessments, mapper);
+        return detector(head(unsupportedScores, new ArrayList<>()), shapes, evidence);
+    }
+
+    private GroundednessDetector detector(
+            EncoderScorer scorer, CallSiteShapeReads shapes, GroundingEvidenceReads evidence) {
+        return new GroundednessDetector(scorer, shapes, evidence, assessments, mapper);
     }
 
     private static SubstrateObservation obs(
             @Nullable String callSiteId, @Nullable String input, @Nullable String output) {
-        String storedInput = input == null ? null : userInput(input);
-        String storedOutput = output == null ? null : assistantOutput(output);
-        return new SubstrateObservation(
-                "obs-1",
-                "p",
-                "t",
-                "s",
-                null,
-                callSiteId,
-                "llm",
-                "chat",
-                storedInput,
-                storedOutput,
-                null,
-                "2026-01-01T00:00:00Z",
-                null);
+        return obs("obs-1", callSiteId, input, output);
     }
 
     private static SubstrateObservation obs(
             String spanId, @Nullable String callSiteId, @Nullable String input, @Nullable String output) {
-        SubstrateObservation o = obs(callSiteId, input, output);
-        return new SubstrateObservation(
+        return TestObservations.llm(
                 spanId,
-                o.projectId(),
-                o.traceId(),
-                o.sessionId(),
-                o.projectVersionId(),
-                o.callSiteId(),
-                o.kind(),
-                o.name(),
-                o.input(),
-                o.output(),
-                o.toolError(),
-                o.createdAt(),
-                null);
+                "p",
+                "t",
+                "s",
+                callSiteId,
+                input == null ? null : userInput(input),
+                output == null ? null : assistantOutput(output),
+                "2026-01-01T00:00:00Z");
     }
 
     private static GroundingEvidenceReads docs(String... documents) {
@@ -272,24 +244,18 @@ class GroundednessDetectorTest {
         List<Response> seen = new ArrayList<>();
         GroundingEvidenceReads evidence = (projectId, ids) -> Map.of();
         CallSiteShapeReads shapes = (projectId, ids) -> Map.of("cs-1", "extract");
-        GroundednessDetector d =
-                new GroundednessDetector(head(List.of(0.99), seen), shapes, evidence, assessments, mapper);
+        GroundednessDetector d = detector(head(List.of(0.99), seen), shapes, evidence);
         String storedInput = "[{\"role\":\"system\",\"content\":\"here is the document: refunds take 5-7 days\"},"
                 + "{\"role\":\"user\",\"content\":\"how long do refunds take?\"}]";
-        SubstrateObservation o = new SubstrateObservation(
+        SubstrateObservation o = TestObservations.llm(
                 "obs-1",
                 "p",
                 "t",
                 "s",
-                null,
                 "cs-1",
-                "llm",
-                "chat",
                 storedInput,
                 assistantOutput("Refunds take 5-7 business days."),
-                null,
-                "2026-01-01T00:00:00Z",
-                null);
+                "2026-01-01T00:00:00Z");
         Detection got = d.sweepBatch(SIGNAL, List.of(o), null).get(0);
         // One passage: system and user text a line apart; the prompt already carries the question.
         assertEquals(
@@ -365,19 +331,14 @@ class GroundednessDetectorTest {
         CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
         GroundingEvidenceReads blind =
                 (projectId, ids) -> Map.of("obs-1", new GroundingEvidenceReads.Evidence(List.of(), true));
-        new GroundednessDetector(never("an abstained turn must not reach the head"), rag, blind, assessments, mapper)
+        detector(never("an abstained turn must not reach the head"), rag, blind)
                 .sweepBatch(SIGNAL, List.of(obs("cs-rag", "where is my order?", "It shipped on 3 March.")), null);
         assertTrue(assessments.rows.isEmpty(), "a turn with no readable evidence abstains");
 
-        EncoderScorer refuses = new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                return List.of(ResponseScore.UNSCORED);
-            }
-        };
+        EncoderScorer refuses = (head, responses) -> List.of(ResponseScore.UNSCORED);
         CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-1", "extract");
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
-        new GroundednessDetector(refuses, extract, none, assessments, mapper)
+        detector(refuses, extract, none)
                 .sweepBatch(SIGNAL, List.of(obs("cs-1", "the doc says X", "the doc says Y")), null);
         assertTrue(assessments.rows.isEmpty(), "an answer too long for the model has no verdict");
     }
@@ -391,21 +352,15 @@ class GroundednessDetectorTest {
         String answer = s1 + s2 + s3;
         int a = s1.length();
         int b = a + s2.length();
-        EncoderScorer threeSentences = new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                // Out of order: the evidence lists them by start.
-                return List.of(new ResponseScore(
-                        0.99,
-                        0.2,
-                        List.of(
-                                new Span(b, answer.length(), 0.975, 0.1),
-                                new Span(0, a - 1, 0.02, 0.01),
-                                new Span(a, b - 1, 0.99, 0.2))));
-            }
-        };
-        GroundednessDetector d = new GroundednessDetector(
-                threeSentences, rag, docs("Refunds are issued within 5-7 business days."), assessments, mapper);
+        // Out of order: the evidence lists them by start.
+        EncoderScorer threeSentences = (head, responses) -> List.of(new ResponseScore(
+                0.99,
+                0.2,
+                List.of(
+                        new Span(b, answer.length(), 0.975, 0.1),
+                        new Span(0, a - 1, 0.02, 0.01),
+                        new Span(a, b - 1, 0.99, 0.2))));
+        GroundednessDetector d = detector(threeSentences, rag, docs("Refunds are issued within 5-7 business days."));
         Detection got = d.sweepBatch(SIGNAL, List.of(obs("cs-rag", "how long do refunds take?", answer)), null)
                 .get(0);
         assertTrue(got.fired());
@@ -433,15 +388,10 @@ class GroundednessDetectorTest {
         String answer = first + second;
         int firstCodePoints = first.codePointCount(0, first.length());
         int totalCodePoints = answer.codePointCount(0, answer.length());
-        EncoderScorer emoji = new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                return List.of(
-                        new ResponseScore(0.99, 0.1, List.of(new Span(firstCodePoints, totalCodePoints, 0.99, 0.1))));
-            }
-        };
+        EncoderScorer emoji = (head, responses) ->
+                List.of(new ResponseScore(0.99, 0.1, List.of(new Span(firstCodePoints, totalCodePoints, 0.99, 0.1))));
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
-        Detection got = new GroundednessDetector(emoji, extract, none, assessments, mapper)
+        Detection got = detector(emoji, extract, none)
                 .sweepBatch(SIGNAL, List.of(obs("cs-1", "refund status for order 42", answer)), null)
                 .get(0);
         JsonNode sentence =
@@ -461,8 +411,7 @@ class GroundednessDetectorTest {
         GroundingEvidenceReads blind =
                 (projectId, ids) -> Map.of("obs-1", new GroundingEvidenceReads.Evidence(List.of(), true));
         List<Response> seen = new ArrayList<>();
-        GroundednessDetector d =
-                new GroundednessDetector(head(List.of(0.99), seen), extract, blind, assessments, mapper);
+        GroundednessDetector d = detector(head(List.of(0.99), seen), extract, blind);
         Detection got = d.sweepBatch(
                         SIGNAL,
                         List.of(obs(
@@ -475,12 +424,7 @@ class GroundednessDetectorTest {
 
     /** A head that answers every request with {@code score}. */
     private static EncoderScorer answering(ResponseScore score) {
-        return new EncoderScorer() {
-            @Override
-            public List<ResponseScore> scoreResponses(String head, List<Response> responses) {
-                return List.of(score);
-            }
-        };
+        return (head, responses) -> List.of(score);
     }
 
     @Test
@@ -498,7 +442,7 @@ class GroundednessDetectorTest {
         CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-1", "extract");
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
 
-        Detection got = new GroundednessDetector(head, extract, none, assessments, mapper)
+        Detection got = detector(head, extract, none)
                 .sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), null)
                 .get(0);
 
@@ -515,8 +459,7 @@ class GroundednessDetectorTest {
         CallSiteShapeReads extract = (projectId, ids) -> Map.of("cs-1", "extract");
         GroundingEvidenceReads none = (projectId, ids) -> Map.of();
 
-        Detection got = new GroundednessDetector(
-                        answering(new ResponseScore(0.99, 0.2, List.of())), extract, none, assessments, mapper)
+        Detection got = detector(answering(new ResponseScore(0.99, 0.2, List.of())), extract, none)
                 .sweepBatch(SIGNAL, List.of(obs("cs-1", "what does the warranty cover?", answer)), null)
                 .get(0);
 
@@ -535,12 +478,10 @@ class GroundednessDetectorTest {
     void evidenceIsSentAsPassagesWithTheQuestion() {
         CallSiteShapeReads rag = (projectId, ids) -> Map.of("cs-rag", "rag_answer");
         List<Response> seen = new ArrayList<>();
-        GroundednessDetector d = new GroundednessDetector(
+        GroundednessDetector d = detector(
                 head(List.of(0.99), seen),
                 rag,
-                docs("The policy excess is Rs 5,000 per claim.", "Claims are settled within 30 days."),
-                assessments,
-                new ObjectMapper());
+                docs("The policy excess is Rs 5,000 per claim.", "Claims are settled within 30 days."));
         Detection got = d.sweepBatch(
                         SIGNAL, List.of(obs("cs-rag", "what is the excess?", "The excess is Rs 50,000.")), null)
                 .get(0);

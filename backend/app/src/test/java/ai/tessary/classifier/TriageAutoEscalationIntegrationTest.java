@@ -158,7 +158,7 @@ class TriageAutoEscalationIntegrationTest {
 
     /**
      * No confirmation bar: an escalatable finding escalates on the first tick. The seam's two-store dispatch is
-     * covered by {@code FindingServiceMergeTest} and {@code TriageSourceAbsenceTest}.
+     * covered by {@code FindingServiceTest} and {@code BehaviorTriageWorkerTest}.
      */
     @Test
     @DisplayName("an escalatable finding escalates on the first tick")

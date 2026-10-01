@@ -116,15 +116,7 @@ class BehaviorTriageEngineTest {
         // The sandbox's own documented contract: an empty Optional means "ran, produced nothing" — the
         // engine must throw so the job retries, never fabricate a ruling for a run that simply did not
         // happen.
-        BehaviorTriageEngine engine = new BehaviorTriageEngine(
-                List.of(fixedSandbox(Optional.empty())),
-                props(),
-                new ObserverProperties(),
-                apiKeys(),
-                projects(),
-                memberships(),
-                mapper,
-                mock(ClassifierDetectionWriteRepository.class));
+        BehaviorTriageEngine engine = engine(props(), fixedSandbox(Optional.empty()), memberships());
 
         TessaryException e = assertThrows(
                 TessaryException.class,
@@ -213,15 +205,8 @@ class BehaviorTriageEngineTest {
         doThrow(new IllegalStateException("db blip")).when(apiKeys).revoke("key1");
         String answer =
                 "{\"verdict\":\"negative\",\"summary\":\"s\",\"citations\":[{\"path\":\"a\",\"reason\":\"b\"}]}";
-        BehaviorTriageEngine engine = new BehaviorTriageEngine(
-                List.of(fixedSandbox(Optional.of(new TriageSandbox.SandboxRun(answer)))),
-                props(),
-                new ObserverProperties(),
-                apiKeys,
-                projects(),
-                memberships(),
-                mapper,
-                mock(ClassifierDetectionWriteRepository.class));
+        BehaviorTriageEngine engine = engine(
+                props(), fixedSandbox(Optional.of(new TriageSandbox.SandboxRun(answer))), memberships(), apiKeys);
 
         BehaviorTriageVerdict verdict = engine.rule(PROJECT_ID, FINDING_ID, Map.of(), "rule on this");
 
@@ -267,11 +252,19 @@ class BehaviorTriageEngineTest {
 
     private BehaviorTriageEngine engine(
             ClassifierProperties props, TriageSandbox sandbox, OrgMembershipRepository memberships) {
+        return engine(props, sandbox, memberships, apiKeys());
+    }
+
+    private BehaviorTriageEngine engine(
+            ClassifierProperties props,
+            TriageSandbox sandbox,
+            OrgMembershipRepository memberships,
+            ApiKeyService apiKeys) {
         return new BehaviorTriageEngine(
                 List.of(sandbox),
                 props,
                 new ObserverProperties(),
-                apiKeys(),
+                apiKeys,
                 projects(),
                 memberships,
                 mapper,

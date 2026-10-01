@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingRowBuilder;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedConversationView;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustratedSessionPage;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
@@ -136,34 +137,15 @@ class FrustrationDetailServiceTest {
         String payload = "{\"cause_kind\":\"" + causeKind + "\",\"baseline_frustrated\":7,"
                 + "\"scorer_version\":\"jev-v1\",\"jev_threshold\":0.4,\"arl_target\":10000,"
                 + "\"min_decision_interval\":4}";
-        return new FindingRow(
-                "fnd_1",
-                PROJECT,
-                "frustration",
-                "frustration:" + CLASSIFIER + ":cs",
-                FindingRow.SubjectKind.CLASSIFIER,
-                CLASSIFIER,
-                null,
-                "cs",
-                FindingRow.Status.OPEN,
-                "2026-09-20T00:00:00Z",
-                "2026-09-23T14:00:00Z",
-                null,
-                null,
-                null,
-                1,
-                payload,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-09-20T00:00:00Z",
-                "2026-09-23T14:00:00Z");
+        return FindingRowBuilder.of("frustration")
+                .id("fnd_1")
+                .projectId(PROJECT)
+                .causeKey("frustration:" + CLASSIFIER + ":cs")
+                .subject(FindingRow.SubjectKind.CLASSIFIER, CLASSIFIER)
+                .callSiteId("cs")
+                .dated("2026-09-20T00:00:00Z", "2026-09-23T14:00:00Z")
+                .sampleCount(1)
+                .payload(payload)
+                .build();
     }
 }

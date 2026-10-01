@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.detector.EncoderScorer.Response;
 import ai.tessary.classifier.detector.EncoderScorer.ResponseScore;
+import ai.tessary.classifier.detector.EncoderScorer.Span;
 import ai.tessary.config.ObserverProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,8 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,14 +49,23 @@ import org.junit.jupiter.params.provider.ValueSource;
  * to the one offending response, which comes back unscored; requests are sized by count and estimated tokens; a non-
  * numeric score is a fault; at most {@code encoder.max-inflight} requests are open; a connection that never opens is
  * unreachable, while a 500 or 401 is a fault.
+ *
+ * <p>It is also the backend half of the contract {@code classifiers/groundedness/serve.py} is tested against: the same
+ * two fixtures, read from the repository rather than copied, so one edit to them moves both sides. The scorer's request
+ * body for the fixture's responses must be the fixture request, key for key, and the fixture response must parse into
+ * the scores and spans it states.
  */
-class LauncherEncoderScorerBackpressureTest {
+class LauncherEncoderScorerTest {
+
+    /** The fixtures, from the module directory surefire runs in. */
+    private static final Path CONTRACT = Path.of("../../classifiers/groundedness/contract");
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private ServerSocket socket;
     private Thread acceptor;
     private LauncherEncoderScorer scorer;
     private final AtomicInteger requests = new AtomicInteger();
+    private final AtomicReference<String> received = new AtomicReference<>();
     /** How many responses each request carried, in arrival order. */
     private final List<Integer> responsesPerRequest = new CopyOnWriteArrayList<>();
 
@@ -136,10 +148,10 @@ class LauncherEncoderScorerBackpressureTest {
                         line.substring("content-length:".length()).trim());
             }
         }
-        byte[] body = in.readNBytes(contentLength);
+        String body = new String(in.readNBytes(contentLength), StandardCharsets.UTF_8);
+        received.set(body);
         int n = requests.incrementAndGet();
-        JsonNode responses =
-                MAPPER.readTree(new String(body, StandardCharsets.UTF_8)).get("responses");
+        JsonNode responses = MAPPER.readTree(body).get("responses");
         responsesPerRequest.add(responses.size());
         @Nullable CountDownLatch held = hold;
         if (held != null) {
@@ -428,6 +440,73 @@ class LauncherEncoderScorerBackpressureTest {
         assertFalse(e instanceof EncoderUnreachableException, String.valueOf(e.getCause()));
         assertTrue(e.getCause() instanceof IOException, String.valueOf(e.getCause()));
         assertTrue(unreachable.isEmpty(), "the model answered; marking it down would pause a live encoder");
+    }
+
+    @Test
+    void theRequestBodyIsTheFixtureRequest() throws IOException {
+        JsonNode fixture = request();
+        serveTheFixtureReply();
+
+        contractScorer().scoreResponses(fixture.get("head").asText(), responses(fixture));
+
+        assertEquals(fixture, MAPPER.readTree(received.get()), "the scorer must send what serve.py is tested with");
+    }
+
+    @Test
+    void theFixtureResponseParsesIntoItsScoresAndSpans() throws IOException {
+        JsonNode fixture = request();
+        JsonNode expected = MAPPER.readTree(serveTheFixtureReply()).get("scores");
+
+        List<ResponseScore> scores =
+                contractScorer().scoreResponses(fixture.get("head").asText(), responses(fixture));
+
+        assertEquals(expected.size(), scores.size());
+        assertTrue(scores.stream().anyMatch(s -> s.unsupported() >= 0.975), "the fixture holds a flagged answer");
+        for (int i = 0; i < scores.size(); i++) {
+            JsonNode want = expected.get(i);
+            ResponseScore got = scores.get(i);
+            assertTrue(got.scored());
+            assertEquals(want.get("unsupported").asDouble(), got.unsupported());
+            assertEquals(want.get("conflict").asDouble(), got.conflict());
+            List<Span> spans = new ArrayList<>();
+            for (JsonNode s : want.get("spans")) {
+                spans.add(new Span(
+                        s.get("start").asInt(),
+                        s.get("end").asInt(),
+                        s.get("unsupported").asDouble(),
+                        s.get("conflict").asDouble()));
+            }
+            assertFalse(spans.isEmpty(), "every fixture score carries its sentences");
+            assertEquals(spans, got.spans());
+        }
+    }
+
+    private String serveTheFixtureReply() throws IOException {
+        String reply = Files.readString(CONTRACT.resolve("classify-response.json"));
+        rawBody = reply;
+        return reply;
+    }
+
+    private LauncherEncoderScorer contractScorer() {
+        return new LauncherEncoderScorer(scorerProps(), MAPPER, reason -> {});
+    }
+
+    private static JsonNode request() throws IOException {
+        return MAPPER.readTree(Files.readAllBytes(CONTRACT.resolve("classify-request.json")));
+    }
+
+    private static List<Response> responses(JsonNode request) {
+        List<Response> out = new ArrayList<>();
+        for (JsonNode r : request.get("responses")) {
+            List<String> passages = new ArrayList<>();
+            r.get("passages").forEach(p -> passages.add(p.asText()));
+            JsonNode question = r.get("question");
+            out.add(new Response(
+                    passages,
+                    question == null ? null : question.asText(),
+                    r.get("answer").asText()));
+        }
+        return out;
     }
 
     private ObserverProperties scorerProps() {

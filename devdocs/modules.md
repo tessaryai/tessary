@@ -220,8 +220,8 @@ invisible to bytecode analysis, backs the generated `TraceServiceGrpc` stub, and
 `OtlpGrpcTraceServiceTest` into a `NoClassDefFoundError`. Its pom entry says so. Treat the report as a
 list of questions, and let the test suite answer them.
 
-Test-only libraries carry `<scope>test</scope>` — logback in `analysis` (six tests in
-`ClassifierWorkerLoggingTest` capture log output) and the OTel SDK in `llm-runtime` (production emits
+Test-only libraries carry `<scope>test</scope>` — logback in `analysis` (`ClassifierWorkerTest`
+captures log output) and the OTel SDK in `llm-runtime` (production emits
 through the API; only tests need an in-memory reader). The scope is what stops production code
 reaching for them.
 

@@ -18,6 +18,7 @@ import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.An
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CauseRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.CitedAnswer;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingRowBuilder;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -279,34 +280,15 @@ class GroundednessDetailServiceTest {
     }
 
     private static FindingRow finding(String payload) {
-        return new FindingRow(
-                "fnd_1",
-                PROJECT,
-                "groundedness",
-                "groundedness:" + CLASSIFIER + ":" + CALL_SITE,
-                FindingRow.SubjectKind.CLASSIFIER,
-                CLASSIFIER,
-                null,
-                CALL_SITE,
-                FindingRow.Status.OPEN,
-                "2026-09-20T00:00:00Z",
-                "2026-09-23T14:00:00Z",
-                null,
-                null,
-                null,
-                32,
-                payload,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-09-20T00:00:00Z",
-                "2026-09-23T14:00:00Z");
+        return FindingRowBuilder.of("groundedness")
+                .id("fnd_1")
+                .projectId(PROJECT)
+                .causeKey("groundedness:" + CLASSIFIER + ":" + CALL_SITE)
+                .subject(FindingRow.SubjectKind.CLASSIFIER, CLASSIFIER)
+                .callSiteId(CALL_SITE)
+                .dated("2026-09-20T00:00:00Z", "2026-09-23T14:00:00Z")
+                .sampleCount(32)
+                .payload(payload)
+                .build();
     }
 }
