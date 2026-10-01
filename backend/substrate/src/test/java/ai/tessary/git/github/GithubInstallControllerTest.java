@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
+import static ai.tessary.git.github.GithubFixtures.secretBox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,8 +19,6 @@ import ai.tessary.auth.AuthProperties;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.auth.TenantPathResolver.Resolved;
-import ai.tessary.config.TessaryProperties;
-import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
 import ai.tessary.git.GitIntegrationDtos.SelectInstallationRequest;
 import ai.tessary.git.GitIntegrationRow;
@@ -31,7 +30,6 @@ import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,14 +52,6 @@ class GithubInstallControllerTest {
     private GithubInstallController controller;
 
     private final TenantContext ctx = new TenantContext("u", "e@x.io", "o", "p1", "owner", null);
-
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 3);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
 
     @BeforeEach
     void setUp() {

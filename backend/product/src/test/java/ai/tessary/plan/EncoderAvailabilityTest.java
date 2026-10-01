@@ -10,18 +10,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.testsupport.LoopbackHttpStub;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,15 +33,12 @@ class EncoderAvailabilityTest {
     /** The shape {@code serve.py} answers {@code /healthz} with. */
     private static final String HEALTHY = "{\"ok\": true, \"heads\": [\"groundedness\"], \"device\": \"mps\"}";
 
-    private final List<String> requestLines = new ArrayList<>();
-    private ServerSocket socket;
-    private Thread acceptor;
+    private LoopbackHttpStub stub;
     private ObserverProperties props;
 
     @AfterEach
-    void stop() throws IOException, InterruptedException {
-        if (socket != null) socket.close();
-        if (acceptor != null) acceptor.join(2_000);
+    void stop() throws IOException {
+        if (stub != null) stub.close();
     }
 
     @Test
@@ -71,28 +64,10 @@ class EncoderAvailabilityTest {
         assertTrue(s.available(), s.reason());
         assertTrue(encoder.available());
         assertEquals(Status.UP, encoder.health().getStatus());
-        assertEquals("GET /healthz HTTP/1.1", requestLines.getFirst(), "the probe asks the service's own health path");
-    }
-
-    @Test
-    void a200WithoutTheGroundednessHeadIsUnavailable() throws IOException {
-        // Healthy, but no groundedness model loaded.
-        EncoderAvailability encoder = serve(200, "{\"ok\": true, \"heads\": []}");
-
-        EncoderAvailability.Snapshot s = encoder.refresh();
-
-        assertFalse(s.available());
-        assertEquals("healthz answered 200 without the groundedness head", s.reason());
-    }
-
-    @Test
-    void a200WithNoHeadsAtAllIsUnavailable() throws IOException {
-        EncoderAvailability encoder = serve(200, "{}");
-
-        EncoderAvailability.Snapshot s = encoder.refresh();
-
-        assertFalse(s.available());
-        assertEquals("healthz answered 200 without the groundedness head", s.reason());
+        assertEquals(
+                "GET /healthz HTTP/1.1",
+                stub.requests().getFirst().line(),
+                "the probe asks the service's own health path");
     }
 
     @Test
@@ -129,7 +104,7 @@ class EncoderAvailabilityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"{\"heads\": [\"sentiment\"]}", "<html>ok</html>"})
+    @ValueSource(strings = {"{\"ok\": true, \"heads\": []}", "{}", "{\"heads\": [\"sentiment\"]}", "<html>ok</html>"})
     void a200ThatDoesNotListTheHeadIsUnavailable(String body) throws IOException {
         EncoderAvailability encoder = serve(200, body);
 
@@ -185,38 +160,10 @@ class EncoderAvailabilityTest {
         assertTrue(interrupted, "the scheduler's shutdown request must survive the probe");
     }
 
-    /** A loopback listener answering every request with {@code status} and {@code body}. */
     private EncoderAvailability serve(int status, String body) throws IOException {
-        socket = new ServerSocket(0, 8, InetAddress.getLoopbackAddress());
-        acceptor = new Thread(() -> serveLoop(status, body), "stub-healthz");
-        acceptor.setDaemon(true);
-        acceptor.start();
+        stub = LoopbackHttpStub.answering(status, body);
         props = new ObserverProperties();
-        props.getEncoder().setUrl("http://127.0.0.1:" + socket.getLocalPort());
+        props.getEncoder().setUrl(stub.baseUrl());
         return new EncoderAvailability(props);
-    }
-
-    private void serveLoop(int status, String body) {
-        while (!socket.isClosed()) {
-            try (Socket client = socket.accept()) {
-                InputStream in = client.getInputStream();
-                StringBuilder head = new StringBuilder();
-                int c;
-                while ((c = in.read()) != -1) {
-                    head.append((char) c);
-                    if (head.toString().endsWith("\r\n\r\n")) break;
-                }
-                requestLines.add(head.toString().split("\r\n")[0]);
-                OutputStream out = client.getOutputStream();
-                byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-                out.write(("HTTP/1.1 " + status + " Stub\r\nContent-Type: application/json\r\n" + "Content-Length: "
-                                + payload.length + "\r\nConnection: close\r\n\r\n")
-                        .getBytes(StandardCharsets.UTF_8));
-                out.write(payload);
-                out.flush();
-            } catch (IOException e) {
-                return;
-            }
-        }
     }
 }

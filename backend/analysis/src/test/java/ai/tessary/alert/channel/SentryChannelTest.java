@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.tessary.alert.AlertEventRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -60,7 +61,7 @@ class SentryChannelTest {
                 () -> channel.deliver(FiredEvents.digest(1), FiredEvents.config(mapper, config)));
 
         assertEquals(AlertError.INVALID_CHANNEL_CONFIG, e.error());
-        assertNull(client.lastRequest);
+        assertNull(client.lastRequest());
     }
 
     @Test
@@ -72,11 +73,11 @@ class SentryChannelTest {
         DeliveryResult result = channel.deliver(event, FiredEvents.config(mapper, CONFIG));
 
         assertEquals(DeliveryResult.success(200), result);
-        assertEquals(URI.create(STORE), requireNonNull(client.lastRequest).uri());
+        assertEquals(URI.create(STORE), requireNonNull(client.lastRequest()).uri());
         assertEquals(
                 "Sentry sentry_version=7, sentry_client=tessary/1.0, sentry_key=pk1",
-                client.lastRequest.headers().firstValue("X-Sentry-Auth").orElseThrow());
-        ObjectNode sent = (ObjectNode) mapper.readTree(client.lastBody);
+                client.lastRequest().headers().firstValue("X-Sentry-Auth").orElseThrow());
+        ObjectNode sent = (ObjectNode) mapper.readTree(client.lastBody());
         JsonNode eventId = sent.remove("event_id");
         assertEquals(32, eventId.asText().length(), "Sentry's store API wants 32 hex characters");
         assertEquals(eventId.asText(), eventId.asText().replaceAll("[^0-9a-f]", ""), "and only hex");

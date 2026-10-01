@@ -285,7 +285,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 | `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage`, `vitals` |
 | `tenancy` | `tenant`, `auth`, `edition`, `featureflags`, `version` |
 | `core` | `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `telemetry` (the transport/config/instance-id half — see `surfaces`'s `telemetry` above), `llmspi`, the Liquibase changelog, the schema-column generator |
-| `test-support` | `TestPostgres` + its context initializer; test scope in `app` |
+| `test-support` | `TestPostgres` + its context initializer, the `ScriptedHttpClient` and `LoopbackHttpStub` HTTP doubles; test scope in `app`, `substrate`, `product` and `analysis` |
 | `contract` | `open/contract` — the checked-in canonical OpenAPI spec |
 | `shared` | `open/{errors,jobqueue,media,obs}`, `detection/` (per-classifier detection-table registry: `DetectionTable`, `DetectionTableRegistry`) |
 

@@ -47,6 +47,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
 
         <!-- THREE dependencies were here and are not any more, so that a `git log -p` on this
              file answers the question rather than a `git log` on the whole reactor.

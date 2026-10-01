@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
+import static ai.tessary.git.github.GithubFixtures.location;
+import static ai.tessary.git.github.GithubFixtures.secretBox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,15 +15,12 @@ import ai.tessary.auth.AuthProperties;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.auth.TenantPathResolver.Resolved;
-import ai.tessary.config.TessaryProperties;
-import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ManifestStartView;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
 import ai.tessary.web.ApiResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -43,14 +42,6 @@ class GithubManifestControllerTest {
 
     private final TenantContext ctx = new TenantContext("u", "e@x.io", "o", "p1", "owner", null);
 
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 5);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
-
     @BeforeEach
     void setUp() {
         state = new GithubInstallStateService(secretBox(), mapper);
@@ -65,11 +56,6 @@ class GithubManifestControllerTest {
                 new Project("p1", "o", "web", "Web", "d", "t", null, null, true, null),
                 "owner");
         when(resolver.requireProject(ctx, "acme", "web")).thenReturn(resolved);
-    }
-
-    private static String location(ResponseEntity<Void> resp) {
-        assertEquals(HttpStatus.FOUND, resp.getStatusCode());
-        return resp.getHeaders().getLocation().toString();
     }
 
     // ---- manifest-url --------------------------------------------------------

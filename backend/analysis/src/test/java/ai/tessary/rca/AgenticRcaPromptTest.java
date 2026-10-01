@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -151,31 +153,44 @@ class AgenticRcaPromptTest {
     }
 
     /** Thin evidence changes the instruction, not just the number: a rate over four traces is four traces. */
-    @Test
-    void aThinSideCapsConfidence() {
-        assertTrue(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 2, 40).contains("cap every cause"),
-                "a two-trace baseline must cap confidence");
-        assertFalse(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 40, 40).contains("cap every cause"),
-                "a well-evidenced finding gets no cap");
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("evidenceDepths")
+    void aThinSideCapsConfidence(String evidence, Supplier<String> prompt, boolean capped) {
+        assertEquals(capped, prompt.get().contains("cap every cause"), evidence);
     }
 
-    @Test
-    void aFewFrustratedSessionsCapConfidence() {
-        RcaReportRow r = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
-        assertTrue(
-                AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 3, 3).contains("cap every cause"));
-        assertFalse(AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 30, 30)
-                .contains("cap every cause"));
-    }
-
-    @Test
-    void aFewFlaggedTracesCapConfidence() {
-        RcaReportRow r = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
-        assertTrue(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 3).contains("cap every cause"));
-        assertFalse(
-                AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 30).contains("cap every cause"));
+    static Stream<Arguments> evidenceDepths() {
+        RcaReportRow frustration = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
+        RcaReportRow groundedness = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
+        return Stream.of(
+                Arguments.of(
+                        "a two-trace baseline must cap confidence",
+                        (Supplier<String>) () -> AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 2, 40),
+                        true),
+                Arguments.of(
+                        "a well-evidenced finding gets no cap",
+                        (Supplier<String>) () -> AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 40, 40),
+                        false),
+                Arguments.of(
+                        "a few frustrated sessions cap confidence",
+                        (Supplier<String>)
+                                () -> AgenticRcaEngine.buildFrustrationPrompt(frustration, "fnd-1", true, 3, 3),
+                        true),
+                Arguments.of(
+                        "many frustrated sessions get no cap",
+                        (Supplier<String>)
+                                () -> AgenticRcaEngine.buildFrustrationPrompt(frustration, "fnd-1", true, 30, 30),
+                        false),
+                Arguments.of(
+                        "a few flagged traces cap confidence",
+                        (Supplier<String>)
+                                () -> AgenticRcaEngine.buildGroundednessPrompt(groundedness, "fnd-1", true, 3),
+                        true),
+                Arguments.of(
+                        "many flagged traces get no cap",
+                        (Supplier<String>)
+                                () -> AgenticRcaEngine.buildGroundednessPrompt(groundedness, "fnd-1", true, 30),
+                        false));
     }
 
     /** The two resources the groundedness branch sends: a schema whose causes cite traces, and its own rules. */

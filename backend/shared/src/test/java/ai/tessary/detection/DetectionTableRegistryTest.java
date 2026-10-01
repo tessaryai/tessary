@@ -6,37 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.detection.DetectionTable.Grain;
-import java.util.List;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 class DetectionTableRegistryTest {
 
-    /** A minimal {@link ObjectProvider} stub backed by a fixed list, mirroring what Spring hands a
-     * bean constructor for an {@code ObjectProvider<T>} parameter — only {@code orderedStream()} is
-     * exercised by {@link DetectionTableRegistry}, so nothing else needs a real implementation. */
-    private static <T> ObjectProvider<T> providerOf(List<T> items) {
-        return new ObjectProvider<>() {
-            @Override
-            public T getObject() {
-                throw new UnsupportedOperationException("not exercised by DetectionTableRegistry");
-            }
-
-            @Override
-            public Stream<T> orderedStream() {
-                return items.stream();
-            }
-        };
-    }
-
     @Test
     void twoBeansClaimingOneKindFailAtConstruction() {
-        List<DetectionTable> dup = List.of(
+        ObjectProvider<DetectionTable> dup = Providers.of(
                 new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
                 new DetectionTable("classifier", "some_other_table", Grain.SPAN));
 
-        assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(providerOf(dup)));
+        assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(dup));
     }
 
     @Test
@@ -49,11 +30,11 @@ class DetectionTableRegistryTest {
 
     @Test
     void unionSqlHasOneArmPerDistinctTableAndThirteenColumnsPerArm() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
+        DetectionTableRegistry registry = new DetectionTableRegistry(Providers.of(
                 new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
                 new DetectionTable("frustration", "frustration_detection", Grain.TRACE),
                 new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN))));
+                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN)));
 
         String sql = registry.unionSql();
         String[] arms = sql.split(" UNION ALL ");

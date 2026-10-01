@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
-import static ai.tessary.git.github.ScriptedHttpClient.response;
+import static ai.tessary.testsupport.ScriptedHttpClient.response;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import org.junit.jupiter.api.Test;

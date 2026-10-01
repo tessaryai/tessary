@@ -15,7 +15,6 @@ import ai.tessary.auth.BearerTokenAuthenticator;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.config.OtlpReceiverProperties;
 import ai.tessary.config.SubstrateProperties;
-import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
 import ai.tessary.open.errors.CapabilityError;
@@ -24,7 +23,6 @@ import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.KeyScope;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.RetryInfo;
 import io.grpc.Channel;
@@ -40,11 +38,6 @@ import io.grpc.stub.MetadataUtils;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse;
 import io.opentelemetry.proto.collector.trace.v1.TraceServiceGrpc;
-import io.opentelemetry.proto.common.v1.AnyValue;
-import io.opentelemetry.proto.common.v1.KeyValue;
-import io.opentelemetry.proto.trace.v1.ResourceSpans;
-import io.opentelemetry.proto.trace.v1.ScopeSpans;
-import io.opentelemetry.proto.trace.v1.Span;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.List;
@@ -117,21 +110,8 @@ class OtlpGrpcTraceServiceTest {
     }
 
     private static ExportTraceServiceRequest request() {
-        Span span = Span.newBuilder()
-                .setName("chat")
-                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
-                .addAttributes(KeyValue.newBuilder()
-                        .setKey(GenAiAttributes.OPERATION_NAME)
-                        .setValue(AnyValue.newBuilder()
-                                .setStringValue(GenAiAttributes.OP_CHAT)
-                                .build())
-                        .build())
-                .build();
-        return ExportTraceServiceRequest.newBuilder()
-                .addResourceSpans(ResourceSpans.newBuilder()
-                        .addScopeSpans(ScopeSpans.newBuilder().addSpans(span))
-                        .build())
-                .build();
+        return OtlpRequests.request(
+                OtlpRequests.chatSpan((byte) 0x01).toBuilder().setName("chat").build());
     }
 
     private static TenantContext projectToken(String projectId) {

@@ -19,7 +19,8 @@ substrate    storage, ingest, redaction, retention, pricing, sources, traces, gi
 tenancy      tenant, auth, edition, featureflags, version            (declares bcrypt)
 core         web, model, apidoc, ops, crypto, db, config, telemetry, llmspi
              + the Liquibase changelog and the schema-column generator that reads it
-test-support TestPostgres, TestcontainersPostgresInitializer, OpenApiCanonicalizer  (test scope in app)
+test-support TestPostgres, TestcontainersPostgresInitializer, OpenApiCanonicalizer, ScriptedHttpClient,
+             LoopbackHttpStub  (test scope in app, substrate, product, analysis)
 shared       open/{errors,obs,jobqueue,media}, detection  ·  contract  open/contract
 ```
 
@@ -167,8 +168,9 @@ classifier/
 
 ## Test support
 
-`TestPostgres` and `TestcontainersPostgresInitializer` depend on nothing in the platform, so they
-form **`test-support`**, which sits beside the kernel and is consumed with `test` scope by `app`. Its sources live in `src/main` rather than a test-jar, so the dependency is readable and
+`TestPostgres`, `TestcontainersPostgresInitializer` and the HTTP doubles (`ScriptedHttpClient`,
+`LoopbackHttpStub`) depend on nothing in the platform, so they form **`test-support`**, which sits
+beside the kernel and is consumed with `test` scope by `app`, `substrate`, `product` and `analysis`. Its sources live in `src/main` rather than a test-jar, so the dependency is readable and
 resolves in an IDE without extra configuration.
 
 Fixtures that build a tenant, a trace or a classifier are NOT there. They would drag their layer's

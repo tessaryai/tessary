@@ -9,20 +9,17 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.testsupport.LogCapture;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import java.util.List;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 
 /**
  * The reaper's two alarms. Both are ERROR on purpose: a queue that has fallen behind and a sweep that has
@@ -34,19 +31,8 @@ class TraceRollupReaperTest {
     @Mock
     TraceV2Repository traces;
 
-    private final Logger logger = (Logger) LoggerFactory.getLogger(TraceRollupReaper.class);
-    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
-
-    @BeforeEach
-    void attach() {
-        appender.start();
-        logger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detach() {
-        logger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(TraceRollupReaper.class);
 
     private TraceRollupReaper reaper() {
         SubstrateProperties props = new SubstrateProperties();
@@ -62,7 +48,7 @@ class TraceRollupReaperTest {
         when(traces.queueStats()).thenReturn(new TraceV2Repository.RollupQueue(4, overdueMs));
 
         assertEquals(new TraceRollupReaper.Sweep(0, 4, overdueMs), reaper().sweepOnce());
-        assertEquals(errors, errors());
+        assertEquals(errors, log.count(Level.ERROR));
     }
 
     /** A failed sweep is survived, raised at ERROR, and carries only the error's class. */
@@ -72,15 +58,8 @@ class TraceRollupReaperTest {
 
         assertDoesNotThrow(reaper()::tick);
 
-        ILoggingEvent error = appender.list.stream()
-                .filter(e -> e.getLevel() == Level.ERROR)
-                .findFirst()
-                .orElseThrow();
+        ILoggingEvent error = log.first(Level.ERROR);
         assertNull(error.getThrowableProxy());
         assertEquals(List.of("IllegalStateException"), List.of(error.getArgumentArray()));
-    }
-
-    private long errors() {
-        return appender.list.stream().filter(e -> e.getLevel() == Level.ERROR).count();
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
+import static ai.tessary.git.github.GithubFixtures.secretBox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -8,7 +9,6 @@ import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
-import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,14 +16,6 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GithubInstallStateServiceTest {
-
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 1);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
 
     private final GithubInstallStateService svc =
             new GithubInstallStateService(secretBox(), new com.fasterxml.jackson.databind.ObjectMapper());

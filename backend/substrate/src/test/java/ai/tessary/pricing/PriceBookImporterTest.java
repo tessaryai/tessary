@@ -8,19 +8,15 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.PricingProperties;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
+import ai.tessary.testsupport.LogCapture;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.info.BuildProperties;
 
@@ -31,19 +27,8 @@ class PriceBookImporterTest {
     @Mock
     PriceBookRepository books;
 
-    private final Logger logger = (Logger) LoggerFactory.getLogger(PriceBookImporter.class);
-    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
-
-    @BeforeEach
-    void attach() {
-        appender.start();
-        logger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detach() {
-        logger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(PriceBookImporter.class);
 
     private PriceBookImporter importer() {
         return new PriceBookImporter(
@@ -75,7 +60,7 @@ class PriceBookImporterTest {
 
         assertEquals(
                 announcements,
-                appender.list.stream()
+                log.events().stream()
                         .filter(e -> e.getKeyValuePairs() != null
                                 && e.getKeyValuePairs().stream()
                                         .anyMatch(kv ->

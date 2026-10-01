@@ -13,7 +13,12 @@ import ai.tessary.rca.RcaDtos.RuledOutCheck.Assessment;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The validator every {@link AgenticRcaEngine} run passes through: receipt whitelists, verdict normalization, the
@@ -42,63 +47,74 @@ class RcaSynthesisOutputTest {
         assertNull(out.verdictNote());
     }
 
-    @Test
-    void crossWindowVerdictWithoutPriorEvidenceIsDowngraded() {
-        // The failure guarded: a traffic_shift "proven" from degraded-window traces alone, the prior window inferred.
-        for (String verdict : List.of(RcaReportRow.Verdict.TRAFFIC_SHIFT, RcaReportRow.Verdict.BEHAVIOR_CHANGE)) {
-            String text = "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\","
-                    + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
-                    + "\"evidence_trace_ids\":[\"tr-degraded\"]}]}";
+    /**
+     * A comparative verdict must cite the prior window when the prior window has anything citable. The failure
+     * guarded: a traffic_shift "proven" from degraded-window traces alone, the prior window inferred. With nothing
+     * citable on the prior side, demanding a citation would make the verdict unreachable.
+     */
+    @ParameterizedTest(name = "{0} prior={1} cited={2}")
+    @MethodSource("crossWindowVerdicts")
+    void crossWindowVerdictsNeedPriorEvidenceWhenThereIsAny(
+            String verdict, Set<String> prior, List<String> cited, String expected, boolean downgraded)
+            throws Exception {
+        String text = "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"detailed_report\":\"## r\","
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
+                + "\"evidence_trace_ids\":" + MAPPER.writeValueAsString(cited) + "}]}";
 
-            RcaSynthesisOutput.Parsed out =
-                    RcaSynthesisOutput.parse(MAPPER, text, Set.of("tr-prior"), Set.of("tr-degraded"), CHECKS, "proj");
+        RcaSynthesisOutput.Parsed out =
+                RcaSynthesisOutput.parse(MAPPER, text, prior, Set.of("tr-degraded"), CHECKS, "proj");
 
-            assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, out.verdict());
+        assertEquals(expected, out.verdict());
+        if (downgraded) {
             assertNotNull(out.verdictNote());
             assertTrue(out.verdictNote().contains(verdict), out.verdictNote());
+        } else {
+            assertNull(out.verdictNote());
         }
     }
 
-    @Test
-    void crossWindowVerdictWithPriorEvidenceStands() {
-        String text = "{\"summary\":\"s\",\"verdict\":\"traffic_shift\",\"detailed_report\":\"## r\","
-                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
-                + "\"evidence_trace_ids\":[\"tr-prior\",\"tr-degraded\"]}]}";
-
-        RcaSynthesisOutput.Parsed out =
-                RcaSynthesisOutput.parse(MAPPER, text, Set.of("tr-prior"), Set.of("tr-degraded"), CHECKS, "proj");
-
-        assertEquals(RcaReportRow.Verdict.TRAFFIC_SHIFT, out.verdict());
-        assertNull(out.verdictNote());
+    static Stream<Arguments> crossWindowVerdicts() {
+        Set<String> prior = Set.of("tr-prior");
+        List<String> degradedOnly = List.of("tr-degraded");
+        return Stream.of(
+                Arguments.of(
+                        RcaReportRow.Verdict.TRAFFIC_SHIFT,
+                        prior,
+                        degradedOnly,
+                        RcaReportRow.Verdict.INCONCLUSIVE,
+                        true),
+                Arguments.of(
+                        RcaReportRow.Verdict.BEHAVIOR_CHANGE,
+                        prior,
+                        degradedOnly,
+                        RcaReportRow.Verdict.INCONCLUSIVE,
+                        true),
+                Arguments.of(
+                        RcaReportRow.Verdict.TRAFFIC_SHIFT,
+                        prior,
+                        List.of("tr-prior", "tr-degraded"),
+                        RcaReportRow.Verdict.TRAFFIC_SHIFT,
+                        false),
+                Arguments.of(
+                        RcaReportRow.Verdict.TRAFFIC_SHIFT,
+                        NO_PRIOR,
+                        degradedOnly,
+                        RcaReportRow.Verdict.TRAFFIC_SHIFT,
+                        false));
     }
 
-    @Test
-    void emptyPriorWindowExemptsTheCrossWindowBurden() {
-        // Nothing citable on the prior side, so demanding a citation would make the verdict unreachable.
-        String text = "{\"summary\":\"s\",\"verdict\":\"traffic_shift\",\"detailed_report\":\"## r\","
-                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"what_changed\":\"r\","
-                + "\"evidence_trace_ids\":[\"tr-degraded\"]}]}";
-
-        RcaSynthesisOutput.Parsed out =
-                RcaSynthesisOutput.parse(MAPPER, text, NO_PRIOR, Set.of("tr-degraded"), CHECKS, "proj");
-
-        assertEquals(RcaReportRow.Verdict.TRAFFIC_SHIFT, out.verdict());
-        assertNull(out.verdictNote());
-    }
-
-    @Test
-    void structuralVerdictsSurviveBecauseTheAgentVerifiesThemItself() {
-        // The agent has the repo, so it owns these verdicts; single-window, so no prior-citation burden.
-        for (String verdict : List.of(RcaReportRow.Verdict.DEFINITION_CHANGE, RcaReportRow.Verdict.MODEL_CHANGE)) {
-            RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
-                    MAPPER,
-                    "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"causes\":[]}",
-                    Set.of("tr-prior"),
-                    Set.of(),
-                    CHECKS,
-                    "proj");
-            assertEquals(verdict, out.verdict());
-        }
+    /** The agent has the repo, so it owns these verdicts; single-window, so no prior-citation burden. */
+    @ParameterizedTest
+    @ValueSource(strings = {RcaReportRow.Verdict.DEFINITION_CHANGE, RcaReportRow.Verdict.MODEL_CHANGE})
+    void structuralVerdictsSurviveBecauseTheAgentVerifiesThemItself(String verdict) {
+        RcaSynthesisOutput.Parsed out = RcaSynthesisOutput.parse(
+                MAPPER,
+                "{\"summary\":\"s\",\"verdict\":\"" + verdict + "\",\"causes\":[]}",
+                Set.of("tr-prior"),
+                Set.of(),
+                CHECKS,
+                "proj");
+        assertEquals(verdict, out.verdict());
     }
 
     @Test

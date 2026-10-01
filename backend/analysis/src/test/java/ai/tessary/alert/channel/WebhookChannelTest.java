@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.tessary.alert.AlertEventRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.http.HttpHeaders;
@@ -52,7 +53,7 @@ class WebhookChannelTest {
                 () -> channel.deliver(FiredEvents.digest(1), FiredEvents.config(mapper, config)));
 
         assertEquals(AlertError.INVALID_CHANNEL_CONFIG, e.error());
-        assertNull(client.lastRequest);
+        assertNull(client.lastRequest());
     }
 
     /** Without a secret the body goes out unsigned but still names its event kind and delivery id. */
@@ -67,11 +68,11 @@ class WebhookChannelTest {
                 channel.deliver(event, FiredEvents.config(mapper, "{\"url\":\"" + URL + "\"" + secret + "}"));
 
         assertEquals(DeliveryResult.success(204), result);
-        HttpHeaders headers = requireNonNull(client.lastRequest).headers();
+        HttpHeaders headers = requireNonNull(client.lastRequest()).headers();
         assertEquals(Optional.empty(), headers.firstValue(WebhookChannel.SIGNATURE_HEADER));
         assertEquals(Optional.of("case_opened"), headers.firstValue("X-Evals-Event"));
         assertEquals(Optional.of("evt_case"), headers.firstValue("X-Evals-Delivery"));
-        assertEquals(AlertPayload.envelope(event, mapper), mapper.readTree(client.lastBody));
+        assertEquals(AlertPayload.envelope(event, mapper), mapper.readTree(client.lastBody()));
     }
 
     @ParameterizedTest(name = "{0}")
