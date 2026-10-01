@@ -14,6 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { withoutElapsed } = require('./fixtures/launcher-harness');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
@@ -138,12 +139,6 @@ async function until(condition, what) {
     assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 10));
   }
-}
-
-function withoutElapsed(body) {
-  assert.equal(typeof body.elapsed_ms, 'number');
-  const { elapsed_ms: _elapsed, ...rest } = body;
-  return rest;
 }
 
 test('a container that exits non-zero answers script_exit with its spend, and its stderr stays on the console', async () => {

@@ -7,45 +7,16 @@
  * quarantine, the dossier and its traversal guard, the failure envelope, and the exit guard that
  * ends a run a leaked handle would otherwise keep alive.
  */
-const { test } = require('node:test');
+const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { makeFakeOpencodeBin } = require('./fixtures/fake-opencode');
+const { runLane } = require('./fixtures/run-lane');
 
 const LEAK = path.join(__dirname, 'fixtures', 'leak-handle');
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-
-function runLane(script, input, { reply = '{"verdict":"supported"}', env = {} } = {}) {
-  const workDir = tmp('lanes-work-');
-  const recordDir = tmp('lanes-record-');
-  const binDir = makeFakeOpencodeBin(tmp('lanes-bin-'));
-  const inputPath = path.join(tmp('lanes-input-'), 'input.json');
-  fs.writeFileSync(inputPath, JSON.stringify({
-    prompt: 'investigate',
-    json_schema: JSON.stringify({ type: 'object', required: ['verdict'] }),
-    model: 'anthropic/claude-sonnet-5',
-    mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_fake' },
-    timeout_ms: 5000,
-    ...input,
-  }));
-  const result = spawnSync(process.execPath, [path.join(__dirname, '..', script), inputPath], {
-    env: {
-      WORK_DIR: workDir,
-      PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
-      FAKE_OPENCODE_RECORD_DIR: recordDir,
-      FAKE_OPENCODE_REPLY: reply,
-      ...(process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {}),
-      ...env,
-    },
-    timeout: 15_000,
-    encoding: 'utf8',
-  });
-  const configs = fs.readdirSync(recordDir).map((f) => JSON.parse(fs.readFileSync(path.join(recordDir, f), 'utf8')).config);
-  return { result, workDir, configs };
-}
 
 /** A local repository: one commit carrying agent config, then a second commit on top. */
 function makeRepo() {
@@ -66,9 +37,9 @@ function makeRepo() {
   return { dir, first };
 }
 
-test('rca.js checks out the requested commit, quarantines agent config, and runs read-only', () => {
+test('rca.js checks out the requested commit, quarantines agent config, and runs read-only', async () => {
   const repo = makeRepo();
-  const { result, workDir, configs } = runLane('rca.js', {
+  const { result, workDir, configs } = await runLane('rca.js', {
     clone_url: `file://${repo.dir}`,
     head_sha: repo.first,
     files: { 'finding.md': 'the claim' },
@@ -85,17 +56,17 @@ test('rca.js checks out the requested commit, quarantines agent config, and runs
   assert.deepEqual(configs[0].permission.edit, { '*': 'deny' }, 'RCA never edits');
 });
 
-test('rca.js without a clone_url still investigates, with no repo', () => {
-  const { result, workDir } = runLane('rca.js', { files: { 'finding.md': 'the claim' } });
+test('rca.js without a clone_url still investigates, with no repo', async () => {
+  const { result, workDir } = await runLane('rca.js', { files: { 'finding.md': 'the claim' } });
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(path.join(workDir, 'repo')), false);
 });
 
-test('a clone git refuses exits 1 with git\'s reason and never the tokenized URL', () => {
+test('a clone git refuses exits 1 with git\'s reason and never the tokenized URL', async () => {
   // A local path carrying a platform-key-shaped segment, so git quotes the "remote" back verbatim
   // the way an older git quotes a credentialed URL (a current one redacts those itself).
-  const { result, configs } = runLane('rca.js', { clone_url: '/nonexistent/tsy_a_secretkey/app.git', head_sha: 'abc' });
+  const { result, configs } = await runLane('rca.js', { clone_url: '/nonexistent/tsy_a_secretkey/app.git', head_sha: 'abc' });
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), "git clone failed: fatal: repository '/nonexistent/tsy_***/app.git' does not exist");
@@ -103,16 +74,16 @@ test('a clone git refuses exits 1 with git\'s reason and never the tokenized URL
   assert.equal(configs.length, 0, 'no agent is started without the repo it was asked about');
 });
 
-test('a clone past its deadline is killed and reported as a timeout, not a hang', () => {
+test('a clone past its deadline is killed and reported as a timeout, not a hang', async () => {
   const repo = makeRepo();
-  const { result } = runLane('rca.js', { clone_url: `file://${repo.dir}`, head_sha: repo.first }, { env: { GIT_TIMEOUT_MS: '1' } });
+  const { result } = await runLane('rca.js', { clone_url: `file://${repo.dir}`, head_sha: repo.first }, { env: { GIT_TIMEOUT_MS: '1' } });
 
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), 'git clone timed out after 1ms');
 });
 
-test('a failed RCA run still writes its spend for the launcher to book', () => {
-  const { result } = runLane('rca.js', { files: {} }, { reply: '' });
+test('a failed RCA run still writes its spend for the launcher to book', async () => {
+  const { result } = await runLane('rca.js', { files: {} }, { reply: '' });
 
   assert.equal(result.status, 1);
   const envelope = JSON.parse(result.stdout);
@@ -121,21 +92,25 @@ test('a failed RCA run still writes its spend for the launcher to book', () => {
 });
 
 for (const script of ['rca.js', 'triage.js']) {
-  test(`${script} refuses a dossier path that escapes its directory, before any agent starts`, () => {
-    const { result, workDir, configs } = runLane(script, { files: { '../escaped.md': 'x' } });
+  test(`${script} refuses a dossier path that escapes its directory, before any agent starts`, async () => {
+    const { result, workDir, configs } = await runLane(script, { files: { '../escaped.md': 'x' } });
 
     assert.equal(result.status, 1);
     assert.equal(result.stderr.trim(), 'dossier path escapes root: ../escaped.md');
     assert.equal(fs.existsSync(path.join(workDir, 'escaped.md')), false);
     assert.equal(configs.length, 0);
   });
-
-  test(`${script} ends itself 5s after main() when a leaked handle holds the process open`, () => {
-    const { result } = runLane(script, { files: {} }, { env: { NODE_OPTIONS: `--require ${LEAK}` } });
-
-    assert.notEqual(result.signal, 'SIGTERM', 'the guard must end it, not the 15s spawn timeout');
-    assert.match(result.stderr, /still alive 5s after main\(\) finished/);
-    assert.equal(result.status, 1, 'a run that needed the guard is not reported clean');
-    assert.equal(typeof JSON.parse(result.stdout).raw, 'string', 'the result it produced is still written');
-  });
 }
+
+describe('the exit guard', { concurrency: true }, () => {
+  for (const script of ['rca.js', 'triage.js']) {
+    test(`${script} ends itself 5s after main() when a leaked handle holds the process open`, async () => {
+      const { result } = await runLane(script, { files: {} }, { env: { NODE_OPTIONS: `--require ${LEAK}` } });
+
+      assert.notEqual(result.signal, 'SIGTERM', 'the guard must end it, not the 15s spawn timeout');
+      assert.match(result.stderr, /still alive 5s after main\(\) finished/);
+      assert.equal(result.status, 1, 'a run that needed the guard is not reported clean');
+      assert.equal(typeof JSON.parse(result.stdout).raw, 'string', 'the result it produced is still written');
+    });
+  }
+});

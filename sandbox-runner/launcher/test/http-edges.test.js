@@ -9,28 +9,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-
-const SERVER_JS = path.join(__dirname, '..', 'server.js');
-
-function spawnLauncher(env) {
-  return spawn('node', [SERVER_JS], { env: { ...process.env, ...env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
-}
-
-async function startLauncher(env) {
-  const child = spawnLauncher(env);
-  const port = await new Promise((resolve, reject) => {
-    let out = '';
-    child.stdout.on('data', (d) => {
-      out += d.toString();
-      const bound = /listening on :(\d+)/.exec(out);
-      if (bound) resolve(Number(bound[1]));
-    });
-    child.on('exit', (code) => reject(new Error(`launcher exited early (code ${code}): ${out}`)));
-  });
-  return { child, port };
-}
+const { spawnLauncher, startLauncher } = require('./fixtures/launcher-harness');
 
 function request(port, method, urlPath, { body, auth } = {}) {
   return new Promise((resolve, reject) => {
