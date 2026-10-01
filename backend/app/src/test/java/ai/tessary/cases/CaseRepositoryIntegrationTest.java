@@ -10,6 +10,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,8 +21,6 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * The two partial indexes on {@code eval_case}, the display-number allocation against them, and the filtered keyset
@@ -29,8 +28,7 @@ import org.springframework.test.context.TestPropertySource;
  * the point, the {@code MAX(seq)+1} allocator fails only when an unexpected row exists, and a keyset page is a claim
  * about Postgres row-constructor ordering.
  */
-@SpringBootTest
-@TestPropertySource(properties = "test.context-group=case-repository")
+@RcaParkedSpringBootTest
 class CaseRepositoryIntegrationTest {
 
     @Autowired

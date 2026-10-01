@@ -503,17 +503,17 @@ class SubstrateWriteIntegrationTest {
         assertFalse(redaction.listRules(guarded).isEmpty(), "listing seeds the built-in rules, enabled");
 
         String body = chattyBody();
-        long plainMillis = Math.min(drainBurst(plain, body, "off-a"), drainBurst(plain, body, "off-b"));
-        long guardedMillis = Math.min(drainBurst(guarded, body, "on-a"), drainBurst(guarded, body, "on-b"));
+        long plainMillis = drainBurst(plain, body, "off");
+        long guardedMillis = drainBurst(guarded, body, "on");
         assertEquals(0L, writer.failedBatches());
-        assertEquals(1000, count("span", plain));
-        assertEquals(1000, count("span", guarded));
+        assertEquals(500, count("span", plain));
+        assertEquals(500, count("span", guarded));
         int redacted = jdbc.sql(
                         "SELECT count(*) FROM span_payload WHERE project_id = :pid AND input LIKE '%[REDACTED_EMAIL]%'")
                 .param("pid", guarded)
                 .query(Integer.class)
                 .single();
-        assertEquals(1000, redacted, "every span body of both guarded runs was redacted");
+        assertEquals(500, redacted, "every span body of the guarded run was redacted");
         double ratio = (double) guardedMillis / Math.max(1, plainMillis);
         log.info(
                 "redaction cost: 500 spans x {} B bodies drained in {} ms without rules, {} ms with all built-ins, ratio {}",

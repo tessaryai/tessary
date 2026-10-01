@@ -31,6 +31,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -47,10 +48,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * The RCA worker and pipeline against real Postgres with only {@link AgenticRcaEngine} mocked. Gate-free: a grader-
@@ -58,12 +56,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * their measurements; an engine failure stamps {@code failed}. A finding's two sides are its evidence rows by role,
  * never by time.
  */
-// batch-size=0 parks the scheduled drain (claimBatch's LIMIT 0), so a direct `run` is the only execution; a tick
-// would run the job twice. A long heartbeat cannot do this, since fixedDelay fires at startup. Static
-// @TestPropertySource keeps the context cache key shared, where @DynamicPropertySource would fork one per declaring
-// class.
-@SpringBootTest
-@TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
+@RcaParkedSpringBootTest
 class RcaWorkerTest {
 
     @Autowired
@@ -105,7 +98,7 @@ class RcaWorkerTest {
     @Autowired
     JdbcClient jdbc;
 
-    @MockitoBean
+    @Autowired
     AgenticRcaEngine engine;
 
     private static final Instant TO = Instant.parse("2026-07-15T12:00:00Z");

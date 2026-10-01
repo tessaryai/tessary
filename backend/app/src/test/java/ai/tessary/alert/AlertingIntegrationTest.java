@@ -91,7 +91,10 @@ class AlertingIntegrationTest {
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigB, spanIn(pid, newSession(pid)));
-        sleep(1100);
+        jdbc.sql("UPDATE alert_rule SET created_at = :at WHERE id = :id")
+                .param("at", Instant.now().minusSeconds(5).toString())
+                .param("id", digestRule.id())
+                .update();
         worker.tick();
 
         List<AlertEventRow> fired = alertEvents.listByProject(pid, 100);
@@ -233,13 +236,5 @@ class AlertingIntegrationTest {
                 .param("conf", Detection.Confidence.HIGH)
                 .param("at", Instant.now().toString())
                 .update();
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }
