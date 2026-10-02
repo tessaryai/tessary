@@ -10,11 +10,14 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -32,6 +35,8 @@ public final class SubstrateV2Fixtures {
 
     private static final AtomicLong COUNTER = new AtomicLong();
     private static final HexFormat HEX = HexFormat.of();
+    private static final String TOOL_CALL_VALUES = "(:id#, :pid#, :name#, :err#, :isErr#, CAST(:result# AS jsonb),"
+            + " :tid#, :sid#, :at#::timestamptz, :at#::timestamptz, :at#::timestamptz)";
 
     private final SessionRepository sessions;
     private final TraceV2Repository traces;
@@ -184,7 +189,19 @@ public final class SubstrateV2Fixtures {
         if (sessionId != null) {
             session(projectId, sessionId, startedAt);
         }
-        TraceV2Row row = TraceV2Row.of(
+        TraceV2Row row = traceRow(projectId, traceId, sessionId, threadId, projectVersionId, startedAt);
+        traces.getOrCreateAll(List.of(row));
+        return row;
+    }
+
+    private static TraceV2Row traceRow(
+            String projectId,
+            String traceId,
+            @Nullable String sessionId,
+            @Nullable String threadId,
+            @Nullable String projectVersionId,
+            Instant startedAt) {
+        return TraceV2Row.of(
                 projectId,
                 traceId,
                 sessionId,
@@ -194,8 +211,6 @@ public final class SubstrateV2Fixtures {
                 projectVersionId,
                 startedAt.toString(),
                 startedAt.toString());
-        traces.getOrCreateAll(List.of(row));
-        return row;
     }
 
     /** A named trace with no spans, for surfaces that render trace-level facts only. */
@@ -251,51 +266,9 @@ public final class SubstrateV2Fixtures {
             @Nullable Long cacheReadTokens,
             @Nullable Long cacheWriteTokens,
             @Nullable Long reasoningTokens) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                row.callSiteId(),
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheWriteTokens,
-                reasoningTokens,
-                row.inputCost(),
-                row.outputCost(),
-                row.cacheReadCost(),
-                row.cacheWriteCost(),
-                row.costSource(),
-                row.priceBookVersion(),
-                row.inputPreview(),
-                row.outputPreview(),
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated = copyOf(row)
+                .usage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens)
+                .build();
         spans.upsertAll(List.of(updated));
         return updated;
     }
@@ -310,51 +283,9 @@ public final class SubstrateV2Fixtures {
             @Nullable String cacheReadCost,
             @Nullable String cacheWriteCost,
             String costSource) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                row.callSiteId(),
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                row.inputTokens(),
-                row.outputTokens(),
-                row.cacheReadTokens(),
-                row.cacheWriteTokens(),
-                row.reasoningTokens(),
-                inputCost,
-                outputCost,
-                cacheReadCost,
-                cacheWriteCost,
-                costSource,
-                row.priceBookVersion(),
-                row.inputPreview(),
-                row.outputPreview(),
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated = copyOf(row)
+                .cost(inputCost, outputCost, cacheReadCost, cacheWriteCost, costSource)
+                .build();
         spans.upsertAll(List.of(updated));
         return updated;
     }
@@ -362,53 +293,143 @@ public final class SubstrateV2Fixtures {
     /** Re-write a span with the previews and call site the rollup copies from the root onto the trace. */
     public SpanRow withPreviews(
             SpanRow row, @Nullable String inputPreview, @Nullable String outputPreview, @Nullable String callSiteId) {
-        SpanRow updated = new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                row.parentSpanId(),
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                callSiteId,
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                row.isLogicalRoot(),
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                row.inputTokens(),
-                row.outputTokens(),
-                row.cacheReadTokens(),
-                row.cacheWriteTokens(),
-                row.reasoningTokens(),
-                row.inputCost(),
-                row.outputCost(),
-                row.cacheReadCost(),
-                row.cacheWriteCost(),
-                row.costSource(),
-                row.priceBookVersion(),
-                inputPreview,
-                outputPreview,
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
-                null,
-                null,
-                null,
-                null);
+        SpanRow updated =
+                copyOf(row).previews(inputPreview, outputPreview, callSiteId).build();
         spans.upsertAll(List.of(updated));
         return updated;
+    }
+
+    public static SpanRowCopy copyOf(SpanRow row) {
+        return new SpanRowCopy(row);
+    }
+
+    public static final class SpanRowCopy {
+
+        private final SpanRow row;
+        private @Nullable String parentSpanId;
+        private boolean isLogicalRoot;
+        private @Nullable String callSiteId;
+        private @Nullable Long inputTokens;
+        private @Nullable Long outputTokens;
+        private @Nullable Long cacheReadTokens;
+        private @Nullable Long cacheWriteTokens;
+        private @Nullable Long reasoningTokens;
+        private @Nullable String inputCost;
+        private @Nullable String outputCost;
+        private @Nullable String cacheReadCost;
+        private @Nullable String cacheWriteCost;
+        private String costSource;
+        private @Nullable String inputPreview;
+        private @Nullable String outputPreview;
+
+        private SpanRowCopy(SpanRow row) {
+            this.row = row;
+            this.parentSpanId = row.parentSpanId();
+            this.isLogicalRoot = row.isLogicalRoot();
+            this.callSiteId = row.callSiteId();
+            this.inputTokens = row.inputTokens();
+            this.outputTokens = row.outputTokens();
+            this.cacheReadTokens = row.cacheReadTokens();
+            this.cacheWriteTokens = row.cacheWriteTokens();
+            this.reasoningTokens = row.reasoningTokens();
+            this.inputCost = row.inputCost();
+            this.outputCost = row.outputCost();
+            this.cacheReadCost = row.cacheReadCost();
+            this.cacheWriteCost = row.cacheWriteCost();
+            this.costSource = row.costSource();
+            this.inputPreview = row.inputPreview();
+            this.outputPreview = row.outputPreview();
+        }
+
+        public SpanRowCopy parent(String parentSpanId) {
+            this.parentSpanId = parentSpanId;
+            this.isLogicalRoot = false;
+            return this;
+        }
+
+        public SpanRowCopy usage(
+                @Nullable Long inputTokens,
+                @Nullable Long outputTokens,
+                @Nullable Long cacheReadTokens,
+                @Nullable Long cacheWriteTokens,
+                @Nullable Long reasoningTokens) {
+            this.inputTokens = inputTokens;
+            this.outputTokens = outputTokens;
+            this.cacheReadTokens = cacheReadTokens;
+            this.cacheWriteTokens = cacheWriteTokens;
+            this.reasoningTokens = reasoningTokens;
+            return this;
+        }
+
+        public SpanRowCopy cost(
+                @Nullable String inputCost,
+                @Nullable String outputCost,
+                @Nullable String cacheReadCost,
+                @Nullable String cacheWriteCost,
+                String costSource) {
+            this.inputCost = inputCost;
+            this.outputCost = outputCost;
+            this.cacheReadCost = cacheReadCost;
+            this.cacheWriteCost = cacheWriteCost;
+            this.costSource = costSource;
+            return this;
+        }
+
+        public SpanRowCopy previews(
+                @Nullable String inputPreview, @Nullable String outputPreview, @Nullable String callSiteId) {
+            this.inputPreview = inputPreview;
+            this.outputPreview = outputPreview;
+            this.callSiteId = callSiteId;
+            return this;
+        }
+
+        public SpanRow build() {
+            return new SpanRow(
+                    row.projectId(),
+                    row.traceId(),
+                    row.id(),
+                    parentSpanId,
+                    row.path(),
+                    row.sessionId(),
+                    row.userId(),
+                    row.projectVersionId(),
+                    callSiteId,
+                    row.traceName(),
+                    row.kind(),
+                    row.name(),
+                    isLogicalRoot,
+                    row.status(),
+                    row.level(),
+                    row.errorType(),
+                    row.errorMessage(),
+                    row.startedAt(),
+                    row.endedAt(),
+                    row.latencyMs(),
+                    row.ttftMs(),
+                    row.providedModelName(),
+                    row.modelId(),
+                    inputTokens,
+                    outputTokens,
+                    cacheReadTokens,
+                    cacheWriteTokens,
+                    reasoningTokens,
+                    inputCost,
+                    outputCost,
+                    cacheReadCost,
+                    cacheWriteCost,
+                    costSource,
+                    row.priceBookVersion(),
+                    inputPreview,
+                    outputPreview,
+                    row.correlationState(),
+                    row.pathState(),
+                    row.eventTs(),
+                    row.isDeleted(),
+                    null,
+                    null,
+                    null,
+                    null);
+        }
     }
 
     /**
@@ -430,10 +451,15 @@ public final class SubstrateV2Fixtures {
 
     public SpanPayloadRow payload(
             SpanRow span, @Nullable String input, @Nullable String output, @Nullable String attributesJson) {
-        SpanPayloadRow row = new SpanPayloadRow(
-                span.projectId(), span.traceId(), span.id(), input, output, attributesJson, null, span.eventTs());
+        SpanPayloadRow row = payloadRow(span, input, output, attributesJson);
         payloads.upsertAll(List.of(row));
         return row;
+    }
+
+    private static SpanPayloadRow payloadRow(
+            SpanRow span, @Nullable String input, @Nullable String output, @Nullable String attributesJson) {
+        return new SpanPayloadRow(
+                span.projectId(), span.traceId(), span.id(), input, output, attributesJson, null, span.eventTs());
     }
 
     // ---- the fluent seed --------------------------------------------------------------------------
@@ -493,6 +519,24 @@ public final class SubstrateV2Fixtures {
             traces.applyBatchTimers(
                     projectId, List.of(new TraceV2Repository.TimerUpdate(traceId, minStarted, maxEnded, hasRoot)));
         }
+        return claimAndRecompute(projectId, traceId);
+    }
+
+    public boolean rollup(
+            String projectId, String traceId, Instant startedAt, @Nullable Instant endedAt, boolean hasRoot) {
+        traces.applyBatchTimers(
+                projectId,
+                List.of(new TraceV2Repository.TimerUpdate(
+                        traceId, startedAt.toString(), endedAt == null ? null : endedAt.toString(), hasRoot)));
+        return claimAndRecompute(projectId, traceId);
+    }
+
+    /**
+     * One trace's claim and recompute, back to back. Claiming a batch up front and recomputing it afterwards leaves
+     * every trace still waiting in exactly the state {@code TraceV2Repository#reap} re-arms (unsettled, no deadline,
+     * never rolled up), and a re-armed trace recomputes as unsettled.
+     */
+    private boolean claimAndRecompute(String projectId, String traceId) {
         jdbc().sql("UPDATE trace SET rollup_due_at = NULL WHERE project_id = :pid AND id = :tid")
                 .param("pid", projectId)
                 .param("tid", traceId)
@@ -500,6 +544,65 @@ public final class SubstrateV2Fixtures {
         return traces.recompute(projectId, traceId)
                 .map(TraceV2Repository.Recomputed::settled)
                 .orElse(false);
+    }
+
+    public record ToolCallTurn(
+            Instant at,
+            @Nullable String errorType,
+            @Nullable String resultJson,
+            @Nullable String attributesJson) {}
+
+    public void toolCallTurns(String projectId, String tool, List<ToolCallTurn> calls) {
+        List<SessionRow> sessionRows = new ArrayList<>();
+        List<TraceV2Row> traceRows = new ArrayList<>();
+        List<SpanRow> spanRows = new ArrayList<>();
+        List<SpanPayloadRow> payloadRows = new ArrayList<>();
+        List<ToolCallRow> toolCalls = new ArrayList<>();
+        List<TraceV2Repository.TimerUpdate> timers = new ArrayList<>();
+        for (ToolCallTurn call : calls) {
+            String traceId = traceId();
+            String sessionId = sessionId();
+            sessionRows.add(sessionRow(projectId, sessionId, call.at().toString()));
+            traceRows.add(traceRow(projectId, traceId, sessionId, null, null, call.at()));
+            SpanRow root = spanSeed(projectId)
+                    .traceId(traceId)
+                    .sessionId(sessionId)
+                    .kind("agent")
+                    .name("loop")
+                    .at(call.at())
+                    .row();
+            SpanRow span = spanSeed(projectId)
+                    .traceId(traceId)
+                    .parentSpanId(root.id())
+                    .sessionId(sessionId)
+                    .kind("tool")
+                    .name("execute_tool " + tool)
+                    .at(call.at())
+                    .row();
+            spanRows.add(root);
+            spanRows.add(span);
+            payloadRows.add(payloadRow(span, null, null, call.attributesJson()));
+            toolCalls.add(new ToolCallRow(
+                    "tc-" + COUNTER.incrementAndGet(),
+                    projectId,
+                    new SpanRef(traceId, span.id()),
+                    tool,
+                    call.errorType(),
+                    call.resultJson(),
+                    call.at()));
+            timers.add(new TraceV2Repository.TimerUpdate(traceId, root.startedAt(), root.endedAt(), true));
+        }
+        sessions.getOrCreateAll(sessionRows);
+        traces.getOrCreateAll(traceRows);
+        spans.upsertAll(spanRows);
+        payloads.upsertAll(payloadRows);
+        insertToolCalls(toolCalls);
+        traces.applyBatchTimers(projectId, timers);
+        for (TraceV2Repository.TimerUpdate timer : timers) {
+            if (!claimAndRecompute(projectId, timer.traceId())) {
+                throw new IllegalStateException("seeded trace " + timer.traceId() + " did not settle");
+            }
+        }
     }
 
     // ---- side tables ------------------------------------------------------------------------------
@@ -522,24 +625,40 @@ public final class SubstrateV2Fixtures {
             @Nullable String errorType,
             @Nullable String resultJson,
             Instant at) {
-        String id = "tc-" + COUNTER.incrementAndGet();
-        jdbc().sql("""
-                        INSERT INTO tool_call (id, project_id, name, error_type, is_error, result,
-                                               trace_id, span_id, started_at, created_at, event_ts)
-                        VALUES (:id, :pid, :name, :err, :isErr, CAST(:result AS jsonb),
-                                :tid, :sid, :at::timestamptz, :at::timestamptz, :at::timestamptz)
-                        """)
-                .param("id", id)
-                .param("pid", projectId)
-                .param("name", name)
-                .param("err", errorType)
-                .param("isErr", errorType != null)
-                .param("result", resultJson)
-                .param("tid", span.traceId())
-                .param("sid", span.spanId())
-                .param("at", at.toString())
-                .update();
-        return id;
+        ToolCallRow row =
+                new ToolCallRow("tc-" + COUNTER.incrementAndGet(), projectId, span, name, errorType, resultJson, at);
+        insertToolCalls(List.of(row));
+        return row.id();
+    }
+
+    private record ToolCallRow(
+            String id,
+            String projectId,
+            SpanRef span,
+            @Nullable String name,
+            @Nullable String errorType,
+            @Nullable String resultJson,
+            Instant at) {}
+
+    private void insertToolCalls(List<ToolCallRow> rows) {
+        String values = IntStream.range(0, rows.size())
+                .mapToObj(i -> TOOL_CALL_VALUES.replace("#", Integer.toString(i)))
+                .collect(Collectors.joining(", "));
+        var spec = jdbc().sql("INSERT INTO tool_call (id, project_id, name, error_type, is_error, result,"
+                + " trace_id, span_id, started_at, created_at, event_ts) VALUES " + values);
+        for (int i = 0; i < rows.size(); i++) {
+            ToolCallRow row = rows.get(i);
+            spec = spec.param("id" + i, row.id())
+                    .param("pid" + i, row.projectId())
+                    .param("name" + i, row.name())
+                    .param("err" + i, row.errorType())
+                    .param("isErr" + i, row.errorType() != null)
+                    .param("result" + i, row.resultJson())
+                    .param("tid" + i, row.span().traceId())
+                    .param("sid" + i, row.span().spanId())
+                    .param("at" + i, row.at().toString());
+        }
+        spec.update();
     }
 
     /**
@@ -790,10 +909,19 @@ public final class SubstrateV2Fixtures {
 
         public SpanRow write() {
             fx.trace(projectId, traceId, sessionId, threadId, projectVersionId, startedAt);
+            SpanRow row = row();
+            fx.spans.upsertAll(List.of(row));
+            if (writePayload) {
+                fx.payload(row, payloadInput, payloadOutput, payloadAttributes);
+            }
+            return row;
+        }
+
+        SpanRow row() {
             Instant end = unterminated ? null : (endedAt == null ? startedAt.plusMillis(250) : endedAt);
             Instant eventTs = end == null ? startedAt : end;
             String correlationState = sessionId == null ? SpanRow.ResolverState.NONE : SpanRow.ResolverState.DONE;
-            SpanRow row = new SpanRow(
+            return new SpanRow(
                     projectId,
                     traceId,
                     spanId,
@@ -838,11 +966,6 @@ public final class SubstrateV2Fixtures {
                     null,
                     null,
                     null);
-            fx.spans.upsertAll(List.of(row));
-            if (writePayload) {
-                fx.payload(row, payloadInput, payloadOutput, payloadAttributes);
-            }
-            return row;
         }
 
         public SpanRef writeRef() {

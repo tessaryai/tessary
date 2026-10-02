@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Named.named;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,6 +22,8 @@ import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierPause;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
+import ai.tessary.classifier.TestObservations;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.PagedDetector.FiredTurn;
 import ai.tessary.classifier.catalog.PagedDetector.PageAction;
@@ -66,9 +70,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionOperations;
@@ -96,6 +105,11 @@ class JevFrustrationDetectorTest {
 
     private final DecisionTarget target = new DecisionTarget(
             ModelProvider.TYPESAFE, "jev-latest", URI.create("https://api.typesafe.ai/v1/systemone"), "key");
+    private static final DecisionTarget PLATFORM = new DecisionTarget(
+            ModelProvider.PLATFORM,
+            "~typesafe/jev-latest",
+            URI.create("https://openrouter.ai/api/alpha/decisions"),
+            "platform-key");
 
     @BeforeEach
     void wire() {
@@ -120,9 +134,13 @@ class JevFrustrationDetectorTest {
     }
 
     private JevFrustrationDetector detector() {
+        return detector(client);
+    }
+
+    private JevFrustrationDetector detector(DecisionClient decisions) {
         return new JevFrustrationDetector(
                 new FrustrationTurnBuilder(assembler),
-                client,
+                decisions,
                 providers,
                 assessments,
                 detections,
@@ -302,17 +320,7 @@ class JevFrustrationDetectorTest {
             }
             throw new IllegalStateException("the provider call was interrupted");
         };
-        JevFrustrationDetector d = new JevFrustrationDetector(
-                new FrustrationTurnBuilder(assembler),
-                hangs,
-                providers,
-                assessments,
-                detections,
-                classifiers,
-                TransactionOperations.withoutTransaction(),
-                props,
-                mapper,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        JevFrustrationDetector d = detector(hangs);
         AtomicReference<JevFrustrationDetector.Page> page = new AtomicReference<>();
         AtomicBoolean keptInterrupt = new AtomicBoolean();
         Thread sweep = new Thread(() -> {
@@ -341,17 +349,7 @@ class JevFrustrationDetectorTest {
         DecisionClient dies = (projectId, lane, t, request) -> {
             throw boom;
         };
-        JevFrustrationDetector d = new JevFrustrationDetector(
-                new FrustrationTurnBuilder(assembler),
-                dies,
-                providers,
-                assessments,
-                detections,
-                classifiers,
-                TransactionOperations.withoutTransaction(),
-                props,
-                mapper,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        JevFrustrationDetector d = detector(dies);
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> d.score(signal("{}"), List.of(turn)));
 
@@ -425,18 +423,48 @@ class JevFrustrationDetectorTest {
         verify(assessments, never()).insert(any());
     }
 
-    @Test
-    void aRejectedKeyPausesTheClassifierAndAbortsThePage() {
-        SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
-        SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
-        client.answer("t-ok", 0.9, 0.0);
-        client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+    static Stream<Arguments> failedCalls() {
+        return Stream.of(
+                arguments(
+                        named("a rejected own key, after a turn that answered", false),
+                        true,
+                        DecisionError.PROVIDER_REJECTED,
+                        ClassifierPause.PROVIDER_REJECTED),
+                arguments(
+                        named("a refused request on the deployment's provider is not the org's to fix", true),
+                        false,
+                        DecisionError.REQUEST_REFUSED,
+                        ClassifierPause.PLATFORM_UNAVAILABLE),
+                arguments(
+                        named("an own key out of credit is no_credit, not a bad key", false),
+                        false,
+                        DecisionError.PROVIDER_NO_CREDIT,
+                        ClassifierPause.NO_CREDIT),
+                arguments(
+                        named("the deployment's key out of credit is not the org's to fix", true),
+                        false,
+                        DecisionError.PROVIDER_NO_CREDIT,
+                        ClassifierPause.PLATFORM_UNAVAILABLE));
+    }
 
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(ok, refused));
+    @ParameterizedTest
+    @MethodSource("failedCalls")
+    void aFailedCallPausesTheClassifierAndAbortsThePage(
+            boolean platform, boolean answeredFirst, DecisionError error, String reason) {
+        if (platform) when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
+        List<SubstrateObservation> turns = new ArrayList<>();
+        if (answeredFirst) {
+            turns.add(eligibleTurn("t-ok", "conv-a"));
+            client.answer("t-ok", 0.9, 0.0);
+        }
+        turns.add(eligibleTurn("t-failed", "conv-b"));
+        client.fail("t-failed", error);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), turns);
 
         assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.PROVIDER_REJECTED, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PROVIDER_REJECTED, NOW);
+        assertEquals(reason, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, reason, NOW);
     }
 
     /**
@@ -478,24 +506,6 @@ class JevFrustrationDetectorTest {
         }
     }
 
-    /** On the deployment's own provider a refused request is not the org's to fix: platform_unavailable, as a bad key is. */
-    @Test
-    void aRefusedRequestOnThePlatformProviderPausesAsPlatformUnavailable() {
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
-                .thenReturn(Optional.of(new DecisionTarget(
-                        ModelProvider.PLATFORM,
-                        "~typesafe/jev-latest",
-                        URI.create("https://openrouter.ai/api/alpha/decisions"),
-                        "platform-key")));
-        client.fail("t-refused", DecisionError.REQUEST_REFUSED);
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-refused", "conv-a")));
-
-        assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
-    }
-
     /** An aborted page records nothing and logs a pause with its reason; a silent pause reads as a quiet week. */
     @Test
     void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {
@@ -529,35 +539,6 @@ class JevFrustrationDetectorTest {
         }
     }
 
-    /** An own key out of credit reads the same as the deployment's provider out of credit: no_credit, not a bad key. */
-    @Test
-    void anOwnKeyWithNoCreditPausesAsNoCredit() {
-        client.fail("t-broke", DecisionError.PROVIDER_NO_CREDIT);
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-broke", "conv-a")));
-
-        assertEquals(Status.ABORTED, page.status());
-        assertEquals(ClassifierPause.NO_CREDIT, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
-    }
-
-    /** The deployment's key running dry is the deployment's to fix, so the org is not told it has no credit. */
-    @Test
-    void theDeploymentsKeyWithNoCreditPausesAsPlatformUnavailable() {
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
-                .thenReturn(Optional.of(new DecisionTarget(
-                        ModelProvider.PLATFORM,
-                        "~typesafe/jev-latest",
-                        URI.create("https://openrouter.ai/api/alpha/decisions"),
-                        "platform-key")));
-        client.fail("t-broke", DecisionError.PROVIDER_NO_CREDIT);
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-broke", "conv-a")));
-
-        assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
-    }
-
     /** Out of platform credit is not "no key": the org has a provider, and adding a key is one of two ways out. */
     @Test
     void aResolverReportingNoPlatformCreditPausesAsNoCreditAndSendsNothing() {
@@ -571,17 +552,22 @@ class JevFrustrationDetectorTest {
         assertTrue(client.requests.isEmpty());
     }
 
-    @Test
-    void aRecheckThatStillFindsNoCreditPassesThePageAndRestampsThePause() {
+    @ParameterizedTest
+    @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.NO_PROVIDER})
+    void aRecheckThatStillFindsTheSameGapPassesThePageAndRestampsThePause(String reason) {
         when(classifiers.findPause(PROJECT, CLASSIFIER))
-                .thenReturn(Optional.of(new ClassifierPause(
-                        ClassifierPause.NO_CREDIT, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+                .thenReturn(Optional.of(
+                        new ClassifierPause(reason, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+        if (ClassifierPause.NO_CREDIT.equals(reason)) {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+        } else {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
+        }
 
         JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
 
         assertEquals(Status.PAUSED, page.status());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
+        verify(classifiers).pause(PROJECT, CLASSIFIER, reason, NOW);
         verify(classifiers, never()).unpause(any(), any());
     }
 
@@ -596,12 +582,7 @@ class JevFrustrationDetectorTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION))
-                    .thenReturn(Optional.of(new DecisionTarget(
-                            ModelProvider.PLATFORM,
-                            "~typesafe/jev-latest",
-                            URI.create("https://openrouter.ai/api/alpha/decisions"),
-                            "platform-key")));
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
             client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
             JevFrustrationDetector d = detector();
 
@@ -651,52 +632,19 @@ class JevFrustrationDetectorTest {
         assertEquals(1, page.sent());
     }
 
-    @Test
-    void aRecheckThatStillFindsNoKeyPassesThePageAndRestampsThePause() {
-        when(classifiers.findPause(PROJECT, CLASSIFIER))
-                .thenReturn(Optional.of(new ClassifierPause(
-                        ClassifierPause.NO_PROVIDER, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
-        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
-
-        assertEquals(Status.PAUSED, page.status());
-        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_PROVIDER, NOW);
-        verify(classifiers, never()).unpause(any(), any());
-    }
-
     private static ClassifierRow signal(String configJson) {
-        return new ClassifierRow(
-                CLASSIFIER,
-                PROJECT,
-                "frustration",
-                "Frustration",
-                null,
-                BuiltInDetector.Kind.FRUSTRATION,
-                configJson,
-                true,
-                8,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "now",
-                "now");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .id(CLASSIFIER)
+                .projectId(PROJECT)
+                .named("frustration", "Frustration")
+                .config(configJson)
+                .version(8)
+                .build();
     }
 
     private static SubstrateObservation observation(String traceId) {
-        return new SubstrateObservation(
-                "span-" + traceId,
-                PROJECT,
-                traceId,
-                "sess",
-                null,
-                "cs-" + traceId,
-                "llm",
-                "chat",
-                null,
-                null,
-                null,
-                "2026-09-21T11:59:00Z",
-                null);
+        return TestObservations.llm(
+                "span-" + traceId, PROJECT, traceId, "sess", "cs-" + traceId, null, null, "2026-09-21T11:59:00Z");
     }
 
     /** A turn root with a clean user, assistant, user, assistant prefix. */

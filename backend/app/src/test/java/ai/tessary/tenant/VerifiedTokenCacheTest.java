@@ -10,8 +10,6 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * The three properties {@link VerifiedTokenCache} is only worth having if it holds. Each of these was
@@ -19,12 +17,6 @@ import org.springframework.test.context.TestPropertySource;
  * one names the failure it exists to catch rather than the method it calls.
  */
 @SpringBootTest
-// The flood test leaves thousands of entries in the singleton cache and the kill-switch test mutates
-// singleton properties, so this class does not hand a polluted context to the next one.
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-// Own context on purpose: this class mutates the singleton TokenCacheProperties and floods the shared cache, and its
-// @DirtiesContext would otherwise evict the context most of the suite runs in.
-@TestPropertySource(properties = "test.context-group=verified-token-cache")
 class VerifiedTokenCacheTest {
 
     @Autowired

@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
@@ -15,6 +14,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
@@ -91,7 +91,10 @@ class AlertingIntegrationTest {
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigB, spanIn(pid, newSession(pid)));
-        sleep(1100);
+        jdbc.sql("UPDATE alert_rule SET created_at = :at WHERE id = :id")
+                .param("at", Instant.now().minusSeconds(5).toString())
+                .param("id", digestRule.id())
+                .update();
         worker.tick();
 
         List<AlertEventRow> fired = alertEvents.listByProject(pid, 100);
@@ -165,23 +168,7 @@ class AlertingIntegrationTest {
     }
 
     private String seedSignal(String pid, String key) {
-        String now = Instant.now().toString();
-        String id = Ids.ulid();
-        signals.insert(new ClassifierRow(
-                id,
-                pid,
-                key + "-" + id,
-                key,
-                null,
-                "keyword",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
-        return id;
+        return ClassifierRows.insertKeyedByName(signals, pid, key, "keyword");
     }
 
     /**
@@ -233,13 +220,5 @@ class AlertingIntegrationTest {
                 .param("conf", Detection.Confidence.HIGH)
                 .param("at", Instant.now().toString())
                 .update();
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }

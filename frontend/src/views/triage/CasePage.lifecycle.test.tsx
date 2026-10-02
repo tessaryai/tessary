@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * CasePage beyond the groundedness story: the verbs that close a case, the RCA run and its in-flight
- * and failed states, the answer and the working behind it, the failures a page at a time, and a
- * frustration case's causes. The bugs worth catching: a verb sent for the wrong case or offered before
- * there is a report to justify it, a run that can be pressed twice, a failed run that reads as an
- * empty one, and a cause's "Show" that filters nothing.
+ * CasePage: the groundedness story's causes, rate and cause-filtered answers, the verbs that close a
+ * case, the RCA run and its in-flight and failed states, the answer and the working behind it, the
+ * failures a page at a time, and a frustration case's causes. The bugs worth catching: a verb sent for
+ * the wrong case or offered before there is a report to justify it, a run that can be pressed twice, a
+ * failed run that reads as an empty one, and a cause's "Show" that filters nothing.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
   CaseDetail,
   EvidenceSpan,
+  FlaggedAnswer,
   FrustratedConversation,
   FrustrationDetail,
   RcaReport,
@@ -22,7 +23,12 @@ import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
 import { ToastProvider } from "../../ui";
 import { CasePage } from "./CasePage";
-import { GROUNDEDNESS_CASE_DETAIL, GROUNDEDNESS_DETAIL, GROUNDEDNESS_REPORT } from "../../test/groundednessFixtures";
+import {
+  FLAGGED_ANSWER,
+  GROUNDEDNESS_CASE_DETAIL,
+  GROUNDEDNESS_DETAIL,
+  GROUNDEDNESS_REPORT,
+} from "../../test/groundednessFixtures";
 
 const OWNER: Me = {
   id: "user-1",
@@ -213,11 +219,6 @@ beforeEach(() => {
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
   for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca]) f.mockResolvedValue({});
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 function renderPage() {
@@ -653,5 +654,117 @@ describe("a case that cannot be read", () => {
 
     expect(await heading("Case not found")).toBeTruthy();
     expect(screen.getByText("CASE.NOT_FOUND")).toBeTruthy();
+  });
+});
+
+describe("CasePage, groundedness", () => {
+  /** One answer per cause, each unlike the unfiltered first page's, so the list shows which filter it read. */
+  const causeAnswer = (traceId: string, text: string): FlaggedAnswer => ({
+    ...FLAGGED_ANSWER,
+    traceId,
+    spanId: `span-${traceId}`,
+    answer: text,
+    flaggedSentences: [{ start: 0, end: text.length, score: 0.99 }],
+  });
+  const CAUSE_ANSWERS = [
+    causeAnswer("t-1", "The old policy page says refunds run for 60 days."),
+    causeAnswer("t-4", "The API allows 1,000 requests per minute per key."),
+  ];
+  const TITLE_1 = "The retriever still serves the old pricing and policy pages";
+  const FIX_1 = "Remove the old folders from the index sources and rebuild the index.";
+  const TITLE_2 = "The system prompt asks for a complete answer every time";
+  const FIX_2 = "Tell the agent to say when the documents don't answer the question.";
+  const NO_REPO =
+    "These causes aren't linked to a prompt or code because no repository was connected. Connect a repository and run RCA again to find them.";
+
+  /** Waits for `read`'s answer to land, so what the page leaves out after it is settled rather than pending. */
+  async function settled(read: Mock) {
+    await waitFor(() => expect(read).toHaveBeenCalled());
+    await act(async () => {
+      await read.mock.results.at(-1)?.value;
+    });
+  }
+
+  beforeEach(() => {
+    api.getGitIntegration.mockResolvedValue(null);
+    api.getFlaggedAnswers.mockImplementation(async (_id: string, params?: { cause?: { index: number } }) => ({
+      rows: [params?.cause ? CAUSE_ANSWERS[params.cause.index] : FLAGGED_ANSWER],
+      total: 1,
+      nextCursor: null,
+    }));
+  });
+
+  it("cards the proven cause, draws the rate, and filters the answers to the cause pressed", async () => {
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Answers on support-agent became less grounded" });
+    expect(screen.getByText(TITLE_1)).toBeTruthy();
+    expect(screen.getByText(FIX_1)).toBeTruthy();
+    expect(screen.getByText("Why answers went unsupported")).toBeTruthy();
+    expect(screen.getByText("What to do")).toBeTruthy();
+    expect(screen.getByText("support-agent/retrieval/index.yaml @ a41c0de")).toBeTruthy();
+    // The second cause is a lead, and a lead is not shown beside a proven cause.
+    expect(screen.queryByText(TITLE_2)).toBeNull();
+    expect(screen.queryByText(FIX_2)).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Show \d+ answers$/ }).map((b) => b.textContent)).toEqual([
+      "Show 3 answers",
+    ]);
+    expect(screen.queryByText(NO_REPO)).toBeNull();
+
+    expect(screen.getByText("6.4% of answers flagged")).toBeTruthy();
+    expect(screen.getByText(/This rate opened this case\./)).toBeTruthy();
+
+    const filter = screen.getByRole("group", { name: "Filter answers" });
+    expect(within(filter).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "All · 58",
+      "Cause 1 · 3",
+      "Cause 2 · 2",
+    ]);
+    const answers = screen.getByRole("list", { name: "Flagged answers" });
+    within(answers).getByRole("button", { name: /Refunds are available for up to 60 days/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 answers" }));
+
+    await within(answers).findByRole("button", { name: /The old policy page/ });
+    expect(within(answers).queryByRole("button", { name: /Refunds are available for up to 60 days/ })).toBeNull();
+    expect(within(answers).queryByRole("button", { name: /The API allows 1,000 requests/ })).toBeNull();
+    expect(within(filter).getByRole("button", { name: "Cause 1 · 3" }).getAttribute("aria-pressed")).toBe("true");
+
+    expect(screen.getByRole("button", { name: "Re-run RCA" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resolve case" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Mute case" })).toBeTruthy();
+  });
+
+  it("offers an owner Connect repository while the project has none, and drops it once one is connected", async () => {
+    renderPage();
+    await screen.findByRole("button", { name: "Re-run RCA" });
+    await screen.findByRole("button", { name: "Connect repository" });
+    cleanup();
+
+    api.getGitIntegration.mockClear();
+    api.getGitIntegration.mockResolvedValue({ provider: "github", repoOwner: "acme", repoName: "agent" });
+    renderPage();
+    await screen.findByRole("button", { name: "Re-run RCA" });
+    await settled(api.getGitIntegration);
+    expect(screen.queryByRole("button", { name: "Connect repository" })).toBeNull();
+  });
+
+  it("hides the RCA controls when the organization does not have RCA", async () => {
+    getCapabilities.mockResolvedValue({ capabilities: { rca_enabled: false } as CapabilitiesView["capabilities"] });
+    renderPage();
+
+    // The finished report still reads: only running it again is withheld.
+    await screen.findByText(TITLE_1);
+    await settled(getCapabilities);
+    expect(screen.queryByRole("button", { name: "Re-run RCA" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect repository" })).toBeNull();
+  });
+
+  it("says the causes are not tied to code when the run had no repository", async () => {
+    api.getCase.mockResolvedValue({ ...BASE, rca: { ...GROUNDEDNESS_REPORT, repo_available: false } });
+    renderPage();
+
+    await screen.findByText(NO_REPO);
+    expect(screen.queryByText(/support-agent\/retrieval\/index\.yaml/)).toBeNull();
   });
 });

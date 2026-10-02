@@ -18,7 +18,7 @@ import org.springframework.test.context.TestPropertySource;
  */
 @SpringBootTest
 // Own context: a model row written by another class would change the books.
-@TestPropertySource(properties = "test.context-group=model-resolver")
+@TestPropertySource(properties = "test.context-group=pricing-books")
 class ModelResolverIntegrationTest {
 
     @Autowired

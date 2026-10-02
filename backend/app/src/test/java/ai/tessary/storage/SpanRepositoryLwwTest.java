@@ -119,7 +119,9 @@ class SpanRepositoryLwwTest {
         write(version("streaming", null, t0));
         assertNull(spans.findById(pid, traceId, spanId).orElseThrow().parentSpanId());
 
-        SpanRow reparented = withParent(version("chat", 42L, t0.plusSeconds(3)), parent.id());
+        SpanRow reparented = SubstrateV2Fixtures.copyOf(version("chat", 42L, t0.plusSeconds(3)))
+                .parent(parent.id())
+                .build();
         write(reparented);
 
         assertEquals(
@@ -204,54 +206,6 @@ class SpanRepositoryLwwTest {
                 SpanRow.ResolverState.PENDING,
                 eventTs.toString(),
                 false,
-                null,
-                null,
-                null,
-                null);
-    }
-
-    private static SpanRow withParent(SpanRow row, String parentSpanId) {
-        return new SpanRow(
-                row.projectId(),
-                row.traceId(),
-                row.id(),
-                parentSpanId,
-                row.path(),
-                row.sessionId(),
-                row.userId(),
-                row.projectVersionId(),
-                row.callSiteId(),
-                row.traceName(),
-                row.kind(),
-                row.name(),
-                false,
-                row.status(),
-                row.level(),
-                row.errorType(),
-                row.errorMessage(),
-                row.startedAt(),
-                row.endedAt(),
-                row.latencyMs(),
-                row.ttftMs(),
-                row.providedModelName(),
-                row.modelId(),
-                row.inputTokens(),
-                row.outputTokens(),
-                row.cacheReadTokens(),
-                row.cacheWriteTokens(),
-                row.reasoningTokens(),
-                row.inputCost(),
-                row.outputCost(),
-                row.cacheReadCost(),
-                row.cacheWriteCost(),
-                row.costSource(),
-                row.priceBookVersion(),
-                row.inputPreview(),
-                row.outputPreview(),
-                row.correlationState(),
-                row.pathState(),
-                row.eventTs(),
-                row.isDeleted(),
                 null,
                 null,
                 null,

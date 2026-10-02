@@ -66,7 +66,7 @@ class SpanResolverIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
         pid = TenantFixture.bootstrap(tenants, "span-resolver").project().id();
         t0 = Instant.parse("2026-08-12T10:00:00Z");
     }
@@ -206,14 +206,7 @@ class SpanResolverIntegrationTest {
 
     /** Arm, claim, and recompute, as the rollup worker would. */
     private void settle(String traceId) {
-        traces.applyBatchTimers(pid, List.of(new TraceV2Repository.TimerUpdate(traceId, t0.toString(), null, true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
-                .param("id", traceId)
-                .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
+        fx.rollup(pid, traceId, t0, null, true);
         assertTrue(traces.findById(pid, traceId).orElseThrow().isSettled(), "the trace must actually settle");
     }
 }

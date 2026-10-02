@@ -117,10 +117,19 @@ class E2bTriageSandboxTest {
     }
 
     private static E2bTriageSandbox sandbox(LlmUsageAccountant usage, HttpResponse<String> canned) {
-        return new E2bTriageSandbox(props(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER) {
+        return sandbox(credentials(), usage, req -> canned);
+    }
+
+    private interface Transport {
+        HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException;
+    }
+
+    private static E2bTriageSandbox sandbox(
+            AgenticCredentialResolver resolver, LlmUsageAccountant usage, Transport transport) {
+        return new E2bTriageSandbox(props(), noLaneSetting(), resolver, usage, OpenTelemetry.noop(), MAPPER) {
             @Override
-            HttpResponse<String> send(HttpRequest req) {
-                return canned;
+            HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
+                return transport.send(req);
             }
         };
     }
@@ -146,19 +155,7 @@ class E2bTriageSandboxTest {
     void theRunsCredentialIsReleasedHoweverTheRunEnds(int status, String body) {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox =
-                new E2bTriageSandbox(
-                        props(),
-                        noLaneSetting(),
-                        resolver,
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    HttpResponse<String> send(HttpRequest req) {
-                        return respondWith(status, body);
-                    }
-                };
+        E2bTriageSandbox sandbox = sandbox(resolver, mock(LlmUsageAccountant.class), req -> respondWith(status, body));
 
         try {
             sandbox.run(request());
@@ -173,19 +170,9 @@ class E2bTriageSandboxTest {
     void aTimedOutRunStillReleasesItsCredential() {
         AgenticCredentialResolver resolver = mock(AgenticCredentialResolver.class);
         when(resolver.resolve(any(), any())).thenReturn(LEASED);
-        E2bTriageSandbox sandbox =
-                new E2bTriageSandbox(
-                        props(),
-                        noLaneSetting(),
-                        resolver,
-                        mock(LlmUsageAccountant.class),
-                        OpenTelemetry.noop(),
-                        MAPPER) {
-                    @Override
-                    HttpResponse<String> send(HttpRequest req) throws IOException {
-                        throw new HttpTimeoutException("request timed out");
-                    }
-                };
+        E2bTriageSandbox sandbox = sandbox(resolver, mock(LlmUsageAccountant.class), req -> {
+            throw new HttpTimeoutException("request timed out");
+        });
 
         assertEquals(Optional.empty(), sandbox.run(request()));
         verify(resolver, times(1)).release(LEASED);
@@ -402,14 +389,10 @@ class E2bTriageSandboxTest {
     }
 
     private static E2bTriageSandbox throwing(Exception failure) {
-        LlmUsageAccountant usage = mock(LlmUsageAccountant.class);
-        return new E2bTriageSandbox(props(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER) {
-            @Override
-            HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
-                if (failure instanceof IOException io) throw io;
-                throw (InterruptedException) failure;
-            }
-        };
+        return sandbox(credentials(), mock(LlmUsageAccountant.class), req -> {
+            if (failure instanceof IOException io) throw io;
+            throw (InterruptedException) failure;
+        });
     }
 
     /**

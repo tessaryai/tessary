@@ -5,7 +5,7 @@
  * opens the wrong page, and a failed catalog read claiming nothing is switched on.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BehaviorFinding, Classifier } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { ClassifiersPage } from "./ClassifiersPage";
@@ -38,11 +38,6 @@ const opened = (id: string, caseId: string | null = `case-${id}`) =>
 beforeEach(() => {
   api.listClassifiers.mockResolvedValue([classifier("tool_error", true), classifier("cost_drift", true), classifier("loop", false)]);
   api.listBehaviorFindings.mockResolvedValue({ findings: [] });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const renderPage = () =>

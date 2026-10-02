@@ -6,7 +6,7 @@
  * arriving or was cut short. The rails are the same views in a side panel, opening the full page in
  * a new tab.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import type { SessionDetailView, SessionSpansView, TraceDetailView } from "../../api/types";
 import { span, traceItem } from "../../test/fixtures";
@@ -65,11 +65,6 @@ function spans(over: Partial<SessionSpansView> = {}): SessionSpansView {
 beforeEach(() => {
   api.getSession.mockResolvedValue(session());
   api.getSessionSpans.mockResolvedValue(spans());
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 function renderSession(search = "") {

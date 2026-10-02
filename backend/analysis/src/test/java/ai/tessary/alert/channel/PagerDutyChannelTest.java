@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.util.stream.Stream;
@@ -46,7 +47,7 @@ class PagerDutyChannelTest {
                 () -> channel.deliver(FiredEvents.digest(1), FiredEvents.config(mapper, config)));
 
         assertEquals(AlertError.INVALID_CHANNEL_CONFIG, e.error());
-        assertNull(client.lastRequest);
+        assertNull(client.lastRequest());
     }
 
     @ParameterizedTest(name = "{0}")

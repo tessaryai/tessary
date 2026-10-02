@@ -116,19 +116,11 @@ class EncoderDependencyReporterTest {
     }
 
     private static ClassifierRow row(String projectId, String detector, String key) {
-        return new ClassifierRow(
-                "c-" + key,
-                projectId,
-                key,
-                key,
-                null,
-                detector,
-                null,
-                true,
-                1,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z");
+        return ClassifierRowBuilder.of(detector)
+                .id("c-" + key)
+                .projectId(projectId)
+                .named(key, key)
+                .at("2026-01-01T00:00:00Z")
+                .build();
     }
 }

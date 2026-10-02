@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -96,38 +97,56 @@ class ProviderCredentialControllerTest {
         when(resolver.requireOrg(ctx, ORG_SLUG)).thenReturn(resolved);
     }
 
+    private static ProviderCredential cred(
+            String id,
+            ModelProvider provider,
+            @Nullable String baseUrlOverride,
+            @Nullable String apiKeySealed,
+            @Nullable String awsRegion,
+            @Nullable String awsAccessKeySealed,
+            @Nullable String bedrockModelArn,
+            String authMode) {
+        return new ProviderCredential(
+                id,
+                ORG_ID,
+                null,
+                provider,
+                baseUrlOverride,
+                apiKeySealed,
+                awsRegion,
+                awsAccessKeySealed,
+                null,
+                bedrockModelArn,
+                null,
+                authMode,
+                "t0",
+                "t1");
+    }
+
     // ---- capability gate: list/upsert/delete all 403 the same way the doc says every verb does ----
 
-    @Test
-    void listThrowsDisabledWhenCapabilityGateThrows() {
-        doThrow(new TessaryException(CapabilityError.DISABLED, Capability.BYO_PROVIDER_KEYS.wire()))
-                .when(capabilities)
-                .require(ORG_ID, Capability.BYO_PROVIDER_KEYS);
-
-        TessaryException e = assertThrows(TessaryException.class, () -> controller.list(ctx, ORG_SLUG));
-        assertEquals(CapabilityError.DISABLED, e.error());
+    interface Verb {
+        void call(ProviderCredentialController controller, TenantContext ctx);
     }
 
-    @Test
-    void upsertThrowsDisabledWhenCapabilityGateThrows() {
-        doThrow(new TessaryException(CapabilityError.DISABLED, Capability.BYO_PROVIDER_KEYS.wire()))
-                .when(capabilities)
-                .require(ORG_ID, Capability.BYO_PROVIDER_KEYS);
+    static Stream<Arguments> gatedVerbs() {
         var req = new ProviderCredentialController.UpsertRequest(
                 null, "sk-live-abc123", null, null, null, null, null, null);
-
-        TessaryException e =
-                assertThrows(TessaryException.class, () -> controller.upsert(ctx, ORG_SLUG, ModelProvider.OPENAI, req));
-        assertEquals(CapabilityError.DISABLED, e.error());
+        return Stream.of(
+                Arguments.of("list", (Verb) (c, ctx) -> c.list(ctx, ORG_SLUG)),
+                Arguments.of("upsert", (Verb) (c, ctx) -> c.upsert(ctx, ORG_SLUG, ModelProvider.OPENAI, req)),
+                Arguments.of("delete", (Verb) (c, ctx) -> c.delete(ctx, ORG_SLUG, ModelProvider.OPENAI)));
     }
 
-    @Test
-    void deleteThrowsDisabledWhenCapabilityGateThrows() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("gatedVerbs")
+    void everyVerbThrowsDisabledWhenCapabilityGateThrows(String verb, Verb call) {
         doThrow(new TessaryException(CapabilityError.DISABLED, Capability.BYO_PROVIDER_KEYS.wire()))
                 .when(capabilities)
                 .require(ORG_ID, Capability.BYO_PROVIDER_KEYS);
 
-        assertThrows(TessaryException.class, () -> controller.delete(ctx, ORG_SLUG, ModelProvider.OPENAI));
+        TessaryException e = assertThrows(TessaryException.class, () -> call.call(controller, ctx));
+        assertEquals(CapabilityError.DISABLED, e.error(), verb);
     }
 
     @Test
@@ -169,21 +188,15 @@ class ProviderCredentialControllerTest {
 
     @Test
     void blankFieldsOnUpsertKeepTheExistingCredentialRatherThanClearingIt() {
-        ProviderCredential existing = new ProviderCredential(
+        ProviderCredential existing = cred(
                 "cred_1",
-                ORG_ID,
-                null,
                 ModelProvider.OPENAI,
                 "https://existing.example.com",
                 "existing-sealed-key",
                 null,
                 null,
                 null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z");
+                ProviderCredential.AUTH_MODE_API_KEY);
         when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.of(existing));
         // Every field null/blank: "leave the stored value untouched" per the record's own javadoc.
         var req = new ProviderCredentialController.UpsertRequest(null, null, null, null, null, null, null, null);
@@ -198,21 +211,15 @@ class ProviderCredentialControllerTest {
 
     @Test
     void aNonBlankFieldOnUpsertReplacesTheExistingCredential() {
-        ProviderCredential existing = new ProviderCredential(
+        ProviderCredential existing = cred(
                 "cred_1",
-                ORG_ID,
-                null,
                 ModelProvider.OPENAI,
                 null,
                 "old-sealed-key",
                 null,
                 null,
                 null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "2026-01-01T00:00:00Z",
-                "2026-01-01T00:00:00Z");
+                ProviderCredential.AUTH_MODE_API_KEY);
         when(repo.findByOrgAndProvider(ORG_ID, ModelProvider.OPENAI)).thenReturn(Optional.of(existing));
         when(secretBox.isConfigured()).thenReturn(true);
         when(secretBox.seal("sk-new-key")).thenReturn("new-sealed-key");
@@ -288,51 +295,33 @@ class ProviderCredentialControllerTest {
 
     @Test
     void listShowsEachCredentialWithItsSecretsReducedToWhetherTheyAreSet() {
-        ProviderCredential openai = new ProviderCredential(
+        ProviderCredential openai = cred(
                 "c1",
-                ORG_ID,
-                null,
                 ModelProvider.OPENAI,
                 "https://gw.example.com",
                 "sealed",
                 null,
                 null,
                 null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "t0",
-                "t1");
-        ProviderCredential role = new ProviderCredential(
+                ProviderCredential.AUTH_MODE_API_KEY);
+        ProviderCredential role = cred(
                 "c2",
-                ORG_ID,
-                null,
                 ModelProvider.BEDROCK,
                 null,
                 null,
                 "us-east-1",
                 null,
-                null,
                 "arn:m",
-                null,
-                ProviderCredential.AUTH_MODE_IAM_ROLE,
-                "t0",
-                "t1");
-        ProviderCredential halfKeyed = new ProviderCredential(
+                ProviderCredential.AUTH_MODE_IAM_ROLE);
+        ProviderCredential halfKeyed = cred(
                 "c3",
-                ORG_ID,
-                null,
                 ModelProvider.BEDROCK_MANTLE,
                 null,
                 null,
                 "us-west-2",
                 "sealed-ak",
                 null,
-                null,
-                null,
-                ProviderCredential.AUTH_MODE_API_KEY,
-                "t0",
-                "t1");
+                ProviderCredential.AUTH_MODE_API_KEY);
         when(repo.findByOrg(ORG_ID)).thenReturn(List.of(openai, role, halfKeyed));
 
         var views = controller.list(ctx, ORG_SLUG).data().credentials();

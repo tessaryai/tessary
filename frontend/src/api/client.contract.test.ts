@@ -8,7 +8,7 @@
  *
  * Beside it: how `http()` and the import upload turn a failed response into an ApiError.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import specJson from "../../../backend/contract/src/main/resources/openapi/tessary-api.json";
 import { ApiError } from "./types";
 import { auth, link, orgApi, projectApi } from "./client";
@@ -41,10 +41,6 @@ function stubFetch(response: () => Response): Call[] {
 }
 
 const ok = (data: unknown) => () => new Response(JSON.stringify({ meta: { success: true }, data }), { status: 200 });
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 const clients: [string, Record<string, unknown>][] = [
   ["auth", auth],

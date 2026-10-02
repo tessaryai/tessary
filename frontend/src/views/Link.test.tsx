@@ -5,8 +5,8 @@
  * a confirm offered with no project chosen, and a link past its life (missing, expired, declined,
  * claimed elsewhere) that still offers to connect.
  */
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../api/types-auth";
 import { currentLocation, renderRoute } from "../test/render";
 import { Link } from "./Link";
@@ -46,12 +46,6 @@ beforeEach(() => {
     org === "acme" ? [project("default"), project("support-bot")] : [],
   );
   getPipeline.mockResolvedValue(pipeline(0));
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-  vi.useRealTimers();
 });
 
 let queryClient: ReturnType<typeof renderRoute>["queryClient"];
@@ -145,6 +139,7 @@ describe("confirming", () => {
 
   it("opens the project once its graders are published", async () => {
     getPipeline.mockResolvedValueOnce(pipeline(0)).mockResolvedValue(pipeline(2));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     await ready();
 
     fireEvent.click(button("Connect"));
@@ -152,7 +147,8 @@ describe("confirming", () => {
     expect(projectApi).toHaveBeenCalledWith("acme", "default");
     expect(currentLocation()).toBe("/link?code=WXYZ-1234");
 
-    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/overview"), { timeout: 3500 });
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/overview"));
   });
 
   it("opens the project anyway if the graders never arrive", async () => {

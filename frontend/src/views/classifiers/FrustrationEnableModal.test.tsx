@@ -5,9 +5,9 @@
  * on without a provider. A provider that already has a key, or the deployment's own provider, skips the key
  * write.
  */
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderRoute } from "../../test/render";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ModelSettingsResponse, ProviderCredentialListResponse } from "../../api/types";
 import { FrustrationEnableModal } from "./FrustrationEnableModal";
 
@@ -40,18 +40,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   };
 });
 
-beforeAll(() => {
-  // jsdom implements <dialog> but not showModal/close.
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-  };
-});
-
 afterEach(() => {
-  cleanup();
   calls.length = 0;
   getModelSettings.mockReset();
   listProviderCredentials.mockReset();
@@ -110,12 +99,7 @@ function credential(provider: "OPENROUTER" | "TYPESAFE"): ProviderCredentialList
 }
 
 function renderModal(onEnabled = vi.fn()) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <FrustrationEnableModal classifierId="clf-1" onClose={vi.fn()} onEnabled={onEnabled} />
-    </QueryClientProvider>,
-  );
+  renderRoute(<FrustrationEnableModal classifierId="clf-1" onClose={vi.fn()} onEnabled={onEnabled} />);
   return onEnabled;
 }
 

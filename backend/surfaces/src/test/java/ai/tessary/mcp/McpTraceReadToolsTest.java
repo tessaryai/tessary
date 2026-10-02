@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.payload;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.span;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -13,32 +17,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.query.QueryService;
 import ai.tessary.storage.SpanKey;
 import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,129 +43,20 @@ import org.mockito.ArgumentCaptor;
  */
 class McpTraceReadToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
     private static final String TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
     private static final String SPAN_ID = "00f067aa0ba902b7";
 
-    private final ObjectMapper mapper = new ObjectMapper();
     private SpanRepository spans;
     private SpanPayloadRepository payloads;
     private TraceV2Repository traces;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
         this.spans = mock(SpanRepository.class);
         this.payloads = mock(SpanPayloadRepository.class);
         this.traces = mock(TraceV2Repository.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-06-13T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // Unused by these tools, but the registry needs them.
-        PipelineService pipeline = mock(PipelineService.class);
-        QueryService query = mock(QueryService.class);
-        FindingService behaviorDrift = mock(FindingService.class);
-        var registry = new McpToolRegistry(
-                pipeline,
-                projects,
-                query,
-                spans,
-                payloads,
-                traces,
-                mock(SessionReadService.class),
-                behaviorDrift,
-                mock(CaseService.class));
-        this.dispatcher = new McpDispatcher(registry, mapper);
-    }
-
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
-    }
-
-    private static SpanRow span(String traceId, String id, @Nullable String startedAt) {
-        return new SpanRow(
-                PROJECT_ID,
-                traceId,
-                id,
-                null, // parentSpanId — a root
-                traceId + "." + id, // path
-                "sess-1",
-                "user-9",
-                null, // projectVersionId
-                "cs-1",
-                "chat turn",
-                "llm",
-                "chat claude-sonnet-5",
-                false,
-                "ok",
-                null, // level
-                null, // errorType
-                null, // errorMessage
-                startedAt == null ? "2026-07-23T17:42:44Z" : startedAt,
-                "2026-07-23T17:42:45Z",
-                1000L,
-                120L,
-                "claude-sonnet-5",
-                "anthropic/claude-sonnet-5",
-                100L, // inputTokens
-                20L, // outputTokens
-                null, // cacheReadTokens
-                null, // cacheWriteTokens
-                null, // reasoningTokens
-                "0.000300000000",
-                "0.000300000000",
-                null,
-                null,
-                SpanRow.CostSource.INFERRED,
-                "litellm-2026-08-12",
-                "user: this is broken again",
-                "ok",
-                SpanRow.ResolverState.DONE,
-                SpanRow.ResolverState.RESOLVED,
-                "2026-07-23T17:42:45Z",
-                false,
-                1, // depth (generated)
-                120L, // totalTokens (generated)
-                "0.000600000000", // totalCost (generated)
-                "2026-07-23T17:42:46Z");
-    }
-
-    private static SpanPayloadRow payload(String traceId, String spanId) {
-        return new SpanPayloadRow(
-                PROJECT_ID,
-                traceId,
-                spanId,
-                "user: this is broken again, and here is the whole prompt",
-                "ok, here is the whole completion",
-                "{\"gen_ai.system\":\"anthropic\"}",
-                "{\"input_tokens\":100}",
-                "2026-07-23T17:42:45Z");
+        this.mcp = registryWith().spans(spans).payloads(payloads).traces(traces).build();
     }
 
     private static TraceV2Row rolledUpTrace() {
@@ -222,11 +103,11 @@ class McpTraceReadToolsTest {
 
     @Test
     void getSpan_returnsTypedColumnsAndFullPayload() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.find(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(payload(TRACE_ID, SPAN_ID)));
 
-        JsonNode s =
-                structured(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
+        JsonNode s = structured(
+                mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
 
         assertEquals(TRACE_ID, s.get("trace_id").asText());
         assertEquals(SPAN_ID, s.get("span_id").asText());
@@ -244,11 +125,11 @@ class McpTraceReadToolsTest {
     /** Typed buckets and cost_source, which the v1 view lacked. */
     @Test
     void getSpan_carriesTypedBucketsAndCostSource() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.find(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.empty());
 
-        JsonNode s =
-                structured(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
+        JsonNode s = structured(
+                mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
 
         assertEquals(100, s.get("input_tokens").asLong());
         assertEquals(20, s.get("output_tokens").asLong());
@@ -266,11 +147,11 @@ class McpTraceReadToolsTest {
      */
     @Test
     void getSpan_purgedPayloadIsNullsNotNotFound() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.find(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.empty());
 
-        JsonNode s =
-                structured(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
+        JsonNode s = structured(
+                mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"span_id\":\"" + SPAN_ID + "\"}"));
 
         assertEquals(SPAN_ID, s.get("span_id").asText());
         assertTrue(s.get("input").isNull());
@@ -285,7 +166,7 @@ class McpTraceReadToolsTest {
      */
     @Test
     void getSpan_withoutTraceIdExplainsTheNewIdentity() throws Exception {
-        String text = errorText(callTool("get_span", "{\"id\":\"" + SPAN_ID + "\"}"));
+        String text = errorText(mcp.callTool("get_span", "{\"id\":\"" + SPAN_ID + "\"}"));
         assertTrue(text.contains("trace_id"), text);
         assertTrue(text.contains("(trace_id, span_id)"), text);
         assertTrue(text.contains("unique only within its trace"), text);
@@ -295,16 +176,17 @@ class McpTraceReadToolsTest {
     /** {@code id} is a synonym for {@code span_id} once the trace is named. */
     @Test
     void getSpan_acceptsLegacyIdArgumentAlongsideTraceId() throws Exception {
-        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.findById(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.find(PROJECT_ID, TRACE_ID, SPAN_ID)).thenReturn(Optional.empty());
 
-        JsonNode s = structured(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"id\":\"" + SPAN_ID + "\"}"));
+        JsonNode s =
+                structured(mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\",\"id\":\"" + SPAN_ID + "\"}"));
         assertEquals(SPAN_ID, s.get("span_id").asText());
     }
 
     @Test
     void getSpan_missingSpanIdIsToolError() throws Exception {
-        String text = errorText(callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        String text = errorText(mcp.callTool("get_span", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
         assertTrue(text.contains("span_id"), text);
     }
 
@@ -312,7 +194,8 @@ class McpTraceReadToolsTest {
     @Test
     void getSpan_crossTenantIsNotFound() throws Exception {
         when(spans.findById(PROJECT_ID, "other-trace", SPAN_ID)).thenReturn(Optional.empty());
-        String text = errorText(callTool("get_span", "{\"trace_id\":\"other-trace\",\"span_id\":\"" + SPAN_ID + "\"}"));
+        String text =
+                errorText(mcp.callTool("get_span", "{\"trace_id\":\"other-trace\",\"span_id\":\"" + SPAN_ID + "\"}"));
         assertTrue(text.contains("other-trace"), text);
     }
 
@@ -326,7 +209,8 @@ class McpTraceReadToolsTest {
                         span(TRACE_ID, "bbb2", "2026-07-23T17:42:45Z")));
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of(payload(TRACE_ID, "aaa1")));
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\",\"fields\":[\"payload\"]}"));
+        JsonNode s =
+                structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\",\"fields\":[\"payload\"]}"));
 
         assertEquals(TRACE_ID, s.get("trace_id").asText());
         assertEquals("sess-1", s.get("session_id").asText());
@@ -363,7 +247,7 @@ class McpTraceReadToolsTest {
                 .thenReturn(List.of(span(TRACE_ID, "aaa1", "2026-07-23T17:42:44Z")));
         when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of(new SpanKey(TRACE_ID, "aaa1")));
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
 
         JsonNode span0 = s.get("spans").get(0);
         assertFalse(span0.has("input"), "no payload was requested — input must be ABSENT, not null");
@@ -392,11 +276,10 @@ class McpTraceReadToolsTest {
                 "2026-07-23T17:42:44Z",
                 "2026-07-23T17:42:44Z");
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(fresh));
-        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt()))
-                .thenReturn(List.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(List.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
 
         assertTrue(s.get("span_count").isNull());
         assertTrue(s.get("total_tokens").isNull());
@@ -412,7 +295,7 @@ class McpTraceReadToolsTest {
         when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(List.of());
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
         assertEquals(TRACE_ID, s.get("trace_id").asText());
         assertEquals(0, s.get("spans").size());
         assertEquals(3, s.get("span_count").asInt(), "the rollup remembers what the retention sweep removed");
@@ -435,7 +318,7 @@ class McpTraceReadToolsTest {
         when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(many);
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
 
         assertEquals(200, s.get("spans").size());
         assertTrue(s.get("spans_truncated").asBoolean());
@@ -456,7 +339,7 @@ class McpTraceReadToolsTest {
         when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(List.of());
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}");
+        mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}");
 
         verify(spans).listByTrace(PROJECT_ID, TRACE_ID, 201);
     }
@@ -472,7 +355,7 @@ class McpTraceReadToolsTest {
         when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(many);
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\",\"fields\":[\"payload\"]}"));
+        structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\",\"fields\":[\"payload\"]}"));
 
         ArgumentCaptor<List<SpanKey>> keys = ArgumentCaptor.forClass(List.class);
         verify(payloads).listByKeys(eq(PROJECT_ID), keys.capture());
@@ -490,7 +373,7 @@ class McpTraceReadToolsTest {
         when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(many);
         when(payloads.existingKeys(eq(PROJECT_ID), any())).thenReturn(Set.of());
 
-        structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
 
         ArgumentCaptor<List<SpanKey>> keys = ArgumentCaptor.forClass(List.class);
         verify(payloads).existingKeys(eq(PROJECT_ID), keys.capture());
@@ -502,11 +385,10 @@ class McpTraceReadToolsTest {
     @Test
     void getTrace_shortTraceReportsNotTruncated() throws Exception {
         when(traces.findById(PROJECT_ID, TRACE_ID)).thenReturn(Optional.of(rolledUpTrace()));
-        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt()))
-                .thenReturn(List.of(span(TRACE_ID, SPAN_ID, null)));
+        when(spans.listByTrace(eq(PROJECT_ID), eq(TRACE_ID), anyInt())).thenReturn(List.of(span(TRACE_ID, SPAN_ID)));
         when(payloads.listByKeys(eq(PROJECT_ID), any())).thenReturn(List.of());
 
-        JsonNode s = structured(callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
+        JsonNode s = structured(mcp.callTool("get_trace", "{\"trace_id\":\"" + TRACE_ID + "\"}"));
 
         assertFalse(s.get("spans_truncated").asBoolean());
     }
@@ -514,7 +396,7 @@ class McpTraceReadToolsTest {
     @Test
     void getTrace_unknownTraceIsCleanToolError() throws Exception {
         when(traces.findById(PROJECT_ID, "trace-x")).thenReturn(Optional.empty());
-        String text = errorText(callTool("get_trace", "{\"trace_id\":\"trace-x\"}"));
+        String text = errorText(mcp.callTool("get_trace", "{\"trace_id\":\"trace-x\"}"));
         assertTrue(text.contains("trace-x"), text);
     }
 }

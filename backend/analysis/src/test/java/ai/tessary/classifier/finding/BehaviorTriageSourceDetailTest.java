@@ -89,34 +89,15 @@ class BehaviorTriageSourceDetailTest {
     }
 
     private static FindingRow escalatedRow(String id) {
-        return new FindingRow(
-                id,
-                PROJECT,
-                BuiltInDetector.Kind.DURATION_DRIFT,
-                "cause:" + id,
-                FindingRow.SubjectKind.CLASSIFIER,
-                "clf_1",
-                null,
-                null,
-                FindingRow.Status.OPEN,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z",
-                null,
-                null,
-                null,
-                3,
-                "{\"cause_kind\":\"behavior_drift\"}",
-                null,
-                null,
-                "2026-08-02T00:00:00Z", // escalated_at: handed to triage
-                null,
-                null,
-                null,
-                null,
-                null, // triaged_at: no ruling came back
-                null,
-                null,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z");
+        return FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .id(id)
+                .projectId(PROJECT)
+                .causeKey("cause:" + id)
+                .subject(FindingRow.SubjectKind.CLASSIFIER, "clf_1")
+                .dated("2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z")
+                .sampleCount(3)
+                .payload("{\"cause_kind\":\"behavior_drift\"}")
+                .escalatedAt("2026-08-02T00:00:00Z")
+                .build();
     }
 }

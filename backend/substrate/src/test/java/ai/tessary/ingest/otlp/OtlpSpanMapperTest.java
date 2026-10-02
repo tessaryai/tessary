@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.otlp;
 
+import static ai.tessary.ingest.otlp.OtlpRequests.kv;
+import static ai.tessary.ingest.otlp.OtlpRequests.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -29,22 +31,6 @@ import org.junit.jupiter.api.Test;
 class OtlpSpanMapperTest {
 
     private final OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-
-    private static KeyValue kv(String key, String value) {
-        return KeyValue.newBuilder()
-                .setKey(key)
-                .setValue(AnyValue.newBuilder().setStringValue(value).build())
-                .build();
-    }
-
-    private static ExportTraceServiceRequest request(Span... spans) {
-        ScopeSpans.Builder scope = ScopeSpans.newBuilder();
-        for (Span s : spans) scope.addSpans(s);
-        return ExportTraceServiceRequest.newBuilder()
-                .addResourceSpans(
-                        ResourceSpans.newBuilder().addScopeSpans(scope).build())
-                .build();
-    }
 
     @Test
     void nativeGenAiSpan_mapsToCanonicalRawEntry_withHexIdsAndTimestamps() {

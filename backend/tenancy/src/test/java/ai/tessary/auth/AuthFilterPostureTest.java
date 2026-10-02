@@ -11,10 +11,14 @@ import static org.mockito.Mockito.when;
 import ai.tessary.tenant.PrincipalRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -34,6 +38,11 @@ class AuthFilterPostureTest {
     private static final String[] ACTUATOR_GUARDED = {
         "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus"
     };
+
+    private static final String BY_DESIGN =
+            "the unauthenticated-by-design paths stay bypassed in every posture: never caught by the closed default";
+    private static final String HEALTH_PROBE =
+            "actuator health and its probes stay public: orchestrators poll them before anything holds a credential";
 
     private static AuthFilter filter(boolean authDisabled) {
         return filter(authDisabled, mock(BearerTokenAuthenticator.class), notStaff());
@@ -86,34 +95,48 @@ class AuthFilterPostureTest {
         return bearerAuth;
     }
 
-    private static HttpServletRequest guarded() {
-        return new MockHttpServletRequest("GET", "/api/orgs/acme/projects/web/traces");
+    static Stream<Arguments> postures() {
+        Stream<Arguments> fixed = Stream.of(
+                // A provider is always configured (PasswordAuthProvider is the fallback), so "no provider
+                // configured" is not a reachable state. The flag is authoritative on its own; a test that wants
+                // enforcement despite the suite's global disabled=true default must say so explicitly
+                // (see TestAuthDisabledInitializer's javadoc).
+                Arguments.of("the flag bypasses regardless of provider state", true, GUARDED_API, true),
+                Arguments.of("a configured provider enforces by default", false, GUARDED_API, false),
+                Arguments.of(BY_DESIGN, false, "/auth/login", true),
+                Arguments.of(BY_DESIGN, false, "/auth/callback", true),
+                Arguments.of(BY_DESIGN, false, "/v3/api-docs", true),
+                Arguments.of(HEALTH_PROBE, false, "/actuator/health", true),
+                Arguments.of(HEALTH_PROBE, false, "/actuator/health/liveness", true),
+                Arguments.of(HEALTH_PROBE, false, "/actuator/health/readiness", true),
+                Arguments.of(
+                        "a health GROUP is not public — show-details:always must not publish /actuator/health/db; the"
+                                + " probes are enumerated, not prefixed, so a health component stays guarded",
+                        false,
+                        "/actuator/health/db",
+                        false),
+                Arguments.of(
+                        "a health-prefixed sibling does not inherit the exemption by name: /actuator/health is"
+                                + " matched exactly, so a same-prefix sibling must not be public",
+                        false,
+                        "/actuator/healthz",
+                        false));
+        // Not currently exposed -- Spring Boot's default is `health` alone. That is the point: the
+        // guarantee must hold for the endpoint a self-hoster adds tomorrow, not just the ones
+        // shipped today, because widening exposure must not widen the unauthenticated surface.
+        Stream<Arguments> actuator = Arrays.stream(ACTUATOR_GUARDED)
+                .map(path -> Arguments.of(
+                        "every other actuator endpoint is filtered, exposed or not, and must require authentication",
+                        false,
+                        path,
+                        false));
+        return Stream.concat(fixed, actuator);
     }
 
-    @Test
-    @DisplayName("the flag bypasses regardless of provider state")
-    void flagWinsRegardlessOfProviderState() {
-        // A provider is always configured (PasswordAuthProvider is the fallback), so "no provider
-        // configured" is not a reachable state. The flag is authoritative on its own; a test that wants
-        // enforcement despite the suite's global disabled=true default must say so explicitly
-        // (see TestAuthDisabledInitializer's javadoc).
-        assertTrue(filter(true).shouldNotFilter(guarded()));
-    }
-
-    @Test
-    @DisplayName("a configured provider enforces by default")
-    void configuredProviderEnforces() {
-        assertFalse(filter(false).shouldNotFilter(guarded()));
-    }
-
-    @Test
-    @DisplayName("the unauthenticated-by-design paths stay bypassed in every posture")
-    void byDesignPathsAreUnaffected() {
-        for (String path : new String[] {"/auth/login", "/auth/callback", "/v3/api-docs"}) {
-            assertTrue(
-                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
-                    path + " is unauthenticated by design and must not be caught by the closed default");
-        }
+    @ParameterizedTest(name = "{2}: {0}")
+    @MethodSource("postures")
+    void shouldNotFilterFollowsThePostureTable(String rule, boolean authDisabled, String path, boolean bypassed) {
+        assertEquals(bypassed, filter(authDisabled).shouldNotFilter(new MockHttpServletRequest("GET", path)), rule);
     }
 
     @Test
@@ -136,30 +159,6 @@ class AuthFilterPostureTest {
         assertEquals(200, res.getStatus(), "MockFilterChain never actually writes a status; asserted for clarity");
     }
 
-    @Test
-    @DisplayName("actuator health and its probes stay public")
-    void actuatorHealthIsPublic() {
-        for (String path :
-                new String[] {"/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"}) {
-            assertTrue(
-                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
-                    path + " is polled by orchestrators before anything holds a credential");
-        }
-    }
-
-    @Test
-    @DisplayName("every other actuator endpoint is filtered, exposed or not")
-    void actuatorNonHealthIsFiltered() {
-        // Not currently exposed -- Spring Boot's default is `health` alone. That is the point: the
-        // guarantee must hold for the endpoint a self-hoster adds tomorrow, not just the ones
-        // shipped today, because widening exposure must not widen the unauthenticated surface.
-        for (String path : ACTUATOR_GUARDED) {
-            assertFalse(
-                    filter(false).shouldNotFilter(new MockHttpServletRequest("GET", path)),
-                    path + " must require authentication");
-        }
-    }
-
     /**
      * A path that escapes {@code shouldNotFilter} still reaches {@code chain.doFilter} unless
      * something rejects it. The bare {@code /actuator} index passed {@code shouldNotFilter} above
@@ -178,22 +177,6 @@ class AuthFilterPostureTest {
             assertEquals(401, res.getStatus(), path + " must be rejected");
             assertNull(chain.getRequest(), path + " must never reach the filter chain unauthenticated");
         }
-    }
-
-    @Test
-    @DisplayName("a health GROUP is not public — show-details:always must not publish /actuator/health/db")
-    void healthGroupsAreNotPublic() {
-        assertFalse(
-                filter(false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/health/db")),
-                "the probes are enumerated, not prefixed, so a health component stays guarded");
-    }
-
-    @Test
-    @DisplayName("a health-prefixed sibling does not inherit the exemption by name")
-    void healthPrefixedSiblingsAreNotPublic() {
-        assertFalse(
-                filter(false).shouldNotFilter(new MockHttpServletRequest("GET", "/actuator/healthz")),
-                "/actuator/health is matched exactly, so a same-prefix sibling must not be public");
     }
 
     // ---------------------------------------------------------------------------------------

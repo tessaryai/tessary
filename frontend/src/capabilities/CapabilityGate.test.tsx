@@ -4,7 +4,7 @@
  * capability (the server refuses its calls, so it would only ever fail), and one bounced while the
  * capabilities are still being read.
  */
-import { cleanup, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../test/render";
 import { CapabilityGate } from "./CapabilityGate";
@@ -16,7 +16,6 @@ vi.mock("./useCapabilities", () => ({
 vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
 
 afterEach(() => {
-  cleanup();
   caps.loading = false;
   caps.on.clear();
 });

@@ -5,7 +5,7 @@
  * only be refused, a lifecycle action on the default or a deleting project, an action sent for the
  * wrong project, a delete without its confirmation, and a deleting row that never goes away.
  */
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrgMember, OrgRole, Organization as Org, Project } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
@@ -79,9 +79,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
   window.localStorage.clear();
 });
 
@@ -210,10 +207,12 @@ describe("project lifecycle", () => {
     auth.listProjects
       .mockResolvedValueOnce([project("default", { is_default: true }), project("gone", { deleting_at: "2026-09-01T00:00:00Z" })])
       .mockResolvedValue([project("default", { is_default: true })]);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     renderRoute(<Organization />);
     await screen.findByText("gone");
 
-    await waitFor(() => expect(screen.queryByText("gone")).toBeNull(), { timeout: 4500 });
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    await waitFor(() => expect(screen.queryByText("gone")).toBeNull());
     expect(screen.getByText("1 project")).toBeTruthy();
   });
 

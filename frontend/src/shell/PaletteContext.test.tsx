@@ -3,12 +3,10 @@
  * The palette's open state. The bugs worth catching: "/" opening the palette while someone is typing,
  * a programmatic open that does nothing, and a component outside the provider failing silently.
  */
-import { act, cleanup, fireEvent, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { PaletteProvider, usePalette } from "./PaletteContext";
-
-afterEach(cleanup);
 
 const wrapper = ({ children }: { children: ReactNode }) => <PaletteProvider>{children}</PaletteProvider>;
 

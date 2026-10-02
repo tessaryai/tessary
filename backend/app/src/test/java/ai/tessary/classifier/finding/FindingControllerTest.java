@@ -16,8 +16,6 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
-import ai.tessary.classifier.metric.MetricBaselineRow;
-import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
 import ai.tessary.open.errors.ClassifierError;
@@ -31,6 +29,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.tenant.rbac.Role;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.MetricBaselineRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -244,34 +243,9 @@ class FindingControllerTest {
         String classifierId = ClassifierRows.byKey(signals, projectId, BuiltInDetector.Kind.DURATION_DRIFT)
                 .orElseThrow()
                 .id();
-        String now = Instant.now().toString();
         String baselineId = baselines
-                .ensure(new MetricBaselineRow(
-                        Ids.ulid(),
-                        projectId,
-                        classifierId,
-                        Measure.TURN_DURATION,
-                        BucketKind.CALL_SITE,
-                        "summarize",
-                        State.ARMED,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        null,
-                        now,
-                        now))
+                .ensure(MetricBaselineRows.fresh(
+                        projectId, classifierId, Measure.TURN_DURATION, "summarize", State.ARMED))
                 .id();
         String eventId = Ids.ulid();
         baselineEvents.insert(BehaviorBaselineEventRow.forBaseline(

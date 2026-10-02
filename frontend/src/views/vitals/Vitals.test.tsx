@@ -6,7 +6,7 @@
  * and a spend or latency printed wrong.
  */
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { Vitals } from "./Vitals";
@@ -65,11 +65,6 @@ const DATA: VitalsData = {
 
 beforeEach(() => {
   api.getVitals.mockResolvedValue(DATA);
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const bodyRows = () => screen.getAllByRole("row").slice(1);

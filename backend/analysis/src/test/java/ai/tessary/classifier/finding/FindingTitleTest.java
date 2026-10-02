@@ -32,34 +32,11 @@ class FindingTitleTest {
     }
 
     private static FindingRow finding(@Nullable String callSiteId, String payloadJson) {
-        return new FindingRow(
-                "fnd-1",
-                "proj-1",
-                BuiltInDetector.Kind.GROUNDEDNESS,
-                "sig-1:" + (callSiteId == null ? "summarize" : callSiteId),
-                FindingRow.SubjectKind.CLASSIFIER,
-                "sig-1",
-                "Groundedness",
-                callSiteId,
-                FindingRow.Status.OPEN,
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z",
-                null,
-                null,
-                null,
-                12,
-                payloadJson,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-09-01T00:00:00Z",
-                "2026-09-02T00:00:00Z");
+        return FindingRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+                .causeKey("sig-1:" + (callSiteId == null ? "summarize" : callSiteId))
+                .subjectLabel("Groundedness")
+                .callSiteId(callSiteId)
+                .payload(payloadJson)
+                .build();
     }
 }

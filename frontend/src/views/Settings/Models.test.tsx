@@ -4,12 +4,10 @@
  * one decision model, so the server sends `model_selectable: false` for the group and the row must
  * draw no model, tier or effort control. An agent lane beside it keeps its model select.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+import { renderRoute } from "../../test/render";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { CatalogEntry, ModelSettingsResponse } from "../../api/types";
-import { ToastProvider } from "../../ui/Toast";
 import { Models } from "./Models";
 
 const getModelSettings = vi.fn<() => Promise<ModelSettingsResponse>>();
@@ -110,23 +108,7 @@ const SETTINGS: ModelSettingsResponse = {
   configured_providers: ["TYPESAFE", "OPENROUTER"],
 };
 
-function renderModels() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={qc}>
-        <ToastProvider>
-          <Models />
-        </ToastProvider>
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-}
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-});
+const renderModels = () => renderRoute(<Models />);
 
 describe("Models", () => {
   it("renders the decision group with a provider select and no model control", async () => {

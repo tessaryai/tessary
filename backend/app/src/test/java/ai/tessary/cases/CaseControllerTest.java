@@ -22,6 +22,7 @@ import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.tenant.rbac.Role;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -29,9 +30,7 @@ import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
@@ -40,9 +39,7 @@ import org.springframework.web.server.ResponseStatusException;
  * this project's path, a bucket that files a muted or resolved case under the open queue, and RCA pressable
  * by someone the org does not let spend a strong model's time.
  */
-@SpringBootTest
-// batch-size=0 parks RcaWorker's drain, as in CaseServiceTest.
-@TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
+@RcaParkedSpringBootTest
 class CaseControllerTest {
 
     @Autowired

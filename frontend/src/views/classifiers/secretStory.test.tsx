@@ -5,7 +5,7 @@
  * that is not its key, and the unredacted count wrong or said when there is nothing to say.
  */
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../api/generated/schema";
 import { LeakPins, LeakTimeline } from "./secretStory";
 
@@ -53,11 +53,6 @@ const pins = (d: Detail) => render(<LeakPins secretLeak={d} linkToTrace={link} /
 
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
 });
 
 describe("LeakPins", () => {

@@ -8,12 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
-import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricBaselineRow.State;
-import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.MetricBaselineRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
@@ -164,33 +163,7 @@ class MetricBaselineRepositoryTest {
             "{\"kind\":\"control\",\"half_life_days\":7.0,\"days\":[{\"d\":\"2026-07-20\",\"m\":{\"kind\":\"hist\",\"n\":500}}]}";
 
     private static MetricBaselineRow seed(Scope scope, String measure, String bucketKey) {
-        String now = now();
-        return new MetricBaselineRow(
-                Ids.ulid(),
-                scope.projectId,
-                scope.classifierId,
-                measure,
-                BucketKind.CALL_SITE,
-                bucketKey,
-                State.LEARNING,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                0,
-                null,
-                null,
-                null,
-                now,
-                now);
+        return MetricBaselineRows.fresh(scope.projectId, scope.classifierId, measure, bucketKey, State.LEARNING);
     }
 
     private static String now() {

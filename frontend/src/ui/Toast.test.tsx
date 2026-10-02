@@ -3,16 +3,12 @@
  * Toasts. The bugs worth catching: a toast that never leaves, a dismiss that takes the wrong one with
  * it, and a component rendered outside the provider failing silently rather than loudly.
  */
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider, useToast } from "./Toast";
 
 beforeEach(() => {
   vi.useFakeTimers();
-});
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
 });
 
 function Pusher() {

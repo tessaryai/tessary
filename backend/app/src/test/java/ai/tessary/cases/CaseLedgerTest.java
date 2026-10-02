@@ -11,21 +11,19 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * {@link CaseLedger#openOrJoin} against real Postgres, so the partial indexes and ISO-text comparisons run for real.
  * Each test calls it on one finding, as {@link CaseOpener} does inside a ruling's transaction (decision 1).
  */
-@SpringBootTest
-@TestPropertySource(properties = "test.context-group=case-ledger")
+@RcaParkedSpringBootTest
 class CaseLedgerTest {
 
     @Autowired

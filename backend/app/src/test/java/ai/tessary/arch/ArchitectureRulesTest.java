@@ -121,6 +121,16 @@ public class ArchitectureRulesTest {
             .because("every per-domain error enum lives in errors/ (AGENTS.md error handling)");
 
     @ArchTest
+    static final ArchRule jobqueue_stays_dependency_free = classes()
+            .that()
+            .resideInAPackage("..jobqueue..")
+            .should()
+            .onlyDependOnClassesThat()
+            .resideInAnyPackage("..jobqueue..", "java..", "org.jspecify..")
+            .because("jobqueue is the seed of the open `shared` module (Phase 0) and must not depend on "
+                    + "any tessary feature package, so it stays cleanly extractable");
+
+    @ArchTest
     static final ArchRule jdbc_client_only_in_repositories = noClasses()
             .that()
             .haveSimpleNameNotEndingWith("Repository")

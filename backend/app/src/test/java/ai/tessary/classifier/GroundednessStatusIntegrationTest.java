@@ -18,6 +18,7 @@ import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.EncoderFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Duration;
@@ -160,22 +161,15 @@ class GroundednessStatusIntegrationTest {
 
     private Fixture fixture(String name, boolean enabled) {
         String pid = TenantFixture.bootstrap(tenants, name).project().id();
-        String now = Instant.now().toString();
-        ClassifierRow row = new ClassifierRow(
-                Ids.ulid(),
+        ClassifierRow row = ClassifierRows.insertRow(
+                rows,
                 pid,
                 "groundedness-status",
                 "Groundedness (status test)",
-                null,
                 BuiltInDetector.Kind.GROUNDEDNESS,
                 null,
-                false,
-                1,
-                enabled,
                 ClassifierRow.Mode.TRACKING,
-                now,
-                now);
-        rows.insert(row);
+                enabled);
         return new Fixture(pid, row);
     }
 

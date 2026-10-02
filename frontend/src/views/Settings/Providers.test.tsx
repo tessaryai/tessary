@@ -10,9 +10,9 @@
  * false empty state indistinguishable from a genuinely fresh, keyless install. Fixed to
  * `catalog.isError || credentials.isError`.
  */
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderRoute } from "../../test/render";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
   ModelProvider,
   PlatformDescriptor,
@@ -22,7 +22,6 @@ import type {
   UpsertProviderCredentialRequest,
 } from "../../api/types";
 import { ApiError } from "../../api/types";
-import { ToastProvider } from "../../ui/Toast";
 import { Providers } from "./Providers";
 
 // ---- collaborator mocks ------------------------------------------------------------------
@@ -138,29 +137,9 @@ const TESSARY_AI: PlatformDescriptor = {
   detail: "$10.00 left",
 };
 
-function renderProviders() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <Providers />
-      </ToastProvider>
-    </QueryClientProvider>,
-  );
-}
-
-beforeAll(() => {
-  // jsdom implements <dialog> but not showModal/close.
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-  };
-});
+const renderProviders = () => renderRoute(<Providers />);
 
 afterEach(() => {
-  cleanup();
   // vi.resetAllMocks() is a WORKER-GLOBAL reset, not file-scoped -- when this file runs in the
   // same vitest worker as src/routeManifest.smoke.test.tsx, it silently wiped out that file's own
   // vi.fn()-backed mock implementations (e.g. auth.getCapabilities) mid-run, breaking dozens of
@@ -169,7 +148,6 @@ afterEach(() => {
   listProviderCredentials.mockReset();
   upsertProviderCredential.mockReset();
   deleteProviderCredential.mockReset();
-  vi.restoreAllMocks();
 });
 
 describe("Providers", () => {

@@ -25,10 +25,10 @@ import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
-import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.MetricBaselineRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -213,34 +213,13 @@ class ClassifierDebugControllerTest {
     }
 
     private String baseline(String pid, String classifierId, String bucket) {
-        String now = Instant.now().toString();
         return baselines
-                .ensure(new MetricBaselineRow(
-                        Ids.ulid(),
+                .ensure(MetricBaselineRows.fresh(
                         pid,
                         classifierId,
                         MetricBaselineRow.Measure.TURN_DURATION,
-                        MetricBaselineRow.BucketKind.CALL_SITE,
                         bucket,
-                        MetricBaselineRow.State.LEARNING,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        0,
-                        null,
-                        null,
-                        null,
-                        now,
-                        now))
+                        MetricBaselineRow.State.LEARNING))
                 .id();
     }
 

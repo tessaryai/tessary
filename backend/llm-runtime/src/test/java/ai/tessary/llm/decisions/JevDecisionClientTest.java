@@ -42,9 +42,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -257,43 +261,40 @@ class JevDecisionClientTest {
         sent(3);
     }
 
-    @Test
-    void a401_isRejectedWithoutRetrying() throws Exception {
-        stub(response(401, "{\"error\":\"bad key\"}"));
-
-        TessaryException e =
-                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
-
-        assertSame(DecisionError.PROVIDER_REJECTED, e.error());
-        assertEquals(List.of(), sleeps);
-        sent(1);
+    static Stream<Arguments> statusesARetryCannotFix() {
+        return Stream.of(
+                Arguments.of(401, "{\"error\":\"bad key\"}", typesafe(), DecisionError.PROVIDER_REJECTED, null),
+                // A key with no funds left is fixed only by a top-up, so retrying it or skipping turns silently helps
+                // no one.
+                Arguments.of(
+                        402,
+                        "{\"error\":\"insufficient credits\"}",
+                        openrouter(),
+                        DecisionError.PROVIDER_NO_CREDIT,
+                        null),
+                // The provider's own words ride the message: a 400 on its own never named the model.
+                Arguments.of(
+                        400,
+                        "{\"error\":{\"message\":\"Model typesafe/jev-latest does not exist\",\"code\":400}}",
+                        typesafe(),
+                        DecisionError.REQUEST_REFUSED,
+                        "Decision provider TYPESAFE refused the request (HTTP 400): Model typesafe/jev-latest does not"
+                                + " exist"));
     }
 
-    /** A key with no funds left is fixed only by a top-up, so retrying it or skipping turns silently helps no one. */
-    @Test
-    void a402_isNoCreditWithoutRetrying() throws Exception {
-        stub(response(402, "{\"error\":\"insufficient credits\"}"));
-
-        TessaryException e = assertThrows(
-                TessaryException.class, () -> client().decide("p1", "frustration", openrouter(), request()));
-
-        assertSame(DecisionError.PROVIDER_NO_CREDIT, e.error());
-        assertEquals(List.of(), sleeps);
-        sent(1);
-    }
-
-    @Test
-    void a400_isRefusedWithoutRetrying() throws Exception {
-        stub(response(400, "{\"error\":{\"message\":\"Model typesafe/jev-latest does not exist\",\"code\":400}}"));
+    @ParameterizedTest(name = "HTTP {0}")
+    @MethodSource("statusesARetryCannotFix")
+    void aStatusARetryCannotFix_failsWithoutRetrying(
+            int status, String body, DecisionTarget target, DecisionError expected, @Nullable String message)
+            throws Exception {
+        stub(response(status, body));
 
         TessaryException e =
-                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", typesafe(), request()));
+                assertThrows(TessaryException.class, () -> client().decide("p1", "frustration", target, request()));
 
-        assertSame(DecisionError.REQUEST_REFUSED, e.error());
-        // The provider's own words ride the message: a 400 on its own never named the model.
-        assertEquals(
-                "Decision provider TYPESAFE refused the request (HTTP 400): Model typesafe/jev-latest does not exist",
-                e.getMessage());
+        assertSame(expected, e.error());
+        if (message != null) assertEquals(message, e.getMessage());
+        assertEquals(List.of(), sleeps);
         sent(1);
     }
 

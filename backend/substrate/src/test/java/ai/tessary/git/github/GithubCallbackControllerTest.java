@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static ai.tessary.git.github.GithubFixtures.location;
+import static ai.tessary.git.github.GithubFixtures.secretBox;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -12,19 +13,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.auth.AuthProperties;
-import ai.tessary.config.TessaryProperties;
-import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ConnectRequest;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitIntegrationService;
 import ai.tessary.git.github.GithubTokenService.InstalledRepo;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 class GithubCallbackControllerTest {
@@ -35,14 +32,6 @@ class GithubCallbackControllerTest {
     private GithubCallbackController controller;
 
     private static final String HOST = "api.github.com";
-
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 7);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
 
     @BeforeEach
     void setUp() {
@@ -57,11 +46,6 @@ class GithubCallbackControllerTest {
 
     private String stateFor(String projectId) {
         return state.mint("acme", "web", projectId);
-    }
-
-    private static String location(ResponseEntity<Void> resp) {
-        assertEquals(HttpStatus.FOUND, resp.getStatusCode());
-        return resp.getHeaders().getLocation().toString();
     }
 
     // ---- idempotency -------------------------------------------------------

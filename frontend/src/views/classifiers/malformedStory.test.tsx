@@ -6,7 +6,7 @@
  * and a missing document drawn as an empty one.
  */
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MalformedOutputDetail, MalformedOutputRow } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { HowOutputsBroke } from "./malformedStory";
@@ -43,11 +43,6 @@ beforeEach(() => {
       ? { rows: [output(3)], total: 3, nextCursor: null }
       : { rows: [output(1), output(2)], total: 3, nextCursor: "p2" };
   });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const renderBlock = (detail = DETAIL) =>

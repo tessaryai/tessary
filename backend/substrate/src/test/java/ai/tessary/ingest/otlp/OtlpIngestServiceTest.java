@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.otlp;
 
+import static ai.tessary.ingest.otlp.OtlpRequests.chatSpan;
+import static ai.tessary.ingest.otlp.OtlpRequests.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
@@ -8,18 +10,10 @@ import static org.mockito.Mockito.verify;
 
 import ai.tessary.config.OtlpReceiverProperties;
 import ai.tessary.config.SubstrateProperties;
-import ai.tessary.ingest.GenAiAttributes;
 import ai.tessary.ingest.IngestQuotaGate;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
-import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
-import io.opentelemetry.proto.common.v1.AnyValue;
-import io.opentelemetry.proto.common.v1.KeyValue;
-import io.opentelemetry.proto.trace.v1.ResourceSpans;
-import io.opentelemetry.proto.trace.v1.ScopeSpans;
-import io.opentelemetry.proto.trace.v1.Span;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -46,33 +40,12 @@ class OtlpIngestServiceTest {
         return new OtlpIngestService(props, new SubstrateProperties(), substrateWriter, mapper, quotaGate);
     }
 
-    private static Span span(byte id) {
-        return Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {id}))
-                .addAttributes(KeyValue.newBuilder()
-                        .setKey(GenAiAttributes.OPERATION_NAME)
-                        .setValue(AnyValue.newBuilder()
-                                .setStringValue(GenAiAttributes.OP_CHAT)
-                                .build())
-                        .build())
-                .build();
-    }
-
-    private static ExportTraceServiceRequest request(Span... spans) {
-        ScopeSpans.Builder scope = ScopeSpans.newBuilder();
-        for (Span s : spans) scope.addSpans(s);
-        return ExportTraceServiceRequest.newBuilder()
-                .addResourceSpans(
-                        ResourceSpans.newBuilder().addScopeSpans(scope).build())
-                .build();
-    }
-
     @Test
     void clampsOverLimitBatch_enqueuesClampedAndReportsPartialSuccess() {
         OtlpIngestService svc = service(1); // clamp to a single span
         Mockito.when(substrateWriter.enqueue(eq("proj-2"), Mockito.anyList())).thenReturn(true);
 
-        OtlpIngestService.IngestOutcome outcome = svc.ingest("proj-2", request(span((byte) 1), span((byte) 2)));
+        OtlpIngestService.IngestOutcome outcome = svc.ingest("proj-2", request(chatSpan((byte) 1), chatSpan((byte) 2)));
 
         assertTrue(outcome.accepted(), "a clamp is not a shed — the surviving span was taken");
         assertTrue(outcome.response().hasPartialSuccess(), "an over-limit batch reports partial success");

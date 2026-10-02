@@ -6,7 +6,7 @@
  * another's tab, and a failed list read that looks like no sources.
  */
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type IngestionSource } from "../api/types";
 import { currentLocation, pending, renderRoute } from "../test/render";
 import { Sources } from "./Sources";
@@ -33,11 +33,6 @@ beforeEach(() => {
   api.createSource.mockResolvedValue({ id: "s-2" });
   writeText.mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 const dialog = () => screen.getByRole("dialog");

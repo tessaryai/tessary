@@ -31,6 +31,7 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -41,14 +42,11 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 
 /** Case lifecycle as a human drives it: resolve, mute, unmute, lookup, and pressing RCA (1c). */
-@SpringBootTest
 // batch-size=0 parks RcaWorker's drain so this class reads locked_at and the trail itself.
-@TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
+@RcaParkedSpringBootTest
 class CaseServiceTest {
 
     @Autowired

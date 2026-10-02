@@ -10,7 +10,7 @@
  * floating promise, a button that did nothing, and no way to tell from the UI.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CopyButton } from "./CopyButton";
 
 function setClipboard(value: unknown) {
@@ -18,9 +18,6 @@ function setClipboard(value: unknown) {
 }
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
   setClipboard(undefined);
 });
 

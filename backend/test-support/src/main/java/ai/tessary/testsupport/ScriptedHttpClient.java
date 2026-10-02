@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package ai.tessary.git.github;
+package ai.tessary.testsupport;
 
 import java.io.IOException;
 import java.net.Authenticator;
@@ -27,63 +27,92 @@ import java.util.concurrent.Flow;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
+import org.jspecify.annotations.Nullable;
 
 /**
- * A hand-written stand-in for the JDK {@link HttpClient}: answers each request by its exact URI from a
- * script, and records every request it was sent. The last scripted answer for a URI repeats; an unscripted
- * URI fails the test. An answer is a response, an {@link IOException} or {@link InterruptedException} to
- * throw, or a {@link Deferred} computed when the request arrives.
+ * A hand-written stand-in for the JDK {@link HttpClient}: answers each request by its exact URI from a script, and
+ * records every request it was sent. The last scripted answer for a URI repeats; an unscripted URI fails the test,
+ * unless the client was built by {@code answering} or {@code failingWith}, which answer every URI the same way. An
+ * answer is a response, an {@code IOException} or {@code InterruptedException} to throw, or a {@link Deferred}
+ * computed when the request arrives.
  */
-final class ScriptedHttpClient extends HttpClient {
+public final class ScriptedHttpClient extends HttpClient {
 
-    /** An answer computed at request time, for a test that has to hold a request open. */
     @FunctionalInterface
-    interface Deferred {
+    public interface Deferred {
         Object answer() throws Exception;
     }
 
     private final Map<String, Deque<Object>> answers = new ConcurrentHashMap<>();
     private final List<HttpRequest> sent = new CopyOnWriteArrayList<>();
+    private final @Nullable Object anyUri;
+    private volatile @Nullable String lastBody;
 
-    ScriptedHttpClient on(String uri, Object... responses) {
+    public ScriptedHttpClient() {
+        this(null);
+    }
+
+    private ScriptedHttpClient(@Nullable Object anyUri) {
+        this.anyUri = anyUri;
+    }
+
+    public static ScriptedHttpClient answering(int status, String body) {
+        return new ScriptedHttpClient(response(status, body));
+    }
+
+    public static ScriptedHttpClient failingWith(Exception failure) {
+        return new ScriptedHttpClient(failure);
+    }
+
+    public ScriptedHttpClient on(String uri, Object... responses) {
         answers.computeIfAbsent(uri, k -> new ConcurrentLinkedDeque<>()).addAll(List.of(responses));
         return this;
     }
 
-    List<HttpRequest> sent() {
+    public List<HttpRequest> sent() {
         return sent;
     }
 
-    static HttpResponse<String> response(int status, String body) {
-        return new Response(status, body, HttpHeaders.of(Map.of(), (k, v) -> true));
+    public @Nullable HttpRequest lastRequest() {
+        return sent.isEmpty() ? null : sent.getLast();
     }
 
-    /** A response carrying a {@code Link} header whose rel="next" is {@code next}. */
-    static HttpResponse<String> response(int status, String body, String next) {
+    public @Nullable String lastBody() {
+        return lastBody;
+    }
+
+    public static HttpResponse<String> response(int status, String body) {
+        return new Response(status, body, HttpHeaders.of(Map.of(), (k, v) -> true), null);
+    }
+
+    public static HttpResponse<String> response(int status, String body, String next) {
         return new Response(
-                status, body, HttpHeaders.of(Map.of("Link", List.of("<" + next + ">; rel=\"next\"")), (k, v) -> true));
+                status,
+                body,
+                HttpHeaders.of(Map.of("Link", List.of("<" + next + ">; rel=\"next\"")), (k, v) -> true),
+                null);
     }
 
-    /** The body a request carried, read back off its publisher. */
-    static String body(HttpRequest req) {
+    public static String body(HttpRequest req) {
         List<ByteBuffer> chunks = new ArrayList<>();
-        req.bodyPublisher().orElseThrow().subscribe(new Flow.Subscriber<>() {
-            @Override
-            public void onSubscribe(Flow.Subscription s) {
-                s.request(Long.MAX_VALUE);
-            }
+        req.bodyPublisher()
+                .ifPresent(p -> p.subscribe(new Flow.Subscriber<ByteBuffer>() {
+                    @Override
+                    public void onSubscribe(Flow.Subscription s) {
+                        s.request(Long.MAX_VALUE);
+                    }
 
-            @Override
-            public void onNext(ByteBuffer item) {
-                chunks.add(item);
-            }
+                    @Override
+                    public void onNext(ByteBuffer item) {
+                        chunks.add(item);
+                    }
 
-            @Override
-            public void onError(Throwable t) {}
+                    @Override
+                    public void onError(Throwable t) {}
 
-            @Override
-            public void onComplete() {}
-        });
+                    @Override
+                    public void onComplete() {}
+                }));
         StringBuilder sb = new StringBuilder();
         for (ByteBuffer b : chunks) sb.append(StandardCharsets.UTF_8.decode(b));
         return sb.toString();
@@ -93,11 +122,16 @@ final class ScriptedHttpClient extends HttpClient {
     public <T> HttpResponse<T> send(HttpRequest req, HttpResponse.BodyHandler<T> handler)
             throws IOException, InterruptedException {
         sent.add(req);
+        lastBody = body(req);
         Deque<Object> script = answers.get(req.uri().toString());
-        if (script == null || script.isEmpty()) {
+        Object answer;
+        if (script != null && !script.isEmpty()) {
+            answer = script.size() > 1 ? script.poll() : script.peek();
+        } else if (anyUri != null) {
+            answer = anyUri;
+        } else {
             throw new AssertionError("no answer scripted for " + req.method() + " " + req.uri());
         }
-        Object answer = script.size() > 1 ? script.poll() : script.peek();
         if (answer instanceof Deferred d) {
             try {
                 answer = d.answer();
@@ -109,15 +143,21 @@ final class ScriptedHttpClient extends HttpClient {
         }
         if (answer instanceof IOException e) throw e;
         if (answer instanceof InterruptedException e) throw e;
+        if (!(answer instanceof Response r)) throw new AssertionError("not an answer: " + answer);
         @SuppressWarnings("unchecked")
-        HttpResponse<T> res = (HttpResponse<T>) answer;
+        HttpResponse<T> res = (HttpResponse<T>) new Response(r.statusCode(), r.body(), r.headers(), req);
         return res;
     }
 
-    private record Response(int statusCode, String body, HttpHeaders headers) implements HttpResponse<String> {
+    private record Response(
+            int statusCode,
+            String body,
+            HttpHeaders headers,
+            @Nullable HttpRequest sentRequest) implements HttpResponse<String> {
         @Override
         public HttpRequest request() {
-            throw new UnsupportedOperationException();
+            if (sentRequest == null) throw new UnsupportedOperationException();
+            return sentRequest;
         }
 
         @Override
@@ -132,7 +172,7 @@ final class ScriptedHttpClient extends HttpClient {
 
         @Override
         public URI uri() {
-            throw new UnsupportedOperationException();
+            return request().uri();
         }
 
         @Override
@@ -140,8 +180,6 @@ final class ScriptedHttpClient extends HttpClient {
             return Version.HTTP_1_1;
         }
     }
-
-    // ---- the rest of HttpClient, which nothing under test touches ----------
 
     @Override
     public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest req, HttpResponse.BodyHandler<T> handler) {

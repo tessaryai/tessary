@@ -13,7 +13,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -126,36 +125,5 @@ class AnthropicModelListerTest {
         assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
 
         verify(http, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
-    }
-
-    @Test
-    void non2xxStatus_throwsModelListingException() throws Exception {
-        stub(page(403, "{\"error\":\"forbidden\"}"));
-
-        assertThrows(ModelListingException.class, () -> lister().list(cred("sk-ant-bad")));
-    }
-
-    @Test
-    void ioExceptionFromTheTransport_wrapsIntoModelListingException() throws Exception {
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new IOException("connection reset"));
-
-        assertThrows(ModelListingException.class, () -> lister().list(cred("sk-ant-test")));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void anInterruptedFetchIsAListingFailureThatKeepsTheInterrupt() throws Exception {
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new InterruptedException());
-
-        boolean interrupted;
-        try {
-            assertThrows(ModelListingException.class, () -> lister().list(cred("sk-ant-test")));
-        } finally {
-            interrupted = Thread.interrupted();
-        }
-
-        assertTrue(interrupted, "the caller's interrupt must survive the failed fetch");
     }
 }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.cases.CaseOpener;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -66,20 +67,9 @@ class ClassifierArmingTest {
     }
 
     private static ClassifierRow signal(String configJson) {
-        String kind = BuiltInDetector.Kind.SECRET_LEAK;
-        return new ClassifierRow(
-                "sig-1",
-                "proj-1",
-                kind,
-                kind,
-                null,
-                kind,
-                configJson,
-                true,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                "now",
-                "now");
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.SECRET_LEAK)
+                .config(configJson)
+                .discovery()
+                .build();
     }
 }

@@ -3,13 +3,16 @@
  * GroundednessEnableModal: the mode control picks the prompt and its requirements line, Copy puts the
  * prompt (at the running version's ref) on the clipboard, and the steps follow the status reads from
  * "set up model", through a failed read while Tessary restarts, to the model answering. It then enables
- * the classifier exactly once and says so.
+ * the classifier exactly once and says so. The restart modal closes itself once a poll reads the model
+ * scoring again; the turn-off modal warns, in production only, that the AWS instance keeps running.
  */
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, type GroundednessStatus } from "../../api/types";
 import { GroundednessEnableModal, SETUP_POLL_MS } from "./GroundednessEnableModal";
+import { GroundednessRestartModal } from "./GroundednessRestartModal";
+import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
 
 const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
 const setClassifierEnabled = vi.fn(async () => ({}));
@@ -26,19 +29,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   };
 });
 
-beforeAll(() => {
-  // jsdom implements <dialog> but not showModal/close.
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-  };
-});
-
 afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
   getGroundednessStatus.mockReset();
   setClassifierEnabled.mockClear();
 });
@@ -201,5 +192,63 @@ describe("GroundednessEnableModal", () => {
 
     expect(screen.getByRole("alert").textContent).toBe("auth.forbidden: only an owner can read this");
     expect(activeStep()).toBe("Set up model");
+  });
+});
+
+describe("GroundednessRestartModal", () => {
+  it("closes itself once a poll reads the model scoring again", async () => {
+    vi.useFakeTimers();
+    getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />
+      </QueryClientProvider>,
+    );
+    await tick(50);
+    expect(getGroundednessStatus).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+
+    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true }));
+    // The result reaches the component on a zero-delay timer of its own, a few ms past the poll.
+    await tick(SETUP_POLL_MS + 50);
+
+    expect(getGroundednessStatus).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GroundednessTurnOffModal", () => {
+  const renderTurnOff = (mode: "production" | "dev", onClose = vi.fn()) => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <GroundednessTurnOffModal classifierId="clf-g" mode={mode} onClose={onClose} />
+      </QueryClientProvider>,
+    );
+    return onClose;
+  };
+
+  it("warns that the AWS instance keeps running in production", () => {
+    renderTurnOff("production");
+
+    screen.getByText("Findings and detections stay.");
+    screen.getByText("The AWS instance keeps running");
+    screen.getByText("Delete the groundedness-model stack in CloudFormation to stop charges.");
+  });
+
+  it("has no AWS warning in dev", () => {
+    renderTurnOff("dev");
+
+    screen.getByText("Findings and detections stay.");
+    expect(screen.queryByText("The AWS instance keeps running")).toBeNull();
+  });
+
+  it("switches the classifier off and closes", async () => {
+    const onClose = renderTurnOff("dev");
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn off" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", false);
   });
 });

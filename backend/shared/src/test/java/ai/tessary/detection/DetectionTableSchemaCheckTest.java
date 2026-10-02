@@ -14,39 +14,14 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.stream.Stream;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 /**
  * {@code backend/shared} has no Spring Boot test harness or mocking library, so {@link DetectionTableSchemaCheck} is
  * exercised directly with JDBC objects stood in by {@link Proxy}.
  */
 class DetectionTableSchemaCheckTest {
-
-    private static <T> ObjectProvider<T> providerOf(T item) {
-        return new ObjectProvider<>() {
-            @Override
-            public T getObject() {
-                return item;
-            }
-
-            @Override
-            public T getIfAvailable() {
-                return item;
-            }
-
-            @Override
-            public Stream<T> orderedStream() {
-                return item == null ? Stream.empty() : Stream.of(item);
-            }
-        };
-    }
-
-    private static ObjectProvider<DataSource> noDataSource() {
-        return providerOf(null);
-    }
 
     /** A {@link DataSource} whose {@code to_regclass(...)} answer is fixed for every query it runs. */
     private static DataSource fakeDataSource(boolean tableExists) {
@@ -101,25 +76,11 @@ class DetectionTableSchemaCheckTest {
                 resultSetHandler);
     }
 
-    private static ObjectProvider<DetectionTable> tablesOf(DetectionTable... items) {
-        return new ObjectProvider<>() {
-            @Override
-            public DetectionTable getObject() {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public Stream<DetectionTable> orderedStream() {
-                return Stream.of(items);
-            }
-        };
-    }
-
     @Test
     void noDataSourceBeanStartsClean() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
-        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, noDataSource());
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.<DataSource>of());
 
         assertDoesNotThrow(check::afterSingletonsInstantiated);
     }
@@ -127,8 +88,8 @@ class DetectionTableSchemaCheckTest {
     @Test
     void missingTableFailsBootNamingKindAndTable() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("frustration", "frustration_detection", Grain.TRACE)));
-        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(false)));
+                Providers.of(new DetectionTable("frustration", "frustration_detection", Grain.TRACE)));
+        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(false)));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
         assertTrue(ex.getMessage().contains("frustration"));
@@ -139,9 +100,9 @@ class DetectionTableSchemaCheckTest {
     @Test
     void missingSubjectStartedAtColumnFailsBootNamingKindAndTable() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
         DetectionTableSchemaCheck check =
-                new DetectionTableSchemaCheck(registry, providerOf(fakeDataSource(true, false)));
+                new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(true, false)));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
         assertTrue(ex.getMessage().contains("secret_leak"));
@@ -159,8 +120,8 @@ class DetectionTableSchemaCheckTest {
                     throw new UnsupportedOperationException(m.getName());
                 });
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                tablesOf(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
-        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, providerOf(down));
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+        DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.of(down));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
         assertEquals(

@@ -15,6 +15,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -90,22 +91,15 @@ class GroundednessAssessmentIntegrationTest {
 
     private Fixture fixture(String name) {
         String pid = TenantFixture.bootstrap(tenants, name).project().id();
-        String now = Instant.now().toString();
-        ClassifierRow row = new ClassifierRow(
-                Ids.ulid(),
+        ClassifierRow row = ClassifierRows.insertRow(
+                rows,
                 pid,
                 "groundedness-assessment",
                 "Groundedness (assessment test)",
-                null,
                 BuiltInDetector.Kind.GROUNDEDNESS,
                 null,
-                false,
-                1,
-                true,
                 ClassifierRow.Mode.TRACKING,
-                now,
-                now);
-        rows.insert(row);
+                true);
         return new Fixture(pid, row);
     }
 

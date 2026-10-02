@@ -16,23 +16,26 @@ import ai.tessary.tenant.OrgMembership;
 import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -45,16 +48,8 @@ import org.springframework.web.server.ResponseStatusException;
  * updated, replace removes absent graders and orphans curation entries, missing {@code pipeline/meta.yaml} is a 400,
  * sidecars are ignored, and both the {@code .tessary/} prefix and root-relative paths are accepted.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class ImportControllerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        // Enable auth so this test exercises the real, authenticated request path -- say so
-        // directly rather than configuring a fake external-provider key as an indirect toggle.
-        // See TestAuthDisabledInitializer's javadoc.
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -241,50 +236,34 @@ class ImportControllerTest {
         assertEquals(1, back.callSites().size(), "only the real shard should land in the DB");
     }
 
-    @Test
-    void importDirectory_missingMeta_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-no-meta");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "noMeta").plaintext();
-        mvc.perform(multipart(url(fix))
-                        .file(file(".tessary/graders/cs_summarize__hallucinates__grader.yaml", GRADER_YAML_1))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
+    static Stream<Arguments> malformedBundles() {
+        return Stream.of(
+                Arguments.of(
+                        "import-no-meta",
+                        "",
+                        List.of(file(".tessary/graders/cs_summarize__hallucinates__grader.yaml", GRADER_YAML_1))),
+                // Multipart needs at least one part; send a noise file the import drops.
+                Arguments.of(
+                        "import-dir-empty",
+                        "",
+                        List.of(new MockMultipartFile(
+                                "files", "README.md", "text/markdown", "# noise\n".getBytes(StandardCharsets.UTF_8)))),
+                Arguments.of(
+                        "import-dup-meta",
+                        "",
+                        List.of(file("a/pipeline/meta.yaml", META_YAML), file("b/pipeline/meta.yaml", META_YAML))),
+                Arguments.of("import-mode-bad", "?mode=nope", List.of(file(".tessary/pipeline/meta.yaml", META_YAML))));
     }
 
-    @Test
-    void importDirectory_emptyUpload_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-dir-empty");
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("malformedBundles")
+    void importDirectory_malformedBundle_400(String name, String query, List<MockMultipartFile> files)
+            throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, name);
         String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "empty").plaintext();
-        // Multipart needs at least one part; send a noise file the import drops.
-        mvc.perform(multipart(url(fix))
-                        .file(new MockMultipartFile(
-                                "files", "README.md", "text/markdown", "# noise\n".getBytes(StandardCharsets.UTF_8)))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void importDirectory_doubleMetaShard_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-dup-meta");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "dup").plaintext();
-        mvc.perform(multipart(url(fix))
-                        .file(file("a/pipeline/meta.yaml", META_YAML))
-                        .file(file("b/pipeline/meta.yaml", META_YAML))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void importDirectory_unknownMode_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-mode-bad");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "modeBad").plaintext();
-        var req = multipart(url(fix) + "?mode=nope")
-                .file(file(".tessary/pipeline/meta.yaml", META_YAML))
-                .header("Authorization", "Bearer " + token);
+                mcpTokens.issue(fix.project().id(), fix.user().id(), name).plaintext();
+        var req = multipart(url(fix) + query).header("Authorization", "Bearer " + token);
+        for (MockMultipartFile f : files) req = req.file(f);
         mvc.perform(req).andExpect(status().isBadRequest());
     }
 

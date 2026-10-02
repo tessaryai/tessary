@@ -12,7 +12,6 @@ import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorRate;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
@@ -20,17 +19,14 @@ import ai.tessary.classifier.toolerror.ToolErrorTrend.Spell;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
-import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierRows;
-import ai.tessary.testsupport.TenantFixture;
+import ai.tessary.testsupport.RateClassifierFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,9 +42,6 @@ class FrustrationRateReplayIntegrationTest {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
-
-    @Autowired
-    FrustrationAssessmentRepository assessments;
 
     @Autowired
     FrustrationRateRepository rates;
@@ -69,29 +62,33 @@ class FrustrationRateReplayIntegrationTest {
     JdbcClient jdbc;
 
     @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
+    RateClassifierFixture fixture;
 
     @Test
     void aConversationIsOneTrialOnItsFirstScoredCallSiteAndHourAndFailsOnlyWhileFlagged() {
-        String pid = project("fr-tally");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-tally", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant h10 = Instant.now().minus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
 
         // Calm on cs-a, then flagged on a later turn on cs-b: a failure on cs-a, in its first hour.
-        assess(pid, signal, "a1", "conv-a", "cs-a", h10.plus(Duration.ofMinutes(5)), false, VERSION);
-        assess(pid, signal, "a2", "conv-a", "cs-b", h10.plus(Duration.ofHours(2)), true, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "a1", "conv-a", "cs-a", h10.plus(Duration.ofMinutes(5)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "a2", "conv-a", "cs-b", h10.plus(Duration.ofHours(2)), true, VERSION);
         flag(pid, signal, "a2", "conv-a", false);
         // Flagged, then cleared by a false-alarm resolve: a trial, not a failure.
-        assess(pid, signal, "b1", "conv-b", "cs-a", h10.plus(Duration.ofMinutes(30)), true, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "b1", "conv-b", "cs-a", h10.plus(Duration.ofMinutes(30)), true, VERSION);
         flag(pid, signal, "b1", "conv-b", true);
-        assess(pid, signal, "c1", "conv-c", "cs-b", h10.plus(Duration.ofMinutes(70)), false, VERSION);
-        assess(pid, signal, "d1", "conv-d", null, h10.plus(Duration.ofMinutes(40)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "c1", "conv-c", "cs-b", h10.plus(Duration.ofMinutes(70)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "d1", "conv-d", null, h10.plus(Duration.ofMinutes(40)), false, VERSION);
         // Another scorer's rows and rows before the window do not count.
-        assess(pid, signal, "e1", "conv-e", "cs-a", h10.plus(Duration.ofMinutes(10)), true, "jev-choice3-other");
-        assess(pid, signal, "f1", "conv-f", "cs-a", h10.minus(Duration.ofDays(1)), false, VERSION);
+        fixture.frustrationAssessment(
+                pid, signal, "e1", "conv-e", "cs-a", h10.plus(Duration.ofMinutes(10)), true, "jev-choice3-other");
+        fixture.frustrationAssessment(
+                pid, signal, "f1", "conv-f", "cs-a", h10.minus(Duration.ofDays(1)), false, VERSION);
 
         List<HourlyToolTally> tallies = rates.hourlyTallies(pid, signal.id(), VERSION, h10);
 
@@ -109,14 +106,14 @@ class FrustrationRateReplayIntegrationTest {
 
     @Test
     void aRiseAlarmsTheStateRowIsSavedAndTheTuningViewReadsIt() {
-        String pid = project("fr-rise");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-rise", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         // Judged from 100 (four hours), and every later hour is added to the reference until 1,000.
         seedHours(pid, signal, "cs-chat", start, 0, 7, 30, 0.05); // 210 conversations at 5%
         seedHours(pid, signal, "cs-chat", start, 7, 6, 30, 0.40); // then 180 at 40%
         seedHours(pid, signal, "cs-quiet", start, 0, 2, 10, 0.0); // 20 conversations: still learning
-        assess(pid, signal, "orphan", "conv-orphan", null, start, false, VERSION);
+        fixture.frustrationAssessment(pid, signal, "orphan", "conv-orphan", null, start, false, VERSION);
 
         List<Spell> spells = service.refresh(pid, signal, Instant.now());
 
@@ -156,8 +153,8 @@ class FrustrationRateReplayIntegrationTest {
 
     @Test
     void aTuningChangeResetsTheCallSiteAndItReLearnsFromLaterTraffic() {
-        String pid = project("fr-retune");
-        ClassifierRow signal = frustration(pid);
+        String pid = fixture.project("fr-retune", Capability.FRUSTRATION);
+        ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, signal, "cs-chat", start, 0, 12, 30, 0.05);
         service.refresh(pid, signal, Instant.now());
@@ -190,7 +187,7 @@ class FrustrationRateReplayIntegrationTest {
 
     @Test
     void theTuningViewRefusesAnyOtherClassifier() {
-        String pid = project("fr-other");
+        String pid = fixture.project("fr-other", Capability.FRUSTRATION);
         classifierService.seedBuiltIns(pid);
         ClassifierRow other = classifierService.list(pid).stream()
                 .filter(c -> !"frustration".equals(c.classifierKey()))
@@ -205,17 +202,6 @@ class FrustrationRateReplayIntegrationTest {
         CarriedState state = rates.states().byTool(pid).get(callSite);
         assertNotNull(state, callSite + " has a state row");
         return state;
-    }
-
-    private String project(String slug) {
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
-                .project()
-                .id();
-    }
-
-    private ClassifierRow frustration(String pid) {
-        classifierService.seedBuiltIns(pid);
-        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
     }
 
     /** {@code perHour} one-turn conversations an hour, the first {@code rate} of each hour flagged. */
@@ -233,7 +219,7 @@ class FrustrationRateReplayIntegrationTest {
             for (int c = 0; c < perHour; c++) {
                 String id = callSite + "-" + h + "-" + c;
                 boolean flagged = c < flaggedPerHour;
-                assess(
+                fixture.frustrationAssessment(
                         pid,
                         signal,
                         id,
@@ -245,35 +231,6 @@ class FrustrationRateReplayIntegrationTest {
                 if (flagged) flag(pid, signal, id, "conv-" + id, false);
             }
         }
-    }
-
-    private void assess(
-            String pid,
-            ClassifierRow signal,
-            String traceId,
-            String conversation,
-            @Nullable String callSite,
-            Instant at,
-            boolean frustrated,
-            String version) {
-        assessments.insert(new Assessment(
-                Ids.ulid(),
-                pid,
-                signal.id(),
-                traceId,
-                "span-" + traceId,
-                conversation,
-                callSite,
-                at,
-                frustrated,
-                version,
-                "TYPESAFE",
-                "typesafe/jev-1.13-20260917",
-                null,
-                "{}",
-                null,
-                null,
-                null));
     }
 
     private void flag(String pid, ClassifierRow signal, String traceId, String conversation, boolean cleared) {

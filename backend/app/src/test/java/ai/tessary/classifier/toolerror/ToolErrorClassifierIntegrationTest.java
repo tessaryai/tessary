@@ -20,11 +20,13 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
+import ai.tessary.testsupport.SubstrateV2Fixtures.ToolCallTurn;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -54,7 +56,9 @@ class ToolErrorClassifierIntegrationTest {
     private static final String TOOL = "search_docs";
 
     /** Past {@code minBaselineCalls} (500), so the reference is thick before the rise. */
-    private static final int QUIET_HOURS = 40;
+    private static final int QUIET_HOURS = 27;
+
+    private static final int RISE_HOURS = 4;
 
     private static final int CALLS_PER_HOUR = 20;
 
@@ -140,7 +144,7 @@ class ToolErrorClassifierIntegrationTest {
         Instant start = Instant.now().minus(60, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
 
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
 
         assertEquals(1, service.refresh(pid), "one tool in a spell");
 
@@ -204,7 +208,7 @@ class ToolErrorClassifierIntegrationTest {
         // Ninety days old: outside a {@code now - 28d} window, but inside 28 days of this project's last call.
         Instant start = Instant.now().minus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
 
         assertEquals(
                 1,
@@ -261,7 +265,7 @@ class ToolErrorClassifierIntegrationTest {
         // backfill test covers.
         Instant start = Instant.now().minus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
         // The replay's own last folded bucket, read back rather than computed from the seed.
         String lastFoldedBucket = repo.hourlyTallies(pid, start).stream()
                 .filter(t -> t.toolKey().endsWith(TOOL))
@@ -312,7 +316,7 @@ class ToolErrorClassifierIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "toolerr-fold").project().id();
         Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
         service.refresh(pid);
 
         FindingRow finding = firedFinding(pid);
@@ -354,7 +358,7 @@ class ToolErrorClassifierIntegrationTest {
                 .id();
         Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
         service.refresh(pid);
         FindingRow finding = firedFinding(pid);
         double armed = armOf(pid);
@@ -402,7 +406,7 @@ class ToolErrorClassifierIntegrationTest {
                 .id();
         Instant start = Instant.now().minus(90, ChronoUnit.HOURS).truncatedTo(ChronoUnit.HOURS);
         seedHours(pid, start, QUIET_HOURS, 1);
-        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), 20, 8);
+        seedHours(pid, start.plus(QUIET_HOURS, ChronoUnit.HOURS), RISE_HOURS, 8);
         service.refresh(pid);
         FindingRow ruled = firedFinding(pid);
         assertEquals(
@@ -418,7 +422,7 @@ class ToolErrorClassifierIntegrationTest {
         assertEquals(1, service.refresh(pid), "the spell is still running");
         assertEquals(1, rateShiftFindings(pid), "an unchanged recompute must not re-file the ruled window");
 
-        seedHours(pid, start.plus(QUIET_HOURS + 20L, ChronoUnit.HOURS), 2, 8);
+        seedHours(pid, start.plus(QUIET_HOURS + RISE_HOURS, ChronoUnit.HOURS), 2, 8);
         service.refresh(pid);
         assertEquals(2, rateShiftFindings(pid), "a later hour of traffic is a window nobody ruled on");
         FindingRow fresh = findings.listByProject(pid, FindingRow.Status.OPEN, null, null, false, 50).stream()
@@ -548,6 +552,7 @@ class ToolErrorClassifierIntegrationTest {
     }
 
     private void seedHours(String projectId, Instant from, int hours, int failuresPerHour) {
+        List<ToolCallTurn> calls = new ArrayList<>();
         for (int h = 0; h < hours; h++) {
             Instant hour = from.plus(h, ChronoUnit.HOURS);
             for (int c = 0; c < CALLS_PER_HOUR; c++) {
@@ -555,9 +560,23 @@ class ToolErrorClassifierIntegrationTest {
                 Failure mode = c >= failuresPerHour
                         ? Failure.NONE
                         : (c % 2 == 0 ? Failure.RESULT_ERROR_OBJECT : Failure.SPAN_STATUS);
-                seedCall(projectId, hour.plusSeconds(c * 10L), mode);
+                calls.add(call(hour.plusSeconds(c * 10L), mode));
             }
         }
+        fx.toolCallTurns(projectId, TOOL, calls);
+    }
+
+    private static ToolCallTurn call(Instant at, Failure failure) {
+        return new ToolCallTurn(
+                at,
+                failure == Failure.SPAN_STATUS ? "upstream search timed out after 30014ms" : null,
+                switch (failure) {
+                    case RESULT_ERROR_OBJECT -> "{\"error\": {\"message\": \"index shard 7 unavailable\"}}";
+                    case RESULT_IS_ERROR -> "{\"isError\": true, \"content\": \"backend refused the query\"}";
+                    default -> "{\"docs\": [\"policy.md\"]}";
+                },
+                // Rule 2's attribute lives in span_payload, which the predicate's {@code pl} join reads.
+                failure == Failure.ERROR_TYPE_ATTRIBUTE ? "{\"error.type\": \"SearchTimeout\"}" : null);
     }
 
     /**
@@ -565,6 +584,7 @@ class ToolErrorClassifierIntegrationTest {
      * skipping it would make every assertion read zero.
      */
     private void seedCall(String projectId, Instant at, Failure failure) {
+        ToolCallTurn call = call(at, failure);
         String traceId = SubstrateV2Fixtures.traceId();
         String rootId = SubstrateV2Fixtures.spanId();
         String sessionId = SubstrateV2Fixtures.sessionId();
@@ -577,7 +597,6 @@ class ToolErrorClassifierIntegrationTest {
                 .at(at)
                 .write();
 
-        // Rule 2's attribute lives in span_payload, which the predicate's {@code pl} join reads.
         SpanRef span = fx.spanSeed(projectId)
                 .traceId(traceId)
                 .parentSpanId(rootId)
@@ -585,20 +604,9 @@ class ToolErrorClassifierIntegrationTest {
                 .kind("tool")
                 .name("execute_tool " + TOOL)
                 .at(at)
-                .payload(
-                        null,
-                        null,
-                        failure == Failure.ERROR_TYPE_ATTRIBUTE ? "{\"error.type\": \"SearchTimeout\"}" : null)
+                .payload(null, null, call.attributesJson())
                 .writeRef();
-
-        String errorType = failure == Failure.SPAN_STATUS ? "upstream search timed out after 30014ms" : null;
-        String result =
-                switch (failure) {
-                    case RESULT_ERROR_OBJECT -> "{\"error\": {\"message\": \"index shard 7 unavailable\"}}";
-                    case RESULT_IS_ERROR -> "{\"isError\": true, \"content\": \"backend refused the query\"}";
-                    default -> "{\"docs\": [\"policy.md\"]}";
-                };
-        fx.toolCall(projectId, span, TOOL, errorType, result, at);
+        fx.toolCall(projectId, span, TOOL, call.errorType(), call.resultJson(), at);
 
         fx.rollup(projectId, traceId);
     }

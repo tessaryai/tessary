@@ -18,8 +18,12 @@ import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * What an agentic (RCA/TRIAGE) run actually carries to the sandbox launcher, now that the
@@ -67,7 +71,7 @@ class AgenticCredentialResolverTest {
         return p;
     }
 
-    private ProviderCredential cred(
+    private static ProviderCredential cred(
             ModelProvider provider,
             String apiKeySealed,
             String baseUrlOverride,
@@ -93,7 +97,7 @@ class AgenticCredentialResolverTest {
                 "t");
     }
 
-    private ProviderCredential apiKeyCred(ModelProvider provider, String baseUrl, String customModelName) {
+    private static ProviderCredential apiKeyCred(ModelProvider provider, String baseUrl, String customModelName) {
         return cred(
                 provider,
                 "sealed-api-key",
@@ -105,7 +109,7 @@ class AgenticCredentialResolverTest {
                 ProviderCredential.AUTH_MODE_API_KEY);
     }
 
-    private ProviderCredential bedrockCred(ModelProvider provider, String region, String access, String secret) {
+    private static ProviderCredential bedrockCred(ModelProvider provider, String region, String access, String secret) {
         return cred(provider, null, null, region, access, secret, null, ProviderCredential.AUTH_MODE_API_KEY);
     }
 
@@ -138,50 +142,51 @@ class AgenticCredentialResolverTest {
         verify(repo, never()).findByOrgAndProvider(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
-    @Test
-    void openAiCompatCredentialWithNoApiKey_failsWithMissingCredentials() {
-        stored(
-                ModelProvider.GROK,
-                cred(ModelProvider.GROK, null, null, null, null, null, null, ProviderCredential.AUTH_MODE_API_KEY));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.GROK));
+    static Stream<Arguments> incompleteCredentials() {
+        return Stream.of(
+                Arguments.of(
+                        "an OpenAI-compat credential with no api key",
+                        cred(
+                                ModelProvider.GROK,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                ProviderCredential.AUTH_MODE_API_KEY)),
+                Arguments.of(
+                        "an OpenAI-compat credential with a blank api key",
+                        cred(
+                                ModelProvider.GLM,
+                                "   ",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                ProviderCredential.AUTH_MODE_API_KEY)),
+                Arguments.of(
+                        "Bedrock without a region",
+                        bedrockCred(ModelProvider.BEDROCK, null, "sealed-access", "sealed-secret")),
+                Arguments.of(
+                        "Bedrock with a blank region",
+                        bedrockCred(ModelProvider.BEDROCK, "  ", "sealed-access", "sealed-secret")),
+                Arguments.of(
+                        "Bedrock without an access key",
+                        bedrockCred(ModelProvider.BEDROCK, "us-east-1", null, "sealed-secret")),
+                Arguments.of(
+                        "Bedrock without a secret key",
+                        bedrockCred(ModelProvider.BEDROCK, "us-east-1", "sealed-access", null)),
+                Arguments.of(
+                        "mantle without AWS keys", bedrockCred(ModelProvider.BEDROCK_MANTLE, "us-east-1", null, null)));
     }
 
-    @Test
-    void openAiCompatCredentialWithBlankApiKey_failsWithMissingCredentials() {
-        stored(
-                ModelProvider.GLM,
-                cred(ModelProvider.GLM, "   ", null, null, null, null, null, ProviderCredential.AUTH_MODE_API_KEY));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.GLM));
-    }
-
-    @Test
-    void bedrockWithoutRegion_failsWithMissingCredentials() {
-        stored(ModelProvider.BEDROCK, bedrockCred(ModelProvider.BEDROCK, null, "sealed-access", "sealed-secret"));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.BEDROCK));
-    }
-
-    @Test
-    void bedrockWithBlankRegion_failsWithMissingCredentials() {
-        stored(ModelProvider.BEDROCK, bedrockCred(ModelProvider.BEDROCK, "  ", "sealed-access", "sealed-secret"));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.BEDROCK));
-    }
-
-    @Test
-    void bedrockWithoutAccessKey_failsWithMissingCredentials() {
-        stored(ModelProvider.BEDROCK, bedrockCred(ModelProvider.BEDROCK, "us-east-1", null, "sealed-secret"));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.BEDROCK));
-    }
-
-    @Test
-    void bedrockWithoutSecretKey_failsWithMissingCredentials() {
-        stored(ModelProvider.BEDROCK, bedrockCred(ModelProvider.BEDROCK, "us-east-1", "sealed-access", null));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.BEDROCK));
-    }
-
-    @Test
-    void mantleWithoutAwsKeys_failsWithMissingCredentials() {
-        stored(ModelProvider.BEDROCK_MANTLE, bedrockCred(ModelProvider.BEDROCK_MANTLE, "us-east-1", null, null));
-        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(ModelProvider.BEDROCK_MANTLE));
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("incompleteCredentials")
+    void anIncompleteCredential_failsWithMissingCredentials(String why, ProviderCredential credential) {
+        stored(credential.provider(), credential);
+        assertEquals(ModelConfigError.MISSING_CREDENTIALS, errorFrom(credential.provider()), why);
     }
 
     // ---------------------------------------------------------------- IAM role is not sandbox-usable

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -14,8 +16,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
-import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
@@ -31,21 +31,9 @@ import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.query.QueryService;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,87 +45,42 @@ import org.junit.jupiter.api.Test;
  */
 class McpFindingToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
-
-    private final ObjectMapper mapper = new ObjectMapper();
     private FindingService behaviorDrift;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
         this.behaviorDrift = mock(FindingService.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-        // Unused by the finding tools, but the registry needs them.
-        PipelineService pipeline = mock(PipelineService.class);
-        QueryService query = mock(QueryService.class);
-        SpanRepository spans = mock(SpanRepository.class);
-        SpanPayloadRepository payloads = mock(SpanPayloadRepository.class);
-        TraceV2Repository traces = mock(TraceV2Repository.class);
-        var registry = new McpToolRegistry(
-                pipeline,
-                projects,
-                query,
-                spans,
-                payloads,
-                traces,
-                mock(SessionReadService.class),
-                behaviorDrift,
-                mock(CaseService.class));
-        this.dispatcher = new McpDispatcher(registry, mapper);
+        this.mcp = registryWith().findings(behaviorDrift).build();
     }
 
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
-    }
-
-    private static BehaviorFindingDetailView sampleFinding() {
-        FindingRow row = new FindingRow(
-                "find-1",
+    private static FindingRow row(
+            String id,
+            String classifierKey,
+            String causeKey,
+            String subjectKind,
+            String subjectId,
+            @Nullable String subjectLabel,
+            @Nullable String callSiteId,
+            long sampleCount,
+            String payloadJson) {
+        return new FindingRow(
+                id,
                 PROJECT_ID,
-                BuiltInDetector.Kind.DURATION_DRIFT,
-                "cause-key-1",
-                FindingRow.SubjectKind.CLASSIFIER,
-                "clf-1",
-                "cause-key-1",
-                "cs-1",
+                classifierKey,
+                causeKey,
+                subjectKind,
+                subjectId,
+                subjectLabel,
+                callSiteId,
                 FindingRow.Status.OPEN,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z",
                 /* title */ null,
                 /* basis */ null,
                 /* severity */ null,
-                5L,
-                // The native vocabulary the scoped cause key folds in, exactly as the writer merges it.
-                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\",\"workflow_key\":\"workflow-1\","
-                        + "\"native_cause_key\":\"cause-key-1\"}",
+                sampleCount,
+                payloadJson,
                 /* evidenceCountsJson */ null,
                 /* sinceVersionId */ null,
                 /* escalatedAt */ null,
@@ -150,6 +93,21 @@ class McpFindingToolsTest {
                 null,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
+    }
+
+    private static BehaviorFindingDetailView sampleFinding() {
+        FindingRow row = row(
+                "find-1",
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "cause-key-1",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "clf-1",
+                "cause-key-1",
+                "cs-1",
+                5L,
+                // The native vocabulary the scoped cause key folds in, exactly as the writer merges it.
+                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\",\"workflow_key\":\"workflow-1\","
+                        + "\"native_cause_key\":\"cause-key-1\"}");
         // No evidence on the detail: get_finding returns the claim and get_finding_evidence pages the population.
         return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
@@ -198,7 +156,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFinding());
 
         JsonNode finding =
-                structured(callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
+                structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
 
         assertTrue(finding.get("triageVerdict").isNull(), "triageVerdict reached an agent");
         assertTrue(finding.get("triageSummary").isNull(), "triageSummary reached an agent");
@@ -219,7 +177,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFinding());
 
         JsonNode finding =
-                structured(callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
+                structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
 
         assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
     }
@@ -229,7 +187,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findings(PROJECT_ID, null, null, null, true))
                 .thenReturn(new BehaviorFindingsView(List.of(triagedFinding().finding()), "repo"));
 
-        JsonNode body = structured(callTool("list_findings", "{}"));
+        JsonNode body = structured(mcp.callTool("list_findings", "{}"));
 
         JsonNode first = body.get("findings").get(0);
         assertTrue(first.get("triageVerdict").isNull(), "a list row carried the ruling");
@@ -240,7 +198,7 @@ class McpFindingToolsTest {
     void getFinding_readsByIdProjectScoped() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(sampleFinding());
 
-        JsonNode structured = structured(callTool("get_finding", "{\"id\":\"find-1\"}"));
+        JsonNode structured = structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}"));
 
         assertEquals("find-1", structured.get("finding").get("id").asText());
         assertEquals("cs-1", structured.get("finding").get("callSiteId").asText());
@@ -254,33 +212,26 @@ class McpFindingToolsTest {
     void getFinding_notFoundIsCleanToolError() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "nope"))
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "nope"));
-        String text = errorText(callTool("get_finding", "{\"id\":\"nope\"}"));
+        String text = errorText(mcp.callTool("get_finding", "{\"id\":\"nope\"}"));
         assertTrue(text.contains("nope"), text);
     }
 
     @Test
     void getFinding_missingIdIsToolError_andNeverCallsService() throws Exception {
-        String text = errorText(callTool("get_finding", "{}"));
+        String text = errorText(mcp.callTool("get_finding", "{}"));
         assertTrue(text.contains("id"), text);
         verify(behaviorDrift, org.mockito.Mockito.never()).finding(any(), any());
     }
 
     private static BehaviorFindingDetailView toolErrorFinding() {
-        FindingRow row = new FindingRow(
+        FindingRow row = row(
                 "find-2",
-                PROJECT_ID,
                 "tool_error",
                 "tool_error:tool:search_docs:up",
                 FindingRow.SubjectKind.TOOL,
                 "tool:search_docs",
                 "search_docs",
                 "cs-1",
-                FindingRow.Status.OPEN,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z",
-                null,
-                null,
-                null,
                 80L,
                 "{\"cause_kind\":\"" + FindingRow.Cause.RATE_SHIFT + "\",\"measure\":\"tool_error_rate\","
                         + "\"bucket\":{\"kind\":\"tool\",\"key\":\"tool:search_docs\"},"
@@ -289,19 +240,7 @@ class McpFindingToolsTest {
                         + "\"rate\":{\"ref\":0.02,\"cur\":0.1},\"n_ref\":500,\"n_cur\":80,"
                         + "\"failures\":{\"cur\":8},"
                         + "\"failing_traces\":[\"trace-secret-1\",\"trace-secret-2\"],"
-                        + "\"onset_at\":\"2026-06-01T00:00:00Z\",\"window\":{\"kind\":\"recomputed\"}}",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z");
+                        + "\"onset_at\":\"2026-06-01T00:00:00Z\",\"window\":{\"kind\":\"recomputed\"}}");
         return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
@@ -310,7 +249,7 @@ class McpFindingToolsTest {
     void getFinding_toolError_carriesSummaryNumbers_andDropsFailingTraces() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-2")).thenReturn(toolErrorFinding());
 
-        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-2\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-2\"}"));
         JsonNode toolError = body.get("toolError");
 
         assertEquals("up", toolError.get("direction").asText());
@@ -323,35 +262,16 @@ class McpFindingToolsTest {
     }
 
     private static BehaviorFindingDetailView malformedOutputFinding() {
-        FindingRow row = new FindingRow(
+        FindingRow row = row(
                 "find-4",
-                PROJECT_ID,
                 BuiltInDetector.Kind.MALFORMED_OUTPUT,
                 "malformed_output_rate:cs-3",
                 FindingRow.SubjectKind.TOOL,
                 "cs-3",
                 "cs-3",
                 "cs-3",
-                FindingRow.Status.OPEN,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z",
-                null,
-                null,
-                null,
                 12L,
-                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\"}",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z");
+                "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\"}");
         MalformedOutputEvidence.MalformedDetail malformed = new MalformedOutputEvidence.MalformedDetail(
                 new ToolErrorEvidence.RateDetail(
                         "cs-3",
@@ -382,7 +302,7 @@ class McpFindingToolsTest {
     void getFinding_malformedOutput_dropsFailingTraces() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-4")).thenReturn(malformedOutputFinding());
 
-        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-4\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-4\"}"));
         JsonNode rate = body.get("malformedOutput").get("rate");
 
         assertEquals("up", rate.get("direction").asText());
@@ -391,35 +311,16 @@ class McpFindingToolsTest {
     }
 
     private static BehaviorFindingDetailView secretLeakFinding() {
-        FindingRow row = new FindingRow(
+        FindingRow row = row(
                 "find-3",
-                PROJECT_ID,
                 BuiltInDetector.Kind.SECRET_LEAK,
                 "secret_leak:aws-access-token",
                 FindingRow.SubjectKind.CLASSIFIER,
                 "classifier-1",
                 "aws-access-token",
                 "cs-2",
-                FindingRow.Status.OPEN,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z",
-                null,
-                null,
-                null,
                 3L,
-                "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"native_cause_key\":\"aws-access-token\"}",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z");
+                "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"native_cause_key\":\"aws-access-token\"}");
         SecretLeakEvidence.SecretLeakDetail secretLeak = new SecretLeakEvidence.SecretLeakDetail(
                 "aws-access-token",
                 FindingRow.Confidence.HIGH,
@@ -446,7 +347,7 @@ class McpFindingToolsTest {
     void getFinding_secretLeak_carriesSummaryNumbers_andDropsWitnessIds() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-3")).thenReturn(secretLeakFinding());
 
-        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-3\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-3\"}"));
         JsonNode secretLeak = body.get("secretLeak");
 
         assertEquals("event_count", secretLeak.get("basis").asText());
@@ -461,37 +362,18 @@ class McpFindingToolsTest {
     }
 
     private static BehaviorFindingDetailView armedWindowFinding() {
-        FindingRow row = new FindingRow(
+        FindingRow row = row(
                 "find-5",
-                PROJECT_ID,
                 BuiltInDetector.Kind.FRUSTRATION,
                 "per_span_classifier:classifier-2",
                 FindingRow.SubjectKind.CLASSIFIER,
                 "classifier-2",
                 "Frustration",
                 null,
-                FindingRow.Status.OPEN,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z",
-                null,
-                null,
-                null,
                 7L,
                 "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"basis\":\"event_count\","
                         + "\"observed\":7,\"threshold\":5,\"window_seconds\":86400,"
-                        + "\"window_start\":\"2026-06-01T00:00:00Z\",\"window_end\":\"2026-06-02T00:00:00Z\"}",
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "2026-06-01T00:00:00Z",
-                "2026-06-02T00:00:00Z");
+                        + "\"window_start\":\"2026-06-01T00:00:00Z\",\"window_end\":\"2026-06-02T00:00:00Z\"}");
         return BehaviorFindingDetailView.of(row, null, null, null, null, null);
     }
 
@@ -502,7 +384,7 @@ class McpFindingToolsTest {
     void getFinding_armedWindow_carriesSummaryForAClassifierWithNoRicherDetailOfItsOwn() throws Exception {
         when(behaviorDrift.finding(PROJECT_ID, "find-5")).thenReturn(armedWindowFinding());
 
-        JsonNode body = structured(callTool("get_finding", "{\"id\":\"find-5\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-5\"}"));
         JsonNode armedWindow = body.get("armedWindow");
 
         assertEquals("event_count", armedWindow.get("basis").asText());
@@ -516,7 +398,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
                 .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
-        structured(callTool(
+        structured(mcp.callTool(
                 "list_findings",
                 "{\"status\":\"open\",\"call_site_id\":\"cs-1\",\"detector\":\"duration_drift\","
                         + "\"include\":\"all\"}"));
@@ -530,7 +412,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
                 .thenReturn(new BehaviorFindingsView(List.of(), "repo"));
 
-        JsonNode body = structured(callTool("list_findings", "{}"));
+        JsonNode body = structured(mcp.callTool("list_findings", "{}"));
 
         assertEquals("repo", body.get("lane").asText());
     }
@@ -540,7 +422,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findings(eq(PROJECT_ID), any(), any(), any(), anyBoolean()))
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "boom"));
 
-        String text = errorText(callTool("list_findings", "{}"));
+        String text = errorText(mcp.callTool("list_findings", "{}"));
 
         assertTrue(text.contains("boom"), text);
     }
@@ -621,7 +503,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
                 .thenReturn(samplePage("cursor-2"));
 
-        JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
 
         assertEquals(2, body.get("rows").size());
         JsonNode first = body.get("rows").get(0);
@@ -656,7 +538,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
                 .thenReturn(samplePage(null));
 
-        JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
+        JsonNode body = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"));
 
         JsonNode first = body.get("rows").get(0);
         assertFalse(first.has("inputPreview"), first.toString());
@@ -668,7 +550,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("find-1"), any(), anyInt(), any()))
                 .thenReturn(samplePage(null));
 
-        structured(callTool(
+        structured(mcp.callTool(
                 "get_finding_evidence",
                 "{\"finding_id\":\"find-1\",\"role\":\"member\",\"limit\":9000,\"cursor\":\"c-1\"}"));
 
@@ -681,7 +563,8 @@ class McpFindingToolsTest {
         when(behaviorDrift.findingEvidence(PROJECT_ID, "find-1"))
                 .thenReturn(new FindingEvidencePage(List.of(), null, true, counts(118, 0), counts(120, 0)));
 
-        JsonNode body = structured(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"count_only\":true}"));
+        JsonNode body =
+                structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"count_only\":true}"));
 
         assertEquals(0, body.get("refs").size());
         assertTrue(body.get("rowsOmitted").asBoolean(), "count_only omits rows rather than returning none");
@@ -697,7 +580,8 @@ class McpFindingToolsTest {
     /** An unknown role is an error: an empty page would look like a finished audit of nothing. */
     @Test
     void getFindingEvidence_unknownRoleIsToolError_andNeverCallsService() throws Exception {
-        String text = errorText(callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"role\":\"members\"}"));
+        String text =
+                errorText(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\",\"role\":\"members\"}"));
 
         assertTrue(text.contains("members"), text);
         assertTrue(text.contains(FindingEvidenceRow.Role.BASELINE), text);
@@ -711,7 +595,7 @@ class McpFindingToolsTest {
         when(behaviorDrift.findingEvidenceSpans(eq(PROJECT_ID), eq("other-tenant"), any(), anyInt(), any()))
                 .thenThrow(new TessaryException(ClassifierError.FINDING_NOT_FOUND, "other-tenant"));
 
-        String text = errorText(callTool("get_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));
+        String text = errorText(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));
 
         assertTrue(text.contains("other-tenant"), text);
     }

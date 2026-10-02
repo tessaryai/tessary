@@ -5,9 +5,8 @@
  * reads its next page and one cause's answers from the server.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { renderRoute } from "../../test/render";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import type { FlaggedAnswer, FlaggedAnswerPage } from "../../api/types";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { dateTime } from "./groundedness";
@@ -30,7 +29,6 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
 });
 
 afterEach(() => {
-  cleanup();
   getFlaggedAnswers.mockReset();
 });
 
@@ -73,19 +71,14 @@ function renderList(
   nextCursor: string | null = null,
   filter?: { rcaReport: string; index: number },
 ) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <FlaggedAnswers
-          findingId="f-1"
-          first={{ rows, nextCursor }}
-          traces={traces}
-          filter={filter}
-          basePath="/orgs/acme/projects/default"
-        />
-      </MemoryRouter>
-    </QueryClientProvider>,
+  renderRoute(
+    <FlaggedAnswers
+      findingId="f-1"
+      first={{ rows, nextCursor }}
+      traces={traces}
+      filter={filter}
+      basePath="/orgs/acme/projects/default"
+    />,
   );
 }
 

@@ -18,9 +18,9 @@ import org.springframework.test.context.TestPropertySource;
  * so every test here is really asking what a SECOND boot does.
  */
 @SpringBootTest
-// Own context on purpose: it asserts what a SECOND boot of the importer does, so it must own the price-book tables
-// the first boot seeded.
-@TestPropertySource(properties = "test.context-group=price-book-importer")
+// Own context on purpose, shared only with ModelResolverIntegrationTest, which only reads the books: it asserts what a
+// SECOND boot of the importer does, so no other class may write the price-book tables the first boot seeded.
+@TestPropertySource(properties = "test.context-group=pricing-books")
 class PriceBookImporterIntegrationTest {
 
     @Autowired

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.tessary.alert.AlertEventRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -58,7 +59,7 @@ class LinearChannelTest {
                 () -> channel.deliver(FiredEvents.digest(1), FiredEvents.config(mapper, config)));
 
         assertEquals(AlertError.INVALID_CHANNEL_CONFIG, e.error());
-        assertNull(client.lastRequest, "nothing is sent on a config that cannot create an issue");
+        assertNull(client.lastRequest(), "nothing is sent on a config that cannot create an issue");
     }
 
     /** The issue carries the summary as its title and the firing's facts as its description. */
@@ -73,11 +74,11 @@ class LinearChannelTest {
         DeliveryResult result = channel.deliver(event, FiredEvents.config(mapper, CONFIG));
 
         assertEquals(DeliveryResult.success(200), result);
-        assertEquals(URI.create(URL), requireNonNull(client.lastRequest).uri());
+        assertEquals(URI.create(URL), requireNonNull(client.lastRequest()).uri());
         assertEquals(
                 "lin_api_k",
-                client.lastRequest.headers().firstValue("Authorization").orElseThrow());
-        JsonNode variables = mapper.readTree(client.lastBody).path("variables");
+                client.lastRequest().headers().firstValue("Authorization").orElseThrow());
+        JsonNode variables = mapper.readTree(client.lastBody()).path("variables");
         assertEquals(title, variables.path("title").asText());
         assertEquals(description, variables.path("description").asText());
         assertEquals("team-1", variables.path("teamId").asText());

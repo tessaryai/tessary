@@ -2,17 +2,19 @@
 package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -30,6 +32,10 @@ import org.springframework.mock.web.MockHttpServletResponse;
  * filter's own doc comment.
  */
 class RateLimitFilterTest {
+
+    private static final String HEALTH_PROBE =
+            "the three public health probes remain exempt -- the load-balancer path: polled by orchestrators before"
+                    + " anything holds a credential";
 
     /** The filter's monotonic clock. It moves only when a test advances it, so no bucket refills mid-burst. */
     private final AtomicLong nanos = new AtomicLong();
@@ -52,70 +58,47 @@ class RateLimitFilterTest {
         return req;
     }
 
-    @Test
-    @DisplayName("/api/** and /mcp remain rate-limited")
-    void apiAndMcpAreRateLimited() {
-        assertFalse(
-                filter().shouldNotFilter(request("GET", "/api/orgs/acme/projects/web/traces")),
-                "/api/** must stay rate-limited");
-        assertFalse(filter().shouldNotFilter(request("POST", "/mcp")), "/mcp must stay rate-limited");
+    static Stream<Arguments> postures() {
+        Stream<Arguments> fixed = Stream.of(
+                Arguments.of("/api/** must stay rate-limited", "GET", "/api/orgs/acme/projects/web/traces", false),
+                Arguments.of("/mcp must stay rate-limited", "POST", "/mcp", false),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health", true),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health/liveness", true),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health/readiness", true),
+                Arguments.of(
+                        "/actuator/health is matched exactly by isPublicActuatorPath; a same-prefix sibling must not"
+                                + " inherit the exemption",
+                        "GET",
+                        "/actuator/healthz",
+                        false),
+                // POST /auth/signup and /auth/login are the two credential-checking routes the
+                // dependency-free password provider adds. They must now be rate-limited by IP, since they
+                // have no TenantContext to key on -- and every OTHER /auth/** path must stay exempt exactly
+                // as before.
+                Arguments.of("/auth/signup must be rate-limited", "POST", "/auth/signup", false),
+                Arguments.of("/auth/login must be rate-limited", "POST", "/auth/login", false),
+                Arguments.of(
+                        "the OAuth GET dance shares a path with the new POST credential route but must not be "
+                                + "swept into rate limiting by it",
+                        "GET",
+                        "/auth/login",
+                        true));
+        Stream<Arguments> guardedActuator = Stream.of(
+                        "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus")
+                .map(path -> Arguments.of(
+                        "a guarded actuator path must be rate-limited: AuthFilter runs first (@Order(10) vs this"
+                                + " filter's @Order(20)) and now requires PlatformStaff.isStaff for this path, so"
+                                + " anything reaching here carries a real principal, same as /api/** and /mcp",
+                        "GET",
+                        path,
+                        false));
+        return Stream.concat(fixed, guardedActuator);
     }
 
-    @Test
-    @DisplayName("the three public health probes remain exempt -- the load-balancer path")
-    void publicHealthProbesAreExempt() {
-        for (String path :
-                new String[] {"/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"}) {
-            assertTrue(
-                    filter().shouldNotFilter(request("GET", path)),
-                    path + " is polled by orchestrators before anything holds a credential and must stay exempt");
-        }
-    }
-
-    @Test
-    @DisplayName("a guarded actuator path is NOT exempt -- it now carries a staff-verified ctx")
-    void guardedActuatorPathsAreRateLimited() {
-        for (String path : new String[] {
-            "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus"
-        }) {
-            assertFalse(
-                    filter().shouldNotFilter(request("GET", path)),
-                    path + " must be rate-limited: AuthFilter runs first (@Order(10) vs this filter's "
-                            + "@Order(20)) and now requires PlatformStaff.isStaff for this path, so anything "
-                            + "reaching here carries a real principal, same as /api/** and /mcp");
-        }
-    }
-
-    @Test
-    @DisplayName("a health-prefixed sibling is not exempt by name")
-    void healthPrefixedSiblingIsNotExempt() {
-        assertFalse(
-                filter().shouldNotFilter(request("GET", "/actuator/healthz")),
-                "/actuator/health is matched exactly by isPublicActuatorPath; a same-prefix sibling must not "
-                        + "inherit the exemption");
-    }
-
-    // -----------------------------------------------------------------------------------------
-    // POST /auth/signup and /auth/login are the two credential-checking routes the
-    // dependency-free password provider adds. They must now be rate-limited by IP, since they
-    // have no TenantContext to key on -- and every OTHER /auth/** path must stay exempt exactly
-    // as before.
-    // -----------------------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("POST /auth/signup and /auth/login are no longer exempt")
-    void credentialRoutesAreNotExempt() {
-        assertFalse(filter().shouldNotFilter(request("POST", "/auth/signup")), "/auth/signup must be rate-limited");
-        assertFalse(filter().shouldNotFilter(request("POST", "/auth/login")), "/auth/login must be rate-limited");
-    }
-
-    @Test
-    @DisplayName("GET /auth/login (the OAuth redirect) stays exempt -- same path, different method")
-    void oauthLoginGetStaysExempt() {
-        assertTrue(
-                filter().shouldNotFilter(request("GET", "/auth/login")),
-                "the OAuth GET dance shares a path with the new POST credential route but must not be "
-                        + "swept into rate limiting by it");
+    @ParameterizedTest(name = "{1} {2}: {0}")
+    @MethodSource("postures")
+    void shouldNotFilterFollowsThePostureTable(String rule, String method, String path, boolean exempt) {
+        assertEquals(exempt, filter().shouldNotFilter(request(method, path)), rule);
     }
 
     @Test

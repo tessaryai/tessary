@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Slugify drives URL paths and DB unique-constraint keys; quirks here surface
@@ -18,28 +20,20 @@ import org.junit.jupiter.api.Test;
  */
 class IdsTest {
 
-    @Test
-    void slugify_basicLowercaseDashes() {
-        assertEquals("acme-corp", Ids.slugify("Acme Corp"));
-        assertEquals("hello-world", Ids.slugify("hello world"));
-    }
-
-    @Test
-    void slugify_collapsesNonAlphanumericRuns() {
-        assertEquals("a-b-c", Ids.slugify("a!!!b@@@c"));
-        assertEquals("hello-world", Ids.slugify("hello___world"));
-    }
-
-    @Test
-    void slugify_stripsTrailingAndLeadingPunctuation() {
-        assertEquals("acme", Ids.slugify("!!!Acme!!!"));
-        assertEquals("acme", Ids.slugify("---acme---"));
-    }
-
-    @Test
-    void slugify_fallsBackToProjectWhenEmpty() {
-        assertEquals("project", Ids.slugify(""));
-        assertEquals("project", Ids.slugify("!!!"));
+    @ParameterizedTest(name = "slugify(\"{0}\") = {1}: {2}")
+    @CsvSource(delimiter = '|', textBlock = """
+            Acme Corp        | acme-corp        | lowercases and dashes
+            hello world      | hello-world      | lowercases and dashes
+            a!!!b@@@c        | a-b-c            | collapses non-alphanumeric runs
+            hello___world    | hello-world      | collapses non-alphanumeric runs
+            !!!Acme!!!       | acme             | strips leading and trailing punctuation
+            ---acme---       | acme             | strips leading and trailing punctuation
+            ''               | project          | falls back to project when empty
+            !!!              | project          | falls back to project when empty
+            v1 pipeline 2025 | v1-pipeline-2025 | accepts digits
+            """)
+    void slugify(String input, String slug, String rule) {
+        assertEquals(slug, Ids.slugify(input), rule);
     }
 
     @Test
@@ -49,11 +43,6 @@ class IdsTest {
         String s = Ids.slugify(input);
         assertTrue(s.length() <= 60, "slug must be <= 60 chars");
         assertFalse(s.endsWith("-"), "truncated slug must not end with a dash");
-    }
-
-    @Test
-    void slugify_acceptsDigits() {
-        assertEquals("v1-pipeline-2025", Ids.slugify("v1 pipeline 2025"));
     }
 
     @Test

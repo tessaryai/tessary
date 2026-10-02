@@ -14,6 +14,7 @@ import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierConversations;
 import ai.tessary.testsupport.ClassifierObservations;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.ClassifierSweeps;
 import ai.tessary.testsupport.StubDecisionClientConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
@@ -118,8 +119,8 @@ class ClassifierCursorKeysetIntegrationTest {
         for (int tick = 0; tick < 3 * SAME_TS_COUNT + 2; tick++) {
             service.seedBuiltIns(pid); // the generation-run trigger's effect (idempotent)
             worker.tick();
+            ClassifierSweeps.awaitDone(jdbc, pid, frustration.id());
             if (service.eventsForClassifier(pid, frustration.id(), null, 100).size() >= SAME_TS_COUNT) break;
-            sleep(200);
         }
 
         assertEquals(
@@ -166,20 +167,10 @@ class ClassifierCursorKeysetIntegrationTest {
 
     /** Seed the catalog, then resolve the Frustration definition and turn it on. */
     private ClassifierRow seedAndFindFrustration(String pid) {
-        for (int i = 0; i < 50; i++) {
-            service.seedBuiltIns(pid); // idempotent
-            var maybe = ClassifierRows.byKey(signals, pid, "frustration");
-            if (maybe.isPresent()) return service.setEnabled(pid, maybe.get().id(), true);
-            sleep(100);
-        }
-        throw new IllegalStateException("frustration built-in was not seeded");
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        service.seedBuiltIns(pid);
+        return service.setEnabled(
+                pid,
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
+                true);
     }
 }

@@ -9,40 +9,28 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.testsupport.LogCapture;
 import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import java.util.List;
 import java.util.Optional;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.LoggerFactory;
 
 /** A rollup pass over claims the database answers in every way it can: written, vanished, or failed. */
 @ExtendWith(MockitoExtension.class)
+@Isolated
 class TraceRollupWorkerTest {
 
     @Mock
     TraceV2Repository traces;
 
-    private final Logger logger = (Logger) LoggerFactory.getLogger(TraceRollupWorker.class);
-    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
-
-    @BeforeEach
-    void attach() {
-        appender.start();
-        logger.addAppender(appender);
-    }
-
-    @AfterEach
-    void detach() {
-        logger.detachAppender(appender);
-    }
+    @RegisterExtension
+    final LogCapture log = LogCapture.of(TraceRollupWorker.class);
 
     private TraceRollupWorker worker() {
         return new TraceRollupWorker(traces, new TraceRollupMetrics(), new SubstrateProperties());
@@ -73,10 +61,7 @@ class TraceRollupWorkerTest {
 
         assertDoesNotThrow(worker()::tick);
 
-        ILoggingEvent warn = appender.list.stream()
-                .filter(e -> e.getLevel() == Level.WARN)
-                .findFirst()
-                .orElseThrow();
+        ILoggingEvent warn = log.first(Level.WARN);
         assertNull(warn.getThrowableProxy(), "no stack trace, and no message, on the egressing line");
         assertEquals(List.of("IllegalStateException"), List.of(warn.getArgumentArray()));
     }

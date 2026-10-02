@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
-import static ai.tessary.git.github.ScriptedHttpClient.response;
+import static ai.tessary.git.github.GithubFixtures.secretBox;
+import static ai.tessary.testsupport.ScriptedHttpClient.response;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import ai.tessary.config.TessaryProperties;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.github.GithubTokenService.InstalledRepo;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.ScriptedHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -26,12 +27,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -41,6 +45,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * paginated list endpoints, and the OAuth code exchange that proves who completed an install. Every host is a
  * TEST-NET-3 address so {@code UrlGuard} passes without DNS.
  */
+@Isolated
 class GithubTokenServiceTest {
 
     private static final String HOST = "203.0.113.10";
@@ -63,14 +68,6 @@ class GithubTokenServiceTest {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
-    }
-
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 5);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
     }
 
     private static GithubAppProperties configuredApp() {
@@ -249,7 +246,63 @@ class GithubTokenServiceTest {
         assertTrue(http.sent().isEmpty());
     }
 
+    // ---- PAT mode ------------------------------------------------------------------------------
+
+    private GitIntegrationRow patIntegration(String token) throws Exception {
+        String enc = box.seal(mapper.writeValueAsString(Map.of("token", token)));
+        return new GitIntegrationRow("i1", "p1", "github", null, "acme", "web", "main", enc, "t", "t");
+    }
+
+    /**
+     * {@link GithubTokenService#authHeader} must try a sealed personal-access-token BEFORE gating on
+     * {@code GithubAppProperties.isConfigured()}: that gate used to be the unconditional first line, rejecting
+     * every PAT-mode integration even though PAT mode exists precisely for the no-App case.
+     */
+    @Test
+    void patTokenIsNotCached_rotatedTokenTakesEffectImmediately() throws Exception {
+        GithubAppProperties props = new GithubAppProperties();
+        GithubTokenService svc = new GithubTokenService(props, box, mapper);
+
+        GitIntegrationRow first = patIntegration("ghp_old");
+        assertEquals("Bearer ghp_old", svc.authHeader(first));
+
+        // Same integration id, different sealed token — simulates a self-hoster rotating the PAT.
+        // A cached-forever PAT would keep serving "ghp_old" here; it must not.
+        GitIntegrationRow rotated = patIntegration("ghp_new");
+        assertEquals("Bearer ghp_new", svc.authHeader(rotated));
+    }
+
+    @Test
+    void noPatFallsThroughToAppConfiguredGate() {
+        GithubAppProperties props = new GithubAppProperties(); // unconfigured
+        GithubTokenService svc = new GithubTokenService(props, box, mapper);
+        // No credentialsEnc at all (e.g. App-installation-mode row bound via installationId only,
+        // sealed elsewhere) — installationId-only rows are covered by other tests; here we assert
+        // the no-credentials case still reaches the App gate rather than silently no-op'ing.
+        GitIntegrationRow integ =
+                new GitIntegrationRow("i2", "p1", "github", null, "acme", "web", "main", null, "t", "t");
+        TessaryException e = assertThrows(TessaryException.class, () -> svc.authHeader(integ));
+        assertEquals(GitError.MISSING_APP_CONFIG, e.error());
+    }
+
     // ---- post-install: the bare-installation-id mint and the repo list ------------------------
+
+    /** The GitHub {@code Link} rel="next" cursor parser that drives list-endpoint pagination. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            nullValues = "NULL",
+            value = {
+                "NULL|NULL",
+                "''|NULL",
+                "'   '|NULL",
+                "<https://api.github.com/x?page=1>; rel=\"prev\", <https://api.github.com/x?page=3>; rel=\"next\", "
+                        + "<https://api.github.com/x?page=9>; rel=\"last\"|https://api.github.com/x?page=3",
+                "<https://api.github.com/x?page=1>; rel=\"prev\", <https://api.github.com/x?page=1>; rel=\"first\"|NULL"
+            })
+    void nextLink_findsTheNextCursorAnywhereInTheHeader(String header, String expected) {
+        assertEquals(expected, GithubTokenService.nextLink(header));
+    }
 
     @Test
     void mintByInstallationId_refusesWhenNoAppIsConfigured() {

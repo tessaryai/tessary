@@ -76,9 +76,8 @@ public class GithubClient implements GitProviderClient {
     }
 
     /**
-     * The status-to-error mapping for {@link #verifyAccess}, split out so it can be pinned without
-     * an HTTP round trip ({@code UrlGuard} refuses to aim this client at a local test server).
-     * Null means the status is not a refusal and the body should be parsed.
+     * The status-to-error mapping for {@link #verifyAccess}. Null means the status is not a refusal
+     * and the body should be parsed.
      */
     static @Nullable TessaryException verifyRefusal(int status, String slug) {
         return switch (status) {

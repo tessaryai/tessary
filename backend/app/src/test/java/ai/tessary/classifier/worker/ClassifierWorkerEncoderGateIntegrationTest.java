@@ -19,9 +19,9 @@ import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierObservations;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.io.IOException;
@@ -260,22 +260,16 @@ class ClassifierWorkerEncoderGateIntegrationTest {
                         ClassifierObservations.assistantOutput(
                                 "The Eiffel Tower in Berlin was completed in 1925 by Gustave Eiffel."))
                 .write();
-        String classifierId = Ids.ulid();
-        String now = Instant.now().toString();
-        rows.insert(new ClassifierRow(
-                classifierId,
-                pid,
-                "groundedness-gate",
-                "Groundedness (gate test)",
-                null,
-                BuiltInDetector.Kind.GROUNDEDNESS,
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.TRACKING,
-                now,
-                now));
+        String classifierId = ClassifierRows.insertRow(
+                        rows,
+                        pid,
+                        "groundedness-gate",
+                        "Groundedness (gate test)",
+                        BuiltInDetector.Kind.GROUNDEDNESS,
+                        null,
+                        ClassifierRow.Mode.TRACKING,
+                        true)
+                .id();
         return new Setup(pid, classifierId);
     }
 

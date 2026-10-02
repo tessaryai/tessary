@@ -10,7 +10,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -80,27 +79,6 @@ class OpenAiCompatModelListerTest {
     }
 
     @Test
-    void non2xxStatus_throwsModelListingException() throws Exception {
-        stubResponse(401, "{\"error\":\"unauthorized\"}");
-
-        assertThrows(
-                ModelListingException.class,
-                () -> lister().list(new ResolvedCredential(
-                        "bad-key", "https://api.openai.com/v1", null, null, null, false)));
-    }
-
-    @Test
-    void ioExceptionFromTheTransport_wrapsIntoModelListingException() throws Exception {
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new IOException("connection reset"));
-
-        assertThrows(
-                ModelListingException.class,
-                () -> lister().list(new ResolvedCredential(
-                        "sk-test", "https://api.openai.com/v1", null, null, null, false)));
-    }
-
-    @Test
     void noBaseUrl_throwsModelListingExceptionRatherThanNpe() {
         assertThrows(
                 ModelListingException.class,
@@ -115,34 +93,5 @@ class OpenAiCompatModelListerTest {
 
         String path = capturedRequest().uri().toString();
         assertTrue(path.endsWith("/v1/models") && !path.contains("//models"), path);
-    }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void anInterruptedFetchIsAListingFailureThatKeepsTheInterrupt() throws Exception {
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new InterruptedException());
-
-        boolean interrupted;
-        try {
-            assertThrows(
-                    ModelListingException.class,
-                    () -> lister().list(new ResolvedCredential(
-                            "sk-test", "https://api.openai.com/v1", null, null, null, false)));
-        } finally {
-            interrupted = Thread.interrupted();
-        }
-
-        assertTrue(interrupted, "the caller's interrupt must survive the failed fetch");
-    }
-
-    @Test
-    void anUnparseableBodyIsAListingFailure() throws Exception {
-        stubResponse(200, "<html>maintenance</html>");
-
-        assertThrows(
-                ModelListingException.class,
-                () -> lister().list(new ResolvedCredential(
-                        "sk-test", "https://api.openai.com/v1", null, null, null, false)));
     }
 }

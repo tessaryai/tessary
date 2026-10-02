@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,7 +16,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseExemplarView;
 import ai.tessary.cases.CaseDtos.CaseView;
@@ -21,28 +23,14 @@ import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.FindingRow;
-import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.Pipeline;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.query.QueryService;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,41 +46,13 @@ import org.junit.jupiter.api.Test;
  */
 class McpCaseToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
-
-    private final ObjectMapper mapper = new ObjectMapper();
     private CaseService cases;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
         this.cases = mock(CaseService.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-
-        PipelineService pipelines = mock(PipelineService.class);
-        when(pipelines.getPipeline(PROJECT_ID)).thenReturn(Pipeline.empty());
-
-        var registry = new McpToolRegistry(
-                pipelines,
-                projects,
-                mock(QueryService.class),
-                mock(SpanRepository.class),
-                mock(SpanPayloadRepository.class),
-                mock(TraceV2Repository.class),
-                mock(SessionReadService.class),
-                mock(FindingService.class),
-                cases);
-        this.dispatcher = new McpDispatcher(registry, mapper);
-    }
-
-    @Test
-    void bothCaseToolsAreListed() {
-        List<String> names = toolNames();
-        assertTrue(names.contains("list_cases"), names.toString());
-        assertTrue(names.contains("get_case"), names.toString());
+        this.mcp = registryWith().pipeline(Pipeline.empty()).cases(cases).build();
     }
 
     /** Filters and the cursor reach the service under the service's own names, untranslated. */
@@ -101,7 +61,7 @@ class McpCaseToolsTest {
         when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new CasesPage(List.of(), null));
 
-        JsonNode body = structured(callTool(
+        JsonNode body = structured(mcp.callTool(
                 "list_cases",
                 "{\"state\":\"resolved\",\"detector\":\"tool_error\",\"call_site_id\":\"cs-7\","
                         + "\"limit\":10,\"cursor\":\"tok\"}"));
@@ -118,7 +78,7 @@ class McpCaseToolsTest {
         when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new CasesPage(List.of(), null));
 
-        callTool("list_cases", "{\"limit\":500}");
+        mcp.callTool("list_cases", "{\"limit\":500}");
 
         verify(cases).page(PROJECT_ID, "open", null, null, 100, null);
     }
@@ -126,7 +86,7 @@ class McpCaseToolsTest {
     /** An unknown state is an error, not an empty page, which would read as "nothing is wrong". */
     @Test
     void listCases_refusesAStateThatIsNotAStateInsteadOfReturningNothing() throws Exception {
-        String text = errorText(callTool("list_cases", "{\"state\":\"closed\"}"));
+        String text = errorText(mcp.callTool("list_cases", "{\"state\":\"closed\"}"));
 
         assertTrue(text.contains("closed"), text);
         assertTrue(text.contains("resolved"), "the error must name the states that do exist: " + text);
@@ -143,10 +103,10 @@ class McpCaseToolsTest {
                 .thenReturn(new CasesPage(List.of(), null));
         when(cases.watching(PROJECT_ID)).thenReturn(new WatchingView(3, 7, 1200, 48_000L, 2L));
 
-        JsonNode page = structured(callTool("list_cases", "{}"));
+        JsonNode page = structured(mcp.callTool("list_cases", "{}"));
         assertNull(page.get("watching"), "a page of cases must not carry project-wide coverage");
 
-        JsonNode project = structured(callTool("get_project", "{}"));
+        JsonNode project = structured(mcp.callTool("get_project", "{}"));
 
         verify(cases).watching(PROJECT_ID);
         assertEquals(3, project.get("watching").get("classifiers").asInt());
@@ -162,7 +122,7 @@ class McpCaseToolsTest {
         // The stored id or the display reference: the tool must not normalise either.
         when(cases.detail(eq(PROJECT_ID), eq("C-118"))).thenReturn(detail("rca-4", null));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"C-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"C-118\"}"));
 
         verify(cases).detail(PROJECT_ID, "C-118");
         assertEquals("C-118", body.get("case").get("reference").asText());
@@ -177,7 +137,7 @@ class McpCaseToolsTest {
     void getCase_inlinesTheFinishedRcaReportInFull() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail("rca-4", report()));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
         assertEquals("rca-4", body.get("rca_report_id").asText());
         JsonNode rca = body.get("rca");
@@ -203,7 +163,7 @@ class McpCaseToolsTest {
     void getCase_leavesRcaNullWhileTheReportIsStillRunning() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail("rca-5", null));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
         assertEquals("rca-5", body.get("rca_report_id").asText());
         assertTrue(body.get("rca").isNull(), "a pending report must not render as a report");
@@ -217,7 +177,7 @@ class McpCaseToolsTest {
     void getCase_toolError_keepsTheNumbersAndDropsFailingTracesAndExemplars() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(toolErrorRate(), null, exemplar()));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
         JsonNode toolError = body.get("tool_error");
         assertEquals(5_000, toolError.get("nCur").asLong());
@@ -233,7 +193,7 @@ class McpCaseToolsTest {
     void getCase_secretLeak_keepsTheMaskedKeyAndDropsLeakIdsAndExemplars() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(null, secretLeak(), exemplar()));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
         JsonNode secretLeak = body.get("secret_leak");
         assertEquals(3, secretLeak.get("leakCount").asLong());
@@ -403,45 +363,5 @@ class McpCaseToolsTest {
                 // cause + rca_verdict: an unanalysed case, like most in the queue.
                 null,
                 null);
-    }
-
-    private List<String> toolNames() {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        List<String> names = new java.util.ArrayList<>();
-        for (JsonNode t : tools) names.add(t.get("name").asText());
-        return names;
-    }
-
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
     }
 }

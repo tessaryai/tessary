@@ -124,6 +124,12 @@ fingerprints — most integration classes share one fingerprint (and one DB), wh
 `properties = …` or a unique `DynamicPropertySource` set pays the ~15s again. Prefer reusing the
 shared fingerprint unless the properties are the point of the test.
 
+The `app` module runs its tests in two surefire forks (`forkCount` 2, `reuseForks`), and each fork
+keeps its own context cache, so a fingerprint used on both sides boots once per fork. The shared
+`src/test/resources/config/application.yaml` parks the classifier heartbeat and the rollup reaper
+for every context, because a timer firing mid-seed changes what a test reads. A test that needs
+either one calls it directly.
+
 It also means **adding a slice is linear in distinct contexts, not in test count**: a second
 product area that reuses the shared fingerprint is nearly free; one that brings its own
 `@SpringBootTest(properties=…)` or unique `DynamicPropertySource` pays another ~15s.

@@ -3,9 +3,9 @@
  * FrustrationBanner: shown only while Frustration is off, "Not now" hides it for this project in this
  * browser, the copy names a key the org already holds, and Enable opens the enable modal.
  */
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderRoute } from "../../test/render";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { Classifier, ModelSettingsResponse, ProviderCredentialListResponse } from "../../api/types";
 import { FrustrationBanner } from "./FrustrationBanner";
 
@@ -25,17 +25,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   };
 });
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-  };
-});
-
 afterEach(() => {
-  cleanup();
   localStorage.clear();
   getModelSettings.mockReset();
   listProviderCredentials.mockReset();
@@ -78,14 +68,7 @@ function frustration(enabled: boolean): Classifier {
   return { id: "clf-1", detector: "frustration", name: "Frustration", enabled } as Classifier;
 }
 
-function renderBanner(enabled = false) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <FrustrationBanner classifier={frustration(enabled)} />
-    </QueryClientProvider>,
-  );
-}
+const renderBanner = (enabled = false) => renderRoute(<FrustrationBanner classifier={frustration(enabled)} />);
 
 describe("FrustrationBanner", () => {
   it("offers either provider's key while the org has none", async () => {

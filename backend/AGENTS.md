@@ -8,7 +8,8 @@ can only import what sits below it. Full rationale in [`devdocs/modules.md`](../
 
 - `shared/`, `contract/` — open foundation: `ai.tessary.open.{errors,jobqueue,media,obs}` and
   the checked-in canonical OpenAPI spec.
-- `test-support/` — `TestPostgres` + its context initializer. Test scope in `app`; holds only
+- `test-support/` — `TestPostgres` + its context initializer, and the `ScriptedHttpClient` and `LoopbackHttpStub`
+  HTTP doubles. Test scope in `app`, `substrate`, `product` and `analysis`; holds only
   fixtures that depend on nothing in the platform, plus `OpenApiCanonicalizer`, the one canonical form both
   OpenAPI spec guards pin through.
 - `core/` — `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `analytics`, `llmspi`, plus the

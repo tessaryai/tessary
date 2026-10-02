@@ -4,8 +4,8 @@
  * a Replace (which deletes the current pipeline) that can be sent without typing the project name back,
  * the wrong mode reaching the server, and a result that misreports what changed.
  */
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityDiff, ImportResult } from "../../api/client";
 import { currentLocation, renderRoute } from "../../test/render";
 import { ImportYaml } from "./Import";
@@ -52,11 +52,6 @@ const submit = (name: string) => screen.getByRole("button", { name }) as HTMLBut
 
 beforeEach(() => {
   api.importEvalsDirectory.mockResolvedValue(result());
-});
-
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
 });
 
 describe("choosing a bundle", () => {

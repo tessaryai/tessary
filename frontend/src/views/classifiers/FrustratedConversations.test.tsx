@@ -7,7 +7,8 @@
  * it for the skeleton, which then holds (#109).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderRoute } from "../../test/render";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { FrustratedConversation, FrustratedSessionPage, TraceDetailView } from "../../api/types";
@@ -32,8 +33,6 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
-  cleanup();
   getTrace.mockReset();
   getFrustratedSessions.mockReset();
 });
@@ -84,18 +83,13 @@ function renderList(
   nextCursor: string | null = null,
   filter?: { rcaReport: string; index: number },
 ) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>
-        <FrustratedConversations
-          findingId="f-1"
-          first={{ rows, nextCursor, total }}
-          filter={filter}
-          basePath="/orgs/acme/projects/default"
-        />
-      </MemoryRouter>
-    </QueryClientProvider>,
+  renderRoute(
+    <FrustratedConversations
+      findingId="f-1"
+      first={{ rows, nextCursor, total }}
+      filter={filter}
+      basePath="/orgs/acme/projects/default"
+    />,
   );
 }
 
