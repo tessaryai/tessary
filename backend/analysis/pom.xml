@@ -76,7 +76,7 @@
                  against a live local server, so a later bump that re-enables fetching fails loudly.
                  3.x reads through Jackson 3 (tools.jackson), already on the app classpath via
                  logstash-logback-encoder; it adds jackson-dataformat-yaml 3.x to the image. -->
-            <version>3.0.7</version>
+            <version>3.0.8</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
