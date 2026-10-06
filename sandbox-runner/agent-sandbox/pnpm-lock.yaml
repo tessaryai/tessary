@@ -19,8 +19,8 @@ importers:
         version: 6.29.0
     devDependencies:
       dotenv:
-        specifier: ^18.0.3
-        version: 18.0.3
+        specifier: ^18.0.5
+        version: 18.0.5
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -230,8 +230,8 @@ packages:
   dockerfile-ast@0.7.1:
     resolution: {integrity: sha512-oX/A4I0EhSkGqrFv0YuvPkBUSYp1XiY8O8zAKc8Djglx8ocz+JfOr8gP0ryRMC2myqvDLagmnZaU9ot1vG2ijw==}
 
-  dotenv@18.0.3:
-    resolution: {integrity: sha512-/8CJTyL817qPnfbQrJgOEcrU3fDrJkRIoXBE566wHuvIXKOCHUZhPqGPbCPi9SogjdGnreF0TlvnTgK6J/8zpA==}
+  dotenv@18.0.5:
+    resolution: {integrity: sha512-aBrGvt6KhjxbEnatqMWOMidftwsrCiCvqh1yNIGB9QyF0J+VcWkKDMsvYOEm7ZS82oiV+BT1sTOtIlAmUlTpwQ==}
     engines: {node: '>=12'}
     hasBin: true
 
@@ -455,7 +455,7 @@ snapshots:
       vscode-languageserver-textdocument: 1.0.15
       vscode-languageserver-types: 3.18.4
 
-  dotenv@18.0.3: {}
+  dotenv@18.0.5: {}
 
   e2b@2.52.0:
     dependencies:
