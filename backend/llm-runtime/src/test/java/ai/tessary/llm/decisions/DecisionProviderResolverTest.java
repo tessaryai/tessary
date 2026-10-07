@@ -128,11 +128,12 @@ class DecisionProviderResolverTest {
     }
 
     /**
-     * A deployment's resolver refuses to resolve its own provider when the org has no credit. Having a
-     * provider is a different question, so enabling Frustration must not inherit that refusal.
+     * The deployment-supplied provider runs no decision lane (since 2026-10-07 Frustration is scored on
+     * the org's own key only), so offering it gives an org without a Jev key no Frustration provider,
+     * whatever the deployment's own resolver would do.
      */
     @Test
-    void theDeploymentsOwnProviderIsAProviderEvenWhenItsResolverRefusesForCredit() {
+    void theDeploymentsOwnProviderIsNoFrustrationProvider() {
         when(orgs.orgIdFor(PID)).thenReturn(ORG);
         when(credentials.findByOrg(ORG)).thenReturn(List.of());
         ProjectModelSettings settings =
@@ -144,7 +145,7 @@ class DecisionProviderResolverTest {
             }
         };
 
-        assertTrue(deployment.hasProvider(PID, ModelLane.FRUSTRATION));
+        assertFalse(deployment.hasProvider(PID, ModelLane.FRUSTRATION));
     }
 
     private static PlatformProviderSupplier offeringPlatform() {

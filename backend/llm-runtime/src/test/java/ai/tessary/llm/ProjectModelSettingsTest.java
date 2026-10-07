@@ -36,7 +36,6 @@ class ProjectModelSettingsTest {
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String SONNET = "anthropic.claude-sonnet-5-5";
     private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5-5";
-    private static final String PLATFORM_JEV = "PLATFORM:~typesafe/jev-latest";
 
     private ProjectModelSettingRepository repo;
     private ProviderCredentialRepository credentials;
@@ -193,7 +192,7 @@ class ProjectModelSettingsTest {
     @Test
     void theFrustrationLaneOffersOnlyJevAndTypeSafeLeadsIt() {
         assertEquals(
-                List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest", PLATFORM_JEV),
+                List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest"),
                 LanePriority.modelKeys(ModelLane.FRUSTRATION));
         for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
             assertTrue(
@@ -218,14 +217,13 @@ class ProjectModelSettingsTest {
                 "a chat-only key runs no decision lane, whatever else it serves");
     }
 
+    /** The deployment-supplied provider runs no decision lane: without a Jev key of its own, an org scores nowhere. */
     @Test
-    void anOrgWithNoJevKeyScoresFrustrationOnThePlatformProviderWhenItIsOffered() {
+    void anOrgWithNoJevKeyScoresFrustrationNowhereEvenWhenThePlatformIsOffered() {
         configured(ModelProvider.BEDROCK);
         platformOffered = true;
 
-        assertEquals(
-                new ProjectModelSettings.ResolvedDecisionModel(ModelProvider.PLATFORM, "~typesafe/jev-latest"),
-                settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).orElseThrow());
+        assertTrue(settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).isEmpty());
     }
 
     @Test
