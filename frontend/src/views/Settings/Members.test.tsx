@@ -39,7 +39,13 @@ const member = (user_id: string, role: OrgRole, over: Partial<OrgMember> = {}): 
   ...over,
 });
 
-const POLICY: SignupPolicy = { mode: "open", domains: [], governing: true, governing_org_slug: "acme" };
+const POLICY: SignupPolicy = {
+  mode: "open",
+  domains: [],
+  governing: true,
+  governing_org_slug: "acme",
+  governing_org_name: "Acme",
+};
 
 function roster(myRole: OrgRole) {
   return [member("u-me", myRole, { display_name: "Me Myself" }), member("u-owner2", "owner"), member("u-dev", "member")];
@@ -271,16 +277,26 @@ describe("the sign-up policy", () => {
   });
 
   it("is read-only through an organization that does not govern it, and names the one that does", async () => {
-    auth.getSignupPolicy.mockResolvedValue({ ...POLICY, governing: false, governing_org_slug: "first-org" });
+    auth.getSignupPolicy.mockResolvedValue({
+      ...POLICY,
+      governing: false,
+      governing_org_slug: "first-org",
+      governing_org_name: "First Org",
+    });
     renderRoute(<Members />);
 
     expect(await screen.findByRole("note")).toBeTruthy();
-    expect(screen.getByText("first-org")).toBeTruthy();
+    expect(screen.getByText("First Org")).toBeTruthy();
     for (const radio of screen.getAllByRole("radio")) expect((radio as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Save policy" }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
 
-    auth.getSignupPolicy.mockResolvedValue({ ...POLICY, governing: false, governing_org_slug: null });
+    auth.getSignupPolicy.mockResolvedValue({
+      ...POLICY,
+      governing: false,
+      governing_org_slug: null,
+      governing_org_name: null,
+    });
     renderRoute(<Members />);
     expect(await screen.findByText("unknown")).toBeTruthy();
   });

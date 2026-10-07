@@ -82,15 +82,22 @@ public class OrganizationController {
     /**
      * The {@code GET /api/orgs/{slug}/signup-policy} view. The policy is instance-wide and
      * lives on the install's first organization; {@code governing} says whether the addressed
-     * organization is that one, and {@code governing_org_slug} names it either way.
+     * organization is that one, and {@code governing_org_slug} and {@code governing_org_name} name
+     * it either way (the name is what the UI shows; the slug is the URL segment).
      */
     public record SignupPolicyView(
             String mode,
             List<String> domains,
             boolean governing,
-            @JsonProperty("governing_org_slug") @Nullable String governingOrgSlug) {
-        static SignupPolicyView of(SignupPolicy p, boolean governing, @Nullable String governingOrgSlug) {
-            return new SignupPolicyView(p.mode().wire(), p.domains(), governing, governingOrgSlug);
+            @JsonProperty("governing_org_slug") @Nullable String governingOrgSlug,
+            @JsonProperty("governing_org_name") @Nullable String governingOrgName) {
+        static SignupPolicyView of(SignupPolicy p, boolean governing, @Nullable Organization governingOrg) {
+            return new SignupPolicyView(
+                    p.mode().wire(),
+                    p.domains(),
+                    governing,
+                    governingOrg == null ? null : governingOrg.slug(),
+                    governingOrg == null ? null : governingOrg.name());
         }
     }
 
@@ -242,7 +249,7 @@ public class OrganizationController {
         return ApiResponse.ok(SignupPolicyView.of(
                 signupPolicy.current(),
                 signupPolicy.governs(r.org().id()),
-                signupPolicy.governingOrg().map(Organization::slug).orElse(null)));
+                signupPolicy.governingOrg().orElse(null)));
     }
 
     /**
@@ -254,8 +261,8 @@ public class OrganizationController {
             TenantContext ctx, @PathVariable String orgSlug, @RequestBody SignupPolicyRequest req) {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.MEMBERS_MANAGE, "change the sign-up policy");
-        String governingSlug =
-                signupPolicy.governingOrg().map(Organization::slug).orElse(null);
+        Organization governingOrg = signupPolicy.governingOrg().orElse(null);
+        String governingSlug = governingOrg == null ? null : governingOrg.slug();
         if (!signupPolicy.governs(r.org().id())) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
@@ -269,7 +276,7 @@ public class OrganizationController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }
         return ApiResponse.ok(
-                SignupPolicyView.of(signupPolicy.update(r.org(), next, ctx.userId()), true, governingSlug));
+                SignupPolicyView.of(signupPolicy.update(r.org(), next, ctx.userId()), true, governingOrg));
     }
 
     @GetMapping("/api/orgs/{orgSlug}/invitations")

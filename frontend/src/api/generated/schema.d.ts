@@ -4237,6 +4237,7 @@ export interface components {
         SignupPolicyView: {
             domains: string[];
             governing: boolean;
+            governing_org_name: string | null;
             governing_org_slug: string | null;
             mode: string;
         };

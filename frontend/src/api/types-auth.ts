@@ -42,6 +42,8 @@ export interface SignupPolicy {
    */
   governing: boolean;
   governing_org_slug: string | null;
+  /** The governing organization's display name, what the UI shows; the slug is the URL segment. */
+  governing_org_name: string | null;
 }
 
 /**

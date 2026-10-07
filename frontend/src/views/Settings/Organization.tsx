@@ -111,7 +111,7 @@ export function Organization() {
         title="Organization"
         subtitle={
           <>
-            Rename <span className="font-mono text-fg">{orgSlug}</span> and manage its projects. Owners only.
+            Rename <span className="text-fg">{org.data?.name ?? orgSlug}</span> and manage its projects. Owners only.
           </>
         }
       />
