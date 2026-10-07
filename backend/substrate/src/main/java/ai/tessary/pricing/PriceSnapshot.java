@@ -142,7 +142,7 @@ public record PriceSnapshot(String source, String version, String digest, List<M
     }
 
     /**
-     * LiteLLM's own provider-route prefix ({@code vertex_ai/claude-sonnet-5} → {@code vertex_ai}), and
+     * LiteLLM's own provider-route prefix ({@code vertex_ai/claude-sonnet-5-5} → {@code vertex_ai}), and
      * null for a bare key. Deliberately not guessed from anything else: a vendor-dotted Bedrock id names
      * the model's maker rather than who serves it, and inventing a provider for it would put a value in
      * the column that no file actually claims.

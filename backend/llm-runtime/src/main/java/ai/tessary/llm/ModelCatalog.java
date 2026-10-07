@@ -151,8 +151,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
-                    "claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     "https://api.anthropic.com/v1",
@@ -189,8 +189,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
-                    "anthropic/claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "anthropic/claude-sonnet-5.5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
@@ -270,8 +270,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.BEDROCK,
                     "Anthropic",
-                    "anthropic.claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "anthropic.claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     null,
@@ -451,8 +451,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.PLATFORM,
                     "Anthropic",
-                    "claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     null,

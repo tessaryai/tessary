@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * authority.
  *
  * <p><b>A region prefix is a pricing dimension, so stripping it stops there.</b> Bedrock and
- * Vertex prefix the same model with a routing scope ({@code global.anthropic.claude-sonnet-5},
+ * Vertex prefix the same model with a routing scope ({@code global.anthropic.claude-sonnet-5-5},
  * {@code us.anthropic....}), and the regional profiles bill a premium: +10% for
  * {@code us./eu./au./jp.} and +20% for {@code us-gov.}, on 28 keys in the current snapshot. Once
  * a region prefix has been consumed, only a key that still carries it can be trusted; falling

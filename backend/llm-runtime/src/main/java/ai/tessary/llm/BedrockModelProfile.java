@@ -87,18 +87,20 @@ public final class BedrockModelProfile {
                     "Anthropic",
                     true,
                     Endpoint.RUNTIME),
-            // Claude Sonnet 5, the default the SYNTHESIS lane inherits (tessary.synth.agentic-model).
+            // Claude Sonnet 5.5, the default of every agent lane since 2026-10-07 and the one the
+            // SYNTHESIS lane inherits (tessary.synth.agentic-model). It replaced Sonnet 5 outright: a
+            // row that still pins Sonnet 5 reads as unset and the lane runs this.
             new ModelDescriptor(
-                    "anthropic.claude-sonnet-5",
-                    "global.anthropic.claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "anthropic.claude-sonnet-5-5",
+                    "global.anthropic.claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     "Anthropic",
                     true,
                     Endpoint.RUNTIME),
             // GPT-5.6 Luna, bedrock-mantle only and the cheapest model here ($0.22/$1.32 per 1M).
             //
             // Agentic is a product choice here, not a measured claim that Luna holds a long tool loop
-            // over a repo as well as Sonnet 5 does. Terra below is already agentic on the same
+            // over a repo as well as Sonnet 5.5 does. Terra below is already agentic on the same
             // bedrock-mantle endpoint and offered for AGENT_VM, so a mantle-routed agent is proven
             // wiring. Luna is offered because triage is a cost-dominated lane.
             new ModelDescriptor(
@@ -128,11 +130,11 @@ public final class BedrockModelProfile {
      * whether a model could drive a sandbox agent, this answers whether we offer it for that kind of
      * work.
      *
-     * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside Sonnet 5 and Terra as
+     * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside Sonnet 5.5 and Terra as
      * deliberate exceptions, not a rule that any agentic model may go here: Luna because triage is a
      * cost-dominated lane and the cheapest agentic option is the product default there, and Haiku 4.5
      * so the settings page does not warn on it for the triage lane. RCA, the other AGENT_VM lane,
-     * keeps its Sonnet 5 default.
+     * keeps its Sonnet 5.5 default.
      *
      * <p>It lives here rather than on {@link LaneGroup} so that every per-model question is answered
      * by the same table. A model removed from {@link #PROFILES} must also leave this list.
@@ -144,7 +146,7 @@ public final class BedrockModelProfile {
         m.put(
                 LaneGroup.AGENT_VM,
                 List.of(
-                        "anthropic.claude-sonnet-5",
+                        "anthropic.claude-sonnet-5-5",
                         "openai.gpt-5.6-terra",
                         "openai.gpt-5.6-luna",
                         "anthropic.claude-haiku-4-5"));

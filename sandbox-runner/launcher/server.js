@@ -458,7 +458,7 @@ function providerConfig(credential, qualifiedModel) {
     // Declares its model for the same reason every OpenAI-compat block does: 'bedrock-mantle-gpt'
     // is not a models.dev provider id (only plain 'amazon-bedrock' is), so without this the run
     // dies at model resolution before any request. BEDROCK itself needs no such block — its key IS
-    // a catalog id and the ids ModelCatalog uses ('anthropic.claude-sonnet-5' and friends) all
+    // a catalog id and the ids ModelCatalog uses ('anthropic.claude-sonnet-5-5' and friends) all
     // resolve under it.
     const mantleBlock = { npm: '@ai-sdk/amazon-bedrock/mantle', options: mantleOptions };
     if (bareModel) mantleBlock.models = { [bareModel]: {} };
@@ -651,7 +651,7 @@ function toProviderModel(model, credential) {
 // toAnthropicModel (Bedrock inference-profile id -> first-party Anthropic model id) lived here
 // until the removal of AGENT_PROVIDER=anthropic, its one caller. It is not coming back: ANTHROPIC
 // is a per-request-selectable provider again, but it now carries its OWN model names
-// ("claude-sonnet-5", from ModelCatalog) rather than a Bedrock inference-profile id needing
+// ("claude-sonnet-5-5", from ModelCatalog) rather than a Bedrock inference-profile id needing
 // translation, so toProviderModel qualifies it like every other non-Bedrock provider.
 
 // ---------------------------------------------------------------------------

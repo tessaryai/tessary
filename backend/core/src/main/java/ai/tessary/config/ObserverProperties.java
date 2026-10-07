@@ -117,9 +117,9 @@ public class ObserverProperties {
         // with no seeded rows (RCA and triage share it; grader generation has tessary.synth.agentic-model).
         // The launcher qualifies this with a provider and hands it to Bedrock verbatim, so it must be a
         // Bedrock *inference-profile* id and NOT the bare foundation-model name — the bare name 400s.
-        // "global." is region-agnostic; "us.anthropic.claude-sonnet-5" pins a geo. Confirm what is ACTIVE
+        // "global." is region-agnostic; "us.anthropic.claude-sonnet-5-5" pins a geo. Confirm what is ACTIVE
         // in the account with `aws bedrock list-inference-profiles`.
-        private String model = "global.anthropic.claude-sonnet-5";
+        private String model = "global.anthropic.claude-sonnet-5-5";
         // The TRIAGE lane's wall clock: a hard kill for a run that has hung, NOT a budget the agent
         // plans against. It is deliberately not stated in the prompt — a model cannot observe elapsed
         // time, so a number it cannot measure only invites it to guess and cut its reading short. The
