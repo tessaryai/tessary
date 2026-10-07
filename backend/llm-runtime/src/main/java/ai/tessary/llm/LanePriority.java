@@ -77,17 +77,15 @@ public final class LanePriority {
      */
     public record ProviderOption(ModelProvider provider, List<String> modelKeys, String defaultModelKey) {}
 
-    // Bedrock Converse. Sonnet 5.5 is the default of every agent lane since 2026-10-07; Sonnet 5
-    // stays offered so a project that pinned it keeps running on it.
+    // Bedrock Converse. Sonnet 5.5 replaced Sonnet 5 outright on 2026-10-07: a row that still pins
+    // Sonnet 5 reads as unset and the lane falls back to this order.
     private static final String SONNET_5_5 = "anthropic.claude-sonnet-5-5";
-    private static final String SONNET_5 = "anthropic.claude-sonnet-5";
     private static final String HAIKU_4_5 = "anthropic.claude-haiku-4-5";
     // Bedrock's mantle endpoint — the only place the GPT-5.6 line is Bedrock-hosted.
     private static final String TERRA = "openai.gpt-5.6-terra";
     private static final String MANTLE_LUNA = "openai.gpt-5.6-luna";
     // Anthropic direct — the same models Bedrock serves, on Anthropic's own wire and price book.
     private static final String ANTHROPIC_SONNET_5_5 = "ANTHROPIC:claude-sonnet-5-5";
-    private static final String ANTHROPIC_SONNET_5 = "ANTHROPIC:claude-sonnet-5";
     private static final String ANTHROPIC_HAIKU_4_5 = "ANTHROPIC:claude-haiku-4-5";
     // The OpenAI-compatible providers, current generation, one model at each of the two sizes.
     // GPT-6 Sol ($2/$10) and not the $4/$20 flagship is what RCA takes here.
@@ -128,8 +126,6 @@ public final class LanePriority {
      */
     private static final String PLATFORM_SONNET_5_5 = "PLATFORM:claude-sonnet-5-5";
 
-    private static final String PLATFORM_SONNET_5 = "PLATFORM:claude-sonnet-5";
-
     private static final Map<ModelLane, List<ProviderOption>> BY_LANE = byLane();
 
     private static Map<ModelLane, List<ProviderOption>> byLane() {
@@ -139,13 +135,13 @@ public final class LanePriority {
         // shares this list verbatim (see the class javadoc's "TRIAGE is exactly RCA"): both lanes run
         // the same agent shape, so there is no second ordering to maintain.
         List<ProviderOption> agentVmOrder = List.of(
-                new ProviderOption(ModelProvider.BEDROCK, List.of(SONNET_5_5, SONNET_5, HAIKU_4_5), SONNET_5_5),
+                new ProviderOption(ModelProvider.BEDROCK, List.of(SONNET_5_5, HAIKU_4_5), SONNET_5_5),
                 // Directly after Bedrock, because it is the SAME model on a different
                 // transport — if Sonnet is what this lane has been run on, the route to it
                 // is not what should decide second place.
                 new ProviderOption(
                         ModelProvider.ANTHROPIC,
-                        List.of(ANTHROPIC_SONNET_5_5, ANTHROPIC_SONNET_5, ANTHROPIC_HAIKU_4_5),
+                        List.of(ANTHROPIC_SONNET_5_5, ANTHROPIC_HAIKU_4_5),
                         ANTHROPIC_SONNET_5_5),
                 new ProviderOption(ModelProvider.OPENAI, List.of(GPT_6_SOL, GPT_5_6, GPT_6_LUNA), GPT_6_SOL),
                 new ProviderOption(ModelProvider.BEDROCK_MANTLE, List.of(TERRA, MANTLE_LUNA), TERRA),
@@ -158,8 +154,7 @@ public final class LanePriority {
                 new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_SOL, OR_LUNA), OR_SOL),
                 new ProviderOption(ModelProvider.MOONSHOT, List.of(KIMI_K2_6), KIMI_K2_6),
                 new ProviderOption(ModelProvider.CUSTOM, List.of(CUSTOM_MODEL), CUSTOM_MODEL),
-                new ProviderOption(
-                        ModelProvider.PLATFORM, List.of(PLATFORM_SONNET_5_5, PLATFORM_SONNET_5), PLATFORM_SONNET_5_5));
+                new ProviderOption(ModelProvider.PLATFORM, List.of(PLATFORM_SONNET_5_5), PLATFORM_SONNET_5_5));
         m.put(ModelLane.RCA, agentVmOrder);
         m.put(ModelLane.TRIAGE, agentVmOrder);
         m.put(

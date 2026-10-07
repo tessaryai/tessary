@@ -88,7 +88,6 @@ class ProjectModelSettingControllerTest {
                 List.of(
                         "ANTHROPIC",
                         "ANTHROPIC",
-                        "ANTHROPIC",
                         "OPENROUTER",
                         "OPENROUTER",
                         "MOONSHOT",
@@ -178,7 +177,7 @@ class ProjectModelSettingControllerTest {
                 new ProjectModelSettingController.ProviderOptionView(
                         ModelProvider.PLATFORM,
                         "Tessary AI",
-                        List.of("PLATFORM:claude-sonnet-5-5", "PLATFORM:claude-sonnet-5"),
+                        List.of("PLATFORM:claude-sonnet-5-5"),
                         "PLATFORM:claude-sonnet-5-5"),
                 last);
         assertTrue(view.catalogModels().stream().anyMatch(e -> e.provider() == ModelProvider.PLATFORM));

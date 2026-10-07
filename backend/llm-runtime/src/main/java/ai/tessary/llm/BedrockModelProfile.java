@@ -88,19 +88,12 @@ public final class BedrockModelProfile {
                     true,
                     Endpoint.RUNTIME),
             // Claude Sonnet 5.5, the default of every agent lane since 2026-10-07 and the one the
-            // SYNTHESIS lane inherits (tessary.synth.agentic-model). Sonnet 5 stays below it so a
-            // project that pinned it keeps running on it.
+            // SYNTHESIS lane inherits (tessary.synth.agentic-model). It replaced Sonnet 5 outright: a
+            // row that still pins Sonnet 5 reads as unset and the lane runs this.
             new ModelDescriptor(
                     "anthropic.claude-sonnet-5-5",
                     "global.anthropic.claude-sonnet-5-5",
                     "Claude Sonnet 5.5",
-                    "Anthropic",
-                    true,
-                    Endpoint.RUNTIME),
-            new ModelDescriptor(
-                    "anthropic.claude-sonnet-5",
-                    "global.anthropic.claude-sonnet-5",
-                    "Claude Sonnet 5",
                     "Anthropic",
                     true,
                     Endpoint.RUNTIME),
@@ -137,7 +130,7 @@ public final class BedrockModelProfile {
      * whether a model could drive a sandbox agent, this answers whether we offer it for that kind of
      * work.
      *
-     * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside the Sonnets and Terra as
+     * <p>{@link LaneGroup#AGENT_VM} lists Luna and Haiku 4.5 alongside Sonnet 5.5 and Terra as
      * deliberate exceptions, not a rule that any agentic model may go here: Luna because triage is a
      * cost-dominated lane and the cheapest agentic option is the product default there, and Haiku 4.5
      * so the settings page does not warn on it for the triage lane. RCA, the other AGENT_VM lane,
@@ -154,7 +147,6 @@ public final class BedrockModelProfile {
                 LaneGroup.AGENT_VM,
                 List.of(
                         "anthropic.claude-sonnet-5-5",
-                        "anthropic.claude-sonnet-5",
                         "openai.gpt-5.6-terra",
                         "openai.gpt-5.6-luna",
                         "anthropic.claude-haiku-4-5"));
