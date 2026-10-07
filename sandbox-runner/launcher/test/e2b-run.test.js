@@ -99,6 +99,28 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
   assert.deepEqual(calls.map((c) => c.op), ['create', 'write', 'run', 'getInfo', 'kill']);
 });
 
+test('POST /authoring runs authoring.js with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
+  const payload = {
+    ...PAYLOAD,
+    clone_url: 'https://x-access-token:t@github.com/acme/app.git',
+    head_sha: 'abc123',
+    system_prompt: 'You write classifiers.',
+    files: { 'brief.md': 'find timeouts' },
+  };
+
+  const { status, body, calls } = await runOnce('ok', '/authoring', {}, payload);
+
+  assert.deepEqual({ status, body }, { status: 200, body: { verdict: 'supported' } });
+  assert.equal(calls[2].cmd, 'node /home/user/authoring.js /home/user/input.json');
+  const written = JSON.parse(calls[1].content);
+  assert.equal(written.clone_url, 'https://x-access-token:t@github.com/acme/app.git');
+  assert.equal(written.head_sha, 'abc123');
+  assert.equal(written.system_prompt, 'You write classifiers.');
+  assert.deepEqual(written.files, { 'brief.md': 'find timeouts' });
+  assert.equal(written.credential, undefined, 'the credential must never be written to the sandbox filesystem');
+  assert.ok(Object.values(calls[2].envs).includes('test-secret'), 'the credential reaches the agent through its env');
+});
+
 test('a severed command stream still books the spend the launcher captured off the stream', async () => {
   const { status, body } = await runOnce('severed', '/triage');
 

@@ -279,7 +279,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 |---|---|
 | `app` | `TessaryApplication`, `application.yaml`, every `@SpringBootTest` integration test |
 | `surfaces` | `query`, `search`, `mcp`, `ci`, `slack` (the wire surface only), `metering`, `billing`, `telemetry` (the heartbeat orchestrator half — see `core`'s `telemetry` below) |
-| `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt` |
+| `analysis` | `classifier`, `onboarding`, `rca`, `cases`, `alert`, `prompt`, `agentrun` |
 | `llm-runtime` | `llm`, `sandbox` (agent-span telemetry only) — the only module that declares a model-provider SDK |
 | `product` | `pipeline`, `gate`, `plan` |
 | `substrate` | `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`, `git`, `usage`, `vitals` |
@@ -300,6 +300,7 @@ holds. A package appears in exactly one module.
 
 | Package | Module | Purpose | Entry |
 |---|---|---|---|
+| `agentrun/` | `analysis` | the generic agent-sandbox run, controller-free: `AgentRunSandbox` (the seam; `E2bAgentRunSandbox` posts `/authoring` to the launcher sidecar) and `AgentRunService`, which does everything around one run that a caller should not repeat: resolve the lane's model and the org's credential, mint the run's admin MCP key and revoke it in a `finally`, clone the project's repository when it has one, book the spend against the caller's subject. The `AUTHORING` lane runs through it; the caller brings the system prompt, the task, the files and the answer's schema. Failures are `AGENT_RUN.*` (`LAUNCHER_UNAVAILABLE`, `LAUNCHER_MISCONFIGURED`, `RUN_FAILED`, `BAD_OUTPUT`, `TIMED_OUT`). | — |
 | `alert/` | `analysis` | alerting engine: WHEN to fire + WHERE it lands (channel registry). Four rule types — a threshold over classifier detections, digest/brief roll-ups, and `case_opened`, which is the only one that covers the launch detectors (they write no detections to count). | [alerting.md](../concepts/alerting.md) |
 | `apidoc/` | `core` | code-first OpenAPI config: `OpenApiConfig` (stable operationIds), `JSpecifyNullabilityConverter`, `OpenApiSpecDriftTest` (in tests)… | — |
 | `auth/` | `tenancy` | WorkOS AuthKit login, request filters, tenancy enforcement. | [auth-and-mcp.md](./auth-and-mcp.md) |

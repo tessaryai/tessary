@@ -115,3 +115,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0029-frustration-shadow.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0030-authoring-lane.sql
+      relativeToChangelogFile: false

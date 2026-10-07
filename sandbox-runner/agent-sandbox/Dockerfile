@@ -125,13 +125,14 @@ WORKDIR /home/user
 RUN npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force
 
-# Shared OpenCode runner required by rca.js/triage.js — must be baked beside them or their
-# `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
-# agent-stream.js itself, on the triage path only.
+# Shared OpenCode runner required by rca.js/triage.js/authoring.js — must be baked beside them or
+# their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
+# agent-stream.js itself, on the system-prompt (triage, authoring) path only.
 COPY --chown=node:node sandbox-runner/agent-sandbox/agent-stream.js /home/user/agent-stream.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/mcp-relay.js /home/user/mcp-relay.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/rca.js /home/user/rca.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/triage.js /home/user/triage.js
+COPY --chown=node:node sandbox-runner/agent-sandbox/authoring.js /home/user/authoring.js
 
 # The image's version identity: same convention and same "dev" fallback as backend/Dockerfile,
 # so the release workflow's OCI

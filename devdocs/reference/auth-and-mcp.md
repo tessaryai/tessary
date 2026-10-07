@@ -36,7 +36,11 @@ All project-scoped bearer tokens live in the `api_key` table and are issued/veri
 | `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools |
 
 MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **admin**-scoped
-keys via `ApiKeyService.issue(...)`. `AuthFilter` / `BearerTokenAuthenticator` verify any live
+keys via `ApiKeyService.issue(...)`. So do the three agent lanes, one short-lived key per run, revoked
+in a `finally`: `rca-<job id>` (`AgenticRcaEngine`, issued to the person who pressed Run RCA),
+`triage-<finding id> (system)` (`BehaviorTriageEngine`) and `<lane>-<subject id> (system)`
+(`agentrun/AgentRunService`, `authoring-…` for the authoring lane), the last two issued to the
+project org's earliest owner because nobody pressed them. `AuthFilter` / `BearerTokenAuthenticator` verify any live
 key and populate `TenantContext`; MCP tools always read `ctx.projectId()`.
 
 **Verification is cached, and every revocation path must evict.** `ApiKeyService.verify` answers a

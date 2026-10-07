@@ -1,7 +1,7 @@
 # sandbox-runner
 
-Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`) and Layer-2 triage
-(`/triage`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
+Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`), Layer-2 triage
+(`/triage`) and the generic agent run behind the authoring lane (`/authoring`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
 HTTP and the sidecar owns the sandbox lifecycle — one request, one fresh sandbox, torn down after.
 
 ## What this was, and why the name changed
@@ -19,6 +19,7 @@ from the platform, and with it five of the seven routes this service served:
 | `/analyze` | the git observer's drift analysis | gone with the observer |
 | **`/rca`** | agentic root-cause analysis | **survives** |
 | **`/triage`** | Layer-2 ruling on a classifier finding | **survives** |
+| **`/authoring`** | a generic agent run over caller-supplied files, the repo and the traces | **added 2026-10** |
 
 Three whole subtrees went with them: `lambda/` (the AWS Lambda grading executor and the shared
 `harness.js`), `template/` (the air-gapped E2B grader sandbox), and the `grade.js` / `lint.js` /
@@ -37,7 +38,7 @@ E2B; nothing in this tree can delete it.
 ## Layout
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below.
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, the shared `agent-stream.js`
+- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the shared `agent-stream.js`
   OpenCode runner, and TWO INDEPENDENTLY MAINTAINED RECIPES for one runtime — `template.ts` (the E2B
   template, published by `build.ts`) and `Dockerfile` (the published agent image the Docker backend
   spawns). Change one, change the other.

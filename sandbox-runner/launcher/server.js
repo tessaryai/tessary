@@ -16,13 +16,20 @@
  *                                                    -> { raw: "<agent stdout>" }  Layer-2 ruling over
  *                                                    the finding's dossier + the platform's MCP surface.
  *                                                    The one agentic route with NO clone — see runTriage.
+ *   POST /authoring { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
+ *                     timeout_ms }
+ *                                                    -> { raw: "<agent stdout>" }  a generic agent run:
+ *                                                    the caller's files + system prompt, the platform's
+ *                                                    MCP surface, and ./repo/ (read-only) when a
+ *                                                    clone_url is sent. Behind the backend's
+ *                                                    AgentRunService (the AUTHORING lane) — see runAuthoring.
  *   GET  /healthz                                    -> 200
  *
  * FIVE ROUTES WERE REMOVED, and the list is worth keeping because the shape of what remains is
  * the argument for the rename: /grade and /lint ran user-authored grader code, /synthesize and
  * /codegen authored it, and /analyze served the git observer. All five went with grading and the
- * observer. What is left — /rca and /triage — is OUR agent ruling on the surviving classifier
- * product, which is why this service is no longer named for graders.
+ * observer. What is left — /rca, /triage and /authoring — is OUR agent working on the surviving
+ * classifier product, which is why this service is no longer named for graders.
  *
  * Failure contract: every orchestration failure answers 502 with
  *   { error: 'sandbox orchestration failed',            // unchanged, always present
@@ -1437,6 +1444,22 @@ function runTriage(payload) {
   return runAgenticScript('triage.js', payload);
 }
 
+// The generic agent run: one fresh microVM materializes the caller's files, clones the repo at the
+// requested commit when payload.clone_url is sent (read-only, quarantined like RCA's), and runs the
+// agent under the caller's own system prompt, wired to the platform's MCP surface via the short-lived
+// key in payload.mcp (scrubbed from all output, never returned to the backend). json_schema is
+// optional here: without one the agent answers in prose.
+function runAuthoring(payload) {
+  return runAgenticScript('authoring.js', payload);
+}
+
+// The whole route table: a POST anywhere else is 404 before the body is read.
+const AGENTIC_ROUTES = new Map([
+  ['/rca', runRca],
+  ['/triage', runTriage],
+  ['/authoring', runAuthoring],
+]);
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -1466,8 +1489,7 @@ function send(res, status, obj) {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/healthz') return send(res, 200, { ok: true });
 
-  if (req.method !== 'POST'
-      || (req.url !== '/rca' && req.url !== '/triage')) {
+  if (req.method !== 'POST' || !AGENTIC_ROUTES.has(req.url)) {
     return send(res, 404, { error: 'not found' });
   }
   const auth = req.headers['authorization'] || '';
@@ -1476,9 +1498,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const payload = await readBody(req);
-    let out;
-    if (req.url === '/rca') out = await runRca(payload);
-    else out = await runTriage(payload);
+    const out = await AGENTIC_ROUTES.get(req.url)(payload);
     return send(res, 200, out);
   } catch (e) {
     // Transport/orchestration failure.

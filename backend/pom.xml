@@ -206,7 +206,7 @@
                              that is not listed is NOT checked, and a name that matches nothing is
                              silently ignored, so keep this list honest.
                              Still outside the set: alert, billing, ci, config, detection, edition, gate, git, llm, llmspi, metering, model, onboarding, ops, plan, pricing, prompt, query, rca, redaction, retention, search, storage, telemetry, tenant, traces, usage, vitals. -->
-                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.auth,ai.tessary.ingest,ai.tessary.db,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.classifier,ai.tessary.featureflags,ai.tessary.cases</arg>
+                        <arg>-Xplugin:ErrorProne -Xep:NotJavadoc:OFF -Xep:JavaLangClash:OFF -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=ai.tessary.open.errors,ai.tessary.open.obs,ai.tessary.apidoc,ai.tessary.crypto,ai.tessary.version,ai.tessary.web,ai.tessary.mcp,ai.tessary.sources,ai.tessary.auth,ai.tessary.ingest,ai.tessary.db,ai.tessary.pipeline,ai.tessary.sandbox,ai.tessary.classifier,ai.tessary.featureflags,ai.tessary.cases,ai.tessary.agentrun</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>

@@ -3361,7 +3361,7 @@ export interface components {
             /** @enum {string} */
             group: "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage" | "frustration";
+            id: "rca" | "triage" | "authoring" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
         };
@@ -3681,7 +3681,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage" | "frustration";
+            lane: "rca" | "triage" | "authoring" | "frustration";
             model_key: string;
             project_id: string;
             reasoning_effort: string | null;

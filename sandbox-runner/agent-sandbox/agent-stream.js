@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js). ONE source of truth for:
+ * Shared OpenCode runner for the agent lanes (rca.js, triage.js, authoring.js). ONE source of truth for:
  *   - starting `opencode serve` and driving it over the SDK,
  *   - turning its session messages into the `turns[]` shape the backend's
  *     AgentSpanTelemetry.recordTurns expects,
@@ -449,6 +449,7 @@ function splitModel(model) {
  * (anomalyco/opencode#25430) — so even when it works there is no second attempt. Ours retries.
  */
 function schemaInstruction(jsonSchema) {
+  if (!jsonSchema) return '';
   return (
     '\n\nRespond with ONLY a single JSON object that validates against this JSON Schema. ' +
     'No prose, no markdown fence, no commentary before or after it.\n\n' +
@@ -467,7 +468,7 @@ function schemaInstruction(jsonSchema) {
  * correction prompt names back to the model.
  */
 function missingKeys(parsed, jsonSchema) {
-  const required = Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
+  const required = jsonSchema && Array.isArray(jsonSchema.required) ? jsonSchema.required : [];
   if (!parsed || typeof parsed !== 'object') return required;
   return required.filter((k) => parsed[k] === undefined);
 }
@@ -733,7 +734,9 @@ function toEnvelope(turns, structured, text) {
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
  *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
- *     is that reply.
+ *     is that reply. Null (authoring.js, asked for prose) drops the constraint: no schema
+ *     instruction, no schema-miss retry, and the reply's text is the answer, with
+ *     `structured_output` present only when that text happened to carry a JSON object.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
  *     may edit anything is a choice, not a default.
  *   - timeoutMs: the launcher's deadline for this run; bounds the client-side fetch.
@@ -939,9 +942,10 @@ async function runAgent(spec) {
         continue;
       }
       // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
-      // so "we parsed an object at all" is the check that carries the prose case.
+      // so "we parsed an object at all" is the check that carries the prose case. No schema at all
+      // (authoring.js, asked for prose) means any non-empty reply is the answer.
       const missing = missingKeys(structured, spec.jsonSchema);
-      if (structured && missing.length === 0) break;
+      if (!spec.jsonSchema || (structured && missing.length === 0)) break;
       if (attempt === 0) console.error(describeSchemaMiss(text, turns, spec.jsonSchema));
       resume = true;
       correction = structured
@@ -980,8 +984,10 @@ async function runAgent(spec) {
     // `text`, so it clears `unusable` above and would otherwise resolve as success. Reject here so
     // the backend records a failure instead of persisting a plausible-looking artifact.
     const missing = missingKeys(structured, spec.jsonSchema);
-    if (!structured || missing.length) console.error(describeSchemaMiss(text, finalTurns, spec.jsonSchema));
-    if (!structured) {
+    if (spec.jsonSchema && (!structured || missing.length)) {
+      console.error(describeSchemaMiss(text, finalTurns, spec.jsonSchema));
+    }
+    if (spec.jsonSchema && !structured) {
       throw Object.assign(
         new Error('opencode did not return a JSON object for the requested schema (2 attempts)'),
         { turns: finalTurns },

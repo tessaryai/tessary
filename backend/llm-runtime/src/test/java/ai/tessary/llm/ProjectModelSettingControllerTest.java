@@ -105,7 +105,7 @@ class ProjectModelSettingControllerTest {
                         "CUSTOM"),
                 view.catalogModels().stream().map(e -> e.provider().name()).toList());
 
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE, ModelLane.AUTHORING)) {
             var laneView = view.lanes().stream()
                     .filter(l -> l.id() == lane)
                     .findFirst()

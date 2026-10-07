@@ -20,7 +20,7 @@ import java.util.Locale;
  * model.
  *
  * <p>These lanes run on the org's own credential, or on the {@code PLATFORM} provider when the
- * deployment supplies one. Every RCA/TRIAGE run resolves a credential for its provider and injects it
+ * deployment supplies one. Every RCA/TRIAGE/AUTHORING run resolves a credential for its provider and injects it
  * into the sandbox request; see {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
  * lanes entirely and bills the customer's own provider credential.
  */
@@ -54,6 +54,19 @@ public enum ModelLane {
             "triage",
             "Triage",
             "Rules whether a finding is a real deviation. Runs an agent per cause, in a sandbox.",
+            LaneGroup.AGENT_VM),
+
+    /**
+     * Writing a custom classifier from a description: the coding agent in a microVM reads the
+     * project's repository and recent traces over MCP and returns the classifier's builder and
+     * question. Runs once per authoring request, pressed by a person, so it is sized like RCA and
+     * offers exactly RCA's models in RCA's order.
+     */
+    AUTHORING(
+            "authoring",
+            "Authoring",
+            "Writes a classifier's builder and question from a description, reading the repository and recent"
+                    + " traces",
             LaneGroup.AGENT_VM),
 
     /**

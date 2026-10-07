@@ -144,6 +144,6 @@ class ProjectModelSettingViewTest {
 
         // The surviving lanes, the set a client may PUT.
         Set<String> laneIds = json.at("/lanes").findValuesAsText("id").stream().collect(Collectors.toSet());
-        assertEquals(Set.of("rca", "triage", "frustration"), laneIds);
+        assertEquals(Set.of("rca", "triage", "authoring", "frustration"), laneIds);
     }
 }
