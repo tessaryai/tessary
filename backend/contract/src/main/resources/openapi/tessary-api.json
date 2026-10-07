@@ -9696,6 +9696,12 @@
           "governing" : {
             "type" : "boolean"
           },
+          "governing_org_name" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "governing_org_slug" : {
             "type" : [
               "string",
@@ -9709,6 +9715,7 @@
         "required" : [
           "domains",
           "governing",
+          "governing_org_name",
           "governing_org_slug",
           "mode"
         ],

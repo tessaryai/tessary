@@ -71,6 +71,8 @@ function invitedAgo(iso: string): string {
 export function Members() {
   const { orgSlug } = useTenant();
   const { user } = useAuth();
+  // The organization by name wherever the page refers to it; the slug is the URL segment only.
+  const orgName = user?.orgs?.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
   const qc = useQueryClient();
   const toast = useToast();
 
@@ -194,7 +196,7 @@ export function Members() {
         title="Members"
         subtitle={
           <>
-            Who can access <span className="font-mono text-fg">{orgSlug}</span>, and what each person can do.
+            Who can access <span className="text-fg">{orgName}</span>, and what each person can do.
           </>
         }
         actions={
@@ -335,7 +337,10 @@ export function Members() {
           {policy.data && !policy.data.governing && (
             <p className="text-small text-muted mt-2" role="note">
               The policy is instance-wide and is managed under organization{" "}
-              <span className="font-mono text-fg">{policy.data.governing_org_slug ?? "unknown"}</span>; it is shown
+              <span className="text-fg">
+                {policy.data.governing_org_name ?? policy.data.governing_org_slug ?? "unknown"}
+              </span>
+              ; it is shown
               here read-only.
             </p>
           )}
