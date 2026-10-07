@@ -108,7 +108,6 @@ public final class LanePriority {
     // TypeSafe's Jev decision model, direct and over OpenRouter.
     private static final String JEV = "TYPESAFE:jev-latest";
     private static final String OR_JEV = "OPENROUTER:~typesafe/jev-latest";
-    private static final String PLATFORM_JEV = "PLATFORM:~typesafe/jev-latest";
 
     /**
      * Last on every lane, because the entry stands for "whatever model this endpoint serves" rather
@@ -161,8 +160,7 @@ public final class LanePriority {
                 ModelLane.FRUSTRATION,
                 List.of(
                         new ProviderOption(ModelProvider.TYPESAFE, List.of(JEV), JEV),
-                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV),
-                        new ProviderOption(ModelProvider.PLATFORM, List.of(PLATFORM_JEV), PLATFORM_JEV)));
+                        new ProviderOption(ModelProvider.OPENROUTER, List.of(OR_JEV), OR_JEV)));
         return Collections.unmodifiableMap(m);
     }
 

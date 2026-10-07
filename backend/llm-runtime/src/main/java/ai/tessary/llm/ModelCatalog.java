@@ -457,18 +457,6 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     null,
                     true),
-            // Jev on the deployment-supplied provider, named as OpenRouter names it, so it prices under the
-            // same typesafe/ book key the other two routes do. No default base URL, as above.
-            new CatalogEntry(
-                    ModelProvider.PLATFORM,
-                    "TypeSafe",
-                    "~typesafe/jev-latest",
-                    "Jev (latest)",
-                    false,
-                    NO_EFFORT,
-                    null,
-                    false,
-                    true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
             // shows unqualified.

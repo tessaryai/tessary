@@ -606,7 +606,7 @@ class ProviderCredentialControllerTest {
                         .filter(p -> p.id() == ModelProvider.PLATFORM)
                         .toList());
         assertEquals(
-                List.of("claude-sonnet-5-5", "~typesafe/jev-latest"),
+                List.of("claude-sonnet-5-5"),
                 catalog.models().stream()
                         .filter(m -> m.provider() == ModelProvider.PLATFORM)
                         .map(ModelCatalog.CatalogEntry::modelName)
