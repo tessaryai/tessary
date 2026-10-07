@@ -34,8 +34,8 @@ class ProjectModelSettingsTest {
     private static final String ORG = "org1";
     private static final String HAIKU = "anthropic.claude-haiku-4-5";
     private static final String TERRA = "openai.gpt-5.6-terra";
-    private static final String SONNET_5 = "anthropic.claude-sonnet-5";
-    private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5";
+    private static final String SONNET = "anthropic.claude-sonnet-5-5";
+    private static final String PLATFORM_SONNET = "PLATFORM:claude-sonnet-5-5";
     private static final String PLATFORM_JEV = "PLATFORM:~typesafe/jev-latest";
 
     private ProjectModelSettingRepository repo;
@@ -112,11 +112,11 @@ class ProjectModelSettingsTest {
         // configured, so RCA runs Bedrock's default.
         configured(ModelProvider.BEDROCK, ModelProvider.GEMINI);
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(SONNET_5, rca.modelKey());
+        assertEquals(SONNET, rca.modelKey());
         assertTrue(rca.automatic());
         assertEquals(ServiceTier.STANDARD, rca.serviceTier());
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
-        assertEquals(SONNET_5, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
+        assertEquals(SONNET, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
         assertTrue(triage.automatic());
 
         configured(ModelProvider.GEMINI);
@@ -144,7 +144,7 @@ class ProjectModelSettingsTest {
         configured(ModelProvider.ANTHROPIC);
         platformOffered = true;
         assertEquals(
-                "ANTHROPIC:claude-sonnet-5",
+                "ANTHROPIC:claude-sonnet-5-5",
                 settings.resolve(PID, ModelLane.RCA).orElseThrow().modelKey(),
                 "the platform provider is last, so an unpinned lane moves to the org's own key");
     }
@@ -171,10 +171,10 @@ class ProjectModelSettingsTest {
     @Test
     void triageAcceptsTheSameFrontierModelRcaDoes() {
         // Sonnet 5 is the default on both lanes, and an explicit PUT naming it succeeds on either.
-        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET_5);
-        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET_5, ServiceTier.STANDARD, null);
-        settings.set(PID, ORG, ModelLane.RCA, SONNET_5);
-        verify(repo).upsert(PID, ModelLane.RCA, SONNET_5, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET);
+        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET, ServiceTier.STANDARD, null);
+        settings.set(PID, ORG, ModelLane.RCA, SONNET);
+        verify(repo).upsert(PID, ModelLane.RCA, SONNET, ServiceTier.STANDARD, null);
     }
 
     @Test
@@ -262,7 +262,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aChatModelIsRefusedOnTheFrustrationLane() {
-        for (String chat : List.of(SONNET_5, "OPENROUTER:openai/gpt-6-sol", "GROK:grok-4.6")) {
+        for (String chat : List.of(SONNET, "OPENROUTER:openai/gpt-6-sol", "GROK:grok-4.6")) {
             TessaryException ex =
                     assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.FRUSTRATION, chat));
             assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), chat);
@@ -284,7 +284,7 @@ class ProjectModelSettingsTest {
         assertFalse(rca.automatic());
         // TRIAGE resolves through its own provider order, not RCA's pinned Haiku.
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
-        assertEquals(SONNET_5, triage.modelKey());
+        assertEquals(SONNET, triage.modelKey());
         assertTrue(triage.automatic());
     }
 
@@ -296,7 +296,7 @@ class ProjectModelSettingsTest {
         configured(ModelProvider.BEDROCK);
 
         var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(SONNET_5, rca.modelKey());
+        assertEquals(SONNET, rca.modelKey());
         assertTrue(rca.automatic());
         assertEquals(1, settings.list(PID).size(), "the row is still reported to the settings UI");
     }
@@ -366,11 +366,11 @@ class ProjectModelSettingsTest {
      */
     @ParameterizedTest
     @CsvSource({
-        "RCA, OPENAI:gpt-5.5, anthropic.claude-sonnet-5",
+        "RCA, OPENAI:gpt-5.5, anthropic.claude-sonnet-5-5",
         "FRUSTRATION, OPENAI:gpt-5.5, TYPESAFE:jev-latest",
-        "RCA, NOPE:some-model, anthropic.claude-sonnet-5",
+        "RCA, NOPE:some-model, anthropic.claude-sonnet-5-5",
         // A row from before Nova was removed must not pin a sandbox to a model that resolves nowhere.
-        "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5"
+        "RCA, amazon.nova-2-lite, anthropic.claude-sonnet-5-5"
     })
     void aStoredRowTheLaneCannotRunFallsBackToTheOrder(ModelLane lane, String stored, String fallback) {
         when(repo.findByProject(PID)).thenReturn(List.of(row(lane, stored, ServiceTier.STANDARD)));

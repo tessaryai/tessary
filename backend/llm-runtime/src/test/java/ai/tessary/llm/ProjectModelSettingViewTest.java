@@ -133,7 +133,7 @@ class ProjectModelSettingViewTest {
         assertEquals("BEDROCK", rca.at("/provider_options/0/provider").asText());
         assertEquals("AWS Bedrock", rca.at("/provider_options/0/label").asText());
         assertEquals(
-                "anthropic.claude-sonnet-5",
+                "anthropic.claude-sonnet-5-5",
                 rca.at("/provider_options/0/default_model_key").asText());
         assertTrue(rca.at("/tiered").isMissingNode(), "a retired field");
 

@@ -151,6 +151,15 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
+                    false,
+                    NO_EFFORT,
+                    "https://api.anthropic.com/v1",
+                    true),
+            new CatalogEntry(
+                    ModelProvider.ANTHROPIC,
+                    "Anthropic",
                     "claude-sonnet-5",
                     "Claude Sonnet 5",
                     false,
@@ -182,6 +191,15 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic/claude-opus-5.5",
                     "Claude Opus 5.5",
+                    false,
+                    NO_EFFORT,
+                    "https://openrouter.ai/api/v1",
+                    false),
+            new CatalogEntry(
+                    ModelProvider.OPENROUTER,
+                    "Anthropic",
+                    "anthropic/claude-sonnet-5.5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
@@ -267,6 +285,15 @@ public final class ModelCatalog {
 
             // AWS Bedrock: currently hosts Anthropic only (Moonshot/Kimi K2.6 not yet
             // available on Bedrock). Logical ids; ARN/region on the row.
+            new CatalogEntry(
+                    ModelProvider.BEDROCK,
+                    "Anthropic",
+                    "anthropic.claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
+                    false,
+                    NO_EFFORT,
+                    null,
+                    false),
             new CatalogEntry(
                     ModelProvider.BEDROCK,
                     "Anthropic",
@@ -448,6 +475,15 @@ public final class ModelCatalog {
                     true),
             // The deployment-supplied provider runs Anthropic's model on Anthropic's wire, so it prices
             // under the same bare book key. No default base URL: the supplying build decides the route.
+            new CatalogEntry(
+                    ModelProvider.PLATFORM,
+                    "Anthropic",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
+                    false,
+                    NO_EFFORT,
+                    null,
+                    true),
             new CatalogEntry(
                     ModelProvider.PLATFORM,
                     "Anthropic",
