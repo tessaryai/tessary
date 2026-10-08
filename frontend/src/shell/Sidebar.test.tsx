@@ -31,15 +31,18 @@ vi.mock("./ShellActions", () => ({
   useShellActions: () => ({ registerProjectSwitcher: (fn: () => void) => (shell.opener = fn) }),
 }));
 vi.mock("./useNavigation", async () => {
-  const { SETTINGS_ICON: icon } = await import("./nav");
+  // Triage and Classifiers are the real declarations: which row a finding page lights is set in nav.tsx.
+  const { SETTINGS_ICON: icon, TRIAGE_NAV, NAV_GROUPS } = await import("./nav");
+  const classifiers = NAV_GROUPS.flatMap((g) => g.items).find((i) => i.id === "classifiers")!;
   return {
     useNavigation: () => ({
-      triage: { id: "triage", label: "Triage", icon },
+      triage: TRIAGE_NAV,
       groups: [
         {
           label: "Monitor",
           items: [
             { id: "traces", label: "Traces", icon, match: ["sessions"] },
+            classifiers,
             { id: "vitals", label: "Vitals", icon },
           ],
         },
@@ -84,6 +87,19 @@ describe("the nav rows", () => {
     open("/orgs/acme/projects/default/vitals");
     expect(isActive("Vitals")).toBe(true);
     expect(isActive("Settings")).toBe(false);
+  });
+
+  // Bug: a finding page, which Triage links to and whose breadcrumb leads back to Triage, lit Classifiers
+  // because its path sits under classifiers/.
+  it("marks Triage active on a finding page, and Classifiers on a classifier's own pages", () => {
+    open("/orgs/acme/projects/default/classifiers/findings/f-1");
+    expect(isActive("Triage")).toBe(true);
+    expect(isActive("Classifiers")).toBe(false);
+    cleanup();
+
+    open("/orgs/acme/projects/default/classifiers/clf-1");
+    expect(isActive("Classifiers")).toBe(true);
+    expect(isActive("Triage")).toBe(false);
   });
 
   it("goes to this project's page for a row, and to Triage from the brand", () => {

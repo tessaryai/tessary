@@ -32,7 +32,6 @@ import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, LoadingRow, PageHeader, Section, Spinner, Toggle, cn } from "../../ui";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
-import { FrustrationScopeSection } from "./FrustrationScopeSection";
 import { GroundednessEnableModal } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
@@ -203,16 +202,17 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
           />
         </Section>
 
-        {classifier.detector === FRUSTRATION_DETECTOR ? (
+        {!UNSCOPED_DETECTORS.has(classifier.detector) && (
           <Section title="Call sites">
-            <FrustrationScopeSection classifier={classifier} />
+            {classifier.detector === FRUSTRATION_DETECTOR && (
+              <p className="text-subtle m-0 mb-2.5 text-small">
+                To spend less, limit it to the call sites that reply to the user. Routers and memory passes are not
+                conversations.
+              </p>
+            )}
+            {/* Keyed so a switch to another classifier seeds the form from that classifier's list. */}
+            <CallSitesSection key={classifier.id} classifier={classifier} />
           </Section>
-        ) : (
-          !UNSCOPED_DETECTORS.has(classifier.detector) && (
-            <Section title="Call sites">
-              <CallSitesSection classifier={classifier} />
-            </Section>
-          )
         )}
 
         {isDrift && (
@@ -391,10 +391,9 @@ function GroundednessWords({ status }: { status: GroundednessStatusWords }) {
   );
 }
 
-/** Where the classifier runs, as Status names it. Frustration keeps its own list, shown in its Call sites section. */
-function callSitesFact(classifier: Classifier): string | null {
+/** Where the classifier runs, as Status names it. */
+function callSitesFact(classifier: Classifier): string {
   if (UNSCOPED_DETECTORS.has(classifier.detector)) return "Every tool";
-  if (classifier.detector === FRUSTRATION_DETECTOR) return null;
   const count = classifier.call_site_ids?.length;
   if (count === undefined) return "Every call site";
   return `${count} call site${count === 1 ? "" : "s"}`;
@@ -465,7 +464,7 @@ function StatusBlock({
         <Fact label="Mode">
           <span className="font-mono">{classifier.mode}</span>
         </Fact>
-        {callSites && <Fact label="Call sites">{callSites}</Fact>}
+        <Fact label="Call sites">{callSites}</Fact>
       </dl>
     </>
   );
@@ -549,7 +548,11 @@ function Findings({ classifier }: { classifier: Classifier }) {
     queryKey: key,
     queryFn: () => api.listBehaviorFindings(classifier.detector),
   });
-  const invalidate = () => void qc.invalidateQueries({ queryKey: key });
+  // Triage lists the same findings, so a ruling or a triage run here must refresh it too.
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: key });
+    void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
+  };
   const analyzeM = useMutation({ mutationFn: (id: string) => api.analyzeBehaviorFinding(id), onSuccess: invalidate });
   const resolveM = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "expected" | "not_expected" }) =>

@@ -186,27 +186,20 @@ final class ChartSeries {
     /**
      * What a call-site rule needs to know about one classifier beyond its row.
      *
-     * @param frustrationScope the call sites Frustration scores (its own pick list)
      * @param waitingReason why the row as a whole cannot judge: a pause, or Groundedness not scoring; null when it can
      * @param schemaCallSites the call sites that declare an output schema
      * @param measures the drift measures the row's config is live for
      */
-    record Facts(
-            Set<String> frustrationScope,
-            @Nullable String waitingReason,
-            Set<String> schemaCallSites,
-            Set<String> measures) {}
+    record Facts(@Nullable String waitingReason, Set<String> schemaCallSites, Set<String> measures) {}
 
     /**
-     * Whether {@code row} runs on {@code callSiteId}, and if so whether it is waiting. Frustration reads its own pick
-     * list, never the row's call sites. A drift classifier is on only for the measure its call-site card shows.
+     * Whether {@code row} runs on {@code callSiteId}, and if so whether it is waiting. A drift classifier is on only
+     * for the measure its call-site card shows.
      */
     static Availability forCallSite(ClassifierRow row, String callSiteId, Facts facts) {
         if (!row.enabled()) return Availability.OFF_NOW;
         boolean runs =
                 switch (row.detector()) {
-                    case BuiltInDetector.Kind.FRUSTRATION ->
-                        facts.frustrationScope().contains(callSiteId);
                     case BuiltInDetector.Kind.DURATION_DRIFT ->
                         row.runsOn(callSiteId) && facts.measures().contains(Measure.TURN_DURATION);
                     case BuiltInDetector.Kind.COST_DRIFT ->

@@ -34,7 +34,6 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRepository.ConfirmedSpan;
 import ai.tessary.classifier.frustration.FrustrationConfig;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
-import ai.tessary.classifier.frustration.FrustrationScopeRepository;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricBaselineReference;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
@@ -140,7 +139,6 @@ public class ClassifierChartService {
 
     private final ClassifierService classifiers;
     private final ClassifierChartRepository charts;
-    private final FrustrationScopeRepository frustrationScopes;
     private final FrustrationRateRepository frustrationRates;
     private final GroundednessRateRepository groundednessRates;
     private final GroundednessStatus groundednessStatus;
@@ -159,7 +157,6 @@ public class ClassifierChartService {
     public ClassifierChartService(
             ClassifierService classifiers,
             ClassifierChartRepository charts,
-            FrustrationScopeRepository frustrationScopes,
             FrustrationRateRepository frustrationRates,
             GroundednessRateRepository groundednessRates,
             GroundednessStatus groundednessStatus,
@@ -175,7 +172,6 @@ public class ClassifierChartService {
         this(
                 classifiers,
                 charts,
-                frustrationScopes,
                 frustrationRates,
                 groundednessRates,
                 groundednessStatus,
@@ -194,7 +190,6 @@ public class ClassifierChartService {
     ClassifierChartService(
             ClassifierService classifiers,
             ClassifierChartRepository charts,
-            FrustrationScopeRepository frustrationScopes,
             FrustrationRateRepository frustrationRates,
             GroundednessRateRepository groundednessRates,
             GroundednessStatus groundednessStatus,
@@ -210,7 +205,6 @@ public class ClassifierChartService {
             Clock clock) {
         this.classifiers = classifiers;
         this.charts = charts;
-        this.frustrationScopes = frustrationScopes;
         this.frustrationRates = frustrationRates;
         this.groundednessRates = groundednessRates;
         this.groundednessStatus = groundednessStatus;
@@ -295,16 +289,13 @@ public class ClassifierChartService {
 
         Facts facts(ClassifierRow row) {
             return facts.computeIfAbsent(row.id(), k -> {
-                Set<String> scope = BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
-                        ? frustrationScopes.callSites(id, row.id())
-                        : Set.of();
                 Set<String> measures = DRIFT_KINDS.contains(row.detector())
                         ? new HashSet<>(
                                 MetricDriftConfig.of(mapper, row.configJson()).measures())
                         : Set.of();
                 Set<String> schemas =
                         BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(row.detector()) ? schemaCallSites() : Set.of();
-                return new Facts(scope, waitingReason(row), schemas, measures);
+                return new Facts(waitingReason(row), schemas, measures);
             });
         }
 
@@ -475,7 +466,7 @@ public class ClassifierChartService {
             }
             status = reason == null ? Availability.ON : Availability.WAITING;
         }
-        boolean all = row.callSiteIds() == null && !BuiltInDetector.Kind.FRUSTRATION.equals(detector);
+        boolean all = row.callSiteIds() == null;
         return new ClassifierMenuItem(row.id(), row.classifierKey(), row.name(), status, reason, covers, all, count);
     }
 

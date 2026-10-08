@@ -41,7 +41,6 @@ const listBehaviorFindings = vi.fn();
 const analyzeBehaviorFinding = vi.fn();
 const resolveBehaviorFinding = vi.fn();
 const getClassifierTuning = vi.fn(() => new Promise(() => {}));
-const getFrustrationScope = vi.fn(() => new Promise(() => {}));
 const listClassifierCallSites = vi.fn(() => new Promise(() => {}));
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
@@ -63,7 +62,6 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
         analyzeBehaviorFinding,
         resolveBehaviorFinding,
         getClassifierTuning,
-        getFrustrationScope,
         listClassifierCallSites,
         getClassifierDebug: () => new Promise(() => {}),
         getModelSettings: () => new Promise(() => {}),
@@ -85,7 +83,6 @@ afterEach(() => {
   analyzeBehaviorFinding.mockReset();
   resolveBehaviorFinding.mockReset();
   getClassifierTuning.mockClear();
-  getFrustrationScope.mockClear();
   listClassifierCallSites.mockClear();
 });
 
@@ -154,8 +151,8 @@ describe("the configure page", () => {
     expect(screen.queryByText("No classifier with this id in this project.")).toBeNull();
   });
 
-  // Bug: Tool errors offered a call-site list the server refuses (it buckets by tool), Frustration given the
-  // generic list instead of its own picker, or a classifier other than the two drift ones given the drift form.
+  // Bug: Tool errors offered a call-site list the server refuses (it buckets by tool), or a classifier other than
+  // the two drift ones given the drift form.
   it("shows the call-site form and the tuning form only where they apply", async () => {
     listClassifiers.mockResolvedValue([classifier({ id: "clf-t", name: "Tool errors", detector: "tool_error" })]);
     renderPage("clf-t");
@@ -166,14 +163,29 @@ describe("the configure page", () => {
     expect(listClassifierCallSites).not.toHaveBeenCalled();
   });
 
-  it("gives Frustration its own call-site picker", async () => {
+  // Bug: Frustration given a picker of its own (its list is gone; it shares call_site_ids), or no word on what
+  // limiting it is for.
+  it("gives Frustration the shared call-site list, with a tip on which call sites to keep", async () => {
     listClassifiers.mockResolvedValue([classifier({})]);
     renderPage();
 
-    await screen.findByRole("heading", { level: 2, name: "Call sites" });
-    expect(getFrustrationScope).toHaveBeenCalledWith("clf-1");
-    expect(listClassifierCallSites).not.toHaveBeenCalled();
+    const callSites = await waitFor(() => section("Call sites"));
+    expect(within(callSites).getByText(/limit it to the call sites that reply to the user/)).toBeTruthy();
+    expect(listClassifierCallSites).toHaveBeenCalled();
     expect(maybeSection("Tuning")).toBeNull();
+  });
+
+  // Bug: Status says nothing about where Frustration runs, as if it still kept a list of its own.
+  it("says where Frustration runs in Status, like every other classifier", async () => {
+    listClassifiers.mockResolvedValue([classifier({})]);
+    renderPage();
+    expect(await within(await waitFor(() => section("Status"))).findByText("Every call site")).toBeTruthy();
+  });
+
+  it("counts Frustration's call sites in Status when it is limited", async () => {
+    listClassifiers.mockResolvedValue([classifier({ call_site_ids: ["a", "b"] })]);
+    renderPage();
+    expect(await within(await waitFor(() => section("Status"))).findByText("2 call sites")).toBeTruthy();
   });
 
   it("gives a drift classifier the call-site list and the tuning form", async () => {
@@ -679,6 +691,33 @@ describe("a drift classifier's findings, detections and reset", () => {
     fireEvent.click(verbs[1]);
     await waitFor(() => expect(resolveBehaviorFinding).toHaveBeenLastCalledWith("f-1", "not_expected"));
     expect(resolveBehaviorFinding.mock.calls[0]).toEqual(["f-1", "expected"]);
+  });
+
+  // Bug: Triage, reached from the breadcrumb within the staleTime, still lists a finding just ruled or triaged here.
+  it("marks Triage's findings stale when a finding is triaged or ruled here", async () => {
+    listClassifiers.mockResolvedValue([COST]);
+    listBehaviorFindings.mockResolvedValue({ findings: [finding("f-1")] });
+    analyzeBehaviorFinding.mockResolvedValue({});
+    resolveBehaviorFinding.mockResolvedValue({});
+    const qc = renderPage("clf-c");
+    const triageKey = ["behavior-findings", "/api/orgs/acme/projects/default", "all"];
+    const triageStale = () => qc.getQueryState(triageKey)?.isInvalidated ?? false;
+    const row = (await screen.findByText("Cost rose on f-1")).parentElement!;
+
+    qc.setQueryData(triageKey, { findings: [] });
+    fireEvent.click(within(row).getByRole("button", { name: "Run triage" }));
+    await waitFor(() => expect(triageStale()).toBe(true));
+
+    const verbs = within(row).getAllByRole("button").filter((b) => b.textContent !== "Run triage");
+    for (const verb of verbs) {
+      qc.setQueryData(triageKey, { findings: [] });
+      fireEvent.click(verb);
+      await waitFor(() => expect(triageStale()).toBe(true));
+    }
+    expect(resolveBehaviorFinding.mock.calls).toEqual([
+      ["f-1", "expected"],
+      ["f-1", "not_expected"],
+    ]);
   });
 
   it("says when the findings could not be read", async () => {

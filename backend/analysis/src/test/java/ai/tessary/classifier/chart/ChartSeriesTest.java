@@ -33,7 +33,7 @@ class ChartSeriesTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final LocalDate TODAY = LocalDate.parse("2026-10-08");
-    private static final Facts NO_FACTS = new Facts(Set.of(), null, Set.of(), Set.of());
+    private static final Facts NO_FACTS = new Facts(null, Set.of(), Set.of());
 
     @Test
     void denseDays_fillsEveryDayAndEndsOnToday() {
@@ -115,23 +115,31 @@ class ChartSeriesTest {
                 ChartSeries.rateBaseline(state(1000, 30), reference, 500));
     }
 
+    /** Frustration has no pick list of its own any more: no call-site list means every call site. */
     @Test
-    void frustrationEnabledOutsideScope_isOffChip() {
+    void frustrationWithNoCallSiteList_isOnForEveryCallSite() {
         ClassifierRow frustration =
                 ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION).build();
-        Facts scopedElsewhere = new Facts(Set.of("cs-other"), null, Set.of(), Set.of());
 
-        assertEquals(Availability.OFF_NOW, ChartSeries.forCallSite(frustration, "cs-a", scopedElsewhere));
-        assertEquals(
-                Availability.ON_NOW,
-                ChartSeries.forCallSite(frustration, "cs-a", new Facts(Set.of("cs-a"), null, Set.of(), Set.of())));
+        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
+        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
+    }
+
+    @Test
+    void frustrationLimitedElsewhere_isOffChip() {
+        ClassifierRow frustration = ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .onCallSites("cs-b")
+                .build();
+
+        assertEquals(Availability.OFF_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
+        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
     }
 
     @Test
     void malformedWithoutSchema_isWaitingChip() {
         ClassifierRow malformed =
                 ClassifierRowBuilder.of(BuiltInDetector.Kind.MALFORMED_OUTPUT).build();
-        Facts otherHasSchema = new Facts(Set.of(), null, Set.of("cs-b"), Set.of());
+        Facts otherHasSchema = new Facts(null, Set.of("cs-b"), Set.of());
 
         assertEquals(
                 Availability.waiting(ChartSeries.NO_SCHEMA),
@@ -143,7 +151,7 @@ class ChartSeriesTest {
     void driftCallSiteCard_needsItsMeasureInTheConfig() {
         ClassifierRow duration =
                 ClassifierRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT).build();
-        Facts toolOnly = new Facts(Set.of(), null, Set.of(), Set.of(Measure.TOOL_DURATION));
+        Facts toolOnly = new Facts(null, Set.of(), Set.of(Measure.TOOL_DURATION));
 
         assertEquals(Availability.OFF_NOW, ChartSeries.forCallSite(duration, "cs-a", toolOnly));
         assertEquals(Availability.ON_NOW, ChartSeries.forTool(duration, toolOnly.measures()));

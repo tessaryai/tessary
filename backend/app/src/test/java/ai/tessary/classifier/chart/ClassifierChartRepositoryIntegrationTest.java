@@ -20,7 +20,6 @@ import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
-import ai.tessary.classifier.frustration.FrustrationScopeRepository;
 import ai.tessary.classifier.frustration.JevFrustrationQuestion;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
@@ -105,9 +104,6 @@ class ClassifierChartRepositoryIntegrationTest {
     ClassifierRepository classifierRows;
 
     @Autowired
-    FrustrationScopeRepository frustrationScopes;
-
-    @Autowired
     FrustrationRateRepository frustrationRates;
 
     @Autowired
@@ -152,7 +148,6 @@ class ClassifierChartRepositoryIntegrationTest {
         service = new ClassifierChartService(
                 classifierService,
                 charts,
-                frustrationScopes,
                 frustrationRates,
                 groundednessRates,
                 groundednessStatus,
@@ -192,7 +187,6 @@ class ClassifierChartRepositoryIntegrationTest {
         String pid = project("chart-cross", Capability.FRUSTRATION);
         ClassifierRow signal = enable(fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION));
         declare(pid, "cs-a", null);
-        frustrationScopes.replace(pid, signal.id(), List.of("cs-a"));
         Instant crossing = Instant.parse("2026-09-30T10:00:00Z"); // before the 7-day range, inside the 28-day one
         fixture.frustrationAssessment(pid, signal, "t-1a", "conv-1", "cs-a", crossing, false, VERSION);
         Instant flaggedAt = Instant.parse("2026-10-06T10:00:00Z");
