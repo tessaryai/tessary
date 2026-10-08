@@ -570,7 +570,8 @@ function truncate(s: string, max: number): string {
 }
 
 /**
- * One detection = one trace this classifier tripped on. Rows link into the trace; a
+ * One detection = one trace this classifier tripped on. Rows open the session the trace belongs to,
+ * focused on the flagged span, and the trace itself for anonymous traffic with no session; a
  * context-grain detection (no trace_id) has nothing to open and stays inert rather than
  * pretending to be a link.
  *
@@ -616,10 +617,15 @@ export function DetectionRow({ event }: { event: ClassifierEvent }) {
       </div>
     );
   }
+  const to = event.session_id
+    ? `../sessions/${encodeURIComponent(event.session_id)}${
+        event.subject_kind === "span" ? `?span=${encodeURIComponent(event.subject_id)}` : ""
+      }`
+    : `../traces/${encodeURIComponent(event.trace_id)}`;
   return (
     <div className="flex items-start bg-surface gap-3 py-2.75 px-3.5">
       <Link
-        to={`../traces/${encodeURIComponent(event.trace_id)}`}
+        to={to}
         className="min-w-0 flex-1 hover:opacity-80 transition-opacity"
         style={{ transitionDuration: "var(--duration-micro)" }}
       >
@@ -812,7 +818,7 @@ function ClassifierRail({
         meta={
           detections.length === 0
             ? undefined
-            : `${detections.length}${detections.length === DETECTION_LIMIT ? " most recent" : ""} · select one to open the trace`
+            : `${detections.length}${detections.length === DETECTION_LIMIT ? " most recent" : ""} · select one to open its session`
         }
       >
         {detectionsQ.isLoading && <LoadingRow />}

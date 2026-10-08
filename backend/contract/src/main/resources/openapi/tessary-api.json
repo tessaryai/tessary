@@ -3964,6 +3964,12 @@
               "null"
             ]
           },
+          "session_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "severity" : {
             "type" : [
               "string",
@@ -3992,6 +3998,7 @@
           "id",
           "occurred_at",
           "project_version_id",
+          "session_id",
           "severity",
           "subject_id",
           "subject_kind",

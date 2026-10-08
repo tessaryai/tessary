@@ -2874,6 +2874,7 @@ export interface components {
             id: string;
             occurred_at: string | null;
             project_version_id: string | null;
+            session_id: string | null;
             severity: string | null;
             subject_id: string;
             subject_kind: string;
