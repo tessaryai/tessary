@@ -169,6 +169,43 @@ class MetricDriftSweepIntegrationTest {
     }
 
     @Test
+    @DisplayName("a classifier limited to one call site counts only that call site's turns and tool calls")
+    void aScopedSweepCountsOnlyItsCallSitesTraffic() {
+        String pid = project("metric-sweep-call-site-scope");
+        ClassifierRow both = signal(pid, CONFIG_BOTH_GRAINS);
+        ClassifierRow scoped = new ClassifierRow(
+                both.id(),
+                both.projectId(),
+                both.classifierKey(),
+                both.name(),
+                both.description(),
+                both.detector(),
+                both.configJson(),
+                both.builtIn(),
+                both.version(),
+                both.enabled(),
+                both.mode(),
+                both.createdAt(),
+                both.updatedAt(),
+                List.of(CALL_SITE));
+        seedTurnsOn(pid, CALL_SITE, T0, 10, 2_000, 400L);
+        seedTurnsOn(pid, "cs-other", T0.plusSeconds(10), 10, 2_000, 400L);
+
+        sweep.sweepMetrics(claim(pid, scoped), scoped);
+
+        List<String> buckets = baselines.listByClassifier(pid, scoped.id()).stream()
+                .map(r -> r.measure() + "/" + r.bucketKey() + "=" + r.currentCount())
+                .sorted()
+                .toList();
+        assertEquals(
+                List.of(
+                        Measure.TOOL_DURATION + "/" + TOOL_BUCKET + "=10",
+                        Measure.TURN_DURATION + "/" + CALL_SITE + "=10"),
+                buckets,
+                "no bucket for cs-other, and the shared tool bucket holds only cs-research's ten calls");
+    }
+
+    @Test
     @DisplayName("a backfill replay compares each window with its prior 21 event-days, not the sweep's own clock")
     void aBackfillReplayJudgesEachWindowAgainstItsOwnEventDays() throws Exception {
         String pid = project("metric-sweep-backfill-replay");
@@ -615,7 +652,8 @@ class MetricDriftSweepIntegrationTest {
                 base.enabled(),
                 base.mode(),
                 base.createdAt(),
-                base.updatedAt());
+                base.updatedAt(),
+                base.callSiteIds());
     }
 
     private ClassifierJobRow claim(String projectId, ClassifierRow signal) {
@@ -648,6 +686,11 @@ class MetricDriftSweepIntegrationTest {
 
     /** Like {@link #seedTurns} but from an absolute instant, for backfill replays months behind the wall clock. */
     private String seedTurnsAt(String projectId, Instant start, int count, long turnMillis, @Nullable Long toolMillis) {
+        return seedTurnsOn(projectId, CALL_SITE, start, count, turnMillis, toolMillis);
+    }
+
+    private String seedTurnsOn(
+            String projectId, String callSiteId, Instant start, int count, long turnMillis, @Nullable Long toolMillis) {
         String sessionId = SubstrateV2Fixtures.sessionId();
         fx.session(projectId, sessionId, start);
 
@@ -656,10 +699,10 @@ class MetricDriftSweepIntegrationTest {
             Instant startedAt = start.plusSeconds(i);
             String traceId = SubstrateV2Fixtures.traceId();
             fx.trace(projectId, traceId, sessionId, startedAt);
-            String rootId = insertSpan(projectId, traceId, null, "agent", "loop", startedAt, turnMillis);
+            String rootId = insertSpan(projectId, traceId, null, "agent", "loop", startedAt, turnMillis, callSiteId);
             if (toolMillis != null) {
                 // A child of the root, as a dispatched call really is.
-                insertSpan(projectId, traceId, rootId, "tool", "search_docs", startedAt, toolMillis);
+                insertSpan(projectId, traceId, rootId, "tool", "search_docs", startedAt, toolMillis, callSiteId);
             }
             settle(projectId, traceId);
             lastTraceId = traceId;
@@ -752,12 +795,24 @@ class MetricDriftSweepIntegrationTest {
             String name,
             Instant startedAt,
             long millis) {
+        return insertSpan(projectId, traceId, parentId, kind, name, startedAt, millis, CALL_SITE);
+    }
+
+    private String insertSpan(
+            String projectId,
+            String traceId,
+            @Nullable String parentId,
+            String kind,
+            String name,
+            Instant startedAt,
+            long millis,
+            String callSiteId) {
         return fx.spanSeed(projectId)
                 .traceId(traceId)
                 .parentSpanId(parentId)
                 .kind(kind)
                 .name(name)
-                .callSiteId(CALL_SITE)
+                .callSiteId(callSiteId)
                 .at(startedAt)
                 .endedAt(startedAt.plusMillis(millis))
                 .write()

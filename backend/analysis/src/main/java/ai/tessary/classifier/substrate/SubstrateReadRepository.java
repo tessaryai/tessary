@@ -256,6 +256,49 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .orElse(null);
     }
 
+    /**
+     * The call sites each of a batch's traces carries on any of its spans. A span with no call site of its own is
+     * scoped by these, the same any-span rule the traces list filters by. A trace with no tagged span is absent.
+     */
+    public java.util.Map<String, java.util.Set<String>> callSitesByTrace(
+            String projectId, java.util.Set<String> traceIds) {
+        if (traceIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<String, java.util.Set<String>> out = new java.util.HashMap<>();
+        jdbc.sql("SELECT DISTINCT trace_id, call_site_id FROM span"
+                        + " WHERE project_id = :pid AND trace_id = ANY(:ids) AND call_site_id IS NOT NULL")
+                .param("pid", projectId)
+                .param("ids", traceIds.toArray(String[]::new))
+                .query((rs, n) -> out.computeIfAbsent(rs.getString("trace_id"), t -> new java.util.HashSet<>())
+                        .add(rs.getString("call_site_id")))
+                .list();
+        return java.util.Map.copyOf(out);
+    }
+
+    /**
+     * Every call site a classifier can be limited to: the ones the bundle declares, and the entry call site of every
+     * settled trace. The trace half walks {@code ix_trace_scope_settled_started} one distinct key at a time, so it costs
+     * one index probe per call site, not a scan of the project's traces. The {@code COALESCE} is spelled exactly as the
+     * index spells it, literal and all, or the planner cannot match the expression.
+     */
+    public java.util.SortedSet<String> knownCallSiteIds(String projectId) {
+        java.util.SortedSet<String> out = new java.util.TreeSet<>(
+                jdbc.sql("""
+                WITH RECURSIVE seen(k) AS (
+                    SELECT MIN(COALESCE(call_site_id, '__unattributed__')) FROM trace
+                     WHERE project_id = :pid AND is_settled AND is_deleted IS NOT TRUE
+                    UNION ALL
+                    SELECT (SELECT MIN(COALESCE(t.call_site_id, '__unattributed__')) FROM trace t
+                             WHERE t.project_id = :pid AND t.is_settled AND t.is_deleted IS NOT TRUE
+                               AND COALESCE(t.call_site_id, '__unattributed__') > seen.k)
+                      FROM seen WHERE seen.k IS NOT NULL
+                )
+                SELECT k FROM seen WHERE k IS NOT NULL AND k <> '__unattributed__'
+                UNION
+                SELECT id FROM call_site WHERE project_id = :pid
+                """).param("pid", projectId).query(String.class).list());
+        return java.util.Collections.unmodifiableSortedSet(out);
+    }
+
     /** The declared output schemas of a batch's call sites: the Malformed Output built-in's read. */
     @Override
     public java.util.Map<String, String> callSiteOutputSchemas(String projectId, java.util.Set<String> callSiteIds) {

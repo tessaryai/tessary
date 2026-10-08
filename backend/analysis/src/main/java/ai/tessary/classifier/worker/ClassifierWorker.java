@@ -440,6 +440,37 @@ public class ClassifierWorker {
     }
 
     /**
+     * Drop observations outside the classifier's call sites, before anything is sent to a detector. A span with no
+     * call site of its own takes its trace's, from any span of that trace: the rule the traces list filters by.
+     */
+    private List<SubstrateObservation> inCallSiteScope(
+            String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
+        if (signal.callSiteIds() == null || candidates.isEmpty()) return candidates;
+        Set<String> untaggedTraces = candidates.stream()
+                .filter(o -> o.callSiteId() == null)
+                .map(SubstrateObservation::traceId)
+                .collect(Collectors.toSet());
+        Map<String, Set<String>> traceCallSites = substrate.callSitesByTrace(projectId, untaggedTraces);
+        List<SubstrateObservation> kept = candidates.stream()
+                .filter(o -> o.callSiteId() != null
+                        ? signal.runsOn(o.callSiteId())
+                        : traceCallSites.getOrDefault(o.traceId(), Set.of()).stream()
+                                .anyMatch(signal::runsOn))
+                .toList();
+        if (kept.size() < candidates.size()) {
+            StructuredLog.debug(log, "signal.sweep.call-site-scoped")
+                    .message(
+                            "skipped %d observation(s) outside %s's call sites",
+                            candidates.size() - kept.size(), signal.classifierKey())
+                    .field("signal", signal.classifierKey())
+                    .field("skipped", candidates.size() - kept.size())
+                    .field("scored", kept.size())
+                    .log();
+        }
+        return kept;
+    }
+
+    /**
      * The observation-grain sweep, drawing its candidate windows at {@code grain}.
      *
      * <p>One page per claim, except for a kind in {@link #DRAIN_TO_HEAD}, which keeps taking pages until one
@@ -648,7 +679,7 @@ public class ClassifierWorker {
                             .toList());
         } else {
             window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, pageSize);
-            obs = window;
+            obs = inCallSiteScope(job.projectId(), signal, window);
         }
         if (window.isEmpty()) return null;
         if (detector instanceof PagedDetector<?> paged) {
@@ -662,14 +693,18 @@ public class ClassifierWorker {
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
         // Batch dispatch: deterministic detectors loop detect() internally; the encoder tier scores the
         // whole batch in one serving call.
-        List<Detection> scored = detector.sweepBatch(signal, obs, detectorConfig);
-        StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
-                .field("job", job.id())
-                .field("signal", signal.classifierKey())
-                .field("classifierId", signal.id())
-                .field("detector", signal.detector())
-                .field("batchSize", obs.size())
-                .log();
+        // A page the call-site scope emptied sends nothing to the detector, but still moves the cursor.
+        List<Detection> scored = List.of();
+        if (!obs.isEmpty()) {
+            scored = detector.sweepBatch(signal, obs, detectorConfig);
+            StructuredLog.info(log, Markers.OPS, "signal.sweep.detect")
+                    .field("job", job.id())
+                    .field("signal", signal.classifierKey())
+                    .field("classifierId", signal.id())
+                    .field("detector", signal.detector())
+                    .field("batchSize", obs.size())
+                    .log();
+        }
         for (int i = 0; i < obs.size(); i++) {
             Detection d = scored.get(i);
             if (!d.fired()) continue;

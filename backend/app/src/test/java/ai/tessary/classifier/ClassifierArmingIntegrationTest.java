@@ -670,7 +670,8 @@ class ClassifierArmingIntegrationTest {
                 /* enabled */ true,
                 ClassifierRow.Mode.DISCOVERY,
                 now,
-                now);
+                now,
+                /* callSiteIds */ null);
     }
 
     private List<String> evaluateLeaks(String pid, String classifierId, List<FindingEvidenceRepository.Ref> refs) {
