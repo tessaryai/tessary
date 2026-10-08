@@ -33,7 +33,8 @@ import org.springframework.stereotype.Repository;
  *   <li>{@link #getOrCreateAll}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
  *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
  *   <li>{@link #applyBatchTimers}: the only in-place update on this row, and it is {@code min}/{@code
- *       max} plus a monotonically-earlier deadline. Idempotent under replay by construction (§7.1).
+ *       max}, a monotonically-earlier deadline, and a fill of the identity handles the get-or-create left
+ *       null (§6.3). Idempotent under replay by construction (§7.1).
  *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
  *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
  *       permanent and undetectable, whereas a full recompute self-heals after any bug.
@@ -106,9 +107,23 @@ public class TraceV2Repository {
      * @param minStartedAt the earliest {@code started_at} among the batch's spans for this trace.
      * @param maxEndedAt the latest {@code ended_at}, or null when no span in the batch had ended.
      * @param hasRoot whether any span in the batch had {@code parent_span_id IS NULL}.
+     * @param name the batch's root span name, filled onto the trace only while the trace's is null; the
+     *     same for {@code userId}, {@code sessionId} and {@code threadId} (substrate-model.md §6.3).
      */
     public record TimerUpdate(
-            String traceId, String minStartedAt, @Nullable String maxEndedAt, boolean hasRoot) {}
+            String traceId,
+            String minStartedAt,
+            @Nullable String maxEndedAt,
+            boolean hasRoot,
+            @Nullable String name,
+            @Nullable String userId,
+            @Nullable String sessionId,
+            @Nullable String threadId) {
+
+        public TimerUpdate(String traceId, String minStartedAt, @Nullable String maxEndedAt, boolean hasRoot) {
+            this(traceId, minStartedAt, maxEndedAt, hasRoot, null, null, null, null);
+        }
+    }
 
     /**
      * Fold a batch into its traces' timers and re-arm the rollup deadline (§7.1).
@@ -155,7 +170,15 @@ public class TraceV2Repository {
                     .append(i)
                     .append("::timestamptz, :rt")
                     .append(i)
-                    .append("::boolean)");
+                    .append("::boolean, :nm")
+                    .append(i)
+                    .append("::text, :us")
+                    .append(i)
+                    .append("::text, :ss")
+                    .append(i)
+                    .append("::text, :th")
+                    .append(i)
+                    .append("::text)");
         }
         var spec = jdbc.sql("""
                         UPDATE trace t SET
@@ -167,9 +190,14 @@ public class TraceV2Repository {
                                                 now() + CASE WHEN v.has_root OR t.has_root_span
                                                              THEN interval '2 seconds'
                                                              ELSE interval '10 seconds' END),
-                            is_settled    = false
+                            is_settled    = false,
+                            name          = COALESCE(t.name, v.name),
+                            user_id       = COALESCE(t.user_id, v.user_id),
+                            session_id    = COALESCE(t.session_id, v.session_id),
+                            thread_id     = COALESCE(t.thread_id, v.thread_id)
                         FROM (VALUES """ + values + """
-                        ) AS v (trace_id, min_started_at, max_ended_at, has_root)
+                        ) AS v (trace_id, min_started_at, max_ended_at, has_root, name, user_id, session_id,
+                                thread_id)
                         WHERE t.project_id = :pid AND t.id = v.trace_id
                         """).param("pid", projectId);
         for (int i = 0; i < sorted.size(); i++) {
@@ -177,7 +205,11 @@ public class TraceV2Repository {
             spec = spec.param("tid" + i, u.traceId())
                     .param("st" + i, u.minStartedAt())
                     .param("en" + i, u.maxEndedAt())
-                    .param("rt" + i, u.hasRoot());
+                    .param("rt" + i, u.hasRoot())
+                    .param("nm" + i, u.name())
+                    .param("us" + i, u.userId())
+                    .param("ss" + i, u.sessionId())
+                    .param("th" + i, u.threadId());
         }
         return spec.update();
     }

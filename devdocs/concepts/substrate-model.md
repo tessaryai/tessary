@@ -445,6 +445,18 @@ trace settles with no session id is marked `correlation_state = 'none'` — a te
 left pending forever — which is what keeps the index near-empty for permanently anonymous
 traffic instead of it accumulating there indefinitely.
 
+The trace row's own handles, `name`, `user_id`, `session_id` and `thread_id`, are folded per
+batch: `name` from the batch's root span, the others from the first span that carries them. The
+get-or-create in §6.1 seeds them only on the row it creates, and a root span ships last (§6.4),
+so the batch that creates a multi-batch trace often carries none of them. The §7.1 update
+therefore fills each one that is still NULL, under the same `FOR UPDATE` lock. The first value
+a trace is given is the one it keeps, and a later batch never replaces it. The fill does not use
+`ON CONFLICT DO UPDATE` on the get-or-create, because that locks existing trace rows ahead of
+the sorted `FOR UPDATE` and brings back the deadlock §6.1 describes. A late `session_id` reaches
+the trace's uncorrelated spans through the backfill above only if it lands before the trace
+settles session-less; spans already marked `none` stay that way. `project_version_id` has no
+ingest source, so there is nothing to fill.
+
 ### 6.4 Roots, parents, and paths
 
 `parent_span_id` is the producer's statement, stored verbatim on every row and never modified
@@ -512,11 +524,12 @@ with a large fresh prompt also satisfies `input >= read + write`.
 
 ## 7. Trace rollups
 
-### 7.1 Incremental columns — `min` / `max` only, coalesced per batch
+### 7.1 Incremental columns — `min` / `max` and fill-if-null, coalesced per batch
 
 `trace.started_at`, `trace.ended_at`, `session.started_at` and `session.last_activity_at` are
 maintained in place. Re-applying `min` or `max` to a value already folded in changes nothing,
-so these are idempotent under replay.
+so these are idempotent under replay. The same update fills the trace's NULL identity handles
+(§6.3), which is idempotent for the same reason.
 
 They are **not** updated once per span. Ingest pre-aggregates each batch in memory — one
 min/max pair per trace touched — and issues **one update per (trace, batch)**. A 1,000-span
@@ -541,8 +554,10 @@ UPDATE trace t SET
                         now() + CASE WHEN v.has_root OR t.has_root_span
                                      THEN interval '2 seconds'
                                      ELSE interval '10 seconds' END),
-    is_settled    = false
-FROM (VALUES ...) AS v (trace_id, min_started_at, max_ended_at, has_root)
+    is_settled    = false,
+    name          = COALESCE(t.name, v.name),               -- and user_id, session_id, thread_id
+    ...
+FROM (VALUES ...) AS v (trace_id, min_started_at, max_ended_at, has_root, name, ...)
 WHERE t.project_id = :project_id AND t.id = v.trace_id;
 ```
 

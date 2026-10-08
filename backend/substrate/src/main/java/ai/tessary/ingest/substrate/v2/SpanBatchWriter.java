@@ -260,7 +260,9 @@ public class SpanBatchWriter {
         //
         // Safe ahead of the timer update below because getOrCreateAll is ON CONFLICT DO NOTHING, which takes
         // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
-        // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes.
+        // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes. A trace
+        // handle this batch knows and the creating batch did not (the root ships last, §6.4) is filled by
+        // applyBatchTimers instead, under its FOR UPDATE.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
         newSessions.sort(Map.Entry.comparingByKey());
         List<SessionRow> sessionRows = new ArrayList<>(newSessions.size());
@@ -314,7 +316,14 @@ public class SpanBatchWriter {
         byTrace.forEach((traceId, fold) -> {
             Instant endedAt = fold.endedAt();
             timers.add(new TraceV2Repository.TimerUpdate(
-                    traceId, fold.startedAt().toString(), endedAt == null ? null : endedAt.toString(), fold.hasRoot()));
+                    traceId,
+                    fold.startedAt().toString(),
+                    endedAt == null ? null : endedAt.toString(),
+                    fold.hasRoot(),
+                    fold.name(),
+                    fold.userId(),
+                    fold.sessionId(),
+                    fold.threadId()));
         });
         traces.applyBatchTimers(projectId, timers);
 
