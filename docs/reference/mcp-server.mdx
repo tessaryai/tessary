@@ -1,6 +1,6 @@
 ---
 title: "MCP Server"
-description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 19 tools with their arguments, and how to configure a client."
+description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 20 tools with their arguments, and how to configure a client."
 ---
 
 Tessary speaks MCP (Model Context Protocol) at `POST /mcp` on the same service that serves the web UI and the REST API. It ships with the backend, so there is no separate server to install or version.
@@ -79,7 +79,7 @@ A groundedness finding goes through triage like any other, so its ruling is stri
 
 ## The tools
 
-Tessary offers all 19 tools to every organization, so `tools/list` returns the whole catalog for any valid token.
+Tessary offers all 20 tools to every organization, so `tools/list` returns the whole catalog for any valid token.
 
 `tools/list` is the authoritative schema. The tables below name each tool's arguments so you can see the shape of the surface; they are not a schema copy.
 
@@ -132,6 +132,7 @@ There is deliberately no server-side sampling mode. An agent that wants a stride
 | `get_span` | `trace_id` **and** `span_id` | none | One span with its full raw payload |
 | `list_sessions` | none | `limit`, `cursor` | Paged sessions, most recently active first, identity only |
 | `get_session` | `id` | none | The session, totals summed from its traces, and those traces oldest first, capped at 1,000 with `traces_truncated` saying so |
+| `get_conversation` | `id` | none | One conversation's turns (top-level traces) oldest first, capped at 1,000 with `traces_truncated` saying so. A conversation is a trace's `thread_id`, else its `session_id`, the key a frustration finding's session refs carry |
 
 `get_span` needs both ids because a producer span id is unique only within its trace. A call with no `trace_id` returns a tool error naming the argument to add.
 
@@ -194,7 +195,7 @@ Four things constrain these tools:
   <Step title="Restart the client">
     Restart Claude Code so it reads the new configuration.
 
-    <Check>`tools/list` returns 19 tools, and `get_project` names the project the token is bound to.</Check>
+    <Check>`tools/list` returns 20 tools, and `get_project` names the project the token is bound to.</Check>
   </Step>
 </Steps>
 

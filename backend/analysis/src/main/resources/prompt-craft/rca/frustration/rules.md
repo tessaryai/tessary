@@ -3,7 +3,7 @@
 1. **You are first to look.** Nobody has read these sessions. "They share no agent behaviour" is a
    full answer: return `no_cause_found` and say what you read.
 2. **Read every frustrated session whole before grouping.** Page the `witness` session refs and open
-   each with `get_session`. The flagged turn is where the user said it, not where the agent caused it.
+   each with `get_conversation`. The flagged turn is where the user said it, not where the agent caused it.
 3. **Group by what the agent did wrong, not by what the user said.** "The user repeated the request"
    is a symptom; "the agent ignored the attached file" is a cause.
 4. **A group needs at least two sessions**, unless it names a code or prompt line that produces the

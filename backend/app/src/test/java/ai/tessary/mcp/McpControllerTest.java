@@ -8,18 +8,28 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
+import ai.tessary.storage.SessionRepository;
+import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.AuthEnforcedContext;
+import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -45,6 +55,21 @@ class McpControllerTest {
 
     @Autowired
     AuthFilter authFilter;
+
+    @Autowired
+    SessionRepository sessions;
+
+    @Autowired
+    TraceV2Repository traces;
+
+    @Autowired
+    SpanRepository spans;
+
+    @Autowired
+    SpanPayloadRepository payloads;
+
+    @Autowired
+    JdbcClient jdbc;
 
     final ObjectMapper mapper = new ObjectMapper();
     MockMvc mvc;
@@ -102,6 +127,73 @@ class McpControllerTest {
         assertNull(found.get("pipelines"), "get_project returns the project itself, not a wrapper list");
         assertEquals(project.id(), found.get("id").asText());
         assertEquals(project.slug(), found.get("slug").asText());
+    }
+
+    /**
+     * The frustration classifier keys a conversation on {@code COALESCE(thread_id, session_id)} over top-level
+     * traces, and RCA hands the agent those keys. A read keyed on {@code session_id} alone finds nothing for a
+     * thread key, and for a bare session key it also returns the session's threaded traces and sub-agent traces.
+     */
+    @Test
+    void toolsCallGetConversationReadsTheFrustrationConversationKey() throws Exception {
+        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        String pid = project.id();
+        Instant t0 = Instant.parse("2026-09-01T10:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String threadA = "thread-a-" + SubstrateV2Fixtures.traceId();
+        String threadB = "thread-b-" + SubstrateV2Fixtures.traceId();
+        String a1 = SubstrateV2Fixtures.traceId();
+        String b1 = SubstrateV2Fixtures.traceId();
+        String a2 = SubstrateV2Fixtures.traceId();
+        String bare = SubstrateV2Fixtures.traceId();
+        String subAgent = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, a1, sessionId, threadA, null, t0);
+        fx.trace(pid, b1, sessionId, threadB, null, t0.plusSeconds(1));
+        fx.trace(pid, a2, sessionId, threadA, null, t0.plusSeconds(2));
+        fx.trace(pid, bare, sessionId, null, null, t0.plusSeconds(3));
+        fx.trace(pid, subAgent, sessionId, null, null, t0.plusSeconds(4));
+        jdbc.sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
+                .param("parent", bare)
+                .param("pid", pid)
+                .param("child", subAgent)
+                .update();
+
+        JsonNode thread = getConversation(threadA);
+        assertEquals(threadA, thread.get("id").asText());
+        assertEquals(List.of(a1, a2), traceIds(thread), "a thread key reads that thread's turns, oldest first");
+        assertEquals(false, thread.get("traces_truncated").asBoolean());
+
+        assertEquals(
+                List.of(bare),
+                traceIds(getConversation(sessionId)),
+                "a session key reads only the session's unthreaded turns, never a sub-agent trace");
+    }
+
+    @Test
+    void toolsCallGetConversationUnknownIdIsCleanToolError() throws Exception {
+        JsonNode result = call("""
+            {"jsonrpc":"2.0","id":27,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"no-such-conversation"}}}
+            """).get("result");
+        assertEquals(true, result.get("isError").asBoolean());
+        assertEquals(
+                "conversation not found: no-such-conversation",
+                result.get("content").get(0).get("text").asText());
+    }
+
+    private JsonNode getConversation(String id) throws Exception {
+        JsonNode result = call(String.format(Locale.ROOT, """
+            {"jsonrpc":"2.0","id":26,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"%s"}}}
+            """, id)).get("result");
+        assertEquals(false, result.get("isError").asBoolean(), result::toString);
+        return result.get("structuredContent");
+    }
+
+    private static List<String> traceIds(JsonNode conversation) {
+        List<String> ids = new ArrayList<>();
+        conversation.get("traces").forEach(t -> ids.add(t.get("id").asText()));
+        return ids;
     }
 
     @Test
