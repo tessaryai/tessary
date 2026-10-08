@@ -159,15 +159,15 @@ describe("ChartCard", () => {
     expect(tip.textContent).toContain("Open since Oct 4");
   });
 
-  // Bug: more than three lanes squeezed into the strip, or the extra cases silently dropped.
-  it("shows three cases at most and says how many more Triage holds", () => {
+  // Bug: more than three rows squeezed into the strip, or the extra cases silently dropped.
+  it("uses three rows at most: two cases and how many more Triage holds", () => {
     const spans = [1, 2, 3, 4, 5].map((i) =>
       span({ case_id: `case-${i}`, case_reference: `C-${i}`, start_at: `2026-10-0${i}T00:00:00Z` }),
     );
     renderCard(card({ cases: { open_cases: 5, spans } }));
 
-    expect(screen.getAllByRole("link", { name: /^Opens C-/ })).toHaveLength(3);
-    expect(screen.getByRole("link", { name: "+2 more in Triage" }).getAttribute("href")).toBe(
+    expect(screen.getAllByRole("link", { name: /^Opens C-/ })).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "+3 more in Triage" }).getAttribute("href")).toBe(
       "/orgs/acme/projects/default/triage",
     );
   });

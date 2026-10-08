@@ -185,7 +185,7 @@ describe("headlineOf", () => {
 
 describe("lanesOf", () => {
   // Bug: the strip shows three old fixed cases and hides the one that is still open, or draws more lanes than fit.
-  it("keeps at most three cases, open ones first and then the newest, drawn oldest first", () => {
+  it("keeps two cases and a +N more row when more than three ran, open ones first and then the newest, drawn oldest first", () => {
     const closedNew = span({ case_reference: "C-5", start_at: "2026-10-05T00:00:00Z", end_at: "2026-10-06T00:00:00Z", case_state: "resolved" });
     const closedNewer = span({ case_reference: "C-6", start_at: "2026-10-06T00:00:00Z", end_at: "2026-10-07T00:00:00Z", case_state: "resolved" });
     const closedOld = span({ case_reference: "C-1", start_at: "2026-09-12T00:00:00Z", end_at: "2026-09-14T00:00:00Z", case_state: "resolved" });
@@ -194,8 +194,18 @@ describe("lanesOf", () => {
 
     const { lanes, more } = lanesOf([closedNew, closedOld, openOld, closedNewer, openMid]);
 
-    expect(lanes.map((l) => l.case_reference)).toEqual(["C-2", "C-3", "C-6"]);
-    expect(more).toBe(2);
+    expect(lanes.map((l) => l.case_reference)).toEqual(["C-2", "C-3"]);
+    expect(more).toBe(3);
+  });
+
+  // Bug: a fourth row added for "+N more", so the strip grows taller than three rows.
+  it("draws three cases when exactly three ran, with nothing left over", () => {
+    const three = [1, 2, 3].map((i) => span({ case_reference: `C-${i}`, start_at: `2026-10-0${i}T00:00:00Z` }));
+
+    const { lanes, more } = lanesOf(three);
+
+    expect(lanes.map((l) => l.case_reference)).toEqual(["C-1", "C-2", "C-3"]);
+    expect(more).toBe(0);
   });
 });
 

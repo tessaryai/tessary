@@ -18,7 +18,7 @@ import type {
 } from "../../api/types";
 import { PROVIDER_PAUSES } from "./shared";
 
-/** The most case bars a card draws; the rest are counted as "+N more". */
+/** The rows a card's case strip has. When more cases ran than fit, the last row says "+N more" instead. */
 export const MAX_LANES = 3;
 
 export type AxisUnit = "percent" | "seconds" | "usd" | "count";
@@ -189,14 +189,16 @@ export function headlineOf(card: ChartCard): {
 const isOpen = (s: ChartCaseSpan) => s.end_at == null;
 
 /**
- * The cases a card's strip draws: at most three, the open ones first and then the newest, drawn oldest first so
- * they read left to right. `more` is how many were left out.
+ * The cases a card's strip draws, in at most three rows: every case when three or fewer ran, else two and a
+ * "+N more" row. The open ones come first and then the newest, drawn oldest first so they read left to right.
+ * `more` is how many were left out.
  */
 export function lanesOf(spans: ChartCaseSpan[]): { lanes: ChartCaseSpan[]; more: number } {
   const ranked = [...spans].sort(
     (a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Date.parse(b.start_at) - Date.parse(a.start_at),
   );
-  const lanes = ranked.slice(0, MAX_LANES).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
+  const fit = spans.length > MAX_LANES ? MAX_LANES - 1 : MAX_LANES;
+  const lanes = ranked.slice(0, fit).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
   return { lanes, more: spans.length - lanes.length };
 }
 

@@ -37,7 +37,7 @@ const MR = 8;
 const MT = 10;
 const PB = 130;
 const H = 150;
-const STRIP_H = 52;
+const STRIP_H = 36;
 /** About half the width of a day label ("Sep 24") in pixels; a tick label that would overflow the edge is anchored to it. */
 const TICK_HALF = 22;
 const LANE_Y = (k: number) => 4 + k * 12;
@@ -421,7 +421,7 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
               <Link
                 to={`${basePath}/triage`}
                 className={`${STRIP_TEXT} text-accent hover:text-accent-hover transition-colors`}
-                style={{ right: 0, top: LANE_MID(MAX_LANES), transitionDuration: "var(--duration-micro)" }}
+                style={{ left: ML, top: LANE_MID(MAX_LANES - 1), transitionDuration: "var(--duration-micro)" }}
               >
                 {`+${more} more in Triage`}
               </Link>
