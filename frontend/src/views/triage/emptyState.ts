@@ -317,10 +317,11 @@ function applyProviderGap(
 /**
  * Whether the empty queue needs the setup screen rather than one "Nothing needs you." line.
  *
- * Only the two all-clear stages can be a line: watching with no finding, and findings that no case came from
- * (Triage lists those right below Cases). Every other state has a step for the reader to take, and so does any
- * state carrying a note (a stopped exporter, a missing provider key).
+ * Only findings that no case came from can be a line, because Triage lists those right below Cases. With no
+ * finding open there is no list to show, so the pipeline stays: it is the proof that traces are arriving and
+ * being watched. Every other state has a step for the reader to take, and so does any state carrying a note
+ * (a stopped exporter, a missing provider key).
  */
 export function needsSetupScreen(state: EmptyState): boolean {
-  return (state.key !== "no-findings" && state.key !== "no-cases") || state.note != null;
+  return state.key !== "no-cases" || state.note != null;
 }
