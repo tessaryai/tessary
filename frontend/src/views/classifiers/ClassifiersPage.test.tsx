@@ -217,6 +217,23 @@ describe("ClassifiersPage", () => {
     expect(within(site).getByRole("region", { name: "Frustration" })).toBeTruthy();
   });
 
+  // Bug: picking another call site empties the section and refills it, so the page jumps; or the old call site's
+  // cards stay up looking current under the new name.
+  it("keeps the old cards in place, faded, while another call site loads, and names what is loading", async () => {
+    renderPage();
+    const site = await callSiteSection();
+    await within(site).findByRole("region", { name: "Frustration" });
+
+    api.getClassifierCharts.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(within(site).getByRole("button", { name: "Call site: kb_answer.generate" }));
+    fireEvent.click(within(screen.getByRole("listbox", { name: "Call sites" })).getByRole("option", { name: /support_agent\.reply/ }));
+
+    expect(await within(site).findByText("Loading support_agent.reply…")).toBeTruthy();
+    const card = within(site).getByRole("region", { name: "Frustration" });
+    expect(card.closest("[aria-busy='true']")).not.toBeNull();
+    expect(card.closest(".opacity-40")).not.toBeNull();
+  });
+
   // Bug: the range control redraws nothing, or moves only one of the two sections.
   it("reads both sections again over the range picked", async () => {
     renderPage();

@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl } from "../../ui";
+import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl, cn } from "../../ui";
 import { CONTAINER } from "./shared";
 import { FrustrationBanner } from "./FrustrationBanner";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
@@ -119,7 +119,7 @@ export function ClassifiersPage() {
             {callSites.length === 0 ? (
               <p className="text-body text-muted">No call sites yet.</p>
             ) : (
-              <Charts query={siteQ} days={days} basePath={basePath} empty="Nothing to chart for this call site in this range." />
+              <Charts query={siteQ} id={callSite} label={callSite} days={days} basePath={basePath} empty="Nothing to chart for this call site in this range." />
             )}
           </Section>
 
@@ -146,7 +146,7 @@ export function ClassifiersPage() {
               {tools.length === 0 ? (
                 <p className="text-body text-muted">No tool was called in this range.</p>
               ) : (
-                <Charts query={toolQ} days={days} basePath={basePath} empty="Nothing to chart for this tool in this range." />
+                <Charts query={toolQ} id={tool} label={toolOption?.label ?? tool} days={days} basePath={basePath} empty="Nothing to chart for this tool in this range." />
               )}
             </Section>
           </div>
@@ -157,9 +157,9 @@ export function ClassifiersPage() {
 }
 
 /**
- * The cards for one scope. A new range keeps the scope's old cards on screen while it reads, with a line above them
- * saying the new range is loading; a new scope does not, because one call site's charts under another's name would
- * mislead.
+ * The cards for one scope. While a new range or a new scope reads, the old cards stay where they are, so the page does
+ * not empty and refill. A new range keeps them as they are, with a line saying the range is loading. A new scope fades
+ * them and names the scope that is loading, so one call site's charts never read as another's.
  */
 function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRange) {
   const { api } = useTenant();
@@ -167,18 +167,21 @@ function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRa
     queryKey: ["classifier-charts", api.base, scope, id, days],
     queryFn: () => api.getClassifierCharts(scope === "tool" ? { tool: id! } : { callSiteId: id! }, days),
     enabled: id != null,
-    placeholderData: (prev, prevQuery) =>
-      prevQuery?.queryKey[2] === scope && prevQuery.queryKey[3] === id ? prev : undefined,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === scope ? prev : undefined),
   });
 }
 
 function Charts({
   query,
+  id,
+  label,
   days,
   basePath,
   empty,
 }: {
   query: ReturnType<typeof useCharts>;
+  id: string | null;
+  label: string | null;
   days: ChartRange;
   basePath: string;
   empty: string;
@@ -188,7 +191,10 @@ function Charts({
   const data: ClassifierCharts | undefined = query.data;
   if (!data) return null;
   const stale = query.isPlaceholderData;
-  const reading = stale && <LoadingRow className="mb-3" label={`Loading the last ${days} days…`} />;
+  const otherScope = stale && data.scope_id !== id;
+  const reading = stale && (
+    <LoadingRow className="mb-3" label={otherScope ? `Loading ${label}…` : `Loading the last ${days} days…`} />
+  );
   if (data.cards.length === 0 && data.chips.length === 0) {
     return (
       <>
@@ -201,7 +207,11 @@ function Charts({
     <>
       {reading}
       {data.cards.length > 0 && (
-        <div aria-busy={stale} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div
+          aria-busy={stale}
+          className={cn("grid grid-cols-1 lg:grid-cols-2 gap-4 transition-opacity", otherScope && "opacity-40 pointer-events-none")}
+          style={{ transitionDuration: "var(--duration-micro)" }}
+        >
           {data.cards.map((c) => (
             <ChartCard key={c.classifier_id + (c.measure ?? "")} card={c} basePath={basePath} />
           ))}
