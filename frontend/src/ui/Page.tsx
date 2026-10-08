@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { Badge } from "./Badge";
@@ -116,14 +116,17 @@ export function Section({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <section className="mb-10">
+    <section className="mb-10" aria-labelledby={title ? headingId : undefined}>
       {title && (
         <div className="flex items-center justify-between gap-4 mb-3">
           <div>
             {title && (
               <div className="flex items-center gap-2">
-                <h2 className="text-h2 text-fg">{title}</h2>
+                <h2 id={headingId} className="text-h2 text-fg">
+                  {title}
+                </h2>
                 {count != null && <Badge className="tabular-nums">{count}</Badge>}
               </div>
             )}

@@ -281,6 +281,7 @@ const EMPTY_PROVIDER_CREDENTIALS = { credentials: [] as unknown[] };
 const EMPTY_MODEL_SETTINGS = { groups: [] as unknown[], lanes: [] as unknown[], models: [] as unknown[], settings: [] as unknown[], configured_providers: [] as unknown[] };
 const EMPTY_REDACTION_RULES = { rules: [] as unknown[] };
 const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
+const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as unknown[], classifiers: [] as unknown[] };
 
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
@@ -323,10 +324,12 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   classifiers: {
     listClassifiers: EMPTY,
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
+    getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
   },
   // The old catalog redirects to Classifiers, so it issues Classifiers' reads.
   "classifiers/detectors": {
     listClassifiers: EMPTY,
+    getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
   },
   // No classifier has the fake id: the configure page's not-found state.
   "classifiers/:classifierId": {
@@ -606,6 +609,110 @@ const CONFIGURE_PAGE_READS: Record<string, () => Promise<unknown>> = {
   listClassifierCallSites: EMPTY,
 };
 
+/** One day of a chart, with only the fields its kind uses set. */
+function chartDay(date: string, d: Partial<components["schemas"]["ChartDay"]>): components["schemas"]["ChartDay"] {
+  return { date, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null, ...d };
+}
+
+const CHART_DATES = Array.from({ length: 28 }, (_, i) =>
+  new Date(Date.parse("2026-09-11T00:00:00Z") + i * 86_400_000).toISOString().slice(0, 10),
+);
+
+const chartCard = (c: Partial<components["schemas"]["ChartCard"]>): components["schemas"]["ChartCard"] => ({
+  classifier_id: "c",
+  classifier_key: "frustration",
+  name: "Frustration",
+  kind: "rate",
+  measure: null,
+  unit: "fraction",
+  learning: null,
+  headline: { value: null, delta: null },
+  baseline: null,
+  arming: null,
+  days: [],
+  cases: { open_cases: 0, spans: [] },
+  ...c,
+});
+
+/** One call site and one tool, with a card of every kind: a rate with a baseline and an open case, a learning range, a count with an arming bar. */
+const CHART_SCOPES: components["schemas"]["ChartScopesView"] = {
+  days: 28,
+  call_sites: [{ call_site_id: "extract.order", open_cases: 1, learning: false, turns: 500 }],
+  tools: [{ tool_key: "tool:search_orders", label: "search_orders", open_cases: 0, calls: 900, callers: ["extract.order"] }],
+  classifiers: [
+    {
+      id: "c-frustration",
+      classifier_key: "frustration",
+      name: "Frustration",
+      status: "on",
+      waiting_reason: null,
+      covers: "call_sites",
+      all_call_sites: false,
+      call_site_count: 1,
+    },
+  ],
+};
+
+const chartsView = (scope: string, scopeId: string, cards: components["schemas"]["ChartCard"][]): components["schemas"]["ChartsView"] => ({
+  scope,
+  scope_id: scopeId,
+  days: 28,
+  from_day: CHART_DATES[0],
+  to_day: CHART_DATES[27],
+  cards,
+  chips: [{ classifier_id: "c-malformed", classifier_key: "malformed_output", name: "Malformed Output", state: "waiting", reason: "no_schema", since: null }],
+});
+
+const CALL_SITE_CHARTS = chartsView("call_site", "extract.order", [
+  chartCard({
+    classifier_id: "c-frustration",
+    headline: { value: 0.072, delta: 0.03 },
+    baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
+    days: CHART_DATES.map((date, i) => chartDay(date, { checked: i === 3 ? 0 : 100, flagged: i % 9 })),
+    cases: {
+      open_cases: 1,
+      spans: [
+        {
+          finding_id: "f1",
+          case_id: "case-1",
+          case_reference: "C-43",
+          case_title: "Users on extract.order grew frustrated",
+          case_state: "open",
+          start_at: "2026-10-04T09:00:00Z",
+          end_at: null,
+          resolution: null,
+          disposition: null,
+        },
+      ],
+    },
+  }),
+  chartCard({
+    classifier_id: "c-duration",
+    classifier_key: "duration_drift",
+    name: "Duration Drift",
+    kind: "range",
+    measure: "turn_duration",
+    unit: "ms",
+    learning: { learned: 34, needed: 100 },
+    headline: { value: 16_500, delta: null },
+    days: CHART_DATES.map((date, i) => chartDay(date, i < 20 ? { n: 0 } : { n: 40, p50: 4_000 + i * 10, p95: 11_000 + i * 50 })),
+  }),
+  chartCard({
+    classifier_id: "c-secret",
+    classifier_key: "secret_leak",
+    name: "Secret Leak",
+    kind: "count",
+    unit: "count",
+    headline: { value: 3, delta: null },
+    arming: { threshold: 1, window_seconds: 86_400, basis: "event_count", confidence: "high" },
+    days: CHART_DATES.map((date, i) => chartDay(date, { count: i === 20 ? 2 : 0, total: i === 20 ? 3 : 0 })),
+  }),
+]);
+
+const TOOL_CHARTS = chartsView("tool", "tool:search_orders", [
+  chartCard({ classifier_id: "c-tool", classifier_key: "tool_error", name: "Tool Errors", days: CHART_DATES.map((date) => chartDay(date, { checked: 30, flagged: 1 })) }),
+]);
+
 /** One detail route on a real payload: its manifest entry, the reads it answers, and the heading it must draw. */
 const DETAIL_FIXTURES: {
   name: string;
@@ -618,6 +725,16 @@ const DETAIL_FIXTURES: {
     path: "classifiers/:classifierId",
     overrides: CONFIGURE_PAGE_READS,
     heading: /Secret leak/,
+  },
+  {
+    name: "real charts for a call site and a tool",
+    path: "classifiers",
+    overrides: {
+      getClassifierChartScopes: resolved(CHART_SCOPES),
+      getClassifierCharts: (scope?: unknown) =>
+        Promise.resolve(scope && typeof scope === "object" && "tool" in scope ? TOOL_CHARTS : CALL_SITE_CHARTS),
+    },
+    heading: /^Classifiers$/,
   },
   {
     name: "a secret-leak case",

@@ -1,12 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The pieces the Classifiers surface shares: Triage's findings list, a classifier's configure page and a finding's
- * own page. The verbs, the labels and the chain sentence are the things genuinely common to them.
+ * The pieces the Classifiers surface shares: Triage's findings list, the charts page, a classifier's configure page
+ * and a finding's own page. The verbs, the labels and the chain sentence are the things genuinely common to them.
  */
 import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
+
+/**
+ * `ClassifierView.readiness` while a classifier that calls a provider is paused: the short label beside the switch
+ * and the sentence in Status. A paused sweep sends nothing until the provider works again.
+ */
+export const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
+  provider_rejected: {
+    label: "Provider rejected the key",
+    explained:
+      "The provider rejected the stored key, so no messages are being scored. Fix the key under Settings, Providers, then retry.",
+  },
+  request_refused: {
+    label: "Provider refused the request",
+    explained:
+      "The provider accepted the stored key but refused the request itself, so no messages are being scored. Usually the model this classifier is set to is not one the provider serves: check it under Settings, Models, then retry.",
+  },
+  no_provider: {
+    label: "No provider key",
+    explained:
+      "There is no key for the provider this classifier runs on, so no messages are being scored. Add one under Settings, Providers, then retry.",
+  },
+  no_credit: {
+    label: "No credit left",
+    explained:
+      "This organization has used all of its credit on the provider this classifier runs on, so no messages are being scored. Top up that provider, or add another key under Settings, Providers, then retry.",
+  },
+  platform_unavailable: {
+    label: "Provider unavailable",
+    explained:
+      "The provider this classifier runs on is not accepting requests, so no messages are being scored. Nothing needs to change on your side. It retries on its own.",
+  },
+};
 
 /** One label/value fact in a fact grid; the `<dl>` wrapper supplies the columns. */
 export function Fact({ label, children }: { label: string; children: React.ReactNode }) {

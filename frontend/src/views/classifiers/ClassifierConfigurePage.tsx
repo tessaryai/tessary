@@ -50,7 +50,7 @@ import {
 } from "./groundedness";
 import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
-import { CONTAINER, Fact, ResolveVerbs, VerbButton, ago, chainWords } from "./shared";
+import { CONTAINER, Fact, PROVIDER_PAUSES, ResolveVerbs, VerbButton, ago, chainWords } from "./shared";
 
 /** `ClassifierView.readiness` while Malformed Output has no call site schema to validate against. */
 const WAITING_ON_SCHEMAS = "waiting_on_schemas";
@@ -58,38 +58,6 @@ const WAITING_ON_SCHEMAS = "waiting_on_schemas";
 const SCHEMAS_EXPLAINED =
   "Waiting on schemas. No call site declares an output schema yet, so there is nothing to check outputs against. " +
   "Schemas arrive when your repository is connected and assessed.";
-
-/**
- * `ClassifierView.readiness` while a classifier that calls a provider is paused: the short label beside the switch
- * and the sentence in Status. A paused sweep sends nothing until the provider works again.
- */
-const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
-  provider_rejected: {
-    label: "Provider rejected the key",
-    explained:
-      "The provider rejected the stored key, so no messages are being scored. Fix the key under Settings, Providers, then retry.",
-  },
-  request_refused: {
-    label: "Provider refused the request",
-    explained:
-      "The provider accepted the stored key but refused the request itself, so no messages are being scored. Usually the model this classifier is set to is not one the provider serves: check it under Settings, Models, then retry.",
-  },
-  no_provider: {
-    label: "No provider key",
-    explained:
-      "There is no key for the provider this classifier runs on, so no messages are being scored. Add one under Settings, Providers, then retry.",
-  },
-  no_credit: {
-    label: "No credit left",
-    explained:
-      "This organization has used all of its credit on the provider this classifier runs on, so no messages are being scored. Top up that provider, or add another key under Settings, Providers, then retry.",
-  },
-  platform_unavailable: {
-    label: "Provider unavailable",
-    explained:
-      "The provider this classifier runs on is not accepting requests, so no messages are being scored. Nothing needs to change on your side. It retries on its own.",
-  },
-};
 
 /** The rate classifiers, by what each one flags. Tool Errors is a rate too, but per tool: see `howAFindingOpens`. */
 const RATE_SUBJECTS: Record<string, string> = {
