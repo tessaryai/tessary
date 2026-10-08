@@ -47,6 +47,8 @@ class FrustrationConversationContextIntegrationTest {
     @Autowired
     TenantService tenants;
 
+    private static final String CHAT = "cs-chat";
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -69,8 +71,8 @@ class FrustrationConversationContextIntegrationTest {
         turn(pid, session, base.plusMillis(1_000));
         turn(pid, other, base.plusMillis(3_500));
 
-        Map<String, ConversationContext> context =
-                rates.conversationContext(pid, List.of(flagged.traceId()), FrustrationEvidence.CONTEXT_TURNS_BEFORE);
+        Map<String, ConversationContext> context = rates.conversationContext(
+                pid, CHAT, List.of(flagged.traceId()), FrustrationEvidence.CONTEXT_TURNS_BEFORE);
 
         ConversationContext ctx = Objects.requireNonNull(context.get(flagged.traceId()));
         assertEquals(List.of(second.traceId(), third.traceId()), ctx.priorTraceIds());
@@ -84,14 +86,48 @@ class FrustrationConversationContextIntegrationTest {
                 TenantFixture.bootstrap(tenants, "fr-context-first").project().id();
         SpanRef first = turn(pid, SubstrateV2Fixtures.sessionId(), Instant.now());
 
-        ConversationContext ctx = Objects.requireNonNull(
-                rates.conversationContext(pid, List.of(first.traceId()), 2).get(first.traceId()));
+        ConversationContext ctx =
+                Objects.requireNonNull(rates.conversationContext(pid, CHAT, List.of(first.traceId()), 2)
+                        .get(first.traceId()));
 
         assertEquals(List.of(), ctx.priorTraceIds());
     }
 
+    /**
+     * The turns shown are the ones the classifier read: those that reached the flagged call site. Read across call
+     * sites, a turn that only ran a background call stands in for a turn of the chat.
+     */
+    @Test
+    void aTurnThatNeverReachedTheCallSiteIsNotContext() {
+        String pid = TenantFixture.bootstrap(tenants, "fr-context-call-site")
+                .project()
+                .id();
+        Instant base = Instant.now();
+        String session = SubstrateV2Fixtures.sessionId();
+
+        SpanRef first = turn(pid, session, base.plusMillis(1_000));
+        turn(pid, session, base.plusMillis(2_000), "cs-memory");
+        SpanRef flagged = turn(pid, session, base.plusMillis(3_000));
+
+        ConversationContext ctx =
+                Objects.requireNonNull(rates.conversationContext(pid, CHAT, List.of(flagged.traceId()), 2)
+                        .get(flagged.traceId()));
+
+        assertEquals(List.of(first.traceId()), ctx.priorTraceIds());
+    }
+
     private SpanRef turn(String pid, String session, Instant at) {
-        return fx.turn(
-                pid, SubstrateV2Fixtures.traceId(), session, at, "[{\"role\":\"user\",\"content\":\"q\"}]", null);
+        return turn(pid, session, at, CHAT);
+    }
+
+    /** A turn whose one {@code llm} span is on {@code callSite}. */
+    private SpanRef turn(String pid, String session, Instant at, String callSite) {
+        return fx.spanSeed(pid)
+                .traceId(SubstrateV2Fixtures.traceId())
+                .sessionId(session)
+                .callSiteId(callSite)
+                .at(at)
+                .payload("[{\"role\":\"user\",\"content\":\"q\"}]", null)
+                .writeRef();
     }
 }

@@ -11,6 +11,7 @@ import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.ClassifierDetectionWriteRepository.CallSiteTurn;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -111,6 +112,10 @@ class FrustrationResolveIntegrationTest {
         assertTrue(cases.listLive(pid).isEmpty());
     }
 
+    /**
+     * A false alarm clears the spell's sessions on the case's call site only. Keyed on the conversation alone, it
+     * also clears the same conversation's flag on another call site, which the case never cited.
+     */
     @Test
     void falseAlarmClearsEveryFrustratedSessionOfTheSpellSoItIsScoredAgain() {
         String pid = fixture.project("fr-false-alarm", Capability.FRUSTRATION);
@@ -126,11 +131,13 @@ class FrustrationResolveIntegrationTest {
         String conversation = cited.get(0);
         new SubstrateV2Fixtures(sessions, traces, spans, payloads)
                 .trace(pid, "tr-later", "sess-later", conversation, null, Instant.now());
+        flagOnAnotherCallSite(pid, signal, conversation);
+        List<CallSiteTurn> later =
+                List.of(new CallSiteTurn("tr-later", "cs-chat"), new CallSiteTurn("tr-later", "cs-other"));
         assertEquals(
-                Set.of("tr-later"),
-                detections.tracesInUnclearedFlaggedConversations(
-                        BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-later")),
-                "a flagged conversation is not sent again");
+                Set.copyOf(later),
+                detections.unclearedFlaggedSessions(BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), later),
+                "a flagged session is not sent again");
 
         caseService.resolve(pid, opened.id(), "sarcasm, not frustration", "priya@example.com", "false_alarm");
 
@@ -145,10 +152,9 @@ class FrustrationResolveIntegrationTest {
                 fixture.detections("frustration", pid) > cited.size(),
                 "flags from before the spell are not this case's");
         assertEquals(
-                Set.of(),
-                detections.tracesInUnclearedFlaggedConversations(
-                        BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-later")),
-                "its later turn is scorable again");
+                Set.of(new CallSiteTurn("tr-later", "cs-other")),
+                detections.unclearedFlaggedSessions(BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), later),
+                "its later turn is scorable again on the case's call site, and still stopped on the other");
         assertNull(fixture.state("frustration", pid, "cs-chat").get("baseline_calls"), "a false alarm re-learns too");
         assertEquals(
                 "{\"disposition\": \"false_alarm\", \"sessions_cleared\": 72}",
@@ -185,6 +191,19 @@ class FrustrationResolveIntegrationTest {
         assertEquals(1, live.size());
         assertEquals(CaseRow.Detector.FRUSTRATION, live.get(0).detector());
         return live.get(0);
+    }
+
+    /** A flag on {@code conversation} at a call site the case is not about. */
+    private void flagOnAnotherCallSite(String pid, ClassifierRow signal, String conversation) {
+        jdbc.sql("INSERT INTO frustration_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " severity, confidence, evidence)"
+                        + " VALUES ('det-other', :pid, :cid, 'frustration', :conv, 'tr-other', 'warn', 'high',"
+                        + " CAST('{\"call_site_id\":\"cs-other\"}' AS jsonb))")
+                .param("pid", pid)
+                .param("cid", signal.id())
+                .param("conv", conversation)
+                .update();
     }
 
     private long assessmentsFlagged(String pid, String conversation) {

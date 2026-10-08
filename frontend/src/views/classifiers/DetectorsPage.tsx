@@ -33,6 +33,7 @@ import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Spinner, Toggle, cn } from "../../ui";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
+import { FrustrationScopeSection } from "./FrustrationScopeSection";
 import { GroundednessEnableModal } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
@@ -797,6 +798,12 @@ function ClassifierRail({
       {isMetricDrift && (
         <RailBlock label="Tuning">
           <TuningSection classifier={classifier} />
+        </RailBlock>
+      )}
+
+      {classifier.detector === FRUSTRATION_DETECTOR && (
+        <RailBlock label="Call sites">
+          <FrustrationScopeSection classifier={classifier} />
         </RailBlock>
       )}
 

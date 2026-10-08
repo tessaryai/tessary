@@ -481,49 +481,49 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .list();
     }
 
-    /** One row of a TURN-grain candidate window: the span, plus whether it is a turn ROOT. */
-    public record TurnCandidate(SubstrateObservation observation, boolean turnRoot) {}
+    /**
+     * One row of a TURN-grain candidate window: the span, plus whether it opens its call site's part of a
+     * turn.
+     */
+    public record TurnCandidate(SubstrateObservation observation, boolean opensCallSiteTurn) {}
 
     /**
      * The turn-grain candidate window for classifiers declaring {@link
      * ClassifierModelModule.Grain#TURN} (frustration). The same unfiltered window {@link
-     * #observationsAfter} draws, with the turn-root predicate carried as a projected boolean the
+     * #observationsAfter} draws, with the candidate predicate carried as a projected boolean the
      * worker filters in Java.
      *
      * <p>The predicate isn't a WHERE clause because the cursor advances over the window: a filtered
-     * window would be empty for any project whose traces are all nested under a parent, and an empty
-     * window advances no cursor, so every tick would re-scan the whole unswept history forever.
-     * Projecting the predicate instead keeps the window exactly {@code limit} rows wide.
+     * window would be empty for any project whose spans are all inner calls, and an empty window
+     * advances no cursor, so every tick would re-scan the whole unswept history forever. Projecting
+     * the predicate instead keeps the window exactly {@code limit} rows wide.
      *
-     * <p>Kind alone doesn't identify a turn root, since {@code gen_ai.operation.name = invoke_agent}
-     * normalizes to {@code agent} at every nesting depth and a sub-agent's span is an {@code agent}
-     * span too. Three structural facts define it instead:
+     * <p>A turn is judged once per call site, because one turn can make several model calls (a router,
+     * the reply, a memory pass) and each is its own call site with its own input. A span is a candidate
+     * when:
      * <ul>
-     *   <li>{@code tr.parent_trace_id IS NULL}: the trace isn't a sub-agent trace nested under a caller.
-     *   <li>{@code s.parent_span_id IS NULL}: the span is its trace's outermost, so its input/output
-     *       are the turn's aggregate I/O rather than an inner planner/summarizer call's. This is the
-     *       producer's own statement, stored verbatim and never repaired.
-     *   <li>{@code s.kind IN ('llm','agent')}: it carries dialogue at all. Deliberately not {@code
-     *       agent}-only, since a product with no agent wrapper emits a bare {@code llm} root that is
-     *       still its user-facing turn.
+     *   <li>its trace is not a sub-agent trace nested under a caller ({@code tr.parent_trace_id IS
+     *       NULL});
+     *   <li>it carries dialogue at all ({@code s.kind IN ('llm','agent')}) and a call site;
+     *   <li>it is the first such span of its call site in its trace, by {@code (started_at, id)}: the
+     *       call that received the user's message, before any tool round of the same call site.
      * </ul>
      *
-     * <p>A turn with several parentless root spans yields several rows; the worker keeps one per
-     * {@code trace_id} and advances the cursor on the raw window's last row.
+     * <p>Which call sites are scored is the classifier's choice, applied by the caller.
      */
     public List<TurnCandidate> turnCandidatesAfter(
             String projectId, @Nullable String afterTs, @Nullable String afterHandle, int limit) {
         return spec(SELECT_TURN_CANDIDATE, projectId, afterTs, afterHandle, limit)
-                .query((rs, n) -> new TurnCandidate(map(rs), rs.getBoolean("turn_root")))
+                .query((rs, n) -> new TurnCandidate(map(rs), rs.getBoolean("opens_call_site_turn")))
                 .list();
     }
 
     /**
-     * The turns before a scored turn, for the frustration classifier.
+     * The turns of one call site before a scored turn, for the frustration classifier.
      *
-     * @param spans the {@code llm} and {@code agent} spans of the {@code turns} turns just before the
-     *     scored one, with payloads, oldest first
-     * @param count how many turns the conversation had before the scored one, all of them
+     * @param spans the call site's {@code llm} and {@code agent} spans in the {@code turns} turns just before
+     *     the scored one, with payloads, oldest first
+     * @param count how many turns of the call site the conversation had before the scored one, all of them
      */
     public record PriorTurns(List<SubstrateObservation> spans, int count) {
         public PriorTurns {
@@ -532,13 +532,15 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     }
 
     /**
-     * {@link PriorTurns} for the scored trace. A turn is a top-level trace ({@code parent_trace_id IS
-     * NULL}) of the scored trace's conversation, {@code COALESCE(thread_id, session_id)}, that started
-     * before it in event time, {@code (started_at, id)}: the definition the frustration finding page
-     * reads its earlier turns by, walked on {@code ix_trace_conversation}. A sub-agent trace is not a
-     * turn. A trace in no conversation has no earlier turns: equality on a null key matches nothing.
+     * {@link PriorTurns} of {@code callSiteId} for the scored trace. A turn is a top-level trace ({@code
+     * parent_trace_id IS NULL}) of the scored trace's conversation, {@code COALESCE(thread_id, session_id)},
+     * that started before it in event time, {@code (started_at, id)}, and has an {@code llm} or {@code agent}
+     * span of the call site: the definition the frustration finding page reads its earlier turns by, walked
+     * on {@code ix_trace_conversation}. A turn that never reached the call site is not one of its turns, so a
+     * router or memory call beside the reply adds nothing. A sub-agent trace is not a turn. A trace in no
+     * conversation has no earlier turns: equality on a null key matches nothing.
      */
-    public PriorTurns priorTurns(String projectId, String scoredTraceId, int turns) {
+    public PriorTurns priorTurns(String projectId, String scoredTraceId, String callSiteId, int turns) {
         String earlier = """
                 FROM trace f
                   JOIN trace t
@@ -546,7 +548,10 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                    AND t.parent_trace_id IS NULL
                    AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
                    AND (t.started_at, t.id) < (f.started_at, f.id)
-                WHERE f.project_id = :pid AND f.id = :scoredTraceId""";
+                WHERE f.project_id = :pid AND f.id = :scoredTraceId
+                  AND EXISTS (SELECT 1 FROM span c
+                               WHERE c.project_id = t.project_id AND c.trace_id = t.id
+                                 AND c.call_site_id = :callSite AND c.kind IN ('llm', 'agent'))""";
         List<SubstrateObservation> spans = jdbc.sql(
                         "WITH turns AS MATERIALIZED (SELECT t.id " + earlier + """
 
@@ -558,16 +563,18 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                           JOIN span s ON s.project_id = :pid AND s.trace_id = tu.id
                           LEFT JOIN span_payload pl
                             ON pl.project_id = s.project_id AND pl.trace_id = s.trace_id AND pl.span_id = s.id
-                        WHERE s.kind IN ('llm', 'agent')
+                        WHERE s.kind IN ('llm', 'agent') AND s.call_site_id = :callSite
                         ORDER BY s.started_at, s.created_at, s.trace_id, s.id""")
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
+                .param("callSite", callSiteId)
                 .param("turns", turns)
                 .query((rs, n) -> map(rs))
                 .list();
         int count = jdbc.sql("SELECT COUNT(*) " + earlier)
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
+                .param("callSite", callSiteId)
                 .query(Integer.class)
                 .single();
         return new PriorTurns(spans, count);
@@ -675,14 +682,18 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                         AND tc.span_id = s.id AND tc.error_type IS NOT NULL) AS tool_error,
                    s.created_at         AS created_at""";
 
-    /** The turn-root predicate, projected rather than filtered; see {@link #turnCandidatesAfter}. */
-    private static final String TURN_ROOT_COLUMN = """
+    /** The turn-candidate predicate, projected rather than filtered; see {@link #turnCandidatesAfter}. */
+    private static final String TURN_CANDIDATE_COLUMN = """
             ,
-                   (EXISTS (SELECT 1 FROM trace tr
-                             WHERE tr.project_id = s.project_id AND tr.id = s.trace_id
-                               AND tr.parent_trace_id IS NULL)
-                    AND s.parent_span_id IS NULL
-                    AND s.kind IN ('llm', 'agent'))                              AS turn_root""";
+                   (s.call_site_id IS NOT NULL
+                    AND s.kind IN ('llm', 'agent')
+                    AND EXISTS (SELECT 1 FROM trace tr
+                                 WHERE tr.project_id = s.project_id AND tr.id = s.trace_id
+                                   AND tr.parent_trace_id IS NULL)
+                    AND NOT EXISTS (SELECT 1 FROM span e
+                                     WHERE e.project_id = s.project_id AND e.trace_id = s.trace_id
+                                       AND e.call_site_id = s.call_site_id AND e.kind IN ('llm', 'agent')
+                                       AND (e.started_at, e.id) < (s.started_at, s.id))) AS opens_call_site_turn""";
 
     private static final String SPAN_FROM = """
 
@@ -692,7 +703,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
 
     private static final String SELECT_SPAN = SPAN_COLUMNS + SPAN_FROM;
 
-    private static final String SELECT_TURN_CANDIDATE = SPAN_COLUMNS + TURN_ROOT_COLUMN + SPAN_FROM;
+    private static final String SELECT_TURN_CANDIDATE = SPAN_COLUMNS + TURN_CANDIDATE_COLUMN + SPAN_FROM;
 
     private static SubstrateObservation map(ResultSet rs) throws SQLException {
         return new SubstrateObservation(

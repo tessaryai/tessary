@@ -54,11 +54,10 @@ final class FrustrationDossier {
         }
 
         sb.append("\n## How to read the evidence\n\n");
-        sb.append("A conversation is one trial, counted on the call site of its first scored turn, and it is a"
-                + " failure while it holds an uncleared frustration flag. Each `witness` session row is a"
-                + " frustrated conversation; the `witness` trace row after it is the user turn that fired inside"
-                + " it, which may sit on another call site. There is no baseline side: the learned rate is a count"
-                + " on this finding, not an enumeration.\n");
+        sb.append("A session is one conversation on this finding's call site. It is one trial, and a failure while"
+                + " it holds an uncleared frustration flag. Each `witness` session row is a frustrated session; the"
+                + " `witness` trace row after it is the user turn that fired inside it. There is no baseline side:"
+                + " the learned rate is a count on this finding, not an enumeration.\n");
         return sb.toString();
     }
 }

@@ -99,6 +99,8 @@ class JevFrustrationDetectorTest {
     private final FrustrationAssessmentRepository assessments = mock(FrustrationAssessmentRepository.class);
     private final ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
     private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
+    private final FrustrationScopeRepository scopes = mock(FrustrationScopeRepository.class);
+    private final Set<String> picked = ConcurrentHashMap.newKeySet();
     private final FrustrationProperties props = new FrustrationProperties();
     private final StubClient client = new StubClient();
     private final Map<String, TurnFacts> facts = new HashMap<>();
@@ -114,6 +116,7 @@ class JevFrustrationDetectorTest {
     @BeforeEach
     void wire() {
         when(classifiers.findPause(PROJECT, CLASSIFIER)).thenReturn(Optional.empty());
+        when(scopes.callSites(PROJECT, CLASSIFIER)).thenAnswer(inv -> Set.copyOf(picked));
         when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(target));
         when(assessments.turnFacts(eq(PROJECT), any())).thenAnswer(inv -> facts);
         when(assessments.insert(any())).thenReturn(true);
@@ -145,6 +148,7 @@ class JevFrustrationDetectorTest {
                 assessments,
                 detections,
                 classifiers,
+                scopes,
                 TransactionOperations.withoutTransaction(),
                 props,
                 mapper,
@@ -250,10 +254,10 @@ class JevFrustrationDetectorTest {
     }
 
     @Test
-    void aConversationStopsBeingSentAtItsFirstFlagOnThePage() {
-        SubstrateObservation calm = eligibleTurn("t-1", "conv-a", 30);
-        SubstrateObservation flagged = eligibleTurn("t-2", "conv-a", 20);
-        SubstrateObservation after = eligibleTurn("t-3", "conv-a", 10);
+    void aSessionStopsBeingSentAtItsFirstFlagOnThePage() {
+        SubstrateObservation calm = eligibleTurn("t-1", "t-1", "conv-a", "cs-reply", 30);
+        SubstrateObservation flagged = eligibleTurn("t-2", "t-2", "conv-a", "cs-reply", 20);
+        SubstrateObservation after = eligibleTurn("t-3", "t-3", "conv-a", "cs-reply", 10);
         SubstrateObservation other = eligibleTurn("t-4", "conv-b", 5);
         client.answer("t-1", 0.1, 0.0);
         client.answer("t-2", 0.8, 0.0);
@@ -265,13 +269,54 @@ class JevFrustrationDetectorTest {
         JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(after, other, flagged, calm));
         List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
 
-        assertFalse(client.requests.containsKey("t-3"), "nothing after the conversation's flag is sent");
+        assertFalse(client.requests.containsKey("t-3"), "nothing after the session's flag is sent");
         assertEquals(Set.of("t-1", "t-2", "t-4"), client.requests.keySet());
         assertEquals(4, page.eligible());
         assertEquals(3, page.sent());
         assertEquals(1, fired.size());
         assertEquals("t-2", fired.get(0).turn().traceId());
         verify(assessments, times(3)).insert(any());
+    }
+
+    /**
+     * A session is a conversation on one call site. Keyed on the conversation alone, the reply call site's flag
+     * stops the support call site in the same conversation, and the support call site's own flag is never written.
+     */
+    @Test
+    void aFlagOnOneCallSiteDoesNotStopTheSameConversationOnAnother() {
+        SubstrateObservation reply1 = eligibleTurn("reply-1", "t-1", "conv-a", "cs-reply", 30);
+        SubstrateObservation support1 = eligibleTurn("support-1", "t-1", "conv-a", "cs-support", 30);
+        SubstrateObservation reply2 = eligibleTurn("reply-2", "t-2", "conv-a", "cs-reply", 20);
+        SubstrateObservation support2 = eligibleTurn("support-2", "t-2", "conv-a", "cs-support", 20);
+        client.answer("reply-1", 0.8, 0.0);
+        client.answer("support-1", 0.1, 0.0);
+        client.answer("reply-2", 0.9, 0.0);
+        client.answer("support-2", 0.9, 0.0);
+        JevFrustrationDetector d = detector();
+
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(reply1, support1, reply2, support2));
+        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
+
+        assertEquals(Set.of("reply-1", "support-1", "support-2"), client.requests.keySet());
+        assertEquals(
+                List.of("span-reply-1", "span-support-2"),
+                fired.stream().map(f -> f.turn().observationId()).sorted().toList());
+        verify(assessments, times(3)).insert(any());
+    }
+
+    /** Only the call sites picked on the classifier are scored: a router call beside the reply is never sent. */
+    @Test
+    void aCallSiteNobodyPickedIsNeverSent() {
+        SubstrateObservation reply = eligibleTurn("reply-1", "t-1", "conv-a", "cs-reply", 30);
+        SubstrateObservation router = eligibleTurn("router-1", "t-1", "conv-a", "cs-router", 30);
+        picked.remove("cs-router");
+        client.answer("reply-1", 0.1, 0.0);
+        client.answer("router-1", 0.9, 0.0);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(router, reply));
+
+        assertEquals(Set.of("reply-1"), client.requests.keySet());
+        assertEquals(1, page.eligible());
     }
 
     @Test
@@ -397,6 +442,7 @@ class JevFrustrationDetectorTest {
     @Test
     void anIneligibleTurnOrOneWithNoConversationIsNotSent() {
         SubstrateObservation opener = observation("t-open");
+        picked.add("cs-t-open");
         facts.put("t-open", new TurnFacts("conv-a", NOW));
         when(assembler.assembleStructured(opener))
                 .thenReturn(Optional.of(new StructuredThread(List.of(), text("user", "hello"), 1)));
@@ -643,18 +689,32 @@ class JevFrustrationDetectorTest {
     }
 
     private static SubstrateObservation observation(String traceId) {
-        return TestObservations.llm(
-                "span-" + traceId, PROJECT, traceId, "sess", "cs-" + traceId, null, null, "2026-09-21T11:59:00Z");
+        return observation(traceId, traceId, "cs-" + traceId);
     }
 
-    /** A turn root with a clean user, assistant, user, assistant prefix. */
+    private static SubstrateObservation observation(String key, String traceId, String callSiteId) {
+        return TestObservations.llm(
+                "span-" + key, PROJECT, traceId, "sess", callSiteId, null, null, "2026-09-21T11:59:00Z");
+    }
+
+    /** A turn with a clean user, assistant, user, assistant prefix, on a picked call site. */
     private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv) {
         return eligibleTurn(traceId, conv, 60);
     }
 
     /** As {@link #eligibleTurn(String, String)}, started {@code secondsAgo} before now. */
     private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv, long secondsAgo) {
-        SubstrateObservation obs = observation(traceId);
+        return eligibleTurn(traceId, traceId, conv, "cs-" + traceId, secondsAgo);
+    }
+
+    /**
+     * As {@link #eligibleTurn(String, String, long)}, on {@code callSiteId}. {@code key} names the span and is what
+     * the stub client answers by, so one trace can hold a turn on each of several call sites.
+     */
+    private SubstrateObservation eligibleTurn(
+            String key, String traceId, @Nullable String conv, String callSiteId, long secondsAgo) {
+        SubstrateObservation obs = observation(key, traceId, callSiteId);
+        picked.add(callSiteId);
         facts.put(traceId, new TurnFacts(conv, NOW.minusSeconds(secondsAgo)));
         when(assembler.assembleStructured(obs))
                 .thenReturn(Optional.of(new StructuredThread(
@@ -663,7 +723,7 @@ class JevFrustrationDetectorTest {
                                 text("assistant", "first answer"),
                                 text("user", "second question"),
                                 text("assistant", "second answer")),
-                        text("user", "still wrong " + traceId),
+                        text("user", "still wrong " + key),
                         3)));
         return obs;
     }

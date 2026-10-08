@@ -5,7 +5,9 @@ import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -244,8 +246,8 @@ public final class ClassifierDtos {
      * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
      * is derived by the replay.
      *
-     * @param unassignedConversations conversations in the replay window whose first scored turn had no call
-     *     site; they are never judged, and are counted so the gap is visible
+     * @param unassignedConversations sessions in the replay window scored with no call site, before call sites
+     *     were picked; they are never judged, and are counted so the gap is visible
      */
     public record FrustrationTuningView(
             double threshold,
@@ -288,6 +290,27 @@ public final class ClassifierDtos {
         public static final String IN_CONTROL = "in_control";
         public static final String ALARMING = "alarming";
     }
+
+    /**
+     * The call sites the Frustration classifier scores. Empty until a user picks one, and then nothing is sent.
+     *
+     * @param callSiteIds the picked call site ids, in id order
+     */
+    public record FrustrationScopeView(
+            @JsonProperty("call_site_ids") List<String> callSiteIds) {
+
+        public FrustrationScopeView {
+            callSiteIds = List.copyOf(callSiteIds);
+        }
+    }
+
+    /**
+     * Request body for {@code PUT .../classifiers/{id}/frustration-scope}: the call sites to score, replacing the
+     * earlier picks. Pick the call site that answers the user, not a router or a memory call beside it.
+     */
+    public record SetFrustrationScopeRequest(
+            @JsonProperty("call_site_ids") @NotNull @Size(max = 200)
+            List<@NotBlank String> callSiteIds) {}
 
     /**
      * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.

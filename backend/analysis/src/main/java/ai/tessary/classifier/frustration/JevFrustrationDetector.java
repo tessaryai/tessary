@@ -59,8 +59,9 @@ import org.springframework.transaction.support.TransactionOperations;
  * Frustration, judged by TypeSafe's Jev decision model on the org's own OpenRouter or TypeSafe key, or on
  * the deployment's own provider when it supplies one.
  *
- * <p>Per page: a paused classifier sends nothing. Otherwise each turn root whose conversation is known
- * and whose turn is eligible ({@link FrustrationTurnBuilder}) is sent as one request carrying one
+ * <p>Per page: a paused classifier sends nothing. Otherwise each turn on a picked call site ({@link
+ * FrustrationScopeRepository}) whose conversation is known and whose turn is eligible ({@link
+ * FrustrationTurnBuilder}) is sent as one request carrying one
  * choice question ({@link JevFrustrationQuestion}), a few at a time. A turn fires when the probability
  * of {@code unhappy_with_assistant} exceeds the classifier's threshold; {@code unhappy_other_cause}
  * never fires. A refused key, no key at all, or no platform credit left pauses the classifier and
@@ -68,8 +69,9 @@ import org.springframework.transaction.support.TransactionOperations;
  *
  * <p>What a persisted page writes, in one transaction: an assessment row for every turn sent, flagged
  * or not, with the exact request and response bodies, and a detection row for every flagged turn
- * whose {@code subject_session_id} is the conversation key. The detection row is the conversation's
- * flag: while it stands uncleared the sweep sends no more of that conversation's turns. Ineligible turns, and turns
+ * whose {@code subject_session_id} is the conversation key and whose evidence names the call site. The
+ * detection row is the session's flag, a session being a conversation on one call site: while it stands
+ * uncleared the sweep sends no more of that session's turns. Ineligible turns, and turns
  * whose call failed, leave no row anywhere.
  */
 @Component
@@ -85,6 +87,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private final FrustrationAssessmentRepository assessments;
     private final ClassifierDetectionWriteRepository detections;
     private final ClassifierRepository classifiers;
+    private final FrustrationScopeRepository scopes;
     private final TransactionOperations tx;
     private final FrustrationProperties props;
     private final ObjectMapper mapper;
@@ -98,6 +101,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             FrustrationAssessmentRepository assessments,
             ClassifierDetectionWriteRepository detections,
             ClassifierRepository classifiers,
+            FrustrationScopeRepository scopes,
             TransactionOperations tx,
             FrustrationProperties props,
             ObjectMapper mapper) {
@@ -108,6 +112,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 assessments,
                 detections,
                 classifiers,
+                scopes,
                 tx,
                 props,
                 mapper,
@@ -121,6 +126,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             FrustrationAssessmentRepository assessments,
             ClassifierDetectionWriteRepository detections,
             ClassifierRepository classifiers,
+            FrustrationScopeRepository scopes,
             TransactionOperations tx,
             FrustrationProperties props,
             ObjectMapper mapper,
@@ -131,6 +137,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         this.assessments = assessments;
         this.detections = detections;
         this.classifiers = classifiers;
+        this.scopes = scopes;
         this.tx = tx;
         this.props = props;
         this.mapper = mapper;
@@ -250,12 +257,15 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         DecisionTarget target = resolved.get();
         if (recheck) classifiers.unpause(projectId, signal.id());
 
+        Set<String> picked = scopes.callSites(projectId, signal.id());
+        List<SubstrateObservation> inScope =
+                turns.stream().filter(t -> picked.contains(t.callSiteId())).toList();
         Map<String, TurnFacts> facts = assessments.turnFacts(
-                projectId, turns.stream().map(SubstrateObservation::traceId).toList());
+                projectId, inScope.stream().map(SubstrateObservation::traceId).toList());
         List<SubstrateObservation> eligibleTurns = new ArrayList<>();
         List<EligibleTurn> eligible = new ArrayList<>();
         List<TurnFacts> eligibleFacts = new ArrayList<>();
-        for (SubstrateObservation turn : turns) {
+        for (SubstrateObservation turn : inScope) {
             TurnFacts f = facts.get(turn.traceId());
             if (f == null || f.conversationId() == null) continue;
             Optional<EligibleTurn> e = builder.buildTurn(turn);
@@ -265,7 +275,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             eligibleFacts.add(f);
         }
 
-        List<@Nullable Outcome> outcomes = send(projectId, target, eligible, eligibleFacts, threshold);
+        List<@Nullable Outcome> outcomes = send(projectId, target, eligibleTurns, eligible, eligibleFacts, threshold);
         List<Sent> sent = new ArrayList<>(eligible.size());
         for (int i = 0; i < eligible.size(); i++) {
             Outcome outcome = outcomes.get(i);
@@ -294,31 +304,33 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
 
     /**
      * Send the eligible turns, at most {@code concurrency} calls at once, returning outcomes in page order.
-     * One conversation's turns go one at a time, earliest first, and stop at its first flag or refused
-     * key: a turn after that is never sent and its outcome is null. Conversations run side by side.
+     * One session's turns go one at a time, earliest first, and stop at its first flag or refused key: a
+     * turn after that is never sent and its outcome is null. Sessions run side by side. A session is a
+     * conversation on one call site ({@link #session}).
      * Once the sweep is interrupted no further turn is sent, even by a task that wins the permit an
      * interrupted call just released before its own interrupt arrives.
      */
     private List<@Nullable Outcome> send(
             String projectId,
             DecisionTarget target,
+            List<SubstrateObservation> turns,
             List<EligibleTurn> eligible,
             List<TurnFacts> facts,
             double threshold) {
         if (eligible.isEmpty()) return List.of();
-        Map<String, List<Integer>> byConversation = new LinkedHashMap<>();
+        Map<Session, List<Integer>> bySession = new LinkedHashMap<>();
         for (int i = 0; i < eligible.size(); i++) {
-            byConversation
-                    .computeIfAbsent(Objects.requireNonNull(facts.get(i).conversationId()), k -> new ArrayList<>())
+            bySession
+                    .computeIfAbsent(session(turns.get(i), facts.get(i)), k -> new ArrayList<>())
                     .add(i);
         }
         List<@Nullable Outcome> outcomes = new ArrayList<>(Collections.nCopies(eligible.size(), null));
         Semaphore permits = new Semaphore(Math.max(1, props.getConcurrency()));
         // Set before an interrupted call releases its permit, so the release carries it to the next holder.
         AtomicBoolean stopped = new AtomicBoolean();
-        List<Future<?>> futures = new ArrayList<>(byConversation.size());
+        List<Future<?>> futures = new ArrayList<>(bySession.size());
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (List<Integer> indexes : byConversation.values()) {
+            for (List<Integer> indexes : bySession.values()) {
                 indexes.sort(Comparator.comparing((Integer i) -> facts.get(i).startedAt()));
                 futures.add(executor.submit(() -> {
                     for (int i : indexes) {
@@ -360,7 +372,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     /**
      * Surface a task's failure. The executor's close has already waited for every task, so each future is
      * done. A task catches its own call's runtime failures, so only an {@link Error} or a failure outside the
-     * call (scoring an answer) lands here, and it fails the page rather than dropping that conversation.
+     * call (scoring an answer) lands here, and it fails the page rather than dropping that session.
      */
     private static void joinAll(List<Future<?>> futures) {
         for (Future<?> f : futures) {
@@ -407,15 +419,15 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private List<FiredTurn> persist(ClassifierRow signal, Page page) {
         List<FiredTurn> fired = tx.execute(status -> {
             List<FiredTurn> out = new ArrayList<>();
-            // A page can hold two turns of one conversation; the conversation's flag is its first.
-            Set<String> flaggedConversations = new HashSet<>();
+            // A page can hold two turns of one session; the session's flag is its first.
+            Set<Session> flaggedSessions = new HashSet<>();
             for (Sent s : page.turns()) {
                 DecisionAnswer answer = s.outcome().answer();
                 if (answer == null) continue;
                 double score = score(answer);
                 boolean frustrated = score > page.threshold();
                 assessments.insert(assessment(signal, page, s, answer, frustrated));
-                if (!frustrated || !flaggedConversations.add(s.facts().conversationId())) continue;
+                if (!frustrated || !flaggedSessions.add(session(s.turn(), s.facts()))) continue;
                 String detectionId = Ids.ulid();
                 boolean inserted = detections.insert(
                         detectionId,
@@ -435,6 +447,18 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             return out;
         });
         return fired == null ? List.of() : fired;
+    }
+
+    /**
+     * What one flag stands for and stops: a conversation on one call site. One turn can reach several picked
+     * call sites, and each is judged, flagged and stopped on its own.
+     */
+    private record Session(String conversationId, String callSiteId) {}
+
+    private static Session session(SubstrateObservation turn, TurnFacts facts) {
+        return new Session(
+                Objects.requireNonNull(facts.conversationId()),
+                Objects.requireNonNull(turn.callSiteId(), "a picked turn has a call site"));
     }
 
     /** The probability of {@code unhappy_with_assistant}. */
