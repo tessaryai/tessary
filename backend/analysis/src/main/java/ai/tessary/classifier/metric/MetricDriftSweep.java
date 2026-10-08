@@ -35,11 +35,8 @@ import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -713,7 +710,7 @@ public class MetricDriftSweep implements ClassifierSweep {
         // for the whole page: a page can close several windows and every one of them is judged against a
         // control excluding the same days, which is what makes the page's outcome independent of where
         // its boundaries happened to fall.
-        Set<String> excludedDays = excludedDays(confirmed.get(row.id()));
+        Set<String> excludedDays = MetricBaselineReference.excludedDays(confirmed.get(row.id()));
         Pinned pinned = new Pinned(
                 rehydrate(row.pinnedSketchJson(), row.id()),
                 rehydrateWorkload(row.pinnedWorkloadJson(), grid, row.id()),
@@ -858,31 +855,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                 last.createdAt(),
                 last.traceId());
         return new Folded(closed, List.copyOf(pending));
-    }
-
-    /**
-     * The UTC days a confirmed regression on this bucket ran through — the days the rolling control must
-     * leave out.
-     *
-     * <p>Every day the spell touched, not just the day it opened. A regression that ran for a week was
-     * not normal on any of those days, and excluding only its first would let the rest of it become the
-     * bar it is being measured against.
-     */
-    private static Set<String> excludedDays(@Nullable List<ConfirmedSpan> spans) {
-        if (spans == null || spans.isEmpty()) return Set.of();
-        Set<String> out = new LinkedHashSet<>();
-        for (ConfirmedSpan span : spans) {
-            LocalDate from = LocalDate.ofInstant(Instant.parse(span.fromAt()), ZoneOffset.UTC);
-            LocalDate to = LocalDate.ofInstant(Instant.parse(span.toAt()), ZoneOffset.UTC);
-            if (to.isBefore(from)) continue;
-            // Bounded by the ring's own retention: a spell running for a year would otherwise walk a year
-            // of dates to exclude days the control stopped holding weeks ago.
-            LocalDate floor = to.minusDays(MetricControl.RETAIN_DAYS);
-            for (LocalDate d = from.isBefore(floor) ? floor : from; !d.isAfter(to); d = d.plusDays(1)) {
-                out.add(d.toString());
-            }
-        }
-        return out;
     }
 
     /**

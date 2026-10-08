@@ -30,6 +30,8 @@ public enum ClassifierError implements ErrorCode {
     FRUSTRATION_SCOPE_ELSEWHERE(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Frustration picks its call sites under its own setting, PUT /classifiers/%s/frustration-scope"),
+    INVALID_CHART_DAYS(HttpStatus.UNPROCESSABLE_ENTITY, "A chart range is 7, 28 or 90 days, not %s"),
+    CHART_SCOPE(HttpStatus.UNPROCESSABLE_ENTITY, "Pick one call site or one tool"),
     NOT_GROUNDEDNESS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no groundedness status — only the groundedness classifier does"),
