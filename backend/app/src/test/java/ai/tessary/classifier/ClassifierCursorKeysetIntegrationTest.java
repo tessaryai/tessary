@@ -3,7 +3,6 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.tessary.classifier.frustration.FrustrationScopeRepository;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
@@ -82,9 +81,6 @@ class ClassifierCursorKeysetIntegrationTest {
 
     @Autowired
     CapabilityFixture capabilities;
-
-    @Autowired
-    FrustrationScopeRepository scopes;
 
     private SubstrateV2Fixtures fx;
 
@@ -170,12 +166,11 @@ class ClassifierCursorKeysetIntegrationTest {
         }
     }
 
-    /** Seed the catalog, then resolve the Frustration definition, pick the chat call site and turn it on. */
+    /** Seed the catalog, then resolve the Frustration definition and turn it on, on every call site. */
     private ClassifierRow seedAndFindFrustration(String pid) {
         service.seedBuiltIns(pid);
         String id =
                 ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id();
-        scopes.replace(pid, id, List.of(ClassifierConversations.CALL_SITE));
         return service.setEnabled(pid, id, true);
     }
 }

@@ -972,7 +972,7 @@ function NothingHere({
           {offClassifier.name} is off
         </p>
         <p className="mx-auto text-muted mt-3 text-body" style={{ maxWidth: 460, textWrap: "pretty" }}>
-          It has no detections to filter by. Turn it on and pick the call sites it scores.
+          It has no detections to filter by. Turn it on to start scoring.
         </p>
         <p className="text-muted mt-3 text-body">
           <Link to={offClassifier.href} relative="path" className="text-accent hover:underline">

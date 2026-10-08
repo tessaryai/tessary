@@ -59,10 +59,9 @@ import org.springframework.transaction.support.TransactionOperations;
  * Frustration, judged by TypeSafe's Jev decision model on the org's own OpenRouter or TypeSafe key, or on
  * the deployment's own provider when it supplies one.
  *
- * <p>Per page: a paused classifier sends nothing. Otherwise each turn on a picked call site ({@link
- * FrustrationScopeRepository}) whose conversation is known and whose turn is eligible ({@link
- * FrustrationTurnBuilder}) is sent as one request carrying one
- * choice question ({@link JevFrustrationQuestion}), a few at a time. A turn fires when the probability
+ * <p>Per page: a paused classifier sends nothing. Otherwise each turn the worker hands over, already limited to
+ * the classifier's call sites ({@link ClassifierRow#callSiteIds}), whose conversation is known and whose turn is
+ * eligible ({@link FrustrationTurnBuilder}) is sent as one request carrying one choice question ({@link JevFrustrationQuestion}), a few at a time. A turn fires when the probability
  * of {@code unhappy_with_assistant} exceeds the classifier's threshold; {@code unhappy_other_cause}
  * never fires. A refused key, no key at all, or no platform credit left pauses the classifier and
  * abandons the page.
@@ -87,7 +86,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     private final FrustrationAssessmentRepository assessments;
     private final ClassifierDetectionWriteRepository detections;
     private final ClassifierRepository classifiers;
-    private final FrustrationScopeRepository scopes;
     private final TransactionOperations tx;
     private final FrustrationProperties props;
     private final ObjectMapper mapper;
@@ -101,7 +99,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             FrustrationAssessmentRepository assessments,
             ClassifierDetectionWriteRepository detections,
             ClassifierRepository classifiers,
-            FrustrationScopeRepository scopes,
             TransactionOperations tx,
             FrustrationProperties props,
             ObjectMapper mapper) {
@@ -112,7 +109,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 assessments,
                 detections,
                 classifiers,
-                scopes,
                 tx,
                 props,
                 mapper,
@@ -126,7 +122,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             FrustrationAssessmentRepository assessments,
             ClassifierDetectionWriteRepository detections,
             ClassifierRepository classifiers,
-            FrustrationScopeRepository scopes,
             TransactionOperations tx,
             FrustrationProperties props,
             ObjectMapper mapper,
@@ -137,7 +132,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         this.assessments = assessments;
         this.detections = detections;
         this.classifiers = classifiers;
-        this.scopes = scopes;
         this.tx = tx;
         this.props = props;
         this.mapper = mapper;
@@ -257,15 +251,12 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         DecisionTarget target = resolved.get();
         if (recheck) classifiers.unpause(projectId, signal.id());
 
-        Set<String> picked = scopes.callSites(projectId, signal.id());
-        List<SubstrateObservation> inScope =
-                turns.stream().filter(t -> picked.contains(t.callSiteId())).toList();
         Map<String, TurnFacts> facts = assessments.turnFacts(
-                projectId, inScope.stream().map(SubstrateObservation::traceId).toList());
+                projectId, turns.stream().map(SubstrateObservation::traceId).toList());
         List<SubstrateObservation> eligibleTurns = new ArrayList<>();
         List<EligibleTurn> eligible = new ArrayList<>();
         List<TurnFacts> eligibleFacts = new ArrayList<>();
-        for (SubstrateObservation turn : inScope) {
+        for (SubstrateObservation turn : turns) {
             TurnFacts f = facts.get(turn.traceId());
             if (f == null || f.conversationId() == null) continue;
             Optional<EligibleTurn> e = builder.buildTurn(turn);
@@ -450,15 +441,15 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
     }
 
     /**
-     * What one flag stands for and stops: a conversation on one call site. One turn can reach several picked
-     * call sites, and each is judged, flagged and stopped on its own.
+     * What one flag stands for and stops: a conversation on one call site. One turn can reach several call
+     * sites, and each is judged, flagged and stopped on its own.
      */
     private record Session(String conversationId, String callSiteId) {}
 
     private static Session session(SubstrateObservation turn, TurnFacts facts) {
         return new Session(
                 Objects.requireNonNull(facts.conversationId()),
-                Objects.requireNonNull(turn.callSiteId(), "a picked turn has a call site"));
+                Objects.requireNonNull(turn.callSiteId(), "a turn candidate has a call site"));
     }
 
     /** The probability of {@code unhappy_with_assistant}. */

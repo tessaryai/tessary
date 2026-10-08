@@ -37,8 +37,6 @@ import {
   type GroundednessStatus,
   type ClassifierTuning,
   type SetClassifierTuningRequest,
-  type FrustrationScope,
-  type SetFrustrationScopeRequest,
   type BehaviorFinding,
   type BehaviorFindingDetail,
   type EvidenceSpanPage,
@@ -504,13 +502,6 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
       http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`, {
-        method: "PUT",
-        body: JSON.stringify(req),
-      }),
-    /** The call sites the Frustration classifier scores. 422s for any other classifier. */
-    getFrustrationScope: (id: string) => http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`),
-    setFrustrationScope: (id: string, req: SetFrustrationScopeRequest) =>
-      http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`, {
         method: "PUT",
         body: JSON.stringify(req),
       }),
