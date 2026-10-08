@@ -7681,6 +7681,7 @@ export interface operations {
                 model?: string;
                 kind?: string;
                 callSite?: string;
+                hasCallSite?: boolean;
                 fromTimestamp?: string;
                 toTimestamp?: string;
                 status?: string;

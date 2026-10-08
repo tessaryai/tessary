@@ -601,6 +601,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       q?: string;
       /** Scope to one call site (server-side only). */
       callSite?: string;
+      /** true: traces with any call site; false: traces with none. */
+      hasCallSite?: boolean;
       sort?: string;
     }) => {
       const p = new URLSearchParams();

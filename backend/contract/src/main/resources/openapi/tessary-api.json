@@ -17533,6 +17533,14 @@
           },
           {
             "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
             "name" : "fromTimestamp",
             "required" : false,
             "schema" : {
