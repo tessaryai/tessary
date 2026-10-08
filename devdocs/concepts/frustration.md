@@ -73,6 +73,10 @@ row, and while that row stands uncleared the sweep sends none of the session's l
 one call site does not stop another picked call site in the same conversation. Every sent turn, flagged
 or not, is a `frustration_assessment` row with the exact request and response bodies.
 
+The trace and session views read the same uncleared rows (`storage/TraceDetectionRepository`): the
+Detected by filter and column on the traces list, and the marker on the flagged message in the detail
+views. A turn whose flag a `false_alarm` resolve cleared is not marked.
+
 ## The session is the trial
 
 The rate test is Tool Error's Bernoulli CUSUM, run per call site with a session as the trial instead

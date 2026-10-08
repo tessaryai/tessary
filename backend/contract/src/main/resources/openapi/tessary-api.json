@@ -4529,6 +4529,47 @@
         ],
         "type" : "object"
       },
+      "DetectionLabel" : {
+        "properties" : {
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "classifier_id",
+          "name"
+        ],
+        "type" : "object"
+      },
+      "DetectionMark" : {
+        "properties" : {
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "span_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "trace_id" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "classifier_id",
+          "name",
+          "span_id",
+          "trace_id"
+        ],
+        "type" : "object"
+      },
       "Duration" : {
         "properties" : {
           "baseline_p95_ms" : {
@@ -9253,6 +9294,12 @@
       },
       "SessionDetail" : {
         "properties" : {
+          "detections" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionMark"
+            },
+            "type" : "array"
+          },
           "error_count" : {
             "format" : "int64",
             "type" : [
@@ -9265,6 +9312,15 @@
           },
           "last_activity_at" : {
             "type" : "string"
+          },
+          "matched_trace_ids" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
           },
           "span_count" : {
             "format" : "int64",
@@ -9321,9 +9377,11 @@
           }
         },
         "required" : [
+          "detections",
           "error_count",
           "id",
           "last_activity_at",
+          "matched_trace_ids",
           "span_count",
           "started_at",
           "total_cost",
@@ -9359,6 +9417,12 @@
               "integer",
               "null"
             ]
+          },
+          "detected_by" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionLabel"
+            },
+            "type" : "array"
           },
           "dominant_call_site_id" : {
             "type" : [
@@ -9479,6 +9543,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "call_site_count",
+          "detected_by",
           "dominant_call_site_id",
           "error_count",
           "first_input_preview",
@@ -10661,6 +10726,12 @@
       },
       "TraceDetail" : {
         "properties" : {
+          "detections" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionMark"
+            },
+            "type" : "array"
+          },
           "spans" : {
             "items" : {
               "$ref" : "#/components/schemas/SpanView"
@@ -10672,6 +10743,7 @@
           }
         },
         "required" : [
+          "detections",
           "spans",
           "trace"
         ],
@@ -10698,6 +10770,12 @@
               "string",
               "null"
             ]
+          },
+          "detected_by" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionLabel"
+            },
+            "type" : "array"
           },
           "ended_at" : {
             "type" : [
@@ -10835,6 +10913,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "call_site_id",
+          "detected_by",
           "ended_at",
           "error_count",
           "id",
@@ -17469,6 +17548,78 @@
             "schema" : {
               "type" : "string"
             }
+          },
+          {
+            "in" : "query",
+            "name" : "model",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "kind",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "callSite",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "fromTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "toTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "status",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "q",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
           }
         ],
         "responses" : {
@@ -17520,6 +17671,78 @@
             "in" : "path",
             "name" : "sessionId",
             "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "model",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "kind",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "callSite",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "fromTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "toTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "status",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "q",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
+            "required" : false,
             "schema" : {
               "type" : "string"
             }
@@ -17960,6 +18183,14 @@
           {
             "in" : "query",
             "name" : "sort",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
             "required" : false,
             "schema" : {
               "type" : "string"

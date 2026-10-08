@@ -17,6 +17,7 @@ import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
+import ai.tessary.storage.TraceDetectionRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -103,8 +104,17 @@ record McpToolHarness(McpToolRegistry registry, McpDispatcher dispatcher) {
             Project project = new Project(
                     PROJECT_ID, ORG_ID, "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
             when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-            var registry =
-                    new McpToolRegistry(pipeline, projects, query, spans, payloads, traces, sessions, findings, cases);
+            var registry = new McpToolRegistry(
+                    pipeline,
+                    projects,
+                    query,
+                    spans,
+                    payloads,
+                    traces,
+                    sessions,
+                    findings,
+                    cases,
+                    mock(TraceDetectionRepository.class));
             return new McpToolHarness(registry, new McpDispatcher(registry, MAPPER));
         }
     }

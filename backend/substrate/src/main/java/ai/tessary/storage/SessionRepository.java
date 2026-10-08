@@ -3,10 +3,13 @@ package ai.tessary.storage;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -35,9 +38,12 @@ public class SessionRepository {
 
     private final NamedParameterJdbcTemplate named;
 
-    public SessionRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    private final TraceFilters filters;
+
+    public SessionRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named, TraceFilters filters) {
         this.jdbc = jdbc;
         this.named = named;
+        this.filters = filters;
     }
 
     private static final String GET_OR_CREATE_SQL = """
@@ -157,7 +163,11 @@ public class SessionRepository {
 
     /**
      * A page of the project's sessions, most recently active first, keyset-paginated on
-     * {@code (last_activity_at, id)} — served entirely by {@code ix_session_project_active}.
+     * {@code (last_activity_at, id)} — served by {@code ix_session_project_active}.
+     *
+     * <p>{@code filter} is the traces list's: a session is on the page when one of its traces passes every one of
+     * its filters, one {@code EXISTS} per session row over {@code ix_trace_session}. It never filters on a session
+     * aggregate.
      *
      * <p><b>There is no sort parameter, and that is contractual (§7.5).</b> Sessions carry no rollup: a
      * trace goes quiet in seconds, whereas a session may be resumed days later, so there is no gap of
@@ -168,21 +178,34 @@ public class SessionRepository {
      * the read shape the v2 substrate exists to make impossible.
      */
     public List<SessionRow> listByProject(
-            String projectId, int limit, @Nullable String beforeActivityAt, @Nullable String beforeId) {
-        boolean paged = beforeActivityAt != null && beforeId != null;
-        var where = new StringBuilder("WHERE project_id = :pid AND NOT is_deleted");
-        if (paged) {
-            where.append(" AND (last_activity_at < :beforeAt::timestamptz"
-                    + " OR (last_activity_at = :beforeAt::timestamptz AND id < :beforeId))");
-        }
-        var spec = jdbc.sql("SELECT " + COLS + " FROM session " + where
-                        + " ORDER BY last_activity_at DESC, id DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit);
+            String projectId,
+            TraceV2Repository.TraceQuery filter,
+            int limit,
+            @Nullable String beforeActivityAt,
+            @Nullable String beforeId) {
+        var params = new HashMap<String, Object>();
+        params.put("pid", projectId);
+        params.put("limit", limit);
+        var where = new StringBuilder("WHERE s.project_id = :pid AND NOT s.is_deleted");
         if (beforeActivityAt != null && beforeId != null) {
-            spec = spec.param("beforeAt", beforeActivityAt).param("beforeId", beforeId);
+            where.append(" AND (s.last_activity_at < :beforeAt::timestamptz"
+                    + " OR (s.last_activity_at = :beforeAt::timestamptz AND s.id < :beforeId))");
+            params.put("beforeAt", beforeActivityAt);
+            params.put("beforeId", beforeId);
         }
-        return spec.query((rs, n) -> map(rs)).list();
+        if (TraceFilters.narrows(filter)) {
+            // A session matches when one of its traces passes every filter: the traces the traces list shows.
+            var traceWhere = new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
+                    + " AND t.session_id = s.id AND NOT t.is_deleted");
+            filters.append(projectId, traceWhere, params, filter);
+            where.append(traceWhere).append(')');
+        }
+        String cols = Arrays.stream(COLS.split(", ")).map(c -> "s." + c).collect(Collectors.joining(", "));
+        return jdbc.sql("SELECT " + cols + " FROM session s " + where
+                        + " ORDER BY s.last_activity_at DESC, s.id DESC LIMIT :limit")
+                .params(params)
+                .query((rs, n) -> map(rs))
+                .list();
     }
 
     private static SessionRow map(ResultSet rs) throws SQLException {

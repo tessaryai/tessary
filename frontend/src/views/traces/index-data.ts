@@ -15,6 +15,7 @@
  */
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
+import type { TraceFilterParams } from "../../api/client";
 import type { TraceListItemView as TraceListItem } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 
@@ -28,7 +29,23 @@ export type TraceFilters = {
   /** Absolute ISO-8601 bounds. Resolved by the picker, never a relative token — see index-filters. */
   from?: string | null;
   to?: string | null;
+  /** A classifier id, or "any": traces a classifier flagged. */
+  detectedBy?: string;
 };
+
+/** The filters as the traces and sessions reads take them. */
+export function filterParams(filters: TraceFilters): TraceFilterParams {
+  return {
+    q: filters.q,
+    status: filters.status,
+    callSite: filters.callSite,
+    hasCallSite: filters.hasCallSite,
+    kind: filters.kind,
+    fromTimestamp: filters.from ?? undefined,
+    toTimestamp: filters.to ?? undefined,
+    detectedBy: filters.detectedBy,
+  };
+}
 
 /**
  * 50 a page: the server's own default, and small enough that the first screen
@@ -54,18 +71,7 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
   return useInfiniteQuery({
     queryKey: ["traces-index", api.base, filters, epoch],
     queryFn: ({ pageParam }) =>
-      api.listTraces({
-        limit: PAGE_SIZE,
-        sort: "when",
-        cursor: pageParam ?? undefined,
-        q: filters.q,
-        status: filters.status,
-        callSite: filters.callSite,
-        hasCallSite: filters.hasCallSite,
-        kind: filters.kind,
-        fromTimestamp: filters.from ?? undefined,
-        toTimestamp: filters.to ?? undefined,
-      }),
+      api.listTraces({ limit: PAGE_SIZE, sort: "when", cursor: pageParam ?? undefined, ...filterParams(filters) }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? null,
     enabled,
