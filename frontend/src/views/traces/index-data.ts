@@ -84,7 +84,7 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
  * There is no facets endpoint on the project API — `/v1/query/facets` is
  * token-scoped for MCP, not session-scoped for the UI — so the honest source is
  * what the list has actually served. The call site is on the trace row (copied
- * down from its root span by the rollup), which is why it can still be harvested
+ * down from its spans by the rollup), which is why it can still be harvested
  * this way and the model and kind vocabularies cannot: those are span facts, and
  * the list no longer reads spans at all.
  *

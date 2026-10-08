@@ -610,6 +610,91 @@ class SpanBatchWriterIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("§6.3: a session and thread that only the root carries reach the trace when the root ships later")
+    void correlation_aLaterBatchFillsTheTracesMissingSession() {
+        String traceId = traceId("root-ships-last");
+        writer.write(
+                pid,
+                List.of(span(
+                        "llm", "root", traceId, KindNormalizer.LLM, t0.plusSeconds(1), t0.plusSeconds(2), Map.of())));
+        writer.write(
+                pid,
+                List.of(span(
+                        "root",
+                        null,
+                        traceId,
+                        KindNormalizer.AGENT,
+                        t0,
+                        t0.plusSeconds(3),
+                        Map.of(
+                                GenAiAttributes.SESSION_ID,
+                                "sess-root-only",
+                                GenAiAttributes.CONVERSATION_ID,
+                                "thread-root-only"))));
+        correlate();
+
+        TraceV2Row trace = traces.findById(pid, traceId).orElseThrow();
+        assertEquals("sess-root-only", trace.sessionId(), "the first batch had no session, so the second one fills it");
+        assertEquals("thread-root-only", trace.threadId());
+        assertNotNull(sessions.findById(pid, "sess-root-only").orElse(null));
+        assertEquals(
+                "sess-root-only",
+                spans.findById(pid, traceId, "llm").orElseThrow().sessionId(),
+                "the child shipped first and inherits the session its trace learned later");
+    }
+
+    @Test
+    @DisplayName("§6.3: a trace that settled session-less takes the session its late root carries, children too")
+    void correlation_aSettledAnonymousTraceTakesTheSessionOfItsLateRoot() {
+        String traceId = traceId("settled-then-root");
+        writer.write(
+                pid,
+                List.of(span(
+                        "llm", "root", traceId, KindNormalizer.LLM, t0.plusSeconds(1), t0.plusSeconds(2), Map.of())));
+        settle(traceId);
+        correlate();
+        assertEquals(
+                SpanRow.ResolverState.NONE,
+                spans.findById(pid, traceId, "llm").orElseThrow().correlationState(),
+                "precondition: the child was retired as anonymous while the root was still running");
+
+        writer.write(
+                pid,
+                List.of(span("root", null, traceId, KindNormalizer.AGENT, t0, t0.plusSeconds(60), meta("sess-late"))));
+        correlate();
+
+        assertEquals("sess-late", traces.findById(pid, traceId).orElseThrow().sessionId());
+        assertEquals(
+                "sess-late", spans.findById(pid, traceId, "llm").orElseThrow().sessionId());
+    }
+
+    @Test
+    @DisplayName("§6.3: a later batch never moves a trace out of the session it already has")
+    void correlation_aTracesSessionIsFirstWriteWins() {
+        String traceId = traceId("first-session-wins");
+        writer.write(
+                pid, List.of(span("root", null, traceId, KindNormalizer.AGENT, t0, t0.plusSeconds(3), meta("sess-a"))));
+        writer.write(
+                pid,
+                List.of(span(
+                        "llm",
+                        "root",
+                        traceId,
+                        KindNormalizer.LLM,
+                        t0.plusSeconds(1),
+                        t0.plusSeconds(2),
+                        meta("sess-b"))));
+
+        assertEquals("sess-a", traces.findById(pid, traceId).orElseThrow().sessionId());
+    }
+
+    /** Both correlation passes, with a limit no other test's pending spans can exhaust. */
+    private void correlate() {
+        spans.backfillCorrelation(100_000);
+        spans.markCorrelationNone(100_000);
+    }
+
     /** The rollup worker's tick, run inline with the deadline pulled forward. */
     private void settle(String traceId) {
         jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"

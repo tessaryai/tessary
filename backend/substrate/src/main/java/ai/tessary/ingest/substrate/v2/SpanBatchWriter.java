@@ -66,8 +66,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       transaction below (see {@code commitBatch} for why they moved inside it). Both are
  *       {@code ON CONFLICT DO NOTHING}, so a redelivery is a no-op and every FK is satisfiable regardless
  *       of arrival order. Timing and rollup columns are never written here, they belong to §7 alone.
- *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the session activity fold, then
- *       the span upserts and their payload rows under the same {@code event_ts} guard.
+ *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the fill of a trace name, user,
+ *       session or thread an earlier batch left null, the session activity fold, then the span upserts and their payload
+ *       rows under the same {@code event_ts} guard. A trace whose session was just filled has it copied onto
+ *       its session-less spans in the same transaction.
  * </ol>
  *
  * <h2>The atomicity invariant</h2>
@@ -262,7 +264,7 @@ public class SpanBatchWriter {
         // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
         // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes. A trace
         // handle this batch knows and the creating batch did not (the root ships last, §6.4) is filled by
-        // applyBatchTimers instead, under its FOR UPDATE.
+        // fillCorrelation instead, under the timer update's FOR UPDATE.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
         newSessions.sort(Map.Entry.comparingByKey());
         List<SessionRow> sessionRows = new ArrayList<>(newSessions.size());
@@ -316,16 +318,14 @@ public class SpanBatchWriter {
         byTrace.forEach((traceId, fold) -> {
             Instant endedAt = fold.endedAt();
             timers.add(new TraceV2Repository.TimerUpdate(
-                    traceId,
-                    fold.startedAt().toString(),
-                    endedAt == null ? null : endedAt.toString(),
-                    fold.hasRoot(),
-                    fold.name(),
-                    fold.userId(),
-                    fold.sessionId(),
-                    fold.threadId()));
+                    traceId, fold.startedAt().toString(), endedAt == null ? null : endedAt.toString(), fold.hasRoot()));
         });
         traces.applyBatchTimers(projectId, timers);
+
+        List<TraceV2Repository.CorrelationFill> fills = new ArrayList<>(byTrace.size());
+        byTrace.forEach((traceId, fold) -> fills.add(new TraceV2Repository.CorrelationFill(
+                traceId, fold.name(), fold.userId(), fold.sessionId(), fold.threadId())));
+        List<String> filled = traces.fillCorrelation(projectId, fills);
 
         List<SessionRepository.Touch> touches = new ArrayList<>(bySession.size());
         bySession.forEach((sessionId, fold) -> touches.add(new SessionRepository.Touch(
@@ -365,6 +365,20 @@ public class SpanBatchWriter {
             recordLateness(p, rolledUpThrough.get(p.span().traceId()));
         }
         spans.upsertAll(spanRows);
+        // After the upsert, so this batch's own session-less spans are covered as well as earlier ones.
+        if (!filled.isEmpty()) {
+            Instant adoptStarted = Instant.now();
+            int adopted = spans.adoptTraceSession(projectId, filled);
+            StructuredLog.info(log, Markers.OPS, "ingest.v2.correlation.filled")
+                    .message(
+                            "a later batch gave %s trace(s) their session, copied onto %s span(s)",
+                            filled.size(), adopted)
+                    .field("projectId", projectId)
+                    .field("filledTraces", filled.size())
+                    .field("adoptedSpans", adopted)
+                    .durationMs(adoptStarted)
+                    .log();
+        }
         payloads.upsertAll(payloadRows);
         mediaRefs.insertAllForSpans(projectId, media);
         toolCalls.insertAll(toolCallRows);

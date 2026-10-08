@@ -20,8 +20,8 @@ import org.springframework.stereotype.Repository;
  * {@code latency_ms}) are returned beside the leaf facts rather than instead of them, since a NULL
  * rollup means "not yet rolled up," distinct from zero.
  *
- * <p>The entry-point call site is never re-derived here: the rollup worker copies it onto {@code
- * trace.call_site_id} from the root span, and this and {@link
+ * <p>The trace's call site is never re-derived here: the rollup worker copies it onto {@code
+ * trace.call_site_id} (the root span's, else the earliest tagged span's), and this and {@link
  * ai.tessary.classifier.substrate.BehaviorSubstrateRepository} both read that one column, so the
  * two classifiers can't disagree about which bucket a trace belongs to.
  *

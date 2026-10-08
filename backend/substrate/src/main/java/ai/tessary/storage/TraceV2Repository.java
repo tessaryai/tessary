@@ -32,9 +32,10 @@ import org.springframework.stereotype.Repository;
  * <ul>
  *   <li>{@link #getOrCreateAll}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
  *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
- *   <li>{@link #applyBatchTimers}: the only in-place update on this row, and it is {@code min}/{@code
- *       max}, a monotonically-earlier deadline, and a fill of the identity handles the get-or-create left
- *       null (§6.3). Idempotent under replay by construction (§7.1).
+ *   <li>{@link #applyBatchTimers} and {@link #fillCorrelation}: the in-place updates on this row, under one
+ *       lock. The first is {@code min}/{@code max} plus a monotonically-earlier deadline (§7.1); the second
+ *       only ever turns a null name, user, session or thread into a value (§6.3). Both are idempotent under
+ *       replay by construction.
  *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
  *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
  *       permanent and undetectable, whereas a full recompute self-heals after any bug.
@@ -107,23 +108,9 @@ public class TraceV2Repository {
      * @param minStartedAt the earliest {@code started_at} among the batch's spans for this trace.
      * @param maxEndedAt the latest {@code ended_at}, or null when no span in the batch had ended.
      * @param hasRoot whether any span in the batch had {@code parent_span_id IS NULL}.
-     * @param name the batch's root span name, filled onto the trace only while the trace's is null; the
-     *     same for {@code userId}, {@code sessionId} and {@code threadId} (substrate-model.md §6.3).
      */
     public record TimerUpdate(
-            String traceId,
-            String minStartedAt,
-            @Nullable String maxEndedAt,
-            boolean hasRoot,
-            @Nullable String name,
-            @Nullable String userId,
-            @Nullable String sessionId,
-            @Nullable String threadId) {
-
-        public TimerUpdate(String traceId, String minStartedAt, @Nullable String maxEndedAt, boolean hasRoot) {
-            this(traceId, minStartedAt, maxEndedAt, hasRoot, null, null, null, null);
-        }
-    }
+            String traceId, String minStartedAt, @Nullable String maxEndedAt, boolean hasRoot) {}
 
     /**
      * Fold a batch into its traces' timers and re-arm the rollup deadline (§7.1).
@@ -170,15 +157,7 @@ public class TraceV2Repository {
                     .append(i)
                     .append("::timestamptz, :rt")
                     .append(i)
-                    .append("::boolean, :nm")
-                    .append(i)
-                    .append("::text, :us")
-                    .append(i)
-                    .append("::text, :ss")
-                    .append(i)
-                    .append("::text, :th")
-                    .append(i)
-                    .append("::text)");
+                    .append("::boolean)");
         }
         var spec = jdbc.sql("""
                         UPDATE trace t SET
@@ -190,14 +169,9 @@ public class TraceV2Repository {
                                                 now() + CASE WHEN v.has_root OR t.has_root_span
                                                              THEN interval '2 seconds'
                                                              ELSE interval '10 seconds' END),
-                            is_settled    = false,
-                            name          = COALESCE(t.name, v.name),
-                            user_id       = COALESCE(t.user_id, v.user_id),
-                            session_id    = COALESCE(t.session_id, v.session_id),
-                            thread_id     = COALESCE(t.thread_id, v.thread_id)
+                            is_settled    = false
                         FROM (VALUES """ + values + """
-                        ) AS v (trace_id, min_started_at, max_ended_at, has_root, name, user_id, session_id,
-                                thread_id)
+                        ) AS v (trace_id, min_started_at, max_ended_at, has_root)
                         WHERE t.project_id = :pid AND t.id = v.trace_id
                         """).param("pid", projectId);
         for (int i = 0; i < sorted.size(); i++) {
@@ -205,14 +179,92 @@ public class TraceV2Repository {
             spec = spec.param("tid" + i, u.traceId())
                     .param("st" + i, u.minStartedAt())
                     .param("en" + i, u.maxEndedAt())
-                    .param("rt" + i, u.hasRoot())
-                    .param("nm" + i, u.name())
-                    .param("us" + i, u.userId())
-                    .param("ss" + i, u.sessionId())
-                    .param("th" + i, u.threadId());
+                    .param("rt" + i, u.hasRoot());
         }
         return spec.update();
     }
+
+    /**
+     * The handles one batch saw for a trace, any of which may be absent.
+     *
+     * @param name the batch's root span name; a child span never names its trace.
+     */
+    public record CorrelationFill(
+            String traceId,
+            @Nullable String name,
+            @Nullable String userId,
+            @Nullable String sessionId,
+            @Nullable String threadId) {}
+
+    /**
+     * Fill a trace's {@code name}, {@code user_id}, {@code session_id} and {@code thread_id} where they are
+     * still null (§6.3).
+     *
+     * <p>The get-or-create insert takes them from whichever batch arrives first, and a batch exporter ships
+     * the root last (§6.4). A producer that sets them on the root alone would otherwise leave the trace
+     * unnamed and anonymous for good. A value already set is never replaced, so a trace cannot move between
+     * sessions and a replay changes nothing.
+     *
+     * <p>Run after {@link #applyBatchTimers} in the same transaction, which already holds these rows
+     * {@code FOR UPDATE}, so this takes no lock that statement did not.
+     *
+     * @return the ids of the traces whose session this call filled, usually none.
+     */
+    public List<String> fillCorrelation(String projectId, Collection<CorrelationFill> fills) {
+        List<CorrelationFill> sorted = fills.stream()
+                .filter(f -> f.name() != null || f.userId() != null || f.sessionId() != null || f.threadId() != null)
+                .sorted(Comparator.comparing(CorrelationFill::traceId))
+                .toList();
+        if (sorted.isEmpty()) return List.of();
+
+        StringBuilder values = new StringBuilder();
+        for (int i = 0; i < sorted.size(); i++) {
+            values.append(i == 0 ? "" : ", ")
+                    .append("(:tid")
+                    .append(i)
+                    .append(", :nm")
+                    .append(i)
+                    .append("::text, :uid")
+                    .append(i)
+                    .append("::text, :sid")
+                    .append(i)
+                    .append("::text, :thr")
+                    .append(i)
+                    .append("::text)");
+        }
+        // `o` is the same row read before this statement writes it, so RETURNING can tell a session filled
+        // here from one the trace already had.
+        var spec = jdbc.sql("""
+                        UPDATE trace t SET
+                            name       = COALESCE(t.name, v.name),
+                            user_id    = COALESCE(t.user_id, v.user_id),
+                            session_id = COALESCE(t.session_id, v.session_id),
+                            thread_id  = COALESCE(t.thread_id, v.thread_id)
+                        FROM (VALUES """ + values + """
+                        ) AS v (trace_id, name, user_id, session_id, thread_id)
+                        JOIN trace o ON o.project_id = :pid AND o.id = v.trace_id
+                        WHERE t.project_id = :pid AND t.id = v.trace_id
+                          AND ((t.name IS NULL AND v.name IS NOT NULL)
+                               OR (t.user_id IS NULL AND v.user_id IS NOT NULL)
+                               OR (t.session_id IS NULL AND v.session_id IS NOT NULL)
+                               OR (t.thread_id IS NULL AND v.thread_id IS NOT NULL))
+                        RETURNING t.id, (o.session_id IS NULL AND v.session_id IS NOT NULL) AS session_filled
+                        """).param("pid", projectId);
+        for (int i = 0; i < sorted.size(); i++) {
+            CorrelationFill f = sorted.get(i);
+            spec = spec.param("tid" + i, f.traceId())
+                    .param("nm" + i, f.name())
+                    .param("uid" + i, f.userId())
+                    .param("sid" + i, f.sessionId())
+                    .param("thr" + i, f.threadId());
+        }
+        return spec.query((rs, n) -> new Filled(rs.getString("id"), rs.getBoolean("session_filled"))).list().stream()
+                .filter(Filled::sessionFilled)
+                .map(Filled::traceId)
+                .toList();
+    }
+
+    private record Filled(String traceId, boolean sessionFilled) {}
 
     /** A claimed trace: the key the recompute runs against. */
     public record Claim(String projectId, String traceId) {}
@@ -284,11 +336,15 @@ public class TraceV2Repository {
      * {@code input_tokens = 0} and {@code output_tokens = 0}, and zero is not null, so counting those
      * would trip the marker on traces that represent no spend and withhold them from cost-drift scoring.
      *
-     * <p>The previews and the call site are copied down from the root span, not stored by ingest: that
+     * <p>The previews and the call site are copied down from the spans, not stored by ingest: that
      * is what keeps the traces list a single-table read (spec rule 1) rather than a join to find each
-     * row's entry point. They are a replacement like everything else here, gated on {@code has_root_span}
-     * so a trace whose root has not landed yet keeps whatever it had rather than being blanked by a
-     * rollup that fired between a child and its parent.
+     * row's entry point. The previews are the root's. The call site is the root's when the root carries
+     * one, else the earliest-starting tagged span's: instrumentation tags the span around the model call,
+     * not the handler that encloses it, so an untagged root is the normal case, not a gap. When a turn
+     * reaches several call sites, the first one it reached is the turn's, and each span keeps its own.
+     * They are a replacement like everything else here, gated on {@code has_root_span} so a trace whose
+     * root has not landed yet keeps whatever it had rather than being blanked, or attributed from a
+     * partial set of children, by a rollup that fired between a child and its parent.
      *
      * @return the outcome, or empty if the trace was deleted under the worker.
      */
@@ -322,6 +378,15 @@ public class TraceV2Repository {
                                AND NOT is_deleted
                              ORDER BY started_at, id
                              LIMIT 1
+                        ), tagged AS (
+                            SELECT call_site_id
+                              FROM span
+                             WHERE project_id   = :pid
+                               AND trace_id     = :tid
+                               AND call_site_id IS NOT NULL
+                               AND NOT is_deleted
+                             ORDER BY started_at, id
+                             LIMIT 1
                         )
                         UPDATE trace t
                            SET span_count         = agg.span_count,
@@ -340,12 +405,13 @@ public class TraceV2Repository {
                                                          ELSE t.input_preview END,
                                output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                                          ELSE t.output_preview END,
-                               call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
+                               call_site_id       = CASE WHEN t.has_root_span
+                                                         THEN COALESCE(root.call_site_id, tagged.call_site_id)
                                                          ELSE t.call_site_id END,
                                rolled_up_at       = now(),
                                rolled_up_through  = agg.through,
                                is_settled         = (t.rollup_due_at IS NULL)
-                          FROM agg LEFT JOIN root ON true
+                          FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
                          WHERE t.project_id = :pid AND t.id = :tid
                         RETURNING t.is_settled, t.span_count
                         """)

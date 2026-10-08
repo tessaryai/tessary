@@ -324,6 +324,46 @@ public class SpanRepository {
     }
 
     /**
+     * Copy a session that {@link TraceV2Repository#fillCorrelation} just gave these traces onto their
+     * session-less spans, inside the ingest transaction that filled it (§6.3).
+     *
+     * <p>Not left to {@link #backfillCorrelation}: a child of a trace that settled before its root arrived
+     * is already {@code correlation_state = 'none'}, which that pass never reads again, and flipping it back
+     * to {@code pending} races {@link #markCorrelationNone}, whose unlocked read of the trace can still see
+     * it anonymous and retire the span a second time. Writing the span row itself makes both statements
+     * contend on that row, so whichever runs second sees the session.
+     *
+     * <p>Locks in {@code (trace_id, id)} order like every other span lock the batch takes. The resolver
+     * passes lock without an order, the same exposure {@link #upsertAll} already has with them.
+     *
+     * @return the number of spans given their trace's session.
+     */
+    public int adoptTraceSession(String projectId, Collection<String> traceIds) {
+        if (traceIds.isEmpty()) return 0;
+        return jdbc.sql("""
+                        WITH due AS (
+                            SELECT project_id, trace_id, id
+                              FROM span
+                             WHERE project_id = :pid AND trace_id IN (:tids) AND session_id IS NULL
+                             ORDER BY trace_id, id
+                               FOR UPDATE
+                        )
+                        UPDATE span s
+                           SET session_id        = t.session_id,
+                               user_id           = COALESCE(s.user_id, t.user_id),
+                               trace_name        = COALESCE(s.trace_name, t.name),
+                               correlation_state = 'done'
+                          FROM due, trace t
+                         WHERE s.project_id = due.project_id AND s.trace_id = due.trace_id AND s.id = due.id
+                           AND t.project_id = s.project_id AND t.id = s.trace_id
+                           AND t.session_id IS NOT NULL
+                        """)
+                .param("pid", projectId)
+                .param("tids", List.copyOf(traceIds))
+                .update();
+    }
+
+    /**
      * Retire spans there will never be a session to copy: the trace has settled carrying a null
      * {@code session_id}, which is what anonymous traffic looks like and is a legitimate permanent state.
      *

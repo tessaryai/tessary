@@ -288,7 +288,8 @@ CREATE TABLE trace (
     total_cost          numeric(18,12),
     unpriced_spans      integer,
 
-    -- copied from the root span at rollup (§7.2)
+    -- copied from the spans at rollup (§7.2): previews from the root, call site from
+    -- the root else the earliest tagged span
     input_preview       text,
     output_preview      text,
     call_site_id        text,
@@ -377,7 +378,8 @@ Ingest drains in batches. For each batch, in order:
 2. **Get-or-create traces**: `INSERT INTO trace ... ON CONFLICT (project_id, id) DO NOTHING`,
    identity fields only — never timing or rollup columns, which belong to §7 alone.
 3. **Apply the batch-coalesced trace updates (§7.1) first, then upsert spans and payloads**,
-   in one transaction.
+   in one transaction. The trace update also fills a null `name`, `user_id`, `session_id` or
+   `thread_id` from this batch (§6.3).
 
 Rows are created before anything references them, so every FK is satisfiable regardless of
 arrival order.
@@ -429,7 +431,8 @@ ON CONFLICT (project_id, trace_id, id) DO UPDATE
   trace exactly like a new span.
 - The payload row is written in the same transaction under the same `event_ts` guard.
 
-Trace and session upserts follow the same shape but may touch **identity fields only**. Ingest
+Trace and session upserts follow the same shape but may touch **identity fields only**, and on
+a trace only to fill a null `name`, `user_id`, `session_id` or `thread_id` (§6.3). Ingest
 remains at-least-once and idempotent: re-delivering a batch is a no-op.
 
 ### 6.3 Correlation propagation
@@ -445,17 +448,27 @@ trace settles with no session id is marked `correlation_state = 'none'` — a te
 left pending forever — which is what keeps the index near-empty for permanently anonymous
 traffic instead of it accumulating there indefinitely.
 
-The trace row's own handles, `name`, `user_id`, `session_id` and `thread_id`, are folded per
-batch: `name` from the batch's root span, the others from the first span that carries them. The
-get-or-create in §6.1 seeds them only on the row it creates, and a root span ships last (§6.4),
-so the batch that creates a multi-batch trace often carries none of them. The §7.1 update
-therefore fills each one that is still NULL, under the same `FOR UPDATE` lock. The first value
-a trace is given is the one it keeps, and a later batch never replaces it. The fill does not use
-`ON CONFLICT DO UPDATE` on the get-or-create, because that locks existing trace rows ahead of
-the sorted `FOR UPDATE` and brings back the deadlock §6.1 describes. A late `session_id` reaches
-the trace's uncorrelated spans through the backfill above only if it lands before the trace
-settles session-less; spans already marked `none` stay that way. `project_version_id` has no
-ingest source, so there is nothing to fill.
+**A later batch can give a trace its name and its correlation.** A batch exporter ships the root
+last (§6.4), so the batch that creates a multi-batch trace often has no root. The trace name
+comes from the root span alone, and a producer that sets `user.id`, `session.id` or
+`gen_ai.conversation.id` on the root alone sends a first batch with none of them. The
+get-or-create in §6.1 step 2 does not change an existing row, so the step 3 trace update fills
+them instead: `name = COALESCE(t.name, …)`, the same for `user_id`, `session_id` and
+`thread_id`. The first value wins and is never replaced, so a trace cannot move to another
+session and a replay changes nothing. The update runs under the trace lock that step 3 already
+holds, so it adds no lock. `project_version_id` has no ingest source, so there is nothing to
+fill.
+
+When the fill sets `session_id`, the same transaction copies it onto every span of that trace
+that has none, including spans already marked `'none'`. That is the one way out of the terminal
+state. It is done inline rather than by setting those spans back to `pending`, because the
+`'none'` pass reads the trace without a lock and can still see it anonymous, retiring the span a
+second time after the trace has its session. Writing the span row makes the two statements
+contend on that row, so the one that runs second sees the session.
+
+The fill re-arms a settled trace like any other arrival, and it settles again with its session.
+A sweep whose cursor already passed the trace's `started_at` does not visit it again (the
+behavior sweep's late-settle limit), so a verdict from that sweep keeps the anonymous view.
 
 ### 6.4 Roots, parents, and paths
 
@@ -524,12 +537,11 @@ with a large fresh prompt also satisfies `input >= read + write`.
 
 ## 7. Trace rollups
 
-### 7.1 Incremental columns — `min` / `max` and fill-if-null, coalesced per batch
+### 7.1 Incremental columns — `min` / `max` only, coalesced per batch
 
 `trace.started_at`, `trace.ended_at`, `session.started_at` and `session.last_activity_at` are
 maintained in place. Re-applying `min` or `max` to a value already folded in changes nothing,
-so these are idempotent under replay. The same update fills the trace's NULL identity handles
-(§6.3), which is idempotent for the same reason.
+so these are idempotent under replay.
 
 They are **not** updated once per span. Ingest pre-aggregates each batch in memory — one
 min/max pair per trace touched — and issues **one update per (trace, batch)**. A 1,000-span
@@ -554,10 +566,8 @@ UPDATE trace t SET
                         now() + CASE WHEN v.has_root OR t.has_root_span
                                      THEN interval '2 seconds'
                                      ELSE interval '10 seconds' END),
-    is_settled    = false,
-    name          = COALESCE(t.name, v.name),               -- and user_id, session_id, thread_id
-    ...
-FROM (VALUES ...) AS v (trace_id, min_started_at, max_ended_at, has_root, name, ...)
+    is_settled    = false
+FROM (VALUES ...) AS v (trace_id, min_started_at, max_ended_at, has_root)
 WHERE t.project_id = :project_id AND t.id = v.trace_id;
 ```
 
@@ -651,6 +661,15 @@ WITH agg AS (
        AND NOT is_deleted
      ORDER BY started_at, id
      LIMIT 1
+), tagged AS (
+    SELECT call_site_id
+      FROM span
+     WHERE project_id   = :project_id
+       AND trace_id     = :trace_id
+       AND call_site_id IS NOT NULL
+       AND NOT is_deleted
+     ORDER BY started_at, id
+     LIMIT 1
 )
 UPDATE trace t
    SET span_count         = agg.span_count,
@@ -669,19 +688,24 @@ UPDATE trace t
                                   ELSE t.input_preview END,
        output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                   ELSE t.output_preview END,
-       call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
-                                  ELSE t.call_site_id END,
+       call_site_id       = CASE WHEN t.has_root_span
+                                 THEN COALESCE(root.call_site_id, tagged.call_site_id)
+                                 ELSE t.call_site_id END,
        rolled_up_at       = now(),
        rolled_up_through  = agg.through,
        is_settled         = (t.rollup_due_at IS NULL)
-  FROM agg LEFT JOIN root ON true
+  FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
  WHERE t.project_id = :project_id AND t.id = :trace_id;
 ```
 
-The previews and call site are copied down from the root span, not stored by ingest — that is
+The previews and call site are copied down from the spans, not stored by ingest — that is
 what keeps the traces list a single-table read (rule 1) rather than a join to find each row's
-entry point. Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior
-value.
+entry point. The previews are the root's. The call site is the root's tag, else the
+earliest-starting tagged span's, because instrumentation tags the model-call span rather than the
+handler around it; the full rule is in
+[Call sites](../../docs/concepts/call-sites.mdx#a-trace-takes-the-first-call-site-it-reached).
+Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior value rather
+than taking a call site from a partial set of children.
 
 The aggregate reads one trace's spans through the primary key prefix — an indexed, clustered
 scan. `rollup_due_at` is never written here: the claim already cleared it, and if a span has
