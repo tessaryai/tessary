@@ -82,6 +82,22 @@ describe("TuningSection", () => {
     expect(field("Max hours").value).toBe("24");
   });
 
+  // Bug: Min samples is what a drift chart's learning meter counts up to, and after a save the Classifiers page
+  // still showed the old number until its reads went stale on their own.
+  it("marks the Classifiers charts stale after a save", async () => {
+    api.setClassifierTuning.mockResolvedValue({ ...TUNING, min_sample: 500 });
+    const { queryClient } = renderRoute(<TuningSection classifier={COST} />);
+    const chartsKey = ["classifier-charts", api.base, "call_site", "kb_answer.generate", 28];
+    queryClient.setQueryData(chartsKey, { cards: [] });
+    await waitFor(() => expect(field("Min samples").value).toBe("100"));
+
+    fireEvent.change(field("Min samples"), { target: { value: "500" } });
+    save();
+
+    expect(await screen.findByText("Tuning saved")).toBeTruthy();
+    expect(queryClient.getQueryState(chartsKey)?.isInvalidated).toBe(true);
+  });
+
   it("keeps what is being typed when the tuning is re-read underneath it", async () => {
     const { queryClient } = renderRoute(<TuningSection classifier={COST} />);
     await waitFor(() => expect(field("Max hours").value).toBe("24"));

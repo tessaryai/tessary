@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Classifier } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, LoadingRow, SegmentedControl, Toggle, useToast } from "../../ui";
 
 /** Tool error buckets by tool across call sites, so the server refuses a call-site list for it. */
@@ -31,7 +32,7 @@ export function CallSitesSection({ classifier }: { classifier: Classifier }) {
   const saveM = useMutation({
     mutationFn: (ids: string[] | null) => api.setClassifierCallSites(classifier.id, ids),
     onSuccess: (saved) => {
-      qc.invalidateQueries({ queryKey: ["classifiers", api.base] });
+      invalidateClassifierReads(qc, api.base);
       const count = saved.call_site_ids?.length;
       toast.success(
         "Call sites saved",

@@ -31,6 +31,10 @@ import {
   type OnboardingProgress,
   type Classifier,
   type ClassifierDailyVolume,
+  type ChartRange,
+  type ChartScope,
+  type ChartScopes,
+  type ClassifierCharts,
   type ClassifierDebug,
   type ClassifierEvent,
   type ClassifierHealth,
@@ -479,7 +483,7 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       http<Classifier>(`${base}/classifiers/${enc(id)}/reset`, { method: "POST" }),
     /**
      * The detections one classifier produced, newest-first: the traces that tripped it. This is
-     * the full high-recall set, which is what the detail rail shows.
+     * the full high-recall set, which is what a classifier's configure page shows.
      */
     listClassifierEvents: (id: string, limit = 25) =>
       http<ClassifierEvent[]>(`${base}/classifiers/${enc(id)}/events?limit=${limit}`),
@@ -489,6 +493,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      */
     getClassifierDailyVolume: (days = 7) =>
       http<ClassifierDailyVolume>(`${base}/classifiers/metrics/daily?days=${days}`),
+    /** The call sites and tools the Classifiers page can chart, and every classifier for its Configure menu. */
+    getClassifierChartScopes: (days: ChartRange = 28) =>
+      http<ChartScopes>(`${base}/classifiers/chart-scopes?days=${days}`),
+    /** Daily series for every classifier on one call site, or on one tool across call sites. */
+    getClassifierCharts: (scope: ChartScope, days: ChartRange = 28) => {
+      const q = new URLSearchParams(scope);
+      q.set("days", String(days));
+      return http<ClassifierCharts>(`${base}/classifiers/charts?${q}`);
+    },
     /**
      * Debug bundle for one classifier: sweep-job cursor/lease detail plus family-specific fitted
      * state (metric_baseline rows for cost/duration drift). Not part of the product surface; see

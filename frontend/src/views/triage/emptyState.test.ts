@@ -12,7 +12,7 @@
  *   - The modifier never takes the headline. That is the whole reason the old screen was wrong.
  */
 import { describe, expect, it } from "vitest";
-import { resolveState } from "./emptyState";
+import { needsSetupScreen, resolveState } from "./emptyState";
 import type { Onboarding } from "../onboarding/useOnboarding";
 import type { TriageView } from "../../api/types";
 
@@ -103,20 +103,36 @@ describe("resolveState", () => {
     expect(s.nodes[0].tone).toBe("focus");
   });
 
-  it("sends open findings to the classifiers list, counted", () => {
+  // Bug: the open findings sent to the Classifiers page, which no longer lists them: they sit in the Findings
+  // section below Cases on Triage itself.
+  it("counts the open findings, and sends the reader to traces rather than to the Classifiers page", () => {
     const s = resolveState(watching({ open_findings: 2 }), onboarding(), BASE, HAS_PROVIDER);
     expect(s.key).toBe("no-cases");
     expect(s.title).toBe("No open cases");
     expect(s.body).toBe(
       "2 findings are open. Triage hasn't determined that either one is a real issue.",
     );
-    expect(s.primary).toEqual({ kind: "link", label: "Review 2 findings", to: `${BASE}/classifiers` });
+    expect(s.primary).toEqual({ kind: "link", label: "View traces", to: `${BASE}/traces` });
+    expect(s.secondary).toBeUndefined();
   });
 
-  it("drops the plural at one finding, in the label and the prose", () => {
+  it("drops the plural at one finding", () => {
     const s = resolveState(watching({ open_findings: 1 }), onboarding(), BASE, HAS_PROVIDER);
-    expect(s.primary).toMatchObject({ label: "Review 1 finding" });
     expect(s.body).toBe("1 finding is open. Triage hasn't determined that it is a real issue.");
+  });
+
+  // Bug: an all-clear line drawn over a state that still has a step to take, or the setup screen pushed over the
+  // two states Triage now answers with one line and the findings list.
+  it("asks for the setup screen only where the reader has a step to take", () => {
+    const at = (w: Partial<TriageView["watching"]>, o: Partial<Onboarding> = {}, p = HAS_PROVIDER) =>
+      needsSetupScreen(resolveState(watching(w), onboarding(o), BASE, p));
+    expect(at({ open_findings: 0 })).toBe(false);
+    expect(at({ open_findings: 2 })).toBe(false);
+    expect(at({ classifiers: 0 })).toBe(true);
+    expect(at({}, { stage: "fitting" })).toBe(true);
+    expect(at({ open_findings: 2, traces_last_day: 0 })).toBe(true);
+    expect(at({ open_findings: 0 }, {}, { configured: 0, canConfigure: true })).toBe(true);
+    expect(at({ open_findings: 2 }, {}, { configured: 0, canConfigure: true })).toBe(true);
   });
 
   it("stops saying 'either one' past two findings", () => {
@@ -239,18 +255,14 @@ describe("resolveState", () => {
         );
       });
 
-      it("offers the key first and the findings second", () => {
+      it("offers the key first and traces second, never the Classifiers page the findings left", () => {
         const s = resolveState(watching({ open_findings: 2 }), onboarding(), BASE, NONE);
         expect(s.primary).toEqual({
           kind: "link",
           label: "Add a provider key",
           to: `${BASE}/settings/providers`,
         });
-        expect(s.secondary).toEqual({
-          kind: "link",
-          label: "Review 2 findings",
-          to: `${BASE}/classifiers`,
-        });
+        expect(s.secondary).toEqual({ kind: "link", label: "View traces", to: `${BASE}/traces` });
         expect(s.note).toBe("Provider keys are shared by every project in this organization.");
       });
     });

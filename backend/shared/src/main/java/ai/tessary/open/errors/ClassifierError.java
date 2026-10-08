@@ -25,6 +25,8 @@ public enum ClassifierError implements ErrorCode {
     // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
     CALL_SITE_SCOPE_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
+    INVALID_CHART_DAYS(HttpStatus.UNPROCESSABLE_ENTITY, "A chart range is 7, 28 or 90 days, not %s"),
+    CHART_SCOPE(HttpStatus.UNPROCESSABLE_ENTITY, "Pick one call site or one tool"),
     NOT_GROUNDEDNESS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no groundedness status — only the groundedness classifier does"),

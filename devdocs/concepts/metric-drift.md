@@ -557,7 +557,7 @@ decision, not a quiet addition here.
 against real firings rather than a guessed number. **The valve is a human instead.** Layer-2
 triage costs a sandbox run — an agent in a microVM, with a repo clone when there is one — and no
 sweep enqueues one: a shift is CHANGE, not a problem — slow is not bad and expensive is not bad — so
-the sweep writes the finding and stops. A person presses **Run analysis** on the classifier's rail
+the sweep writes the finding and stops. A person presses **Run triage** in the Findings section of the classifier's configure page
 (`POST /findings/{id}/analysis`), and `escalated_at` keeps that to once per cause.
 
 The one way that valve opens without a person is `triage_automatic_enabled`, off for every org

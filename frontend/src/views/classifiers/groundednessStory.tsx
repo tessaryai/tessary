@@ -45,7 +45,7 @@ export function GroundednessHeader({
   const learned = `vs the rate it learned from its first ${detail.baselineTraces.toLocaleString()} traces`;
   return (
     <PageHeader
-      breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+      breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
       kicker={<span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Groundedness"}</span>}
       title={finding.title}
       subtitle={

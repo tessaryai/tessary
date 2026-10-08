@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -50,7 +50,10 @@ const TracesIndex = named(() => import("./views/traces/TracesIndex"), "TracesInd
 const TraceDetail = named(() => import("./views/traces/TraceDetail"), "TraceDetail");
 const SessionDetail = named(() => import("./views/traces/SessionDetail"), "SessionDetail");
 const ClassifiersPage = named(() => import("./views/classifiers/ClassifiersPage"), "ClassifiersPage", "classifiers");
-const DetectorsPage = named(() => import("./views/classifiers/DetectorsPage"), "DetectorsPage");
+const ClassifierConfigurePage = named(
+  () => import("./views/classifiers/ClassifierConfigurePage"),
+  "ClassifierConfigurePage",
+);
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const Vitals = named(() => import("./views/vitals/Vitals"), "Vitals", "vitals");
 
@@ -235,12 +238,14 @@ function ProjectShell() {
         <Route path="traces" element={<TracesIndex />} />
         <Route path="traces/:traceId" element={<TraceDetail />} />
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
-        {/* Classifiers absorbs the old Behavior drift page (detectors + findings). */}
+        {/* The charts of what each classifier detects, per call site and per tool. */}
         <Route path="classifiers" element={<ClassifiersPage />} />
-        {/* The catalog and the tuning, off the queue rather than above it. */}
-        <Route path="classifiers/detectors" element={<DetectorsPage />} />
-        {/* A finding's own evidence, which the queue links every row to. */}
+        {/* The old catalog and its rail. Their abilities live on each classifier's configure page now. */}
+        <Route path="classifiers/detectors" element={<CatalogRedirect />} />
+        {/* A finding's own evidence, which Triage's findings link every row to. */}
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
+        {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
+        <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
         {/* The Triage pulse strip's full-size page. Amber only, never red. */}
         <Route path="vitals" element={<Vitals />} />
 
@@ -272,7 +277,7 @@ function ProjectShell() {
             path="notifications"
             element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
           />
-          {/* Signal tuning moved into the Classifiers detail rails (one home per concept). */}
+          {/* Signal tuning moved onto each classifier's configure page (one home per concept). */}
           <Route path="signal-tuning" element={<Navigate to="../../classifiers" replace />} />
           <Route
             path="mcp-tokens"
@@ -351,6 +356,16 @@ function ProjectShell() {
       </Suspense>
     </ShellChrome>
   );
+}
+
+/**
+ * The retired catalog. Its rail was addressable as `?classifier=<id>`, and Slack links and bookmarks carry that, so
+ * a link that named a classifier lands on that classifier's configure page and a bare one on Classifiers.
+ */
+function CatalogRedirect() {
+  const [params] = useSearchParams();
+  const id = params.get("classifier");
+  return <ToProjectSegment segment={id ? `classifiers/${encodeURIComponent(id)}` : "classifiers"} />;
 }
 
 /** Absolute tenant-scoped redirect, for splat routes where relative `..` is ambiguous. */

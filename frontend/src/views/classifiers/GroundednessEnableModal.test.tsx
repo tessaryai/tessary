@@ -13,6 +13,7 @@ import { ApiError, type GroundednessStatus } from "../../api/types";
 import { GroundednessEnableModal, SETUP_POLL_MS } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
+import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 
 const getGroundednessStatus = vi.fn<(id: string) => Promise<GroundednessStatus>>();
 const setClassifierEnabled = vi.fn(async () => ({}));
@@ -163,6 +164,23 @@ describe("GroundednessEnableModal", () => {
     await poll();
     expect(setClassifierEnabled).toHaveBeenCalledOnce();
     expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
+  });
+
+  // Bug: Groundedness enabled by the setup still reads "Off" in the Configure menu on Classifiers until the
+  // staleTime ends.
+  it("marks the Classifiers charts and menu stale once it enables", async () => {
+    getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedChartReads(qc);
+    render(
+      <QueryClientProvider client={qc}>
+        <GroundednessEnableModal classifierId="clf-g" onClose={() => {}} onEnabled={() => {}} onPromptCopied={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Groundedness enabled");
+    expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
+    expect(chartReadsStale(qc)).toEqual([true, true]);
   });
 
   it("moves to the restart step when the model URL turns up set, with no failed read between", async () => {

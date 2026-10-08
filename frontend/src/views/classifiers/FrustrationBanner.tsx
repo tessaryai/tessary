@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The Classifiers page's prompt to turn Frustration on. It ships off, and the Catalog where its toggle
+ * The Classifiers page's prompt to turn Frustration on. It ships off, and the configure page where its toggle
  * lives is one level too deep for most people to find it, so the landing page asks once.
  *
  * Shown only while Frustration is off. "Not now" hides it in this browser for this project; nothing is
  * written to the server, so each teammate still sees it once. Enable opens the same modal as the
- * Catalog toggle, which takes the key when the org has none.
+ * configure page's toggle, which takes the key when the org has none.
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
