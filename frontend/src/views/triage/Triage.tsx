@@ -2,11 +2,14 @@
 /*
  * Triage — the front door: an inbox that wants to be empty.
  *
- * ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
- * nothing in this product is assigned, so ranking is magnitude then recency and
- * the server does it (`ix_eval_case_live_rank`). Muted cases and the week's
- * closures are a filter, not furniture. When nothing is open the serif all-clear
- * state renders instead, with a proof line built from real coverage counts.
+ * Two sections. Cases is ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
+ * nothing in this product is assigned, so ranking is magnitude then recency and the server does it
+ * (`ix_eval_case_live_rank`). Muted cases and the week's closures are a filter, not furniture. Findings
+ * below it holds what has not become a case yet (see `OpenFindings`).
+ *
+ * With no open case, Cases says "Nothing needs you." unless the empty-state ladder still has a step for
+ * the reader to take (no classifier, baselines fitting, no provider key, a stopped exporter): then the
+ * setup screen takes the section, because an all-clear line there would hide what to do next.
  *
  * This reads `GET {base}/cases` — an indexed table read. The CUSUM replay that
  * decides what is degrading runs on a worker, never on this page load.
@@ -16,11 +19,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Case, Vitals } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { Button, ErrorNote, PageHeader, TableSkeleton } from "../../ui";
+import { Button, ErrorNote, PageHeader, Section, TableSkeleton } from "../../ui";
 import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
 import { usd } from "../../lib/usd";
 import { PipelineEmpty } from "./PipelineEmpty";
-import { resolveState } from "./emptyState";
+import { needsSetupScreen, resolveState } from "./emptyState";
+import { OpenFindings } from "./OpenFindings";
 import { useOnboarding } from "../onboarding/useOnboarding";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 
@@ -59,14 +63,22 @@ export function Triage() {
   const resolved = triageQ.data?.recently_resolved ?? [];
   const shown = lens === "open" ? open : lens === "muted" ? muted : resolved;
 
-  const allClear = triageQ.data != null && open.length === 0;
   const openCase = (id: string) => navigate(`${basePath}/cases/${id}`);
+  const setup =
+    triageQ.data && lens === "open" && open.length === 0
+      ? resolveState(triageQ.data.watching, onboarding, basePath, {
+          // null until the read settles — see ProviderFacts for why that must not fire the modifier.
+          configured: modelSettingsQ.data?.configured_providers.length ?? null,
+          canConfigure: canAddProvider,
+        })
+      : null;
 
   return (
     <>
       <div className="pt-9 px-10 pb-0">
-        <PageHeader
-          kicker="Triage"
+        <PageHeader title="Triage" />
+
+        <Section
           title="Cases"
           actions={
             <>
@@ -88,40 +100,33 @@ export function Triage() {
               </Button>
             </>
           }
-        />
+        >
+          {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
+          {triageQ.isError && <ErrorNote error={triageQ.error} />}
 
-        {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
-        {triageQ.isError && <ErrorNote error={triageQ.error} />}
+          {/* Which empty state it is, and where it sends the reader, is `resolveState`'s call; see its
+              header for why an empty queue is several states and not one. */}
+          {setup && needsSetupScreen(setup) && <PipelineEmpty state={setup} />}
 
-        {/* One screen for every empty queue. Which of the four it is, and where it sends the reader,
-            is `resolveState`'s call — see its header for why an empty queue is four states and not
-            one, and why a stopped exporter is a modifier on this screen rather than a fifth. */}
-        {triageQ.data && lens === "open" && allClear && (
-          <PipelineEmpty
-            state={resolveState(triageQ.data.watching, onboarding, basePath, {
-              // null until the read settles — see ProviderFacts for why that must not fire the modifier.
-              configured: modelSettingsQ.data?.configured_providers.length ?? null,
-              canConfigure: canAddProvider,
-            })}
-          />
-        )}
+          {triageQ.data && !(setup && needsSetupScreen(setup)) && (
+            <>
+              <ListChassis>
+                {shown.map((c) => (
+                  <CaseRow key={c.id} item={c} onOpen={openCase} />
+                ))}
+                {shown.length === 0 && <EmptyRow lens={lens} />}
+              </ListChassis>
 
-        {triageQ.data && !(lens === "open" && allClear) && (
-          <>
-            <ListChassis>
-              {shown.map((c) => (
-                <CaseRow key={c.id} item={c} onOpen={openCase} />
-              ))}
-              {shown.length === 0 && <EmptyRow lens={lens} />}
-            </ListChassis>
+              {lens === "open" && (
+                <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
+                  Resolved 7d{" "}·{" "}{resolved.length}{" "}·{" "}Muted{" "}·{" "}{muted.length}
+                </p>
+              )}
+            </>
+          )}
+        </Section>
 
-            {lens === "open" && (
-              <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
-                Resolved 7d{" "}·{" "}{resolved.length}{" "}·{" "}Muted{" "}·{" "}{muted.length}
-              </p>
-            )}
-          </>
-        )}
+        <OpenFindings basePath={basePath} />
       </div>
 
       {/* Pulse strip — renders in BOTH states. */}

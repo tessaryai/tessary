@@ -12,7 +12,7 @@ import { EncoderDebug } from "./sections/EncoderDebug";
 import { MetricDriftDebug } from "./sections/MetricDriftDebug";
 
 /**
- * Everything the platform already computes for this classifier that the rail above doesn't render:
+ * Everything the platform already computes for this classifier that the page above doesn't render:
  * sweep cursor/lease detail plus family-specific fitted state. Collapsed by default: the query only
  * runs once opened (`enabled: open`), so browsing the classifier list costs nothing extra, and this
  * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifiersPage.tsx`)

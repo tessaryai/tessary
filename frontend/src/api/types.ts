@@ -61,6 +61,45 @@ export type GroundednessStatus = Omit<S["GroundednessStatusView"], "state" | "mo
 /** `TESSARY_GROUNDEDNESS_CLASSIFIER_MODE`: where the model runs, which picks the setup and restart prompts. */
 export type GroundednessMode = "dev" | "production";
 export type ClassifierDailyVolume = S["ClassifierDailyVolumeView"];
+
+// ---- Classifier charts (GET classifiers/chart-scopes, GET classifiers/charts) ----
+/** The three ranges the chart endpoints accept; anything else 422s. */
+export type ChartRange = 7 | 28 | 90;
+/** What one charts read is scoped to: a call site, or a tool across every call site. */
+export type ChartScope = { callSiteId: string } | { tool: string };
+/** The selectors and the Configure menu: the call sites and tools to chart, and every classifier with its status. */
+export type ChartScopes = Omit<S["ChartScopesView"], "classifiers"> & { classifiers: ClassifierMenuItem[] };
+export type ChartCallSiteOption = S["CallSiteOption"];
+export type ChartToolOption = S["ToolOption"];
+export type ClassifierMenuItem = Omit<S["ClassifierMenuItem"], "status" | "covers"> & {
+  status: "on" | "off" | "waiting";
+  covers: "call_sites" | "tools" | "call_sites_and_tools";
+};
+/** The cards and chips for one call site or one tool over `days`. */
+export type ClassifierCharts = Omit<S["ChartsView"], "scope" | "cards" | "chips"> & {
+  scope: "call_site" | "tool";
+  cards: ChartCard[];
+  chips: ChartChip[];
+};
+/**
+ * One chart. Rates are fractions 0..1, durations milliseconds, cost USD. `days[]` is dense, oldest first, ending
+ * today; fields that do not apply to the card's kind are null. A count card's `count` is what the arming bar counts
+ * (it can exceed `total` for a user classifier), and its headline sums `total`.
+ */
+export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
+  kind: "rate" | "range" | "count";
+  unit: "fraction" | "ms" | "usd" | "count";
+  arming: ChartArming | null;
+};
+export type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
+export type ChartDay = S["ChartDay"];
+export type ChartBaseline = S["ChartBaseline"];
+export type ChartHeadline = S["HeadlineView"];
+export type ChartLearning = S["LearningView"];
+/** One finding that opened a case, drawn as a bar in the card's Cases strip. `end_at` is null while the case is open. */
+export type ChartCaseSpan = S["CaseSpan"];
+/** A classifier with no card for this scope, and why. */
+export type ChartChip = Omit<S["ChartChip"], "state"> & { state: "off" | "waiting" | "quiet" };
 export type ClassifierDebug = S["ClassifierDebugView"];
 export type ClassifierTuning = S["TuningView"];
 export type SetClassifierTuningRequest = S["SetTuningRequest"];

@@ -205,13 +205,13 @@ export function resolveState(
     }
 
     // 4. Findings exist and none of them became a case. The distinction the glossary turns on:
-    //    triage is what decides a finding is a real issue, and it has not.
+    //    triage is what decides a finding is a real issue, and it has not. The findings themselves are
+    //    listed under Cases on this page, so there is no "review" link to offer.
     return {
       key: "no-cases",
       title: "No open cases",
       body: `${plural(live, "finding")} ${live === 1 ? "is" : "are"} open. Triage hasn't determined that ${live === 1 ? "it is" : live === 2 ? "either one is" : "any of them are"} a real issue.`,
-      primary: { kind: "link", label: `Review ${plural(live, "finding")}`, to: classifiersTo },
-      secondary: { kind: "link", label: "View traces", to: tracesTo },
+      primary: { kind: "link", label: "View traces", to: tracesTo },
       nodes: [
         tracesNode("satisfied"),
         {
@@ -225,7 +225,7 @@ export function resolveState(
     };
   })();
 
-  const withProviders = applyProviderGap(state, providers, live, basePath, classifiersTo, tracesTo);
+  const withProviders = applyProviderGap(state, providers, live, basePath, tracesTo);
 
   if (!stale) return withProviders;
   // The modifier, applied last so it cannot be forgotten in a branch. It replaces the secondary
@@ -267,7 +267,6 @@ function applyProviderGap(
   providers: ProviderFacts,
   live: number,
   basePath: string,
-  classifiersTo: string,
   tracesTo: string,
 ): EmptyState {
   if (providers.configured !== 0) return state;
@@ -310,9 +309,18 @@ function applyProviderGap(
       : `${plural(live, "finding")} ${live === 1 ? "is" : "are"} open. Triage uses a model you provide, and this organization has no provider key.`,
     note: shared,
     primary: providers.canConfigure ? addKey : state.primary,
-    secondary: providers.canConfigure
-      ? { kind: "link", label: `Review ${plural(live, "finding")}`, to: classifiersTo }
-      : state.secondary,
+    secondary: providers.canConfigure ? { kind: "link", label: "View traces", to: tracesTo } : state.secondary,
     nodes: [state.nodes[0], state.nodes[1], blocked],
   };
+}
+
+/**
+ * Whether the empty queue needs the setup screen rather than one "Nothing needs you." line.
+ *
+ * Only the two all-clear stages can be a line: watching with no finding, and findings that no case came from
+ * (Triage lists those right below Cases). Every other state has a step for the reader to take, and so does any
+ * state carrying a note (a stopped exporter, a missing provider key).
+ */
+export function needsSetupScreen(state: EmptyState): boolean {
+  return (state.key !== "no-findings" && state.key !== "no-cases") || state.note != null;
 }

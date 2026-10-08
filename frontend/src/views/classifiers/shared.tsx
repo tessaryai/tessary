@@ -1,42 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The pieces the Classifiers surface's three pages share: the findings queue, the detectors page and
- * a finding's own page.
- *
- * They were one file until the queue stopped being a list of everything: a page that shows findings and
- * a page that configures detectors answer different questions and are visited on different days, and the
- * verbs, the labels and the chain sentence are the only things genuinely common to both.
+ * The pieces the Classifiers surface shares: Triage's findings list, a classifier's configure page and a finding's
+ * own page. The verbs, the labels and the chain sentence are the things genuinely common to them.
  */
-import type { BehaviorFinding, Classifier } from "../../api/types";
+import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
-/**
- * One section of a detail rail. Sections are separated by a hairline rather than by bare
- * whitespace: five stacked blocks with only margins between them read as one long column of
- * text.
- *
- * <p>Exported here rather than kept file-private in `DetectorsPage.tsx`, so a block that renders
- * a fact grid elsewhere can reuse it. Same reason for {@link Fact}.
- */
-export function RailBlock({ label, meta, children }: { label: string; meta?: string; children: React.ReactNode }) {
-  return (
-    <section className="border-t border-border pt-4.5 mt-4.5">
-      <div className="flex items-baseline gap-2.5 mb-2.5">
-        <h3 className="font-mono text-label uppercase text-muted">{label}</h3>
-        {meta && (
-          <span className="min-w-0 truncate text-subtle text-label">
-            {meta}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** One label/value fact in a rail's fact grid; the `<dl>` wrapper supplies the columns. */
+/** One label/value fact in a fact grid; the `<dl>` wrapper supplies the columns. */
 export function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
@@ -47,15 +19,6 @@ export function Fact({ label, children }: { label: string; children: React.React
         {children}
       </dd>
     </>
-  );
-}
-
-export function SectionLabel({ label, meta }: { label: string; meta?: string }) {
-  return (
-    <div className="flex items-baseline gap-3 mb-2.5 mt-7.5">
-      <h2 className="font-mono text-label uppercase text-muted">{label}</h2>
-      {meta && <span className="text-small text-subtle">{meta}</span>}
-    </div>
   );
 }
 
@@ -229,17 +192,6 @@ export function detectorLabel(key: string): string {
     .join(" ");
 }
 
-/**
- * A detector description's opening sentence, which is the one that says what it watches. The rest
- * (how the bar is set, what it deliberately does not label) belongs on the detectors page, where
- * the full text is shown untouched.
- */
-export function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const end = /[.!?](\s|$)/.exec(trimmed);
-  return end ? trimmed.slice(0, end.index + 1) : trimmed;
-}
-
 /** Coarse age: an exact second never changes what you do next. */
 export function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -256,9 +208,4 @@ export function ago(iso: string): string {
 /** An unambiguous date ("July 1, 2026"), never the locale's all-numeric form. */
 function absoluteDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-}
-
-/** Detectors that are switched on, in catalog order: the summary card's whole content. */
-export function enabledDetectors(classifiers: Classifier[]): Classifier[] {
-  return classifiers.filter((c) => c.enabled);
 }

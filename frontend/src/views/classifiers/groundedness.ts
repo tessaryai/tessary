@@ -12,7 +12,7 @@ import { ApiError, type GroundednessMode, type GroundednessStatus } from "../../
 /** Groundedness's detector key. */
 export const GROUNDEDNESS_DETECTOR = "groundedness";
 
-/** The model the setup guides install, as the rail names it. */
+/** The model the setup guides install, as the configure page names it. */
 export const GROUNDEDNESS_MODEL = "groundedness-classifier-v1";
 
 export const GROUNDEDNESS_MAC_MD =
@@ -42,7 +42,7 @@ export function restartPrompt(mode: GroundednessMode, ref: string): string {
     : `Restart the Groundedness model on this Mac by following ${setupGuide(mode, ref)}#restart`;
 }
 
-/** Where the model runs, as the mode control and the rail word it. */
+/** Where the model runs, as the mode control and the configure page word it. */
 export const MODE_LABEL: Record<GroundednessMode, string> = {
   dev: "This Mac (dev)",
   production: "AWS (production)",
@@ -53,7 +53,7 @@ export const SETUP_REQUIREMENTS: Record<GroundednessMode, string> = {
   production: "Requires a signed-in AWS CLI and Tessary running on AWS, in the same region.",
 };
 
-/** The status query's key, shared by the row, the rail and the modals so one answer serves all of them. */
+/** The status query's key, shared by the configure page and the modals so one answer serves all of them. */
 export function groundednessStatusKey(base: string, classifierId: string | undefined) {
   return ["groundedness-status", base, classifierId] as const;
 }

@@ -1,231 +1,54 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Classifiers: the findings, and what triage made of each one.
+ * Classifiers: the charts of what each classifier detects, per call site and per tool.
  *
- * <h2>Why there are no queues here any more</h2>
- * There used to be two: "Needs a decision" for anything nothing had ruled on, and "Needs review" for
- * anything a Layer-2 run returned `unclear` on. Both asked a person to be the fallback for a machine —
- * the first for one that had not run, the second for one that ran and shrugged — and between them they
- * grew without bound, because nothing about a finding sitting in either of them made it more decidable
- * tomorrow than it was today. That is the queue this whole redesign exists to remove.
- *
- * What replaced them: every finding that opens gets exactly one triage run, and that run ends in
- * exactly one of two acts. `positive` opens or joins a case and the finding stays open; `negative`
- * CLOSES the finding outright. A ruling freezes the row — the same cause firing again files a FRESH
- * finding rather than reopening this one, so there is no re-open to wait on. So this page is a record
- * of what has been decided, not a pile of what has not.
- *
- * <h2>Open findings only</h2>
- * Pending, in flight, or sound and now a case, counted in the heading. Each row's Triage cell says
- * which, so the heading carries no rollup of its own. Closed findings are left off until the page has
- * an open/closed filter. `status` and `triage_action` agree by construction now — a ruling sets both
- * in the same write — so the split reads `isClosedByTriage`: it is closing that decides, not the bare
- * fact of the status word.
- *
- * <h2>The title is the classifier's own sentence</h2>
- * There is deliberately no "reading" column restating the shift. Each detector writes its finding's
- * title itself and puts its own numbers in it ("search_docs is failing 3.1% of the time, up from
- * 0.4%"), because the detectors do not measure comparable things and a shared column would have to
- * flatten them into one that fits none. See {@link BehaviorFindingView#title} on the server.
+ * Until the charts land, the page lists every classifier with a link to its configure page, which is where the old
+ * catalog's switch, status, call sites, tuning, detections and reset live now. The open findings moved to Triage.
  */
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
-import type { BehaviorFinding } from "../../api/types";
+import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { useTenant } from "../../tenant/TenantContext";
-import {
-  ErrorNote,
-  LoadingRow,
-  PageHeader,
-  Section,
-  Table,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-} from "../../ui";
-import {
-  CONTAINER,
-  ago,
-  detectorLabel,
-  enabledDetectors,
-  isClosedByTriage,
-  triageState,
-} from "./shared";
+import { ErrorNote, LoadingRow, PageHeader, Section } from "../../ui";
+import { CONTAINER } from "./shared";
 import { FrustrationBanner } from "./FrustrationBanner";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
 
 export function ClassifiersPage() {
-  const { api } = useTenant();
-  const navigate = useNavigate();
-
+  const { api, orgSlug, projectSlug } = useTenant();
   const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
-
-  /**
-   * The raw Layer-1 stream, ungated.
-   *
-   * <p>One call, where there used to be two. The second fetched the Layer-2-confirmed set so the page
-   * could SUBTRACT it and show only what was outstanding; nothing is outstanding now, because every
-   * finding carries its own ruling and the page's job is to show it. `include: "all"` is what makes a
-   * closed finding visible at all — the default gate returns only what triage found sound.
-   */
-  const allQ = useQuery({
-    queryKey: ["behavior-findings", api.base, "all"],
-    queryFn: () => api.listBehaviorFindings(),
-  });
-
   const classifiers = classifiersQ.data ?? [];
-  const enabled = enabledDetectors(classifiers);
   const frustration = classifiers.find((c) => c.detector === FRUSTRATION_DETECTOR);
-
-  const live = useMemo(
-    () => (allQ.data?.findings ?? []).filter((f) => !isClosedByTriage(f)),
-    [allQ.data],
-  );
+  const classifiersPath = `/orgs/${orgSlug}/projects/${projectSlug}/classifiers`;
 
   return (
     <div style={CONTAINER}>
-      <PageHeader
-        kicker="Monitor"
-        title="Classifiers"
-        actions={
-          <Link
-            to="detectors"
-            className="inline-flex items-center h-[30px] px-3 rounded-control border border-border-strong text-small text-muted hover:text-fg transition-colors"
-            style={{ transitionDuration: "var(--duration-micro)" }}
-          >
-            {classifiersQ.isSuccess
-              ? `Catalog · ${enabled.length} of ${classifiers.length} on`
-              : "Catalog"}
-          </Link>
-        }
-      />
+      <PageHeader kicker="Monitor" title="Classifiers" />
 
       {frustration && <FrustrationBanner classifier={frustration} />}
-
-      {allQ.isLoading && <LoadingRow />}
-      {allQ.isError && <ErrorNote error={allQ.error} />}
-      {/*
-        * The catalog only fills the header's count, but a failure to read it still has to say so:
-        * silently falling back to `classifiers = []` would render "0 of 0 on" — a claim that nothing
-        * is watching production, which is the opposite of "we could not find out". Hence the
-        * `isSuccess` guard on the label above, and this note.
-        */}
+      {classifiersQ.isLoading && <LoadingRow />}
       {classifiersQ.isError && <ErrorNote error={classifiersQ.error} />}
 
-      {allQ.data && live.length === 0 && (
-        <p className="text-body text-subtle" style={{ maxWidth: 520 }}>
-          No findings. A classifier creates a finding when a whole population moves, not when one trace
-          looks odd, so an empty page is the healthy state.
-        </p>
-      )}
-
-      {live.length > 0 && (
-        <Section title="Open" count={live.length}>
-          <FindingTable findings={live} onOpen={(id) => navigate(findingPath(id))} />
+      {classifiers.length > 0 && (
+        <Section title="Configure classifiers">
+          <div className="rounded-card border border-border overflow-hidden" style={{ maxWidth: 560 }}>
+            <div className="flex flex-col gap-px bg-border">
+              {classifiers.map((c) => (
+                <Link
+                  key={c.id}
+                  to={`${classifiersPath}/${encodeURIComponent(c.id)}`}
+                  className="flex items-center gap-3 bg-surface hover:bg-hover transition-colors py-3 px-4"
+                  style={{ transitionDuration: "var(--duration-micro)" }}
+                >
+                  <span className="flex-1 min-w-0 truncate text-body text-fg">{c.name}</span>
+                  <span className="text-small text-muted">{c.enabled ? "On" : "Off"}</span>
+                  <ChevronRight size={12} strokeWidth={1.75} aria-hidden="true" className="text-subtle" />
+                </Link>
+              ))}
+            </div>
+          </div>
         </Section>
       )}
     </div>
-  );
-}
-
-function findingPath(id: string): string {
-  return `findings/${encodeURIComponent(id)}`;
-}
-
-/**
- * One row per cause, one line each.
- *
- * <p>Fixed row height is the point: a list is read by scanning down it, and rows that breathe
- * differently depending on how long a title happens to be cannot be scanned at all. A title too long
- * for its column truncates rather than wrapping: the whole sentence is one click away, on a page that
- * has room for it.
- *
- * <p>The triage column carries a verdict where the old queues carried a section heading, which is the
- * whole shape of the change: the ruling is now a fact about the row rather than the bucket it landed
- * in, so a page holding four different rulings reads as one list.
- */
-function FindingTable({
-  findings,
-  onOpen,
-}: {
-  findings: BehaviorFinding[];
-  onOpen: (id: string) => void;
-}) {
-  return (
-    <Table>
-      <THead>
-        <TR>
-          <TH>Finding</TH>
-          <TH style={{ width: 150 }}>Classifier</TH>
-          <TH style={{ width: 160 }}>Triage</TH>
-          <TH style={{ width: 120 }}>First seen</TH>
-          <TH style={{ width: 32 }} />
-        </TR>
-      </THead>
-      <TBody>
-        {findings.map((f) => (
-          <TR key={f.id} interactive onClick={() => onOpen(f.id)}>
-            <TD className="text-fg truncate" style={{ maxWidth: 0 }} title={f.title}>
-              {f.title}
-            </TD>
-            <TD className="text-muted truncate">{f.detector ? detectorLabel(f.detector) : "–"}</TD>
-            <TD>
-              <TriageCell finding={f} />
-            </TD>
-            <TD className="text-subtle whitespace-nowrap" title={new Date(f.firstSeenAt).toLocaleString()}>
-              {ago(f.firstSeenAt)}
-            </TD>
-            <TD className="text-subtle">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path
-                  d="M4 2.5 7.5 6 4 9.5"
-                  stroke="currentColor"
-                  strokeWidth="1.25"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
-  );
-}
-
-/**
- * The ruling, and for a sound one the case it opened.
- *
- * <p>The link stops the row click rather than riding on it, because they go to two different places
- * that a reader means differently: the row is "show me the evidence", the link is "take me to the
- * work". Only `positive` ever gets one — nothing else opened a case to link to.
- */
-function TriageCell({ finding }: { finding: BehaviorFinding }) {
-  const state = triageState(finding);
-  const caseId = finding.caseId;
-  const tone =
-    state.tone === "positive"
-      ? "text-fg"
-      : state.tone === "closed"
-        ? "text-subtle"
-        : state.tone === "failed"
-          ? "text-error"
-          : "text-muted";
-  return (
-    <span className={`${tone} whitespace-nowrap`}>
-      {state.label}
-      {state.tone === "positive" && caseId && (
-        <>
-          {" · "}
-          <Link
-            to={`../cases/${encodeURIComponent(caseId)}`}
-            onClick={(e) => e.stopPropagation()}
-            className="text-link hover:text-link-hover">
-            Open case
-          </Link>
-        </>
-      )}
-    </span>
   );
 }

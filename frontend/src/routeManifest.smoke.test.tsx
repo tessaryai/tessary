@@ -284,7 +284,7 @@ const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
 
 /**
  * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
- * (getVitals, onboarding) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
+ * (getVitals, onboarding, listBehaviorFindings) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
  * each logs "data cannot be undefined".
  */
 const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
@@ -294,6 +294,8 @@ const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
   substrateStatus: () => Promise.resolve(CONNECTED_SUBSTRATE_STATUS),
   // Triage reads `configured_providers` during that same transient mount.
   getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
+  // ...and its Findings section, below Cases.
+  listBehaviorFindings: () => Promise.resolve({ findings: [] }),
 };
 
 /** Keyed by the manifest's raw `path`. */
@@ -320,13 +322,15 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   },
   classifiers: {
     listClassifiers: EMPTY,
-    listBehaviorFindings: EMPTY,
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
   },
+  // The old catalog redirects to Classifiers, so it issues Classifiers' reads.
   "classifiers/detectors": {
     listClassifiers: EMPTY,
-    getClassifierDailyVolume: EMPTY,
-    listClassifierHealth: EMPTY,
+  },
+  // No classifier has the fake id: the configure page's not-found state.
+  "classifiers/:classifierId": {
+    listClassifiers: EMPTY,
   },
   // A real groundedness finding, so the whole story renders rather than only not-found.
   "classifiers/findings/:findingId": {
@@ -576,6 +580,32 @@ const FINISHED_RCA: RcaReport = {
 
 const resolved = <T,>(value: T) => () => Promise.resolve(value);
 
+const SECRET_LEAK_CLASSIFIER: components["schemas"]["ClassifierView"] = {
+  id: "fake-classifierId",
+  classifier_key: "secret_leak",
+  name: "Secret leak",
+  description: "API keys and tokens in outputs.",
+  detector: "secret_leak",
+  config_json: null,
+  built_in: true,
+  version: 1,
+  enabled: true,
+  mode: "tracking",
+  created_at: T0,
+  updated_at: T0,
+  readiness: null,
+  call_site_ids: null,
+};
+
+/** Every read the configure page issues on mount, answered for a real classifier. */
+const CONFIGURE_PAGE_READS: Record<string, () => Promise<unknown>> = {
+  listClassifiers: resolved([SECRET_LEAK_CLASSIFIER]),
+  getClassifierDailyVolume: resolved({ days: [], trace_totals: [], classifiers: [] }),
+  listClassifierHealth: EMPTY,
+  listClassifierEvents: EMPTY,
+  listClassifierCallSites: EMPTY,
+};
+
 /** One detail route on a real payload: its manifest entry, the reads it answers, and the heading it must draw. */
 const DETAIL_FIXTURES: {
   name: string;
@@ -583,6 +613,12 @@ const DETAIL_FIXTURES: {
   overrides: Record<string, () => Promise<unknown>>;
   heading: RegExp;
 }[] = [
+  {
+    name: "a real classifier",
+    path: "classifiers/:classifierId",
+    overrides: CONFIGURE_PAGE_READS,
+    heading: /Secret leak/,
+  },
   {
     name: "a secret-leak case",
     path: "cases/:caseId",
@@ -829,6 +865,24 @@ describe("app entry redirects", () => {
     const { container } = renderApp("/orgs/fake-orgSlug");
 
     await waitFor(() => expect(container.textContent).toContain("New project"));
+  });
+
+  // Bug: a bookmark or Slack link to the old catalog rail (`?classifier=<id>`) lands on the Classifiers charts
+  // instead of the classifier it named.
+  it("sends an old catalog link for one classifier to that classifier's configure page", async () => {
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
+    const { container } = renderApp(
+      `${resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors")}?classifier=fake-classifierId`,
+    );
+
+    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Secret leak" }));
+  });
+
+  it("sends the old catalog itself to Classifiers", async () => {
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
+    const { container } = renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors"));
+
+    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Classifiers" }));
   });
 
   it("puts a project with no tagged span behind the connect gate", async () => {

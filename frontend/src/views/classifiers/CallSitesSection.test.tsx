@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The call-site scope editor on a classifier's rail. The bugs worth catching: a saved list sent under the wrong
+ * The call-site scope editor on a classifier's configure page. The bugs worth catching: a saved list sent under the wrong
  * name, "Every call site" sent as an empty list (the server refuses it, and an empty list is not "everywhere"),
- * a stored list not shown when the rail opens again, and a save allowed with nothing picked.
+ * a stored list not shown when the page opens again, and a save allowed with nothing picked.
  */
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

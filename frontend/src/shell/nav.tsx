@@ -84,8 +84,8 @@ export type NavGroup = { label: string; items: NavItem[] };
 export const TRIAGE_NAV: NavItem = {
   id: "triage",
   label: "Triage",
-  description: "Open cases, worst first.",
-  keywords: ["cases", "inbox", "home", "overview", "worklist", "triage"],
+  description: "Open cases, worst first, and the findings that are not a case yet.",
+  keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
   alias: 'was "Overview"',
   match: ["cases"],
   icon: Inbox,
@@ -109,11 +109,12 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "classifiers",
         label: "Classifiers",
-        description: "The checks watching production traffic, and the findings they create.",
+        description: "What each classifier detects, charted per call site and per tool.",
         keywords: [
           "signals",
           "detections",
-          "findings",
+          "charts",
+          "configure",
           "drift",
           "behavior drift",
           "behavior",

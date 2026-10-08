@@ -2,11 +2,12 @@
 /*
  * Triage, the front door. The bugs worth catching: a row that opens another case, a lens that shows
  * the wrong bucket or cannot be left, an empty lens that says nothing, the analysis's summary
- * printed as a certainty, and a pulse strip that disagrees with Vitals about spend or latency.
+ * printed as a certainty, a pulse strip that disagrees with Vitals about spend or latency, and a
+ * findings list that shows a finding already in Cases, drops one that is not, or opens the wrong page.
  */
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Case, TriageView, Vitals } from "../../api/types";
+import type { BehaviorFinding, Case, TriageView, Vitals } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
 import { Triage } from "./Triage";
@@ -17,6 +18,7 @@ const api = vi.hoisted(() => ({
   getVitals: vi.fn(),
   getModelSettings: vi.fn(),
   onboarding: vi.fn(),
+  listBehaviorFindings: vi.fn(),
 }));
 
 vi.mock("../../tenant/TenantContext", () => ({
@@ -59,10 +61,28 @@ beforeEach(() => {
   api.getVitals.mockResolvedValue(vitals(512.4, 4200, 28.4, -6.6));
   api.getModelSettings.mockResolvedValue({ configured_providers: ["anthropic"] });
   api.onboarding.mockResolvedValue({ stage: "case" });
+  api.listBehaviorFindings.mockResolvedValue({ findings: [] });
 });
 
 const renderPage = () => renderRoute(<Triage />, { route: "/orgs/acme/projects/default/triage" });
 const lens = (name: RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
+const section = (title: string) => screen.getByRole("heading", { level: 2, name: title }).closest("section")!;
+
+describe("the page", () => {
+  // Bug: the page still titled "Cases", or the lens buttons left in the page header where they read as
+  // filters for the findings too.
+  it("is titled Triage, with the case lenses in the Cases section and Findings below it", async () => {
+    renderPage();
+
+    await screen.findByText("Case a");
+    expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
+    const cases = section("Cases");
+    expect(within(cases).getByRole("button", { name: /Muted · 1/ })).toBeTruthy();
+    expect(within(cases).getByRole("button", { name: /Resolved 7d · 1/ })).toBeTruthy();
+    expect(within(section("Findings")).queryByRole("button", { name: /Muted/ })).toBeNull();
+    expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
 
 describe("the open cases", () => {
   /** Catches a "Likely:" prefix on a summary that already says whether anything was proven. */
@@ -111,13 +131,38 @@ describe("the open cases", () => {
     expect(await screen.findByText("triage unavailable")).toBeTruthy();
   });
 
-  it("hands an all-clear queue to the empty-state screen rather than an empty list", async () => {
+  // Bug: a watched project with nothing open gets the full-page setup screen ("Nothing to review") in place of
+  // the Cases list, pushing the findings it does have out of sight.
+  it("says nothing needs you when no case is open and every stage is running", async () => {
     api.getTriage.mockResolvedValue(triage({ cases: [] }));
     renderPage();
 
-    expect(await screen.findByText(/Nothing to review|Baselines are still fitting|No classifiers running/)).toBeTruthy();
+    expect(await within(section("Cases")).findByText("Nothing needs you.")).toBeTruthy();
+    expect(screen.queryByText("Nothing to review")).toBeNull();
+  });
+
+  // Bug: the setup screen dropped with the empty list, so a project with no classifier running reads as all
+  // clear and is never told what to do next.
+  it("keeps the setup screen in the Cases section while a stage still needs action", async () => {
+    api.getTriage.mockResolvedValue(
+      triage({ cases: [], watching: { ...WATCHING, classifiers: 0 } as TriageView["watching"] }),
+    );
+    renderPage();
+
+    expect(await within(section("Cases")).findByText("No classifiers running")).toBeTruthy();
     expect(screen.queryByText("Nothing needs you.")).toBeNull();
-    expect(screen.queryByText(/Resolved 7d · 1 · Muted/)).toBeNull();
+    expect(await within(section("Findings")).findByText("No open findings.")).toBeTruthy();
+  });
+
+  // Bug: a stopped exporter hidden behind "Nothing needs you.", which reads as all clear while nothing arrives.
+  it("keeps the setup screen when traces have stopped, even with every stage running", async () => {
+    api.getTriage.mockResolvedValue(
+      triage({ cases: [], watching: { ...WATCHING, traces_last_day: 0 } as TriageView["watching"] }),
+    );
+    renderPage();
+
+    expect(await within(section("Cases")).findByText(/No traces have arrived in the last 24 hours/)).toBeTruthy();
+    expect(screen.queryByText("Nothing needs you.")).toBeNull();
   });
 });
 
@@ -201,5 +246,93 @@ describe("the pulse strip", () => {
     await screen.findByText("Case a");
 
     expect(screen.queryByText("Vitals 7d")).toBeNull();
+  });
+});
+
+const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
+  ({
+    id,
+    title: `Finding ${id}`,
+    detector: "cost_drift",
+    callSiteId: "support-agent",
+    firstSeenAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+    triageStatus: "pending",
+    triageAction: null,
+    triageVerdict: null,
+    humanVerdictAt: null,
+    caseId: null,
+    ...over,
+  }) as BehaviorFinding;
+
+describe("the findings", () => {
+  // Bug: a closed finding, or one that already became a case, listed again under Findings; or a sound finding
+  // still waiting for its case dropped from both lists.
+  it("lists the open findings that are not yet a case, with their classifier, call site and triage", async () => {
+    api.listBehaviorFindings.mockResolvedValue({
+      findings: [
+        finding("a"),
+        finding("b", { triageStatus: "done", triageVerdict: "negative", triageAction: "closed" }),
+        finding("c", { detector: "tool_error", callSiteId: "__unattributed__", triageStatus: "failed" }),
+        finding("d", { triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case", caseId: "case-d" }),
+        finding("e", { triageStatus: "done", triageVerdict: "positive", triageAction: "opened_case", caseId: null }),
+        finding("f", { triageStatus: "in_flight", callSiteId: null }),
+      ],
+    });
+    renderPage();
+
+    const findings = section("Findings");
+    const a = (await within(findings).findByText("Finding a")).closest("tr")!;
+    expect(within(findings).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
+      "Finding",
+      "Classifier",
+      "Call site",
+      "Triage",
+      "First seen",
+      "",
+    ]);
+    expect(within(a).getAllByRole("cell").map((c) => c.textContent).slice(0, 5)).toEqual([
+      "Finding a",
+      "Cost drift",
+      "support-agent",
+      "Pending",
+      "3m ago",
+    ]);
+    expect(within(findings).getByText("4")).toBeTruthy();
+    expect(within(findings).queryByText("Finding b")).toBeNull();
+    expect(within(findings).queryByText("Finding d")).toBeNull();
+    expect(within(findings).getByText("Finding e").closest("tr")!.textContent).toContain("Positive");
+    expect(within(findings).getByText("Finding f").closest("tr")!.textContent).toContain("Triaging");
+    // The tool-error sentinel is not a call site, and red is too faint at table size: grey words beside a red icon.
+    const c = within(findings).getByText("Finding c").closest("tr")!;
+    expect(within(c).getAllByRole("cell")[2].textContent).toBe("–");
+    expect(within(c).getByText("Triage failed").className).not.toContain("text-error");
+    expect(api.listBehaviorFindings).toHaveBeenCalledWith();
+  });
+
+  // Bug: a finding row that opens the case list, or a path that breaks on an id with a slash in it.
+  it("opens a finding's own page from its row", async () => {
+    api.listBehaviorFindings.mockResolvedValue({ findings: [finding("f/1")] });
+    renderPage();
+
+    fireEvent.click(await screen.findByText("Finding f/1"));
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/findings/f%2F1");
+  });
+
+  it("says when no finding is open", async () => {
+    api.listBehaviorFindings.mockResolvedValue({
+      findings: [finding("b", { triageStatus: "done", triageVerdict: "negative", triageAction: "closed" })],
+    });
+    renderPage();
+
+    expect(await within(section("Findings")).findByText("No open findings.")).toBeTruthy();
+    expect(screen.queryByText("Finding b")).toBeNull();
+  });
+
+  it("says why the findings could not be read", async () => {
+    api.listBehaviorFindings.mockRejectedValue(new Error("findings unavailable"));
+    renderPage();
+
+    expect(await within(section("Findings")).findByText("findings unavailable")).toBeTruthy();
+    expect(screen.queryByText("No open findings.")).toBeNull();
   });
 });

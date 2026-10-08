@@ -105,12 +105,15 @@ export function Section({
   title,
   subtitle,
   count,
+  actions,
   children,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
   /** How many items the section holds, drawn as a pill beside the title. */
   count?: number;
+  /** Controls for this section only, right-aligned on the title row. */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -126,6 +129,7 @@ export function Section({
             )}
             {subtitle && <p className="text-small text-muted mt-1">{subtitle}</p>}
           </div>
+          {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
         </div>
       )}
       {children}

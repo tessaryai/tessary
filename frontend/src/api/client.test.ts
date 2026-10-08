@@ -53,3 +53,22 @@ describe("the other paged finding reads", () => {
   });
 });
 
+
+describe("the classifier chart reads", () => {
+  // Bug: a scope or range sent under another name than ClassifierChartController reads (`callSiteId`, `tool`,
+  // `days`) answers 422 CLASSIFIER.CHART_SCOPE, or the default range, for every card on the page.
+  it("name the scope and the range as the controller reads them", async () => {
+    vi.stubGlobal("fetch", fetchMock);
+    const api = projectApi("acme", "default");
+
+    await api.getClassifierChartScopes(90);
+    await api.getClassifierCharts({ callSiteId: "support/agent" }, 7);
+    await api.getClassifierCharts({ tool: "tool:search docs" }, 28);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/orgs/acme/projects/default/classifiers/chart-scopes?days=90",
+      "/api/orgs/acme/projects/default/classifiers/charts?callSiteId=support%2Fagent&days=7",
+      "/api/orgs/acme/projects/default/classifiers/charts?tool=tool%3Asearch+docs&days=28",
+    ]);
+  });
+});
