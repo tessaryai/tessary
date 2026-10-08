@@ -116,5 +116,11 @@ databaseChangeLog:
       file: db/changelog/changes/0029-frustration-shadow.sql
       relativeToChangelogFile: false
   - include:
-      file: db/changelog/changes/0030-authoring-lane.sql
+      file: db/changelog/changes/0030-frustration-call-site-scope.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0031-classifier-call-site-scope.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0032-authoring-lane.sql
       relativeToChangelogFile: false

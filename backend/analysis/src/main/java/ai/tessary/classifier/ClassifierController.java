@@ -8,14 +8,18 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierMetricsView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
+import ai.tessary.classifier.ClassifierDtos.FrustrationScopeView;
 import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
+import ai.tessary.classifier.ClassifierDtos.SetCallSitesRequest;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
+import ai.tessary.classifier.ClassifierDtos.SetFrustrationScopeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
 import ai.tessary.classifier.ClassifierDtos.ToolErrorRateView;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
+import ai.tessary.classifier.frustration.FrustrationScope;
 import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
@@ -26,6 +30,7 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,17 +49,23 @@ public class ClassifierController {
     private static final int DEFAULT_EVENT_LIMIT = 200;
 
     private final ClassifierService service;
+    private final ClassifierReset reset;
     private final FrustrationTuning frustrationTuning;
+    private final FrustrationScope frustrationScope;
     private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
 
     public ClassifierController(
             ClassifierService service,
+            ClassifierReset reset,
             FrustrationTuning frustrationTuning,
+            FrustrationScope frustrationScope,
             GroundednessStatus groundednessStatus,
             TenantPathResolver resolver) {
         this.service = service;
+        this.reset = reset;
         this.frustrationTuning = frustrationTuning;
+        this.frustrationScope = frustrationScope;
         this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
     }
@@ -111,6 +122,23 @@ public class ClassifierController {
     }
 
     /**
+     * Reset the classifier: delete what it detected and learned, close its unruled findings, and check
+     * every kept trace again from the start. See {@link ClassifierReset}. 409s while a sweep is running.
+     */
+    @PostMapping("/{id}/reset")
+    public ApiResponse<ClassifierView> reset(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "reset a classifier");
+        ClassifierRow row = reset.reset(r.project().id(), id, ctx.userEmail());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /**
      * Set the classifier's operating point: {@code discovery} (high recall) or {@code tracking}
      * (high precision). One definition, two modes — mirrors {@link #setEnabled}.
      */
@@ -126,6 +154,29 @@ public class ClassifierController {
         ClassifierRow row = service.setMode(r.project().id(), id, req.mode());
         return ApiResponse.ok(
                 ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /** Limit the classifier to some call sites, or run it on every call site again; mirrors {@link #setMode}. */
+    @PutMapping("/{id}/call-sites")
+    public ApiResponse<ClassifierView> setCallSites(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @Valid @RequestBody SetCallSitesRequest req) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "choose the call sites a classifier runs on");
+        ClassifierRow row = service.setCallSiteIds(r.project().id(), id, req.callSiteIds());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /** The call sites a classifier can be limited to: those the bundle declares and those traces arrived on. */
+    @GetMapping("/call-sites")
+    public ApiResponse<List<String>> callSites(
+            TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(service.knownCallSiteIds(r.project().id()));
     }
 
     /**
@@ -175,6 +226,35 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         String projectId = r.project().id();
         return ApiResponse.ok(frustrationTuning.view(projectId, service.get(projectId, id)));
+    }
+
+    /** The call sites the Frustration classifier scores. 422s for any other classifier. */
+    @GetMapping("/{id}/frustration-scope")
+    public ApiResponse<FrustrationScopeView> getFrustrationScope(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        String projectId = r.project().id();
+        return ApiResponse.ok(frustrationScope.view(projectId, service.get(projectId, id)));
+    }
+
+    /**
+     * Pick the call sites the Frustration classifier scores, replacing the earlier picks. Turns already swept are
+     * not sent again. 422s for any other classifier.
+     */
+    @PutMapping("/{id}/frustration-scope")
+    public ApiResponse<FrustrationScopeView> setFrustrationScope(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @Valid @RequestBody SetFrustrationScopeRequest req) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "pick the call sites the frustration classifier scores");
+        String projectId = r.project().id();
+        return ApiResponse.ok(frustrationScope.set(projectId, service.get(projectId, id), req.callSiteIds()));
     }
 
     /**

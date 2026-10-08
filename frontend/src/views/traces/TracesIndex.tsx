@@ -8,7 +8,7 @@
  * verdicts never color this table. Row click → ?trace=<id>, a rail floating
  * over this same page (not a route change) so the table stays visible behind it.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { Search, ChevronRight } from "lucide-react";
@@ -95,8 +95,8 @@ function TracesList() {
   // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
   // the URL; removing a chip removes its param.
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, setRange, setFacet, setSearch, clearAll, activeCount } = useTraceQueryState();
-  const { range, facets, q: submittedQuery } = state;
+  const { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount } = useTraceQueryState();
+  const { range, facets, callSite, q: submittedQuery } = state;
   // The box holds what is typed; the URL holds what was submitted. `q` is a server-side filter, so
   // firing it per keystroke would be a query per character.
   const [query, setQuery] = useState(submittedQuery);
@@ -149,7 +149,8 @@ function TracesList() {
   const q = useTracesIndex(
     {
       q: submittedQuery || undefined,
-      callSite: facets.call_site ?? undefined,
+      callSite: typeof callSite === "object" ? callSite.id : undefined,
+      hasCallSite: callSite === "any" ? true : callSite === "none" ? false : undefined,
       status: facets.status ?? undefined,
       kind: facets.kind ?? undefined,
       from: bounds.from,
@@ -163,7 +164,8 @@ function TracesList() {
   const filtered = activeCount > 0 || !!submittedQuery;
   // The empty state's "filtered": a narrowed list, not a moved window. The range is a choice of
   // window (it counts toward Clear all above), and an all-time list that is empty has nothing to clear.
-  const narrowed = Object.values(facets).some(Boolean) || !!submittedQuery;
+  const narrowed =
+    !!facets.status || !!facets.kind || (callSite !== "any" && callSite !== "all") || !!submittedQuery;
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.traces) ?? [], [q.data]);
   const sessionRows = useMemo(() => sq.data?.pages.flatMap((p) => p.sessions) ?? [], [sq.data]);
 
@@ -283,7 +285,14 @@ function TracesList() {
           label="Call site"
           value={facets.call_site}
           options={callSiteOptions}
-          onChange={(v) => setFacet("call_site", v)}
+          onChange={(v) => setCallSite(v ? { id: v } : "any")}
+          head={[
+            { label: "All traces", short: "all", selected: callSite === "all", onSelect: () => setCallSite("all") },
+            { label: "Any call site", selected: callSite === "any", onSelect: () => setCallSite("any") },
+          ]}
+          foot={[
+            { label: "No call site", short: "none", selected: callSite === "none", onSelect: () => setCallSite("none") },
+          ]}
           emptyHint="No call site has been seen in the loaded traces yet."
         />
         <button
@@ -324,8 +333,11 @@ function TracesList() {
       */}
       {filtered && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3 mx-0 mb-0">
-          {facets.call_site && (
-            <FilterChip label={`call site: ${facets.call_site}`} onRemove={() => setFacet("call_site", null)} />
+          {callSite !== "any" && (
+            <FilterChip
+              label={`call site: ${typeof callSite === "object" ? callSite.id : callSite}`}
+              onRemove={() => setCallSite("any")}
+            />
           )}
           {submittedQuery && (
             <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSearch("")} />
@@ -357,6 +369,7 @@ function TracesList() {
           range={rangeLabel(range).toLowerCase()}
           onClearAll={clearAllFilters}
           onSearchAllTime={() => setRange({ kind: "all" })}
+          onShowAll={callSite === "any" ? () => setCallSite("all") : undefined}
         />
       ) : (
         // table-layout: fixed against the <colgroup> below, not auto: a column's width must never
@@ -874,6 +887,10 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
  * actually change the result, so an all-time unfiltered blank does not suggest
  * clearing filters that are not set.
  *
+ * The default leaves out traces without a call site, and clearing filters
+ * returns to that default, so `onShowAll` is its own way out. While it is
+ * offered, the list may hold nothing only because every trace is untagged.
+ *
  * The source-connection pointer stays for the unfiltered case: with nothing
  * narrowing the list, "you have not connected anything yet" is the likeliest
  * explanation and the only one the reader cannot act on from this page.
@@ -884,39 +901,49 @@ function NothingHere({
   range,
   onClearAll,
   onSearchAllTime,
+  onShowAll,
 }: {
   filtered: boolean;
   allTime: boolean;
   range: string;
   onClearAll: () => void;
   onSearchAllTime: () => void;
+  onShowAll?: () => void;
 }) {
+  const ways = [
+    !allTime && { label: "Search all time", onClick: onSearchAllTime },
+    onShowAll && { label: "Show all traces", onClick: onShowAll },
+    filtered && { label: "Clear all filters", onClick: onClearAll },
+  ].filter((w): w is { label: string; onClick: () => void } => !!w);
+
   return (
     <div className="text-center pt-18 px-0 pb-10">
       <p className="text-h1 mx-auto text-fg" style={{ maxWidth: 560 }}>
-        {filtered ? "No traces match these filters" : allTime ? "No traces yet" : "No traces in this range"}
+        {filtered
+          ? "No traces match these filters"
+          : onShowAll
+            ? allTime
+              ? "No traces with a call site yet"
+              : "No traces with a call site in this range"
+            : allTime
+              ? "No traces yet"
+              : "No traces in this range"}
       </p>
 
-      {(filtered || !allTime) && (
+      {ways.length > 0 && (
         <p className="text-muted mt-3 text-body">
-          {!allTime && (
-            <button
-              type="button"
-              onClick={onSearchAllTime}
-              className="text-accent hover:underline cursor-pointer">
-              Search all time
-            </button>
-          )}
-          {!allTime && filtered && <span className="text-subtle"> · </span>}
-          {filtered && (
-            <button type="button" onClick={onClearAll} className="text-accent hover:underline cursor-pointer">
-              Clear all filters
-            </button>
-          )}
+          {ways.map((w, i) => (
+            <Fragment key={w.label}>
+              {i > 0 && <span className="text-subtle"> · </span>}
+              <button type="button" onClick={w.onClick} className="text-accent hover:underline cursor-pointer">
+                {w.label}
+              </button>
+            </Fragment>
+          ))}
         </p>
       )}
 
-      {!filtered && (
+      {!filtered && !onShowAll && (
         <p
           className="mx-auto text-subtle mt-4 text-small"
           style={{ maxWidth: 460, textWrap: "pretty" }}

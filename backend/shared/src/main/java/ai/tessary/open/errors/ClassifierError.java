@@ -20,6 +20,16 @@ public enum ClassifierError implements ErrorCode {
     NOT_FRUSTRATION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
+    UNKNOWN_CALL_SITE(HttpStatus.UNPROCESSABLE_ENTITY, "This project has no call site '%s'"),
+    // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket
+    // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
+    CALL_SITE_SCOPE_UNSUPPORTED(
+            HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
+    // Frustration keeps its own list (frustration_scope), which means "score nothing" when empty. A second list on
+    // the classifier row would give it two answers to one question.
+    FRUSTRATION_SCOPE_ELSEWHERE(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Frustration picks its call sites under its own setting, PUT /classifiers/%s/frustration-scope"),
     NOT_GROUNDEDNESS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no groundedness status — only the groundedness classifier does"),
@@ -27,6 +37,8 @@ public enum ClassifierError implements ErrorCode {
     PROVIDER_REQUIRED(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
+    /** A reset while a worker holds the sweep job: that sweep would write its cursor back over the reset. */
+    SWEEP_RUNNING(HttpStatus.CONFLICT, "Classifier '%s' is checking traces right now. Try the reset again in a minute"),
     // NO_REPO_TO_RULE_AGAINST used to sit here: a 409 on `Run analysis` for a project with no git
     // integration, back when the only Layer-2 lane rules against a committed spec. It is gone rather than
     // deprecated because the state it named cannot occur — a repo-less project is now ruled on the

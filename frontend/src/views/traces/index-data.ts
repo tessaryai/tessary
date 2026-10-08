@@ -22,6 +22,8 @@ export type TraceFilters = {
   q?: string;
   status?: string;
   callSite?: string;
+  /** true keeps traces with any call site, false only those with none. */
+  hasCallSite?: boolean;
   kind?: string;
   /** Absolute ISO-8601 bounds. Resolved by the picker, never a relative token — see index-filters. */
   from?: string | null;
@@ -59,6 +61,7 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
         q: filters.q,
         status: filters.status,
         callSite: filters.callSite,
+        hasCallSite: filters.hasCallSite,
         kind: filters.kind,
         fromTimestamp: filters.from ?? undefined,
         toTimestamp: filters.to ?? undefined,

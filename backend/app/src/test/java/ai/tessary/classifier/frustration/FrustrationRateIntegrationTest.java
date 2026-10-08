@@ -238,7 +238,7 @@ class FrustrationRateIntegrationTest {
                 .param("trace", trace)
                 .update();
         FrustrationRateRepository.FlaggedTurn turn =
-                rates.flaggedTurns(pid, signal.id(), List.of(trace)).get(trace);
+                rates.flaggedTurns(pid, signal.id(), "cs-chat", List.of(trace)).get(trace);
         assertNotNull(turn);
         assertNull(turn.score());
         assertEquals("cs-chat", turn.callSiteId());

@@ -282,6 +282,30 @@ describe("Tree", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Conversation" }));
     expect(currentParams().has("view")).toBe(false);
     expect(currentParams().get("span")).toBe("sp-agent");
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    expect(currentParams().get("view")).toBe("json");
+  });
+});
+
+describe("JSON", () => {
+  const longInput = j([...HISTORY, QUESTION, TOOL_REQUEST_REPLAYED, TOOL_RESULTS]);
+
+  it("folds each span, and shows every string in full once expanded", async () => {
+    renderTrace("?view=json");
+
+    await screen.findByRole("button", { name: "Expand all" });
+    expect(screen.queryByText(longInput)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(longInput)).toBeTruthy();
+  });
+
+  it("copies the response exactly as the API sent it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderTrace("?view=json");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify(detail(), null, 2));
   });
 });
 

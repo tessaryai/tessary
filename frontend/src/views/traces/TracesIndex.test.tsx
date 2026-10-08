@@ -190,6 +190,40 @@ describe("filters", () => {
     await waitFor(() => expect(currentParams().toString()).toBe("trace=tr-9"));
   });
 
+  it("leaves out traces without a call site by default, and offers them as their own filter", async () => {
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
+    expect(lastListCall()).toMatchObject({ hasCallSite: true, callSite: undefined });
+
+    const pick = async (row: RegExp) => {
+      fireEvent.click(screen.getByRole("button", { name: /^Call site/ }));
+      fireEvent.click(within(screen.getByRole("group", { name: "Call site" })).getByRole("button", { name: row }));
+    };
+
+    fireEvent.click(screen.getByRole("button", { name: /^Call site/ }));
+    const rows = within(screen.getByRole("group", { name: "Call site" })).getAllByRole("button");
+    expect(rows.map((r) => r.textContent)).toEqual(["All traces", "Any call site", "checkout", "No call site"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Call site/ }));
+
+    await pick(/No call site/);
+    await waitFor(() => expect(lastListCall()).toMatchObject({ hasCallSite: false, callSite: undefined }));
+    expect(currentParams().get("call_site_scope")).toBe("none");
+    expect(screen.getByText("call site: none")).toBeTruthy();
+
+    await pick(/checkout/);
+    await waitFor(() => expect(lastListCall()).toMatchObject({ hasCallSite: undefined, callSite: "checkout" }));
+    expect(currentParams().has("call_site_scope")).toBe(false);
+
+    await pick(/All traces/);
+    await waitFor(() => expect(lastListCall()).toMatchObject({ hasCallSite: undefined, callSite: undefined }));
+    expect(currentParams().has("call_site")).toBe(false);
+    expect(currentParams().get("call_site_scope")).toBe("all");
+
+    await pick(/Any call site/);
+    await waitFor(() => expect(lastListCall()).toMatchObject({ hasCallSite: true }));
+    expect(currentParams().toString()).toBe("");
+  });
+
   it("offers only the call sites the list has shown, and says so when there are none", async () => {
     api.listTraces.mockResolvedValue(page([trace({ call_site_id: null })]));
     renderRoute(<TracesIndex />);
@@ -283,7 +317,7 @@ describe("kept for the tab", () => {
 describe("the empty list", () => {
   it("in a rolling range with no filters, offers all time and points at sources", async () => {
     api.listTraces.mockResolvedValue(page([]));
-    renderRoute(<TracesIndex />);
+    renderRoute(<TracesIndex />, { route: "/traces?call_site_scope=all" });
 
     expect(await screen.findByText("No traces in this range")).toBeTruthy();
     expect(screen.getByText(/No traces have arrived in past 30 days/)).toBeTruthy();
@@ -294,6 +328,20 @@ describe("the empty list", () => {
     expect(currentParams().get("range")).toBe("all");
     expect(screen.queryByRole("button", { name: "Search all time" })).toBeNull();
     expect(lastListCall().fromTimestamp).toBeUndefined();
+  });
+
+  it("when only untagged traces exist, offers them rather than pointing at sources", async () => {
+    api.listTraces.mockImplementation(async (filters: { hasCallSite?: boolean }) =>
+      page(filters.hasCallSite ? [] : [trace({ call_site_id: null })]),
+    );
+    renderRoute(<TracesIndex />, { route: "/traces?range=all" });
+
+    expect(await screen.findByText("No traces with a call site yet")).toBeTruthy();
+    expect(screen.queryByText(/start under Sources/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show all traces" }));
+
+    expect(await screen.findByText("checkout-agent")).toBeTruthy();
+    expect(currentParams().get("call_site_scope")).toBe("all");
   });
 
   it("under a filter, offers to clear it", async () => {

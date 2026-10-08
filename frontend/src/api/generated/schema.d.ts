@@ -580,6 +580,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_callSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events": {
         parameters: {
             query?: never;
@@ -644,6 +660,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["ClassifierController_setCallSites"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/debug": {
         parameters: {
             query?: never;
@@ -685,6 +717,22 @@ export interface paths {
         };
         get: operations["ClassifierController_eventsForClassifier"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getFrustrationScope"];
+        put: operations["ClassifierController_setFrustrationScope"];
         post?: never;
         delete?: never;
         options?: never;
@@ -750,6 +798,22 @@ export interface paths {
         get?: never;
         put: operations["ClassifierController_setMode"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["ClassifierController_reset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2172,6 +2236,10 @@ export interface components {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFrustrationScopeView: {
+            data?: components["schemas"]["FrustrationScopeView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFrustrationTuningView: {
             data?: components["schemas"]["FrustrationTuningView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2272,6 +2340,10 @@ export interface components {
         };
         ApiResponseListSourceResponse: {
             data?: components["schemas"]["SourceResponse"][] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseListString: {
+            data?: string[] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseListToolErrorRateView: {
@@ -2838,6 +2910,7 @@ export interface components {
             id: string;
             occurred_at: string | null;
             project_version_id: string | null;
+            session_id: string | null;
             severity: string | null;
             subject_id: string;
             subject_kind: string;
@@ -2866,6 +2939,7 @@ export interface components {
         };
         ClassifierView: {
             built_in: boolean;
+            call_site_ids: string[] | null;
             classifier_key: string;
             config_json: string | null;
             created_at: string;
@@ -3217,6 +3291,9 @@ export interface components {
             minDecisionInterval: number;
             rate: components["schemas"]["RateDetail"];
             scorerVersion: string | null;
+        };
+        FrustrationScopeView: {
+            call_site_ids: string[];
         };
         FrustrationTuningView: {
             /** Format: int64 */
@@ -4179,8 +4256,14 @@ export interface components {
             next_cursor: string | null;
             sessions: components["schemas"]["SessionListItem"][];
         };
+        SetCallSitesRequest: {
+            call_site_ids?: string[] | null;
+        };
         SetEnabledRequest: {
             enabled: boolean;
+        };
+        SetFrustrationScopeRequest: {
+            call_site_ids: string[];
         };
         SetLaneModelRequest: {
             model_key: string;
@@ -5900,6 +5983,31 @@ export interface operations {
             };
         };
     };
+    ClassifierController_callSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListString"];
+                };
+            };
+        };
+    };
     ClassifierController_events: {
         parameters: {
             query: {
@@ -6002,6 +6110,36 @@ export interface operations {
             };
         };
     };
+    ClassifierController_setCallSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCallSitesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
     ClassifierDebugController_get: {
         parameters: {
             query: {
@@ -6082,6 +6220,62 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListClassifierEventView"];
+                };
+            };
+        };
+    };
+    ClassifierController_getFrustrationScope: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
+                };
+            };
+        };
+    };
+    ClassifierController_setFrustrationScope: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFrustrationScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
                 };
             };
         };
@@ -6182,6 +6376,32 @@ export interface operations {
                 "application/json": components["schemas"]["SetModeRequest"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
+    ClassifierController_reset: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
@@ -7681,6 +7901,7 @@ export interface operations {
                 model?: string;
                 kind?: string;
                 callSite?: string;
+                hasCallSite?: boolean;
                 fromTimestamp?: string;
                 toTimestamp?: string;
                 status?: string;

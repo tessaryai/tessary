@@ -37,6 +37,8 @@ import {
   type GroundednessStatus,
   type ClassifierTuning,
   type SetClassifierTuningRequest,
+  type FrustrationScope,
+  type SetFrustrationScopeRequest,
   type BehaviorFinding,
   type BehaviorFindingDetail,
   type EvidenceSpanPage,
@@ -453,7 +455,18 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       }),
+    /** Limit a classifier to some call sites, or `null` to run it on every call site again. */
+    setClassifierCallSites: (id: string, callSiteIds: string[] | null) =>
+      http<Classifier>(`${base}/classifiers/${enc(id)}/call-sites`, {
+        method: "PUT",
+        body: JSON.stringify({ call_site_ids: callSiteIds }),
+      }),
+    /** The call sites a classifier can be limited to: declared in the bundle, or seen on traces. */
+    listClassifierCallSites: () => http<string[]>(`${base}/classifiers/call-sites`),
     listClassifierHealth: () => http<ClassifierHealth[]>(`${base}/classifiers/health`),
+    /** Forget what the classifier found and learned, and check every kept trace again. 409s while it sweeps. */
+    resetClassifier: (id: string) =>
+      http<Classifier>(`${base}/classifiers/${enc(id)}/reset`, { method: "POST" }),
     /**
      * The detections one classifier produced, newest-first: the traces that tripped it. This is
      * the full high-recall set, which is what the detail rail shows.
@@ -479,6 +492,13 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
       http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`, {
+        method: "PUT",
+        body: JSON.stringify(req),
+      }),
+    /** The call sites the Frustration classifier scores. 422s for any other classifier. */
+    getFrustrationScope: (id: string) => http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`),
+    setFrustrationScope: (id: string, req: SetFrustrationScopeRequest) =>
+      http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`, {
         method: "PUT",
         body: JSON.stringify(req),
       }),
@@ -601,6 +621,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       q?: string;
       /** Scope to one call site (server-side only). */
       callSite?: string;
+      /** true: traces with any call site; false: traces with none. */
+      hasCallSite?: boolean;
       sort?: string;
     }) => {
       const p = new URLSearchParams();

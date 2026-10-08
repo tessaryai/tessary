@@ -112,6 +112,14 @@ public class MetricBaselineRepository {
                 .optional();
     }
 
+    /** Delete every baseline of one classifier, and with them their absorb history. */
+    public int deleteByClassifier(String projectId, String classifierId) {
+        return jdbc.sql("DELETE FROM metric_baseline WHERE project_id = :pid AND classifier_id = :sid")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .update();
+    }
+
     /**
      * Every baseline belonging to one classifier, thickest current window first — the sweep's per-pass
      * read. Ordering by {@code current_count} puts the buckets that can actually close a window this

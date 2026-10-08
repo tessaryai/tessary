@@ -197,6 +197,8 @@ public class TracesController {
             // Keeps a trace when any of its spans carries this call site. An untagged span has none, so it
             // never matches — a semi-join, not an aggregate.
             @RequestParam(required = false) @Nullable String callSite,
+            // true keeps a trace when any span carries a call site, false when none does.
+            @RequestParam(required = false) @Nullable Boolean hasCallSite,
             @RequestParam(required = false) @Nullable String fromTimestamp,
             @RequestParam(required = false) @Nullable String toTimestamp,
             @RequestParam(required = false) @Nullable String status,
@@ -208,7 +210,8 @@ public class TracesController {
         r.require(Permission.ORG_VIEW, "view traces");
 
         TracePageCodec.Key before = TracePageCodec.decode(cursor);
-        var query = new TraceV2Repository.TraceQuery(model, kind, callSite, fromTimestamp, toTimestamp, status, q);
+        var query = new TraceV2Repository.TraceQuery(
+                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q);
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
         String projectId = r.project().id();
 

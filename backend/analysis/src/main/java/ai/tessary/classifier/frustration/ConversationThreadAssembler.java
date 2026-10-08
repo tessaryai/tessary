@@ -19,10 +19,12 @@ import org.springframework.stereotype.Component;
 
 /**
  * Reads the conversation a scored user turn belongs to, for the frustration decision model: the two
- * turns before it ({@link SubstrateReadRepository#priorTurns}), oldest first, as separate user and
- * assistant messages. A turn is one trace. System messages are excluded. Each turn contributes its
- * dialogue once: the substrate carries both an {@code agent} and an {@code llm} span per turn, and the
- * {@code llm} span wins. Tool spans and tool parts leave no text; an assistant turn only records whether
+ * turns of the same call site before it ({@link SubstrateReadRepository#priorTurns}), oldest first, as
+ * separate user and assistant messages. A turn is one trace; a router or memory call in the same trace
+ * is another call site and adds nothing. System messages are excluded. A turn's user messages are those
+ * after its input's last assistant message, so a call site that sends the whole chat on every call
+ * gives each turn once. Each turn contributes its dialogue once: the substrate can carry both an {@code
+ * agent} and an {@code llm} span per turn, and the {@code llm} span wins. Tool spans and tool parts leave no text; an assistant turn only records whether
  * it ended on a tool call. Every assistant text part between two user messages is joined into one turn,
  * reading the output of every span of the bearer's kind in the turn, so an agentic turn's final answer
  * is not lost behind its first tool call.
@@ -31,7 +33,6 @@ import org.springframework.stereotype.Component;
 class ConversationThreadAssembler {
 
     private static final Set<String> DIALOGUE_ROLES = Set.of("user", "assistant");
-    private static final Set<String> USER_ROLE = Set.of("user");
     // Only dialogue-bearing spans carry a scored user turn; a tool/retrieval span has no thread.
     private static final Set<String> CONVERSATIONAL_KINDS = Set.of("llm", "agent");
 
@@ -56,7 +57,7 @@ class ConversationThreadAssembler {
 
     /**
      * The scored user turn and the dialogue before it as separate messages, oldest first, or empty when
-     * {@code scored} is not a dialogue span or carries no user message. No caps and no eligibility rule
+     * {@code scored} is not a dialogue span, has no call site, or carries no user message. No caps and no eligibility rule
      * are applied here; see {@link StructuredThread}.
      */
     public Optional<StructuredThread> assembleStructured(SubstrateObservation scored) {
@@ -64,13 +65,13 @@ class ConversationThreadAssembler {
         if (kind == null || !CONVERSATIONAL_KINDS.contains(kind)) {
             return Optional.empty();
         }
-        List<StructuredThread.Message> scoredUser = new ArrayList<>();
-        appendMessages(scoredUser, scored.input(), "user", USER_ROLE);
-        if (scoredUser.isEmpty()) {
+        String callSite = scored.callSiteId();
+        List<StructuredThread.Message> scoredUser = ownUserMessages(scored.input());
+        if (callSite == null || scoredUser.isEmpty()) {
             return Optional.empty();
         }
         SubstrateReadRepository.PriorTurns prior =
-                substrate.priorTurns(scored.projectId(), scored.traceId(), PRIOR_TURNS);
+                substrate.priorTurns(scored.projectId(), scored.traceId(), callSite, PRIOR_TURNS);
         List<SubstrateObservation> chronological = prior.spans();
 
         Map<String, String> dialogueBearer = chooseDialogueBearers(chronological);
@@ -88,21 +89,34 @@ class ConversationThreadAssembler {
                 continue; // the agent twin of a turn that has an llm span
             }
             if (obs.observationId().equals(dialogueBearer.get(turnKey(obs)))) {
-                appendMessages(earlier, obs.input(), "user", DIALOGUE_ROLES);
+                appendMessages(earlier, ownUserMessages(obs.input()));
             }
-            appendMessages(earlier, obs.output(), "assistant", DIALOGUE_ROLES);
+            appendMessages(earlier, columnStructuredMessages(obs.output(), "assistant", DIALOGUE_ROLES));
         }
         return Optional.of(new StructuredThread(earlier, joined(scoredUser), prior.count() + 1));
     }
 
     /**
-     * Append a gen_ai column's {@code roles} messages to {@code into}, joining an assistant message onto
-     * an assistant turn already at the tail. User messages are kept distinct, so a user who wrote twice
-     * with no reply between stays visible as two user turns.
+     * A turn's own user messages: those after the input's last assistant message. A call site that sends the
+     * whole chat on every call repeats every earlier message, and any context block it sends under the user
+     * role, in each turn's input; only what follows the last reply is new in that turn.
      */
-    private static void appendMessages(
-            List<StructuredThread.Message> into, @Nullable String column, String fallbackRole, Set<String> roles) {
-        for (StructuredThread.Message msg : columnStructuredMessages(column, fallbackRole, roles)) {
+    private static List<StructuredThread.Message> ownUserMessages(@Nullable String input) {
+        List<StructuredThread.Message> messages = columnStructuredMessages(input, "user", DIALOGUE_ROLES);
+        int afterLastReply = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("assistant".equals(messages.get(i).role())) afterLastReply = i + 1;
+        }
+        return messages.subList(afterLastReply, messages.size());
+    }
+
+    /**
+     * Append {@code messages} to {@code into}, joining an assistant message onto an assistant turn already
+     * at the tail. User messages are kept distinct, so a user who wrote twice with no reply between stays
+     * visible as two user turns.
+     */
+    private static void appendMessages(List<StructuredThread.Message> into, List<StructuredThread.Message> messages) {
+        for (StructuredThread.Message msg : messages) {
             int last = into.size() - 1;
             if ("assistant".equals(msg.role())
                     && last >= 0

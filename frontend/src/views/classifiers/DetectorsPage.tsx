@@ -31,7 +31,9 @@ import type {
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Spinner, Toggle, cn } from "../../ui";
+import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
+import { FrustrationScopeSection } from "./FrustrationScopeSection";
 import { GroundednessEnableModal } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
@@ -48,6 +50,7 @@ import {
   rowState,
   writeSetupFlag,
 } from "./groundedness";
+import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
   CONTAINER,
@@ -568,7 +571,8 @@ function truncate(s: string, max: number): string {
 }
 
 /**
- * One detection = one trace this classifier tripped on. Rows link into the trace; a
+ * One detection = one trace this classifier tripped on. Rows open the session the trace belongs to,
+ * focused on the flagged span, and the trace itself for anonymous traffic with no session; a
  * context-grain detection (no trace_id) has nothing to open and stays inert rather than
  * pretending to be a link.
  *
@@ -614,10 +618,15 @@ export function DetectionRow({ event }: { event: ClassifierEvent }) {
       </div>
     );
   }
+  const to = event.session_id
+    ? `../sessions/${encodeURIComponent(event.session_id)}${
+        event.subject_kind === "span" ? `?span=${encodeURIComponent(event.subject_id)}` : ""
+      }`
+    : `../traces/${encodeURIComponent(event.trace_id)}`;
   return (
     <div className="flex items-start bg-surface gap-3 py-2.75 px-3.5">
       <Link
-        to={`../traces/${encodeURIComponent(event.trace_id)}`}
+        to={to}
         className="min-w-0 flex-1 hover:opacity-80 transition-opacity"
         style={{ transitionDuration: "var(--duration-micro)" }}
       >
@@ -689,6 +698,11 @@ function NotScoringCallout({ label, onRestart }: { label: string; onRestart: () 
   );
 }
 
+function callSiteMeta(classifier: Classifier): string {
+  const count = classifier.call_site_ids?.length;
+  return count === undefined ? "" : ` · ${count} call site${count === 1 ? "" : "s"}`;
+}
+
 function ClassifierRail({
   classifier,
   health,
@@ -704,6 +718,7 @@ function ClassifierRail({
 }) {
   const { api } = useTenant();
   const [restarting, setRestarting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const isMetricDrift = classifier != null && METRIC_DRIFT_DETECTORS.has(classifier.detector);
   const hasFindings = classifier != null && FINDING_DETECTORS.has(classifier.detector);
 
@@ -727,7 +742,7 @@ function ClassifierRail({
       open
       onClose={onClose}
       title={classifier.name}
-      meta={`${classifier.enabled ? "Enabled" : "Disabled"} · ${classifier.mode}`}
+      meta={`${classifier.enabled ? "Enabled" : "Disabled"} · ${classifier.mode}${callSiteMeta(classifier)}`}
       aria-label={`${classifier.name} detail`}
     >
       <p className="text-muted m-0 text-body">
@@ -798,12 +813,25 @@ function ClassifierRail({
         </RailBlock>
       )}
 
+      {classifier.detector === FRUSTRATION_DETECTOR ? (
+        <RailBlock label="Call sites">
+          <FrustrationScopeSection classifier={classifier} />
+        </RailBlock>
+      ) : (
+        !UNSCOPED_DETECTORS.has(classifier.detector) && (
+          <RailBlock label="Call sites">
+            {/* Keyed so a switch to another row seeds the form from that row's list. */}
+            <CallSitesSection key={classifier.id} classifier={classifier} />
+          </RailBlock>
+        )
+      )}
+
       <RailBlock
         label="Detections"
         meta={
           detections.length === 0
             ? undefined
-            : `${detections.length}${detections.length === DETECTION_LIMIT ? " most recent" : ""} · select one to open the trace`
+            : `${detections.length}${detections.length === DETECTION_LIMIT ? " most recent" : ""} · select one to open its session`
         }
       >
         {detectionsQ.isLoading && <LoadingRow />}
@@ -826,12 +854,22 @@ function ClassifierRail({
         )}
       </RailBlock>
 
+      <RailBlock label="Reset">
+        <p className="text-muted m-0 mb-2.25 text-small">
+          Delete what this classifier found and learned, and check every kept trace again.
+        </p>
+        <Button size="sm" variant="danger" onClick={() => setResetting(true)}>
+          Reset classifier
+        </Button>
+      </RailBlock>
+
       <div className="border-t border-border mt-4.5 pt-4.5">
         <Suspense fallback={<LoadingRow />}>
           <DebugSection classifier={classifier} />
         </Suspense>
       </div>
 
+      {resetting && <ClassifierResetModal classifier={classifier} onClose={() => setResetting(false)} />}
       {groundedness && restarting && (
         <GroundednessRestartModal
           classifierId={classifier.id}

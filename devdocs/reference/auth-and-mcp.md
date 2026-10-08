@@ -90,7 +90,7 @@ cross-tenant id reads as not-found), and there is deliberately **no server-side 
 agent that wants a stride or a draw takes it and says so in its citation.
 
 The launch product's own output is open (project, imported taxonomy, cases and the RCA reports they
-carry, findings, query, the substrate list/read tools). The full catalogue is **19 tools, and every
+carry, findings, query, the substrate list/read tools). The full catalogue is **20 tools, and every
 one of them is open**: `tools/list` returns all of them for any valid token. It was 22 with two gated
 on `GRADERS` until grading was deleted and took three with it: `list_graders` and `get_grader` (the
 gated pair) plus the open `list_quality_dimensions`, whose axes each named a grader. The per-tool

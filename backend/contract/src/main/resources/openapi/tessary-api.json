@@ -756,6 +756,27 @@
         ],
         "type" : "object"
       },
+      "ApiResponseFrustrationScopeView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/FrustrationScopeView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseFrustrationTuningView" : {
         "properties" : {
           "data" : {
@@ -1249,6 +1270,26 @@
           "data" : {
             "items" : {
               "$ref" : "#/components/schemas/SourceResponse"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseListString" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "type" : "string"
             },
             "type" : [
               "array",
@@ -3943,6 +3984,12 @@
               "null"
             ]
           },
+          "session_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "severity" : {
             "type" : [
               "string",
@@ -3971,6 +4018,7 @@
           "id",
           "occurred_at",
           "project_version_id",
+          "session_id",
           "severity",
           "subject_id",
           "subject_kind",
@@ -4059,6 +4107,15 @@
           "built_in" : {
             "type" : "boolean"
           },
+          "call_site_ids" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
           "classifier_key" : {
             "type" : "string"
           },
@@ -4108,6 +4165,7 @@
         },
         "required" : [
           "built_in",
+          "call_site_ids",
           "classifier_key",
           "config_json",
           "created_at",
@@ -5519,6 +5577,20 @@
           "minDecisionInterval",
           "rate",
           "scorerVersion"
+        ],
+        "type" : "object"
+      },
+      "FrustrationScopeView" : {
+        "properties" : {
+          "call_site_ids" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "call_site_ids"
         ],
         "type" : "object"
       },
@@ -9470,6 +9542,23 @@
         ],
         "type" : "object"
       },
+      "SetCallSitesRequest" : {
+        "properties" : {
+          "call_site_ids" : {
+            "items" : {
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "maxItems" : 2147483647,
+            "minItems" : 1,
+            "type" : [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type" : "object"
+      },
       "SetEnabledRequest" : {
         "properties" : {
           "enabled" : {
@@ -9478,6 +9567,23 @@
         },
         "required" : [
           "enabled"
+        ],
+        "type" : "object"
+      },
+      "SetFrustrationScopeRequest" : {
+        "properties" : {
+          "call_site_ids" : {
+            "items" : {
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "maxItems" : 200,
+            "minItems" : 0,
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "call_site_ids"
         ],
         "type" : "object"
       },
@@ -13778,6 +13884,52 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/call-sites" : {
+      "get" : {
+        "operationId" : "ClassifierController_callSites",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseListString"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events" : {
       "get" : {
         "operationId" : "ClassifierController_events",
@@ -13980,6 +14132,70 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/call-sites" : {
+      "put" : {
+        "operationId" : "ClassifierController_setCallSites",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCallSitesRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseClassifierView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/debug" : {
       "get" : {
         "operationId" : "ClassifierDebugController_get",
@@ -14159,6 +14375,122 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseListClassifierEventView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope" : {
+      "get" : {
+        "operationId" : "ClassifierController_getFrustrationScope",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      },
+      "put" : {
+        "operationId" : "ClassifierController_setFrustrationScope",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetFrustrationScopeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
                 }
               }
             },
@@ -14379,6 +14711,60 @@
           },
           "required" : true
         },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseClassifierView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/reset" : {
+      "post" : {
+        "operationId" : "ClassifierController_reset",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
         "responses" : {
           "200" : {
             "content" : {
@@ -17531,6 +17917,14 @@
             "required" : false,
             "schema" : {
               "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
             }
           },
           {

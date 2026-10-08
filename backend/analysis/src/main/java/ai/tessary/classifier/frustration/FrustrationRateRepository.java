@@ -19,15 +19,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * What the Frustration rate test replays: per call site and per hour, how many conversations were scored and how
- * many of them are frustrated now.
+ * What the Frustration rate test replays: per call site and per hour, how many sessions were scored and how many
+ * of them are frustrated now.
  *
- * <p><b>A conversation is one trial, on the call site of its first scored turn.</b> There is no conversation
- * table: every fact is a {@code GROUP BY conversation_id} over {@code frustration_assessment} under the current
- * scorer. A conversation is bucketed in the hour of its first scored turn and assigned to that turn's call site
- * for good, so a flag raised on a later turn, on any call site, counts against the stream the conversation was a
- * trial in. It is a failure while it carries an uncleared detection; a {@code false_alarm} resolve clears it and
- * the next replay counts it calm again.
+ * <p><b>A session is one trial: a conversation on one call site.</b> There is no session table: every fact is a
+ * {@code GROUP BY conversation_id, call_site_id} over {@code frustration_assessment} under the current scorer. A
+ * session is bucketed in the hour of its first scored turn on that call site. A conversation that reaches two
+ * picked call sites is a trial on each, and a flag on one call site never counts against the other. A session is a
+ * failure while it carries an uncleared detection on its call site; a {@code false_alarm} resolve clears it and the
+ * next replay counts it calm again.
  *
  * <p><b>Read, not accumulated.</b> An hour's tally is not final when first read (a later turn can flag an old
  * conversation), which is why the replay rebuilds every pass from these counts.
@@ -36,8 +36,8 @@ import org.springframework.stereotype.Repository;
 public class FrustrationRateRepository {
 
     /**
-     * The key a conversation whose first scored turn has no call site is tallied under. It never alarms (the
-     * service drops it before the replay); the Tuning view counts it so the gap is visible.
+     * The key a session scored before call sites were picked, with no call site, is tallied under. It never alarms
+     * (the service drops it before the replay); the Tuning view counts it so the gap is visible.
      */
     public static final String UNASSIGNED = "";
 
@@ -50,19 +50,21 @@ public class FrustrationRateRepository {
     static final String HOURLY_TALLIES = """
             WITH conv AS (
               SELECT a.conversation_id,
+                     COALESCE(a.call_site_id, '') AS call_site_id,
                      MIN(a.turn_started_at) AS first_scored_at,
-                     (ARRAY_AGG(COALESCE(a.call_site_id, '') ORDER BY a.turn_started_at, a.id))[1] AS call_site_id,
                      BOOL_OR(a.frustrated) AS any_flag
                 FROM frustration_assessment a
                WHERE a.project_id = :pid AND a.classifier_id = :cid
                  AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :from
-               GROUP BY a.conversation_id)
+               GROUP BY a.conversation_id, COALESCE(a.call_site_id, ''))
             SELECT date_trunc('hour', c.first_scored_at, 'UTC') AS bucket, c.call_site_id,
                    COUNT(*) AS conversations,
                    COUNT(*) FILTER (WHERE c.any_flag AND EXISTS (
                        SELECT 1 FROM {detections} d
                         WHERE d.project_id = :pid AND d.classifier_id = :cid
-                          AND d.subject_session_id = c.conversation_id AND d.cleared_at IS NULL)) AS frustrated
+                          AND d.subject_session_id = c.conversation_id
+                          AND COALESCE(d.evidence ->> 'call_site_id', '') = c.call_site_id
+                          AND d.cleared_at IS NULL)) AS frustrated
               FROM conv c
              GROUP BY 1, 2
              ORDER BY 1, 2
@@ -79,17 +81,17 @@ public class FrustrationRateRepository {
     private static final String SPELL_SESSIONS = """
             WITH conv AS (
               SELECT a.conversation_id,
-                     MIN(a.turn_started_at) AS first_scored_at,
-                     (ARRAY_AGG(COALESCE(a.call_site_id, '') ORDER BY a.turn_started_at, a.id))[1] AS call_site_id
+                     MIN(a.turn_started_at) AS first_scored_at
                 FROM frustration_assessment a
                WHERE a.project_id = :pid AND a.classifier_id = :cid
                  AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :windowFrom
+                 AND COALESCE(a.call_site_id, '') = :callSite
                GROUP BY a.conversation_id
               {frustrated})
             SELECT c.conversation_id{flaggedColumn}
               FROM conv c
               {flaggedJoin}
-             WHERE c.call_site_id = :callSite AND c.first_scored_at >= :onset AND c.first_scored_at < :until
+             WHERE c.first_scored_at >= :onset AND c.first_scored_at < :until
              ORDER BY c.first_scored_at DESC, c.conversation_id DESC
             """;
 
@@ -99,7 +101,8 @@ public class FrustrationRateRepository {
                 SELECT d.subject_trace_id
                   FROM {detections} d
                  WHERE d.project_id = :pid AND d.classifier_id = :cid
-                   AND d.subject_session_id = c.conversation_id AND d.cleared_at IS NULL
+                   AND d.subject_session_id = c.conversation_id
+                   AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite AND d.cleared_at IS NULL
                  ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
                  LIMIT 1) d ON true""";
 
@@ -126,6 +129,7 @@ public class FrustrationRateRepository {
                 SELECT d.subject_session_id, d.subject_started_at
                   FROM {detections} d
                  WHERE d.project_id = e.project_id AND d.classifier_id = :cid AND d.subject_trace_id = e.trace_id
+                   AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite
                  ORDER BY d.subject_started_at DESC NULLS LAST, d.id DESC
                  LIMIT 1) d ON true
              WHERE e.project_id = :pid AND e.finding_id = :fid AND e.role = 'witness'
@@ -203,9 +207,9 @@ public class FrustrationRateRepository {
     }
 
     /**
-     * Scored and frustrated conversations per call site per hour since {@code from}, oldest first, as the tallies
-     * {@code ToolErrorTrend} replays: {@code calls} is conversations, {@code failures} is frustrated ones. A
-     * conversation with no call site on its first scored turn is keyed {@link #UNASSIGNED}.
+     * Scored and frustrated sessions per call site per hour since {@code from}, oldest first, as the tallies
+     * {@code ToolErrorTrend} replays: {@code calls} is sessions, {@code failures} is frustrated ones. A session
+     * scored with no call site, before call sites were picked, is keyed {@link #UNASSIGNED}.
      */
     public List<HourlyToolTally> hourlyTallies(
             String projectId, String classifierId, String scorerVersion, Instant from) {
@@ -287,10 +291,17 @@ public class FrustrationRateRepository {
 
     /**
      * One page of {@code findingId}'s witness trace ids, newest flag first, and the total under the same filter.
-     * With {@code cause} set, only the witnesses that cause names: its share.
+     * {@code callSiteId} is the finding's: a witness trace can also hold a flag on another call site. With {@code
+     * cause} set, only the witnesses that cause names: its share.
      */
     public WitnessPage witnessPage(
-            String projectId, String classifierId, String findingId, @Nullable CauseRef cause, int limit, int offset) {
+            String projectId,
+            String classifierId,
+            String callSiteId,
+            String findingId,
+            @Nullable CauseRef cause,
+            int limit,
+            int offset) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         if (limit <= 0) return new WitnessPage(List.of(), 0);
         JdbcClient.StatementSpec spec = jdbc.sql(WITNESS_PAGE
@@ -298,6 +309,7 @@ public class FrustrationRateRepository {
                         .replace("{filter}", cause == null ? "" : CAUSE_FILTER))
                 .param("pid", projectId)
                 .param("cid", classifierId)
+                .param("callSite", callSiteId)
                 .param("fid", findingId)
                 .param("limit", limit)
                 .param("offset", Math.max(0, offset));
@@ -314,17 +326,19 @@ public class FrustrationRateRepository {
             // Past the end: the window count is on no row, so read it on its own.
             return new WitnessPage(
                     List.of(),
-                    witnessPage(projectId, classifierId, findingId, cause, 1, 0).total());
+                    witnessPage(projectId, classifierId, callSiteId, findingId, cause, 1, 0)
+                            .total());
         }
         return new WitnessPage(ids, total[0]);
     }
 
     /**
-     * The detection rows behind {@code traceIds}, by trace: what a finding's page shows beside each witness. Rows
-     * of any clear state, so a conversation a resolve cleared still reads as what it was when the finding cited
-     * it.
+     * The detection rows on {@code callSiteId} behind {@code traceIds}, by trace: what a finding's page shows beside
+     * each witness. Rows of any clear state, so a session a resolve cleared still reads as what it was when the
+     * finding cited it.
      */
-    public Map<String, FlaggedTurn> flaggedTurns(String projectId, String classifierId, List<String> traceIds) {
+    public Map<String, FlaggedTurn> flaggedTurns(
+            String projectId, String classifierId, String callSiteId, List<String> traceIds) {
         String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.FRUSTRATION));
         Map<String, FlaggedTurn> out = new HashMap<>();
         if (traceIds.isEmpty()) return out;
@@ -332,12 +346,14 @@ public class FrustrationRateRepository {
                         + " d.evidence ->> 'call_site_id' AS call_site_id, d.subject_started_at, d.cleared_at,"
                         + " (SELECT a.request -> 'state' ->> 'current_user_message' FROM frustration_assessment a"
                         + "   WHERE a.project_id = d.project_id AND a.classifier_id = d.classifier_id"
-                        + "     AND a.trace_id = d.subject_trace_id"
+                        + "     AND a.trace_id = d.subject_trace_id AND COALESCE(a.call_site_id, '') = :callSite"
                         + "   ORDER BY a.created_at DESC LIMIT 1) AS message"
                         + " FROM " + table + " d"
-                        + " WHERE d.project_id = :pid AND d.classifier_id = :cid AND d.subject_trace_id IN (:traces)")
+                        + " WHERE d.project_id = :pid AND d.classifier_id = :cid AND d.subject_trace_id IN (:traces)"
+                        + " AND COALESCE(d.evidence ->> 'call_site_id', '') = :callSite")
                 .param("pid", projectId)
                 .param("cid", classifierId)
+                .param("callSite", callSiteId)
                 .param("traces", traceIds)
                 .query((rs, n) -> {
                     String score = rs.getString("score");
@@ -358,8 +374,8 @@ public class FrustrationRateRepository {
 
     /**
      * The turns shown around a flagged one: the flagged trace's session, for a link to the whole
-     * conversation, and the ids of the {@code before} top-level traces that started before it in the same
-     * conversation, oldest first.
+     * conversation, and the ids of the {@code before} top-level traces of the same call site that started
+     * before it in the same conversation, oldest first.
      *
      * @param sessionId null when the flagged trace carries no session
      */
@@ -372,10 +388,12 @@ public class FrustrationRateRepository {
 
     /**
      * {@link ConversationContext} for each of {@code traceIds}, keyed by trace id. The conversation key is
-     * {@code COALESCE(thread_id, session_id)}, the grain the classifier scored at, read in event time so
-     * an upload that stored its turns out of order still reads them in the order they happened.
+     * {@code COALESCE(thread_id, session_id)}, and an earlier turn is one that reached {@code callSiteId}: the
+     * turns the classifier read, in event time so an upload that stored its turns out of order still reads
+     * them in the order they happened.
      */
-    public Map<String, ConversationContext> conversationContext(String projectId, List<String> traceIds, int before) {
+    public Map<String, ConversationContext> conversationContext(
+            String projectId, String callSiteId, List<String> traceIds, int before) {
         Map<String, ConversationContext> out = new HashMap<>();
         if (traceIds.isEmpty()) return out;
         Map<String, String> sessions = new HashMap<>();
@@ -389,6 +407,9 @@ public class FrustrationRateRepository {
                                    AND t.parent_trace_id IS NULL
                                    AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
                                    AND (t.started_at, t.id) < (f.started_at, f.id)
+                                   AND EXISTS (SELECT 1 FROM span c
+                                                WHERE c.project_id = t.project_id AND c.trace_id = t.id
+                                                  AND c.call_site_id = :callSite AND c.kind IN ('llm', 'agent'))
                                  ORDER BY t.started_at DESC, t.id DESC
                                  LIMIT :before) p ON TRUE
                          WHERE f.project_id = :pid AND f.id IN (:traces)
@@ -396,6 +417,7 @@ public class FrustrationRateRepository {
                         """)
                 .param("pid", projectId)
                 .param("traces", traceIds)
+                .param("callSite", callSiteId)
                 .param("before", before)
                 .query(rs -> {
                     String flagged = rs.getString("flagged_id");

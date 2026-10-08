@@ -161,6 +161,19 @@ describe("SessionDetail", () => {
   });
 });
 
+describe("SessionDetail JSON", () => {
+  it("shows the session and its spans as the API sent them, every string in full once expanded", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderSession("?view=json");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
+  });
+});
+
 describe("TraceRail", () => {
   const detail: TraceDetailView = {
     trace: TRACE_A,

@@ -230,8 +230,8 @@ public final class ClassifierMethodCard {
             from the start learned that as normal and is flagged only for getting worse. A resolve
             restarts the accumulator and re-learns the rate from the traffic after it.
 
-            A session is one trial, counted on the call site of its first scored turn, and it is a
-            failure while it holds an uncleared flag. The flagged turn can sit on another call site.
+            A session is one conversation on one call site. It is one trial, and a failure while it
+            holds an uncleared flag.
 
             **The claim's numbers** are in `get_finding` under `frustration`: `rate` (`refRate` and
             `curRate` as fractions of sessions, `nRef`, `nCur`, `failuresCur`, `statistic` against

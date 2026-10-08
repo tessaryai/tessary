@@ -26,7 +26,7 @@ class ConversationThreadAssemblerTest {
 
     private static ConversationThreadAssembler assembler(SubstrateObservation... priorOldestFirst) {
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
-        when(substrate.priorTurns(anyString(), anyString(), anyInt()))
+        when(substrate.priorTurns(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(new SubstrateReadRepository.PriorTurns(List.of(priorOldestFirst), priorOldestFirst.length));
         return new ConversationThreadAssembler(substrate);
     }
@@ -73,6 +73,65 @@ class ConversationThreadAssemblerTest {
                                 new Message("user", "the export is empty", true, false),
                                 new Message("assistant", "Try re-running it.", true, false),
                                 new Message("user", "still empty", true, false)),
+                        new Message("user", "this is useless", true, false),
+                        3)),
+                thread);
+    }
+
+    /**
+     * A call site that sends the whole chat on every call: each span's input repeats the context block and every
+     * earlier message. Read whole, the context block becomes the start of the current message and each earlier turn
+     * repeats the chat. Only the user messages after the input's last assistant message are that turn's own.
+     */
+    @Test
+    void aCallSiteThatSendsTheWholeChatGivesOnlyEachTurnsOwnUserMessage() {
+        String system = "{\"role\":\"system\",\"content\":\"You are a support bot.\"}";
+        String background = "{\"role\":\"user\",\"content\":\"[CONTEXT] account: demo\"}";
+        String opener = "{\"role\":\"user\",\"content\":\"the export button does nothing\"}";
+        String retry = "{\"role\":\"assistant\",\"content\":\"Try exporting again from the menu.\"}";
+        String stillFails = "{\"role\":\"user\",\"content\":\"it still fails\"}";
+        String sorry = "{\"role\":\"assistant\",\"content\":\"Sorry, I will look into it.\"}";
+        String sameError = "{\"role\":\"user\",\"content\":\"same error again\"}";
+        String clearCache = "{\"role\":\"assistant\",\"content\":\"Please clear the cache and retry.\"}";
+        String useless = "{\"role\":\"user\",\"content\":\"this is useless\"}";
+
+        SubstrateObservation failsTurn = span(
+                "t1",
+                "llm",
+                "[" + String.join(",", system, background, opener, retry, stillFails) + "]",
+                "[" + sorry + "]");
+        SubstrateObservation sameErrorTurn = span(
+                "t2",
+                "llm",
+                "[" + String.join(",", system, background, opener, retry, stillFails, sorry, sameError) + "]",
+                "[" + clearCache + "]");
+        SubstrateObservation scored = span(
+                "t3",
+                "llm",
+                "["
+                        + String.join(
+                                ",",
+                                system,
+                                background,
+                                opener,
+                                retry,
+                                stillFails,
+                                sorry,
+                                sameError,
+                                clearCache,
+                                useless)
+                        + "]",
+                null);
+
+        Optional<StructuredThread> thread = assembler(failsTurn, sameErrorTurn).assembleStructured(scored);
+
+        assertEquals(
+                Optional.of(new StructuredThread(
+                        List.of(
+                                new Message("user", "it still fails", true, false),
+                                new Message("assistant", "Sorry, I will look into it.", true, false),
+                                new Message("user", "same error again", true, false),
+                                new Message("assistant", "Please clear the cache and retry.", true, false)),
                         new Message("user", "this is useless", true, false),
                         3)),
                 thread);

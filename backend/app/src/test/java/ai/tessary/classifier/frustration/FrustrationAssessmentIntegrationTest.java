@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.ClassifierDetectionWriteRepository.CallSiteTurn;
 import ai.tessary.classifier.ClassifierPause;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
@@ -61,8 +62,8 @@ import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * The frustration detector's writes against Postgres: an assessment per sent turn and a detection per
- * flagged turn, idempotent when a page is written twice; the conversation flag that stops a
- * conversation being sent again until a human clears it; and the pause and held-page counters the sweep
+ * flagged turn, idempotent when a page is written twice; the session flag that stops a session, a
+ * conversation on one call site, being sent again until a human clears it; and the pause and held-page counters the sweep
  * keeps. The decision call and the conversation read are stubbed; everything else is the real schema.
  */
 @SpringBootTest
@@ -79,6 +80,9 @@ class FrustrationAssessmentIntegrationTest {
 
     @Autowired
     ClassifierRepository classifiers;
+
+    @Autowired
+    FrustrationScopeRepository scopes;
 
     @Autowired
     ClassifierService classifierService;
@@ -203,7 +207,7 @@ class FrustrationAssessmentIntegrationTest {
     }
 
     @Test
-    void aFlaggedConversationIsSuppressedUntilItsFlagIsCleared() {
+    void aFlaggedSessionIsSuppressedUntilItsFlagIsCleared() {
         String pid = project("fr-suppress");
         ClassifierRow signal = frustration(pid);
         Instant at = Instant.now();
@@ -214,9 +218,18 @@ class FrustrationAssessmentIntegrationTest {
         JevFrustrationDetector detector = detector(Map.of("tr-a1", 0.9));
         detector.complete(signal, detector.score(signal, List.of(first)), PageAction.PERSIST, 1);
 
-        Set<String> suppressed = detections.tracesInUnclearedFlaggedConversations(
-                BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-a2", "tr-b1", "tr-none"));
-        assertEquals(Set.of("tr-a2"), suppressed, "only the flagged conversation's later turn is dropped");
+        Set<CallSiteTurn> suppressed = detections.unclearedFlaggedSessions(
+                BuiltInDetector.Kind.FRUSTRATION,
+                pid,
+                signal.id(),
+                List.of(
+                        new CallSiteTurn("tr-a2", "cs-1"),
+                        new CallSiteTurn("tr-b1", "cs-1"),
+                        new CallSiteTurn("tr-none", "cs-1")));
+        assertEquals(
+                Set.of(new CallSiteTurn("tr-a2", "cs-1")),
+                suppressed,
+                "only the flagged session's later turn is dropped");
 
         jdbc.sql("UPDATE " + "frustration_detection" + " SET cleared_at = :now WHERE project_id = :pid")
                 .param("now", Instant.now().toString())
@@ -224,9 +237,47 @@ class FrustrationAssessmentIntegrationTest {
                 .update();
         assertEquals(
                 Set.of(),
-                detections.tracesInUnclearedFlaggedConversations(
-                        BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of("tr-a2")),
-                "a cleared flag makes the conversation scorable again");
+                detections.unclearedFlaggedSessions(
+                        BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of(new CallSiteTurn("tr-a2", "cs-1"))),
+                "a cleared flag makes the session scorable again");
+    }
+
+    /**
+     * Two picked call sites in one turn are two sessions. Keyed on the trace, the second call site's assessment and
+     * flag conflict with the first's and are dropped; keyed on the conversation, the first flag suppresses the other
+     * call site.
+     */
+    @Test
+    void twoCallSitesInOneTurnKeepTheirOwnAssessmentFlagAndSuppression() {
+        String pid = project("fr-two-call-sites");
+        ClassifierRow signal = frustration(pid);
+        Instant at = Instant.now().minus(1, ChronoUnit.HOURS);
+        fx.trace(pid, "tr-1", "sess-1", "thread-1", null, at);
+        fx.trace(pid, "tr-2", "sess-1", "thread-1", null, at.plusSeconds(60));
+        SubstrateObservation reply = callSiteTurn(pid, "reply-1", "tr-1", "sess-1", "cs-1", at);
+        SubstrateObservation support = callSiteTurn(pid, "support-1", "tr-1", "sess-1", "cs-2", at);
+        JevFrustrationDetector detector = detector(Map.of("reply-1", 0.9, "support-1", 0.8));
+
+        List<FiredTurn> fired =
+                detector.complete(signal, detector.score(signal, List.of(reply, support)), PageAction.PERSIST, 1);
+
+        assertEquals(2, fired.size());
+        assertEquals(2, count("frustration_assessment", pid));
+        assertEquals(2, count("frustration_detection", pid));
+
+        jdbc.sql("UPDATE frustration_detection SET cleared_at = :now"
+                        + " WHERE project_id = :pid AND evidence ->> 'call_site_id' = 'cs-2'")
+                .param("now", Instant.now().toString())
+                .param("pid", pid)
+                .update();
+        assertEquals(
+                Set.of(new CallSiteTurn("tr-2", "cs-1")),
+                detections.unclearedFlaggedSessions(
+                        BuiltInDetector.Kind.FRUSTRATION,
+                        pid,
+                        signal.id(),
+                        List.of(new CallSiteTurn("tr-2", "cs-1"), new CallSiteTurn("tr-2", "cs-2"))),
+                "the reply's flag stops only the reply; the cleared support flag stops nothing");
     }
 
     @Test
@@ -270,9 +321,13 @@ class FrustrationAssessmentIntegrationTest {
                 .id();
     }
 
+    /** The project's Frustration classifier, scoring call sites cs-1 and cs-2. */
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
-        return ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
+        ClassifierRow signal =
+                ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
+        scopes.replace(pid, signal.id(), List.of("cs-1", "cs-2"));
+        return signal;
     }
 
     private ClassifierJobRow job(String pid, String classifierId) {
@@ -282,17 +337,26 @@ class FrustrationAssessmentIntegrationTest {
                 .orElseThrow();
     }
 
-    /** A turn root in conversation {@code thread} (else {@code session}), with an eligible thread stubbed. */
+    /** A turn on cs-1 in conversation {@code thread} (else {@code session}), with an eligible thread stubbed. */
     private SubstrateObservation turn(
             String pid, String traceId, String session, @Nullable String thread, Instant startedAt) {
         fx.trace(pid, traceId, session, thread, null, startedAt);
+        return callSiteTurn(pid, traceId, traceId, session, "cs-1", startedAt);
+    }
+
+    /**
+     * The span of {@code callSiteId} in trace {@code traceId}, with an eligible thread stubbed. {@code key} names the
+     * span and is what the stubbed decision call answers by.
+     */
+    private SubstrateObservation callSiteTurn(
+            String pid, String key, String traceId, String session, String callSiteId, Instant startedAt) {
         SubstrateObservation obs = new SubstrateObservation(
-                "span-" + traceId,
+                "span-" + key,
                 pid,
                 traceId,
                 session,
                 null,
-                "cs-1",
+                callSiteId,
                 "llm",
                 "chat",
                 null,
@@ -307,7 +371,7 @@ class FrustrationAssessmentIntegrationTest {
                                 text("assistant", "first answer"),
                                 text("user", "second question"),
                                 text("assistant", "second answer")),
-                        text("user", CURRENT_PREFIX + traceId),
+                        text("user", CURRENT_PREFIX + key),
                         3)));
         return obs;
     }
@@ -330,6 +394,7 @@ class FrustrationAssessmentIntegrationTest {
                 assessments,
                 detections,
                 classifiers,
+                scopes,
                 tx,
                 new FrustrationProperties(),
                 mapper,

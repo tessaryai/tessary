@@ -69,7 +69,7 @@ token binds the session to one project; every tool reads `ctx.projectId()`.
 
 ## Tools shipped today
 
-**19 tools, all open.** All delegate to the same services REST uses. **Authoritative names +
+**20 tools, all open.** All delegate to the same services REST uses. **Authoritative names +
 schemas:** `backend/.../mcp/McpToolRegistry.java` — the argument column below names each tool's filters so
 you can see the shape of the surface; it is not a schema copy, and it is not the contract.
 
@@ -105,6 +105,7 @@ Conventions the tools share, stated here once rather than per row:
 | `get_span` | `trace_id` **and** `span_id` | one span, full payload |
 | `list_sessions` | — | paged sessions, most recently active first (identity only — no rollup) |
 | `get_session` | `id` | session + totals summed from its traces + those traces, capped 1000 + `traces_truncated` |
+| `get_conversation` | `id` | one conversation's turns (top-level traces keyed `COALESCE(thread_id, session_id)`, the frustration key), capped 1000 + `traces_truncated` |
 | `describe_dataset` | `dataset` (omit for all) | per dataset: facetable fields, filterable fields, `searchable`, time column, measure |
 | `query_count` | `dataset`, `range`, `filters` | count, or the summed measure on `metric_rollups` |
 | `query_timeseries` | `dataset`, `interval`, `range`, `filters` | buckets |

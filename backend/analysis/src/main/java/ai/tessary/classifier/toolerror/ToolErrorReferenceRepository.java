@@ -45,6 +45,13 @@ public class ToolErrorReferenceRepository {
         this.jdbc = jdbc;
     }
 
+    /** Delete every reference a person accepted in the project. */
+    public int deleteAll(String projectId) {
+        return jdbc.sql("DELETE FROM tool_error_reference WHERE project_id = :pid")
+                .param("pid", projectId)
+                .update();
+    }
+
     /** Every accepted reference in the project, keyed by tool. Empty for a project nobody has corrected. */
     public Map<String, AcceptedReference> byTool(String projectId) {
         return list(projectId).stream().collect(Collectors.toMap(AcceptedReference::toolKey, r -> r));

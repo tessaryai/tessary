@@ -404,6 +404,10 @@ public class TraceV2Repository {
      * becomes {@code EXISTS (SELECT 1 FROM span …)}, keep this trace when any of its spans matches,
      * which is a filter the planner can satisfy from an index and stop at the first hit.
      *
+     * <p>{@code hasCallSite} is the same semi-join over any call site: {@code true} keeps a trace when some span
+     * carries one, {@code false} keeps it when none does. So the {@code true} set is every {@code callSite} set
+     * together, and a trace tagged only below its root still counts.
+     *
      * <p>{@code status} reads the rollup: {@code error} means {@code error_count > 0}, {@code ok} means it
      * is zero. A trace that has never rolled up has a null {@code error_count} and is therefore neither;
      * it is excluded by an explicit status filter rather than silently counted as healthy.
@@ -412,6 +416,7 @@ public class TraceV2Repository {
             @Nullable String model,
             @Nullable String kind,
             @Nullable String callSite,
+            @Nullable Boolean hasCallSite,
             @Nullable String from,
             @Nullable String to,
             @Nullable String status,
@@ -546,6 +551,12 @@ public class TraceV2Repository {
         addExists(where, params, "provided_model_name", "model", query.model());
         addExists(where, params, "kind", "kind", query.kind());
         addExists(where, params, "call_site_id", "callSite", query.callSite());
+        Boolean hasCallSite = query.hasCallSite();
+        if (hasCallSite != null) {
+            where.append(hasCallSite ? " AND EXISTS" : " AND NOT EXISTS")
+                    .append(" (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
+                            + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx.call_site_id IS NOT NULL)");
+        }
 
         String status = query.status();
         if (status != null && !status.isBlank()) {
@@ -640,6 +651,28 @@ public class TraceV2Repository {
                         + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
                 .param("pid", projectId)
                 .param("sid", sessionId)
+                .param("limit", limit)
+                .query((rs, n) -> summary(rs))
+                .list();
+    }
+
+    /**
+     * A conversation's turns, oldest first. A conversation is {@code COALESCE(thread_id, session_id)} and a turn
+     * is a top-level trace: the key and grain the frustration classifier scores at. Served by
+     * {@code ix_trace_conversation}, which is partial on {@code parent_trace_id IS NULL}.
+     */
+    public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
+        return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
+                        + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
+                        + " t.output_tokens, t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens,"
+                        + " t.total_tokens, t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans,"
+                        + " t.is_settled, t.input_preview, t.output_preview"
+                        + " FROM trace t"
+                        + " WHERE t.project_id = :pid AND COALESCE(t.thread_id, t.session_id) = :cid"
+                        + " AND t.parent_trace_id IS NULL AND NOT t.is_deleted"
+                        + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                .param("pid", projectId)
+                .param("cid", conversationId)
                 .param("limit", limit)
                 .query((rs, n) -> summary(rs))
                 .list();
