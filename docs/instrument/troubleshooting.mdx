@@ -52,7 +52,9 @@ The connect screen carries a repair prompt for this state. It deep-links the tag
 **Cause, most likely first:**
 
 1. **The spans carry a call site and no content.** A tracing stack built for latency and errors often records nothing about the model call itself, so there is nothing for a classifier to read. Check your spans against the required rows in [Span requirements](/instrument/span-requirements). An LLM auto-instrumentation such as OpenLLMetry or OpenInference emits those attributes for you and attaches to the provider you already configured.
-2. **The classifiers have not finished fitting a baseline.** This is a wait, not a fault, and it is covered in [Classifiers aren't producing findings](/self-hosting/troubleshooting#classifiers-arent-producing-findings).
+2. **The session and trace boundaries are wrong.** One session must be one end-user conversation, with the same `session.id` on every span of every turn, and one trace must be one turn. When each request gets a new session, or each model call a new trace, every turn looks like the start of a conversation and the conversation-level classifiers never fire. Read one conversation back and compare it with [Span requirements](/instrument/span-requirements).
+3. **The classifier needs a setting you have not made.** [Frustration](/classifiers/frustration#before-you-start) runs only once you turn it on with a provider key. [Groundedness](/classifiers/groundedness) scores only call sites whose shape comes from the `.tessary/` bundle you import.
+4. **The classifiers have not finished fitting a baseline.** This is a wait, not a fault, and it is covered in [Classifiers aren't producing findings](/self-hosting/troubleshooting#classifiers-arent-producing-findings).
 
 **Resolution:** Add the missing attributes at the producer, then let traffic accumulate. Do not translate an auto-instrumentation's dialect by hand: OpenInference and OpenLLMetry spans are normalized at ingest already.
 
