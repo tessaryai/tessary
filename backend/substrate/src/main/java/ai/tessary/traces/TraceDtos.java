@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.traces;
 
+import ai.tessary.storage.TraceDetectionRepository;
 import ai.tessary.storage.TraceV2Repository;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -62,15 +66,53 @@ public final class TraceDtos {
             // "Nothing has arrived since the last rollup" — never "we gave up waiting".
             @JsonProperty("is_settled") boolean isSettled,
             @JsonProperty("input_preview") @Nullable String inputPreview,
-            @JsonProperty("output_preview") @Nullable String outputPreview) {}
+            @JsonProperty("output_preview") @Nullable String outputPreview,
+            // The classifiers that flagged this trace, by name. A flag a false-alarm resolve cleared is not one.
+            @JsonProperty("detected_by") List<DetectionLabel> detectedBy) {}
+
+    /** A classifier that flagged a trace or session. */
+    public record DetectionLabel(
+            @JsonProperty("classifier_id") String classifierId, String name) {}
+
+    /** One classifier's flag on a trace, at the span it judged, so a view can mark where it occurred. */
+    public record DetectionMark(
+            @JsonProperty("classifier_id") String classifierId,
+            String name,
+            @JsonProperty("trace_id") String traceId,
+            @JsonProperty("span_id") @Nullable String spanId) {}
 
     /** A page of traces plus the cursor to fetch the next (older) page, or null at the end. */
     public record TracesPage(
             List<TraceListItem> traces,
             @JsonProperty("next_cursor") @Nullable String nextCursor) {}
 
-    /** Map a repository summary onto the wire. The only such mapping; every trace list surface calls it. */
-    public static TraceListItem item(TraceV2Repository.Summary s) {
+    /**
+     * Map repository summaries onto the wire, each with the classifiers that flagged it. The only such mapping;
+     * every trace list surface calls it.
+     */
+    public static List<TraceListItem> items(
+            List<TraceV2Repository.Summary> rows, List<TraceDetectionRepository.Mark> marks) {
+        Map<String, List<DetectionLabel>> labels = new HashMap<>();
+        for (TraceDetectionRepository.Mark m : marks) {
+            List<DetectionLabel> forTrace = labels.computeIfAbsent(m.traceId(), k -> new ArrayList<>());
+            DetectionLabel label = new DetectionLabel(m.classifierId(), m.classifierName());
+            if (!forTrace.contains(label)) {
+                forTrace.add(label);
+            }
+        }
+        return rows.stream()
+                .map(s -> item(s, labels.getOrDefault(s.id(), List.of())))
+                .toList();
+    }
+
+    /** The marks as the wire carries them. */
+    public static List<DetectionMark> marks(List<TraceDetectionRepository.Mark> marks) {
+        return marks.stream()
+                .map(m -> new DetectionMark(m.classifierId(), m.classifierName(), m.traceId(), m.spanId()))
+                .toList();
+    }
+
+    private static TraceListItem item(TraceV2Repository.Summary s, List<DetectionLabel> detectedBy) {
         Integer errors = s.errorCount();
         return new TraceListItem(
                 s.id(),
@@ -97,6 +139,7 @@ public final class TraceDtos {
                 s.unpricedSpans(),
                 s.isSettled(),
                 s.inputPreview(),
-                s.outputPreview());
+                s.outputPreview(),
+                detectedBy);
     }
 }

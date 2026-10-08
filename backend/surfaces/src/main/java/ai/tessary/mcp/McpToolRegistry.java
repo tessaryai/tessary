@@ -37,6 +37,7 @@ import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
+import ai.tessary.storage.TraceDetectionRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -133,6 +134,7 @@ public class McpToolRegistry {
     private final SpanPayloadRepository payloads;
     private final TraceV2Repository traces;
     private final SessionReadService sessions;
+    private final TraceDetectionRepository detections;
     private final FindingService behaviorDrift;
     private final CaseService cases;
 
@@ -148,7 +150,9 @@ public class McpToolRegistry {
             TraceV2Repository traces,
             SessionReadService sessions,
             FindingService behaviorDrift,
-            CaseService cases) {
+            CaseService cases,
+            TraceDetectionRepository detections) {
+        this.detections = detections;
         this.pipelineService = pipelineService;
         this.projects = projects;
         this.queryService = queryService;
@@ -176,6 +180,7 @@ public class McpToolRegistry {
         this.payloads = null;
         this.traces = null;
         this.sessions = null;
+        this.detections = null;
         this.behaviorDrift = null;
         this.cases = null;
         for (McpTool t : toolset) tools.put(t.name(), t);
@@ -1302,15 +1307,18 @@ public class McpToolRegistry {
                 range == null ? null : range.from(),
                 range == null ? null : range.to(),
                 strArg(args, "status"),
-                strArg(args, "q"));
+                strArg(args, "q"),
+                null);
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));
         // Over-fetch by one; the codec turns the extra row into next_cursor and drops it from the page.
         List<TraceV2Repository.Summary> rows =
                 traces.list(projectId, query, null, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
         TracePageCodec.Page page = TracePageCodec.trim(rows, pageSize, null);
+        List<String> ids =
+                page.rows().stream().map(TraceV2Repository.Summary::id).toList();
         return new TraceDtos.TracesPage(
-                page.rows().stream().map(TraceDtos::item).toList(), page.nextCursor());
+                TraceDtos.items(page.rows(), detections.forTraces(projectId, ids)), page.nextCursor());
     }
 
     /**
@@ -1537,7 +1545,7 @@ public class McpToolRegistry {
     private SessionDtos.SessionsPage listSessions(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
-        return sessions.page(projectId, pageSize, strArg(args, "cursor"), false);
+        return sessions.page(projectId, pageSize, strArg(args, "cursor"), false, TraceV2Repository.TraceQuery.NONE);
     }
 
     /**
@@ -1548,7 +1556,8 @@ public class McpToolRegistry {
      */
     private SessionDtos.SessionDetail getSession(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
-        return sessions.detail(projectId, id).orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
+        return sessions.detail(projectId, id, TraceV2Repository.TraceQuery.NONE)
+                .orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
     }
 
     /** {@code get_conversation}: one conversation's turns, project-scoped like {@link #getSession}. */

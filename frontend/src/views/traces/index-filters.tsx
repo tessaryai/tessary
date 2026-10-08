@@ -67,7 +67,7 @@ function rangeBadge(range: TraceTimeRange): string {
 
 // ---- URL state -------------------------------------------------------------
 
-export type FacetKey = "status" | "kind" | "call_site" | "call_site_scope";
+export type FacetKey = "status" | "kind" | "call_site" | "call_site_scope" | "detected_by";
 
 /**
  * Which traces the call-site control keeps. `any` is the default and has no param: a trace without a
@@ -85,7 +85,7 @@ export type TraceQueryState = {
   q: string;
 };
 
-const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site", "call_site_scope"];
+const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site", "call_site_scope", "detected_by"];
 
 function parseCallSite(params: URLSearchParams): CallSiteFilter {
   const id = params.get("call_site");

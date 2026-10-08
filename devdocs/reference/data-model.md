@@ -659,7 +659,9 @@ Behaviour drift and its catalog entry are not in this tree, so nothing here writ
 > `ix_frustration_detection_uncleared` `(project_id, classifier_id, subject_session_id,
 > COALESCE(evidence->>'call_site_id', ''), subject_started_at) WHERE cleared_at IS NULL`: the sweep stops
 > sending a session's turns, a session being a conversation on one call site, while it has an uncleared
-> row. The only writer of `cleared_at` is a `false_alarm` resolve of a frustration case
+> row. The trace and session views read the uncleared rows by `subject_trace_id` through
+> `TraceDetectionRepository` (substrate), probing the unique index from the project's `classifier` rows.
+> The only writer of `cleared_at` is a `false_alarm` resolve of a frustration case
 > (`FrustrationSessionClearer`), which clears every session cited by a session witness on any of the
 > case's findings, on that finding's call site, which is every frustrated session of the spell. The open
 > `OpenDetectionTables` registers it, and `0022` emptied it of the encoder scorer's rows and turned off

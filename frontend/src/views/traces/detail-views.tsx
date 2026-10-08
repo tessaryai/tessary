@@ -14,6 +14,7 @@ import { ChatItems, PriorContext, messageItems, planConversation, planTools, spa
 import { Chevron, Pane, ToolCallBatch, ToolDetails, toolStepOf } from "./detail-tool";
 import type { ToolPlan } from "./detail-chat";
 import { SpanIcon, spanKindLabel, spanLabel } from "./detail-icons";
+import { DetectionMarker } from "./detection-marker";
 import type { ToolStep } from "./detail-tool";
 import type { TraceListItemView as TraceListItem } from "../../api/types";
 import type { Span, TraceRollup } from "./detail-data";
@@ -38,13 +39,13 @@ import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBoun
 export function ConversationView({
   spans,
   focusId,
-  flagged = false,
+  marks = [],
   showPrior = true,
 }: {
   spans: Span[];
   focusId: string | null;
-  /** Draw the turn's question as the message a classifier fired on. */
-  flagged?: boolean;
+  /** The classifiers that flagged this turn, drawn on the person's message they judged. */
+  marks?: string[];
   /** Offer the fold of earlier messages; off where the page already shows those turns. */
   showPrior?: boolean;
 }) {
@@ -77,7 +78,7 @@ export function ConversationView({
       {showPrior && <PriorContext messages={plan.prior} />}
 
       {/* The question the turn is answering. */}
-      {root && question.length > 0 && chrome(root, <ChatItems items={question} flagged={flagged} />)}
+      {root && question.length > 0 && chrome(root, <ChatItems items={question} marks={marks} />)}
 
       {/* The work, in the order it ran: what each model call said, then the tools
           it asked for, batched onto one line. */}
@@ -155,15 +156,20 @@ function SpanBlock({ o, focused, body }: { o: Span; focused: boolean; body: Reac
 
 /* -------------------------------------------------------------------- tree */
 
+const NO_MARKS = new Map<string, string[]>();
+
 /** Nested spans with inline duration · tokens · cost — the conforming grammar. */
 export function TreeView({
   spans,
   focusId,
   onSelect,
+  marksBySpan = NO_MARKS,
 }: {
   spans: Span[];
   focusId: string | null;
   onSelect: (id: string) => void;
+  /** The classifiers that flagged each span, by span id. */
+  marksBySpan?: Map<string, string[]>;
 }) {
   // A trace parents its tool spans to the agent, so the llm call that requested
   // them is their sibling. planTools recovers the real link from the request ids.
@@ -183,6 +189,7 @@ export function TreeView({
           <span className="font-mono text-fg min-w-0 flex-1 truncate text-small">
             {spanLabel(o)}
           </span>
+          <DetectionMarker names={marksBySpan.get(o.id) ?? []} className="shrink-0" />
           <SpanStats o={o} />
         </ExpandableRow>
       ))}
@@ -334,11 +341,13 @@ export function TimelineView({
   spans,
   focusId,
   onSelect,
+  marksBySpan = NO_MARKS,
 }: {
   trace: TraceRollup | undefined;
   spans: Span[];
   focusId: string | null;
   onSelect: (id: string) => void;
+  marksBySpan?: Map<string, string[]>;
 }) {
   const bounds = traceBounds(trace, spans);
   if (!bounds) {
@@ -351,7 +360,14 @@ export function TimelineView({
   return (
     <div className="flex flex-col gap-0.75">
       {spanOrder(spans).map((o) => (
-        <TimelineRow key={o.id} o={o} bounds={bounds} focusId={focusId} onSelect={onSelect} />
+        <TimelineRow
+          key={o.id}
+          o={o}
+          bounds={bounds}
+          focusId={focusId}
+          onSelect={onSelect}
+          marks={marksBySpan.get(o.id) ?? []}
+        />
       ))}
     </div>
   );
@@ -369,11 +385,13 @@ function TimelineRow({
   bounds,
   focusId,
   onSelect,
+  marks,
 }: {
   o: Span;
   bounds: { start: number; end: number };
   focusId: string | null;
   onSelect: (id: string) => void;
+  marks: string[];
 }) {
   const s = new Date(o.started_at).getTime();
   if (Number.isNaN(s)) return null;
@@ -385,8 +403,9 @@ function TimelineRow({
   return (
     <ExpandableRow o={o} indent={0} focused={focusId === o.id} onSelect={() => onSelect(o.id)}>
       <SpanIcon kind={o.kind} size={12} />
-      <span className="font-mono text-fg shrink-0 truncate text-label" style={{ width: 220 }}>
-        {spanLabel(o)}
+      <span className="flex shrink-0 items-center gap-2 min-w-0" style={{ width: 220 }}>
+        <span className="font-mono text-fg truncate text-label">{spanLabel(o)}</span>
+        <DetectionMarker names={marks} />
       </span>
       <span className="relative flex-1" style={{ height: 10 }}>
         <span
@@ -463,13 +482,13 @@ export function SessionConversationView({
   traces,
   spansByTrace,
   focusId,
-  flaggedTraceId = null,
+  marksByTrace = NO_MARKS,
 }: {
   traces: TraceListItem[];
   spansByTrace: SpansByTrace;
   focusId: string | null;
-  /** The trace whose user message a classifier fired on; its question is drawn flagged. */
-  flaggedTraceId?: string | null;
+  /** The classifiers that flagged each trace's turn, by trace id. */
+  marksByTrace?: Map<string, string[]>;
 }) {
   if (traces.length === 0) {
     return (
@@ -486,7 +505,7 @@ export function SessionConversationView({
           <ConversationView
             spans={spansByTrace.get(t.id) ?? []}
             focusId={focusId}
-            flagged={flaggedTraceId === t.id}
+            marks={marksByTrace.get(t.id) ?? []}
             showPrior={i === 0}
           />
         </div>
@@ -542,13 +561,24 @@ export function SessionTreeView({
   spansByTrace,
   focusId,
   onSelect,
+  marksBySpan = NO_MARKS,
 }: {
   traces: TraceListItem[];
   spansByTrace: SpansByTrace;
   focusId: string | null;
   onSelect: (id: string) => void;
+  marksBySpan?: Map<string, string[]>;
 }) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set(traces[0] ? [traces[0].id] : []));
+  // The first trace opens, and so does every trace a classifier flagged, so the marks are in view.
+  const [open, setOpen] = useState<Set<string>>(
+    () =>
+      new Set([
+        ...(traces[0] ? [traces[0].id] : []),
+        ...traces
+          .filter((t) => (spansByTrace.get(t.id) ?? []).some((o) => marksBySpan.has(o.id)))
+          .map((t) => t.id),
+      ]),
+  );
   const toggle = (id: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -573,7 +603,12 @@ export function SessionTreeView({
             <TraceHeadRow trace={t} open={isOpen} onToggle={() => toggle(t.id)} />
             {isOpen && (
               <div className="pt-1 px-2 pb-2">
-                <TreeView spans={spansByTrace.get(t.id) ?? []} focusId={focusId} onSelect={onSelect} />
+                <TreeView
+                  spans={spansByTrace.get(t.id) ?? []}
+                  focusId={focusId}
+                  onSelect={onSelect}
+                  marksBySpan={marksBySpan}
+                />
               </div>
             )}
           </div>
@@ -620,11 +655,13 @@ export function SessionTimelineView({
   spansByTrace,
   focusId,
   onSelect,
+  marksBySpan = NO_MARKS,
 }: {
   traces: TraceListItem[];
   spansByTrace: SpansByTrace;
   focusId: string | null;
   onSelect: (id: string) => void;
+  marksBySpan?: Map<string, string[]>;
 }) {
   const bounds = sessionBounds(traces, spansByTrace);
   if (!bounds) {
@@ -641,7 +678,14 @@ export function SessionTimelineView({
           <TraceDivider trace={t} first={i === 0} />
           <div className="flex flex-col gap-0.75">
             {spanOrder(spansByTrace.get(t.id) ?? []).map((o) => (
-              <TimelineRow key={o.id} o={o} bounds={bounds} focusId={focusId} onSelect={onSelect} />
+              <TimelineRow
+                key={o.id}
+                o={o}
+                bounds={bounds}
+                focusId={focusId}
+                onSelect={onSelect}
+                marks={marksBySpan.get(o.id) ?? []}
+              />
             ))}
           </div>
         </div>

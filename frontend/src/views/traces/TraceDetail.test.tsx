@@ -120,6 +120,7 @@ function detail(over: Partial<TraceDetailView> = {}): TraceDetailView {
   return {
     trace: traceItem({ id: "tr-1", name: "policy-gpt", span_count: 6, latency_ms: 2_000, total_tokens: 12_900, unpriced_spans: 1, is_settled: false }),
     spans: turn(),
+    detections: [],
     ...over,
   };
 }
@@ -336,3 +337,44 @@ describe("Timeline", () => {
   });
 });
 
+describe("detections", () => {
+  const FLAGGED = [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-1", span_id: "sp-llm-1" }];
+
+  it("marks the question Frustration flagged in Conversation, and the span it scored in Tree and Timeline", async () => {
+    api.getTrace.mockResolvedValue(detail({ detections: FLAGGED }));
+    renderTrace();
+
+    const marker = await screen.findByText("Frustration");
+    expect(screen.getAllByText("Frustration")).toHaveLength(1);
+    const question = screen.getByText("Where is order 881?");
+    const answer = screen.getAllByText("It ships today.").at(-1)!;
+    expect(question.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(marker.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    cleanup();
+    renderTrace("?view=tree");
+    expect(await screen.findAllByText("Frustration")).toHaveLength(1);
+
+    cleanup();
+    renderTrace("?view=timeline");
+    expect(await screen.findAllByText("Frustration")).toHaveLength(1);
+  });
+
+  it("still draws and marks the question when an earlier message said the same words", async () => {
+    const said = [{ role: "user", content: "yes" }, { role: "assistant", content: "Shall I cancel it?" }];
+    api.getTrace.mockResolvedValue(
+      detail({
+        detections: [{ ...FLAGGED[0], span_id: "sp-llm" }],
+        spans: [
+          span({ id: "sp-root", kind: "agent", name: "turn", started_at: "2026-09-25T10:00:00.000Z", input: j([{ role: "user", content: "yes" }]) }),
+          span({ id: "sp-llm", parent_span_id: "sp-root", started_at: "2026-09-25T10:00:00.100Z", input: j([...said, { role: "user", content: "yes" }]), output: j([{ type: "text", text: "Cancelled." }]) }),
+        ],
+      }),
+    );
+    renderTrace();
+
+    const question = await screen.findByText("yes");
+    const marker = screen.getByText("Frustration");
+    expect(question.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

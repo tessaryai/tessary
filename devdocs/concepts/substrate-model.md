@@ -745,6 +745,9 @@ Two consequences are contractual:
 - **No surface may list sessions sorted by cost or tokens.** That is the one read shape this
   design does not serve; building it requires a session materialization with its own staleness
   contract, as a separate piece of work.
+- **A session list filters by its traces, never by a session aggregate.** It takes the traces
+  list's filters, and a session is listed when one of its traces passes every one of them: one
+  `EXISTS` over `ix_trace_session` per session row. The page is still chosen by recency.
 
 `session.last_activity_at` (§7.1) supports listing and sorting sessions by recency without any
 rollup.

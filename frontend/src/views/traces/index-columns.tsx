@@ -32,6 +32,7 @@ export type ColumnKey =
   | "name"
   | "input"
   | "output"
+  | "detectedBy"
   | "latency"
   | "cost"
   | "costIn"
@@ -67,6 +68,7 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { key: "name", label: "Name", flex: true, width: 260 },
   { key: "input", label: "Input", flex: true, width: 280 },
   { key: "output", label: "Output", flex: true, width: 280 },
+  { key: "detectedBy", label: "Detected by", width: 150 },
   // Wide enough for the longest tier ("3d 2h 15m 30s") without truncating under table-layout: fixed.
   { key: "latency", label: "Latency", numeric: true, width: 140 },
   { key: "cost", label: "Cost ($)", numeric: true, width: 90 },
@@ -112,7 +114,7 @@ export function columnWidths(columns: ColumnDef[], extraFixedPx = 0): (string | 
 /** The pinned expand-chevron column's width, in grouped mode — shared with its TD/TH styling below. */
 export const SESSION_EXPAND_COLUMN_WIDTH = 40;
 
-const DEFAULT_VISIBLE: ColumnKey[] = ["when", "name", "input", "output", "latency", "cost", "tokens", "spans"];
+const DEFAULT_VISIBLE: ColumnKey[] = ["when", "name", "input", "output", "detectedBy", "latency", "cost", "tokens", "spans"];
 
 /**
  * Bumped from `tessary:traces:columns` with the v2 wire.

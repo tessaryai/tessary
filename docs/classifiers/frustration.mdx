@@ -86,9 +86,20 @@ Both pages show the same evidence:
 
 - A chart of the call site's rate of frustrated sessions over time, against the rate it learned.
 - The frustrated sessions, newest first, each with its flagged message and score. Every session the rate counted is listed; scroll to the end or select **Load more sessions** for the next page.
-- The selected session as it happened: the flagged turn and the two turns before it, with tool calls, read from the real traces. The flagged message is highlighted, and the pane scrolls to it.
+- The selected session as it happened: the flagged turn and the two turns before it, with tool calls, read from the real traces. The flagged message is outlined and marked **Frustration**, and the pane scrolls to it.
 
 If a session's traces have passed your retention period, the page says the traces may have aged out. The finding's counts still stand.
+
+## Find flagged messages on the Traces page
+
+You don't need a case to see a flagged message. On **Traces**:
+
+- Set **Detected by** to **Frustration** to list only the traces with a flagged message.
+- The **Detected by** column names the classifier on each flagged row.
+- Turn on **Group by session** to list the sessions that hold a flagged trace. Expand one to see all its traces. The traces that don't match your filters are dimmed.
+- Open a trace or a session. The flagged message is marked **Frustration**, and the Tree and Timeline views mark the span that was scored.
+
+A message cleared by a **False alarm** resolve is not marked and does not match the filter.
 
 ## Run RCA on the case
 

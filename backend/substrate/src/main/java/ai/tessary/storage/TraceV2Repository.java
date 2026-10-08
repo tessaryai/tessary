@@ -56,9 +56,12 @@ public class TraceV2Repository {
 
     private final NamedParameterJdbcTemplate named;
 
-    public TraceV2Repository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    private final TraceFilters filters;
+
+    public TraceV2Repository(JdbcClient jdbc, NamedParameterJdbcTemplate named, TraceFilters filters) {
         this.jdbc = jdbc;
         this.named = named;
+        this.filters = filters;
     }
 
     private static final String GET_OR_CREATE_SQL = """
@@ -408,9 +411,8 @@ public class TraceV2Repository {
      * carries one, {@code false} keeps it when none does. So the {@code true} set is every {@code callSite} set
      * together, and a trace tagged only below its root still counts.
      *
-     * <p>{@code status} reads the rollup: {@code error} means {@code error_count > 0}, {@code ok} means it
-     * is zero. A trace that has never rolled up has a null {@code error_count} and is therefore neither;
-     * it is excluded by an explicit status filter rather than silently counted as healthy.
+     * <p>{@code detectedBy} keeps a trace a classifier flagged: a classifier id, or {@code any}
+     * ({@link TraceDetectionRepository}). {@link TraceFilters} writes the SQL for every field.
      */
     public record TraceQuery(
             @Nullable String model,
@@ -420,7 +422,11 @@ public class TraceV2Repository {
             @Nullable String from,
             @Nullable String to,
             @Nullable String status,
-            @Nullable String q) {}
+            @Nullable String q,
+            @Nullable String detectedBy) {
+
+        public static final TraceQuery NONE = new TraceQuery(null, null, null, null, null, null, null, null, null);
+    }
 
     /**
      * One trace's list row: identity, timing, and the rollup columns exactly as the worker wrote them.
@@ -545,33 +551,7 @@ public class TraceV2Repository {
             params.put("beforeId", beforeId);
         }
 
-        addEq(where, params, " AND t.started_at >= :fromTs::timestamptz", "fromTs", query.from());
-        addEq(where, params, " AND t.started_at <= :toTs::timestamptz", "toTs", query.to());
-
-        addExists(where, params, "provided_model_name", "model", query.model());
-        addExists(where, params, "kind", "kind", query.kind());
-        addExists(where, params, "call_site_id", "callSite", query.callSite());
-        Boolean hasCallSite = query.hasCallSite();
-        if (hasCallSite != null) {
-            where.append(hasCallSite ? " AND EXISTS" : " AND NOT EXISTS")
-                    .append(" (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
-                            + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx.call_site_id IS NOT NULL)");
-        }
-
-        String status = query.status();
-        if (status != null && !status.isBlank()) {
-            // A trace with a NULL error_count has not rolled up and therefore has no answer to this
-            // question; it is excluded rather than counted as healthy.
-            where.append(" AND t.error_count IS NOT NULL AND t.error_count ")
-                    .append("error".equalsIgnoreCase(status) ? "> 0" : "= 0");
-        }
-
-        String q = query.q();
-        if (q != null && !q.isBlank()) {
-            where.append(" AND (t.name ILIKE :q OR t.session_id ILIKE :q OR t.thread_id ILIKE :q"
-                    + " OR t.user_id ILIKE :q OR t.id ILIKE :q)");
-            params.put("q", "%" + q + "%");
-        }
+        filters.append(projectId, where, params, query);
 
         String orderBy = sortCol == null
                 ? " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit"
@@ -587,33 +567,6 @@ public class TraceV2Repository {
                 + orderBy;
 
         return jdbc.sql(sql).params(params).query((rs, n) -> summary(rs)).list();
-    }
-
-    /**
-     * {@code EXISTS (SELECT 1 FROM span …)} on one span column, a filter, never an aggregation.
-     *
-     * <p>The correlated predicate carries {@code project_id} as well as {@code trace_id} because the span
-     * primary key leads with the project: without it the subquery would scan by trace id alone, which is
-     * both slower and one typo away from crossing a project boundary.
-     */
-    private static void addExists(
-            StringBuilder where, Map<String, Object> params, String column, String name, @Nullable String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        where.append(" AND EXISTS (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
-                + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx." + column + " = :" + name + ")");
-        params.put(name, value);
-    }
-
-    /** Append a clause and bind its parameter, but only when {@code value} is present. */
-    private static void addEq(
-            StringBuilder clause, Map<String, Object> params, String fragment, String name, @Nullable String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        clause.append(fragment);
-        params.put(name, value);
     }
 
     /**
@@ -653,6 +606,23 @@ public class TraceV2Repository {
                 .param("sid", sessionId)
                 .param("limit", limit)
                 .query((rs, n) -> summary(rs))
+                .list();
+    }
+
+    /**
+     * The ids of a session's traces that pass {@code filter}, oldest first: the traces of an expanded session row
+     * the traces list would show. Served by {@code ix_trace_session}.
+     */
+    public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
+        var params = new HashMap<String, Object>();
+        params.put("pid", projectId);
+        params.put("sid", sessionId);
+        params.put("limit", limit);
+        var where = new StringBuilder("WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted");
+        filters.append(projectId, where, params, filter);
+        return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                .params(params)
+                .query(String.class)
                 .list();
     }
 

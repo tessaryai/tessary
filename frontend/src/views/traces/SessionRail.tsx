@@ -13,6 +13,7 @@ import { ErrorNote, LoadingRow, Rail } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
+import { namesBy } from "./detection-marker";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
 export function SessionRail({ sessionId, onClose }: { sessionId: string | null; onClose: () => void }) {
@@ -28,6 +29,9 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
 
   const detail = q.data;
   const traces = detail?.traces ?? [];
+  const detections = detail?.detections ?? [];
+  const marksByTrace = namesBy(detections, "trace_id");
+  const marksBySpan = namesBy(detections, "span_id");
   const loading = q.isLoading || spansQ.isLoading;
   const error = q.error ?? spansQ.error;
 
@@ -52,7 +56,12 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
       {detail && (
         <TraceMedia>
           {view === "conversation" && (
-            <SessionConversationView traces={traces} spansByTrace={spansByTrace} focusId={focusId} />
+            <SessionConversationView
+                traces={traces}
+                spansByTrace={spansByTrace}
+                focusId={focusId}
+                marksByTrace={marksByTrace}
+              />
           )}
           {view === "tree" && (
             <SessionTreeView
@@ -60,6 +69,7 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
               spansByTrace={spansByTrace}
               focusId={focusId}
               onSelect={setFocusId}
+              marksBySpan={marksBySpan}
             />
           )}
           {view === "timeline" && (
@@ -68,6 +78,7 @@ export function SessionRail({ sessionId, onClose }: { sessionId: string | null; 
               spansByTrace={spansByTrace}
               focusId={focusId}
               onSelect={setFocusId}
+              marksBySpan={marksBySpan}
             />
           )}
         </TraceMedia>

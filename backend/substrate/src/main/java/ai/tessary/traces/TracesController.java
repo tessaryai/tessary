@@ -15,6 +15,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.ToolCallRow;
+import ai.tessary.storage.TraceDetectionRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
@@ -90,6 +91,7 @@ public class TracesController {
     private final RetrievedDocRepository retrievalDocuments;
     private final TenantPathResolver resolver;
     private final MediaStore media;
+    private final TraceDetectionRepository detections;
 
     public TracesController(
             TraceV2Repository traces,
@@ -98,7 +100,9 @@ public class TracesController {
             ToolCallRepository toolCalls,
             RetrievedDocRepository retrievalDocuments,
             TenantPathResolver resolver,
-            MediaStore media) {
+            MediaStore media,
+            TraceDetectionRepository detections) {
+        this.detections = detections;
         this.traces = traces;
         this.spans = spans;
         this.payloads = payloads;
@@ -182,8 +186,11 @@ public class TracesController {
      * <p>The rollups ride along deliberately. Without them the detail view would have to sum its spans to
      * put a total on the header, which is the read-time arithmetic this schema exists to delete — and it
      * would disagree with the list row for any trace whose spans are still arriving.
+     *
+     * <p>{@code detections} names each span a classifier flagged, so the views can mark where it occurred.
      */
-    public record TraceDetail(TraceDtos.TraceListItem trace, List<SpanView> spans) {}
+    public record TraceDetail(
+            TraceDtos.TraceListItem trace, List<SpanView> spans, List<TraceDtos.DetectionMark> detections) {}
 
     @GetMapping
     public ApiResponse<TraceDtos.TracesPage> list(
@@ -205,13 +212,15 @@ public class TracesController {
             @RequestParam(required = false) @Nullable String q,
             // when (default) | tokens | cost | latency — each an indexed rollup column, NULLS LAST so a
             // trace that has not rolled up sorts to the end rather than to either extreme.
-            @RequestParam(required = false) @Nullable String sort) {
+            @RequestParam(required = false) @Nullable String sort,
+            // A classifier id, or "any": keeps a trace a classifier flagged.
+            @RequestParam(required = false) @Nullable String detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view traces");
 
         TracePageCodec.Key before = TracePageCodec.decode(cursor);
         var query = new TraceV2Repository.TraceQuery(
-                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q);
+                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
         int pageSize = TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT);
         String projectId = r.project().id();
 
@@ -220,8 +229,10 @@ public class TracesController {
                 traces.list(projectId, query, sort, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
         TracePageCodec.Page page = TracePageCodec.trim(rows, pageSize, sort);
 
+        List<String> ids =
+                page.rows().stream().map(TraceV2Repository.Summary::id).toList();
         return ApiResponse.ok(new TraceDtos.TracesPage(
-                page.rows().stream().map(TraceDtos::item).toList(), page.nextCursor()));
+                TraceDtos.items(page.rows(), detections.forTraces(projectId, ids)), page.nextCursor()));
     }
 
     @GetMapping("/{traceId}")
@@ -263,7 +274,9 @@ public class TracesController {
                         toolsBySpan.getOrDefault(s.id(), List.of()),
                         docsBySpan.getOrDefault(s.id(), List.of())))
                 .toList();
-        return ApiResponse.ok(new TraceDetail(TraceDtos.item(trace), views));
+        List<TraceDetectionRepository.Mark> marks = detections.forTraces(projectId, List.of(traceId));
+        return ApiResponse.ok(
+                new TraceDetail(TraceDtos.items(List.of(trace), marks).get(0), views, TraceDtos.marks(marks)));
     }
 
     /**

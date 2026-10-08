@@ -3010,6 +3010,16 @@ export interface components {
             id: string;
             status: string;
         };
+        DetectionLabel: {
+            classifier_id: string;
+            name: string;
+        };
+        DetectionMark: {
+            classifier_id: string;
+            name: string;
+            span_id: string | null;
+            trace_id: string;
+        };
         Duration: {
             /** Format: int64 */
             baseline_p95_ms: number | null;
@@ -4155,10 +4165,12 @@ export interface components {
             secure?: boolean;
         };
         SessionDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             /** Format: int64 */
             error_count: number | null;
             id: string;
             last_activity_at: string;
+            matched_trace_ids: string[] | null;
             /** Format: int64 */
             span_count: number | null;
             started_at: string;
@@ -4182,6 +4194,7 @@ export interface components {
             cache_write_tokens: number | null;
             /** Format: int32 */
             call_site_count: number | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             dominant_call_site_id: string | null;
             /** Format: int64 */
             error_count: number | null;
@@ -4468,6 +4481,7 @@ export interface components {
             source: string | null;
         };
         TraceDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             spans: components["schemas"]["SpanView"][];
             trace: components["schemas"]["TraceListItem"];
         };
@@ -4477,6 +4491,7 @@ export interface components {
             /** Format: int64 */
             cache_write_tokens: number | null;
             call_site_id: string | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             ended_at: string | null;
             /** Format: int32 */
             error_count: number | null;
@@ -7593,6 +7608,15 @@ export interface operations {
                 limit?: number;
                 cursor?: string;
                 include?: string;
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7618,6 +7642,15 @@ export interface operations {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7812,6 +7845,7 @@ export interface operations {
                 status?: string;
                 q?: string;
                 sort?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {

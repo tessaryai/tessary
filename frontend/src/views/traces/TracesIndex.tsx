@@ -10,7 +10,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Search, ChevronRight } from "lucide-react";
 import {
   PageHeader,
@@ -57,8 +57,11 @@ import {
   useObservedFacets,
   useTracesIndex,
   formatTokens,
+  type TraceFilters,
   type TraceListItem,
+  filterParams,
 } from "./index-data";
+import { ANY_DETECTION, DETECTED_BY_DETECTORS, DetectionMarker } from "./detection-marker";
 import { useSessionsIndex, sessionName, sessionDurationMs, type SessionListItem } from "./session-index-data";
 import { TraceRail } from "./TraceRail";
 import { SessionRail } from "./SessionRail";
@@ -90,6 +93,7 @@ export function TracesIndex() {
 }
 
 function TracesList() {
+  const api = useProjectApi();
   const { visible, toggle, reset } = useColumnConfig();
 
   // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
@@ -146,26 +150,34 @@ function TracesList() {
 
   // Filtering happens server-side — the list is keyset-paginated, so narrowing
   // it in the browser would only ever filter the page that happens to be loaded.
-  const q = useTracesIndex(
-    {
-      q: submittedQuery || undefined,
-      callSite: typeof callSite === "object" ? callSite.id : undefined,
-      hasCallSite: callSite === "any" ? true : callSite === "none" ? false : undefined,
-      status: facets.status ?? undefined,
-      kind: facets.kind ?? undefined,
-      from: bounds.from,
-      to: bounds.to,
-    },
-    epoch,
-    !groupBySession,
-  );
-  const sq = useSessionsIndex(epoch, groupBySession);
+  const filters: TraceFilters = {
+    q: submittedQuery || undefined,
+    callSite: typeof callSite === "object" ? callSite.id : undefined,
+    hasCallSite: callSite === "any" ? true : callSite === "none" ? false : undefined,
+    status: facets.status ?? undefined,
+    kind: facets.kind ?? undefined,
+    from: bounds.from,
+    to: bounds.to,
+    detectedBy: facets.detected_by ?? undefined,
+  };
+  const q = useTracesIndex(filters, epoch, !groupBySession);
+  const sq = useSessionsIndex(filters, epoch, groupBySession);
+
+  // The classifiers Detected by offers: those whose flags these views show.
+  const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
+  const detectors = (classifiersQ.data ?? []).filter((c) => DETECTED_BY_DETECTORS.has(c.detector));
+  const detectedByOptions = detectors.map((c) => ({ value: c.id, label: c.name }));
+  const pickedDetector = detectors.find((c) => c.id === facets.detected_by) ?? null;
 
   const filtered = activeCount > 0 || !!submittedQuery;
   // The empty state's "filtered": a narrowed list, not a moved window. The range is a choice of
   // window (it counts toward Clear all above), and an all-time list that is empty has nothing to clear.
   const narrowed =
-    !!facets.status || !!facets.kind || (callSite !== "any" && callSite !== "all") || !!submittedQuery;
+    !!facets.status ||
+    !!facets.kind ||
+    !!facets.detected_by ||
+    (callSite !== "any" && callSite !== "all") ||
+    !!submittedQuery;
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.traces) ?? [], [q.data]);
   const sessionRows = useMemo(() => sq.data?.pages.flatMap((p) => p.sessions) ?? [], [sq.data]);
 
@@ -295,6 +307,22 @@ function TracesList() {
           ]}
           emptyHint="No call site has been seen in the loaded traces yet."
         />
+        <FacetControl
+          label="Detected by"
+          value={facets.detected_by === ANY_DETECTION ? null : facets.detected_by}
+          options={detectedByOptions}
+          onChange={(v) => setFacet("detected_by", v)}
+          head={[
+            { label: "All traces", selected: !facets.detected_by, onSelect: () => setFacet("detected_by", null) },
+            {
+              label: "Any detection",
+              short: "any",
+              selected: facets.detected_by === ANY_DETECTION,
+              onSelect: () => setFacet("detected_by", ANY_DETECTION),
+            },
+          ]}
+          emptyHint="No classifier that marks traces is set up yet."
+        />
         <button
           type="button"
           role="switch"
@@ -370,6 +398,11 @@ function TracesList() {
           onClearAll={clearAllFilters}
           onSearchAllTime={() => setRange({ kind: "all" })}
           onShowAll={callSite === "any" ? () => setCallSite("all") : undefined}
+          offClassifier={
+            pickedDetector && !pickedDetector.enabled
+              ? { name: pickedDetector.name, href: `../classifiers/detectors?classifier=${encodeURIComponent(pickedDetector.id)}` }
+              : undefined
+          }
         />
       ) : (
         // table-layout: fixed against the <colgroup> below, not auto: a column's width must never
@@ -411,6 +444,7 @@ function TracesList() {
                       onToggle={() => toggleExpanded(s.id)}
                       onOpenSession={() => openSession(s)}
                       onOpenTrace={openTraceById}
+                      filters={filters}
                     />
                   );
                 })
@@ -501,6 +535,7 @@ function SessionGroupRows({
   onToggle,
   onOpenSession,
   onOpenTrace,
+  filters,
 }: {
   session: SessionListItem;
   columns: ColumnDef[];
@@ -508,13 +543,16 @@ function SessionGroupRows({
   onToggle: () => void;
   onOpenSession: () => void;
   onOpenTrace: (traceId: string) => void;
+  filters: TraceFilters;
 }) {
   const api = useProjectApi();
   const detail = useQuery({
-    queryKey: ["session-detail-expand", api.base, session.id],
-    queryFn: () => api.getSession(session.id),
+    queryKey: ["session-detail-expand", api.base, session.id, filters],
+    queryFn: () => api.getSession(session.id, filterParams(filters)),
     enabled: expanded,
   });
+  // Every trace of the session shows, for context; the ones the filters would not show are dimmed.
+  const matched = detail.data?.matched_trace_ids ? new Set(detail.data.matched_trace_ids) : null;
 
   return (
     <>
@@ -571,14 +609,14 @@ function SessionGroupRows({
             key={t.id}
             interactive
             tabIndex={0}
-            className="group bg-raised"
+            className={cn("group bg-raised", matched && !matched.has(t.id) && "opacity-50")}
             onClick={() => onOpenTrace(t.id)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onOpenTrace(t.id);
             }}
           >
             {columns.map((col) => (
-              <Cell key={col.key} col={col.key} row={t} />
+              <Cell key={col.key} col={col.key} row={t} outside={!!matched && !matched.has(t.id)} />
             ))}
             {/* No shadow/chevron here — the pinned treatment is a session-level affordance; a nested
                 trace row has nothing to expand, so its slice of the column just continues the row's
@@ -627,6 +665,8 @@ function SessionCell({ col, row }: { col: ColumnKey; row: SessionListItem }) {
     // Not an aggregate — the session bracketed as one interaction, the same way a book review might
     // quote the opening line and the ending rather than "averaging" the whole text. Only the first
     // trace's own input and the last trace's own output, exactly as the server sent them.
+    case "detectedBy":
+      return <Detected names={row.detected_by.map((d) => d.name)} />;
     case "input":
       return <Preview value={row.first_input_preview} />;
     case "output":
@@ -783,7 +823,16 @@ function Rollup({
   return <Num title={title}>{render(value)}</Num>;
 }
 
-function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
+/** The classifiers that flagged the row, by name; empty when none did. */
+function Detected({ names }: { names: string[] }) {
+  return (
+    <TD className="truncate text-small" style={{ ...CELL_PAD }}>
+      <DetectionMarker names={names} size="small" />
+    </TD>
+  );
+}
+
+function Cell({ col, row, outside = false }: { col: ColumnKey; row: TraceListItem; outside?: boolean }) {
   switch (col) {
     case "when":
       return <Text>{formatWhen(row.started_at)}</Text>;
@@ -802,6 +851,7 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
               style={{ width: 6, height: 6 }}
             />
             {row.status === "error" && <span className="sr-only">errored: </span>}
+            {outside && <span className="sr-only">outside the filters: </span>}
             <span className="min-w-0 truncate">{row.name ?? row.id}</span>
             {!row.is_settled && (
               <span className="shrink-0 text-subtle text-label"  title="Spans are still arriving">
@@ -815,6 +865,8 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
       return <Preview value={row.input_preview} />;
     case "output":
       return <Preview value={row.output_preview} />;
+    case "detectedBy":
+      return <Detected names={row.detected_by.map((d) => d.name)} />;
     case "session":
       return <Text>{row.session ?? "—"}</Text>;
     case "traceId":
@@ -902,6 +954,7 @@ function NothingHere({
   onClearAll,
   onSearchAllTime,
   onShowAll,
+  offClassifier,
 }: {
   filtered: boolean;
   allTime: boolean;
@@ -909,7 +962,30 @@ function NothingHere({
   onClearAll: () => void;
   onSearchAllTime: () => void;
   onShowAll?: () => void;
+  /** The classifier Detected by picked, when it is off and so has nothing to match. */
+  offClassifier?: { name: string; href: string };
 }) {
+  if (offClassifier) {
+    return (
+      <div className="text-center pt-18 px-0 pb-10">
+        <p className="text-h1 mx-auto text-fg" style={{ maxWidth: 560 }}>
+          {offClassifier.name} is off
+        </p>
+        <p className="mx-auto text-muted mt-3 text-body" style={{ maxWidth: 460, textWrap: "pretty" }}>
+          It has no detections to filter by. Turn it on and pick the call sites it scores.
+        </p>
+        <p className="text-muted mt-3 text-body">
+          <Link to={offClassifier.href} relative="path" className="text-accent hover:underline">
+            Open {offClassifier.name}
+          </Link>
+          <span className="text-subtle"> · </span>
+          <button type="button" onClick={onClearAll} className="text-accent hover:underline cursor-pointer">
+            Clear all filters
+          </button>
+        </p>
+      </div>
+    );
+  }
   const ways = [
     !allTime && { label: "Search all time", onClick: onSearchAllTime },
     onShowAll && { label: "Show all traces", onClick: onShowAll },

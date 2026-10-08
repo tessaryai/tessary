@@ -74,6 +74,7 @@ function trace(id: string, user: string, reply: string, at: string): TraceDetail
   return {
     trace: { id, started_at: at, name: "turn", latency_ms: 1000 } as unknown as TraceDetailView["trace"],
     spans: [span],
+    detections: [],
   };
 }
 
@@ -94,7 +95,7 @@ function renderList(
 }
 
 describe("FrustratedConversations", () => {
-  it("draws the flagged turn after the turns before it, from the traces, with the flagged message tinted", async () => {
+  it("draws the flagged turn after the turns before it, from the traces, with the flagged message marked", async () => {
     getTrace.mockImplementation(async (id) =>
       id === "t-1"
         ? trace("t-1", "policy no PRG-8298-1753", "I need your full name.", "2026-07-27T16:55:00Z")

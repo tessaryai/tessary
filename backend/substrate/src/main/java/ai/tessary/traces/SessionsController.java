@@ -3,6 +3,7 @@ package ai.tessary.traces;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
+import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
 import org.jspecify.annotations.Nullable;
@@ -53,6 +54,9 @@ public class SessionsController {
      * dominant call site to the page already chosen by recency, batched as two grouped queries for the whole
      * page (see {@link SessionReadService#page}). Any other value, or the parameter's absence, is the plain
      * identity-only read.
+     *
+     * <p>The filters are the traces list's, by the same names: a session is on the page when one of its traces
+     * passes every one of them, which is to say when the traces list would show one of its traces.
      */
     @GetMapping
     public ApiResponse<SessionDtos.SessionsPage> list(
@@ -61,24 +65,53 @@ public class SessionsController {
             @PathVariable String projectSlug,
             @RequestParam(required = false) @Nullable Integer limit,
             @RequestParam(required = false) @Nullable String cursor,
-            @RequestParam(required = false) @Nullable String include) {
+            @RequestParam(required = false) @Nullable String include,
+            @RequestParam(required = false) @Nullable String model,
+            @RequestParam(required = false) @Nullable String kind,
+            @RequestParam(required = false) @Nullable String callSite,
+            @RequestParam(required = false) @Nullable Boolean hasCallSite,
+            @RequestParam(required = false) @Nullable String fromTimestamp,
+            @RequestParam(required = false) @Nullable String toTimestamp,
+            @RequestParam(required = false) @Nullable String status,
+            @RequestParam(required = false) @Nullable String q,
+            @RequestParam(required = false) @Nullable String detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view sessions");
         boolean includeTotals = "totals".equals(include);
+        var filter = new TraceV2Repository.TraceQuery(
+                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
         return ApiResponse.ok(sessions.page(
-                r.project().id(), TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT), cursor, includeTotals));
+                r.project().id(),
+                TracePageCodec.clampLimit(limit, DEFAULT_LIMIT, MAX_LIMIT),
+                cursor,
+                includeTotals,
+                filter));
     }
 
-    /** One session: identity, the summed rollups of its traces, and those traces oldest first. */
+    /**
+     * One session: identity, the summed rollups of its traces, and those traces oldest first. Given the traces
+     * list's filters, it also names the traces that pass them.
+     */
     @GetMapping("/{sessionId}")
     public ApiResponse<SessionDtos.SessionDetail> detail(
             TenantContext ctx,
             @PathVariable String orgSlug,
             @PathVariable String projectSlug,
-            @PathVariable String sessionId) {
+            @PathVariable String sessionId,
+            @RequestParam(required = false) @Nullable String model,
+            @RequestParam(required = false) @Nullable String kind,
+            @RequestParam(required = false) @Nullable String callSite,
+            @RequestParam(required = false) @Nullable Boolean hasCallSite,
+            @RequestParam(required = false) @Nullable String fromTimestamp,
+            @RequestParam(required = false) @Nullable String toTimestamp,
+            @RequestParam(required = false) @Nullable String status,
+            @RequestParam(required = false) @Nullable String q,
+            @RequestParam(required = false) @Nullable String detectedBy) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view a session");
-        return ApiResponse.ok(sessions.detail(r.project().id(), sessionId)
+        var filter = new TraceV2Repository.TraceQuery(
+                model, kind, callSite, hasCallSite, fromTimestamp, toTimestamp, status, q, detectedBy);
+        return ApiResponse.ok(sessions.detail(r.project().id(), sessionId, filter)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")));
     }
 
