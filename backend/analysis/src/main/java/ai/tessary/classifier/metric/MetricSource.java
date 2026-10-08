@@ -43,13 +43,11 @@ import org.springframework.stereotype.Component;
  * metric-drift.md §11 opens with.
  *
  * <p><b>The bucket key is not resolved here.</b> It arrives on the {@link TraceHead} this is called
- * with, resolved once by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}'s lateral,
- * root-span-first with the {@code seq → started_at → created_at} fallback chain. Taking the head rather
- * than a bare trace id is deliberate: it makes re-deriving the entry point impossible at this seam, and
+ * with, resolved once by the rollup onto {@code trace.call_site_id} (the root span's, else the earliest
+ * tagged span's) and read by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}. Taking the head rather
+ * than a bare trace id is deliberate: it makes re-deriving the call site impossible at this seam, and
  * re-deriving is the one place the two classifiers could silently disagree about which bucket a trace
- * belongs to. That fallback chain exists because {@code seq} is NULL on every OTLP-ingested
- * observation, and without it 443 traces whose roots all carried one call site were scattered across
- * six.
+ * belongs to.
  *
  * <p><b>Nothing is dropped.</b> A turn whose root span never ended cannot contribute a duration, but it
  * comes back with its {@link Completion} category and is counted. Excluding it silently would remove

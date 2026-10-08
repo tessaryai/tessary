@@ -19,10 +19,9 @@ import org.springframework.stereotype.Repository;
  * <p>{@link #SELECT_TRACE_HEAD} used to be a four-way join, {@code trace} to its turn context to the
  * ltree-root session, plus a LATERAL into {@code observation} to find the entry point's call site. All
  * four are columns on {@code trace} in v2: {@code session_id} and {@code project_version_id} are
- * denormalized at ingest, and {@code call_site_id} is copied down from the ROOT SPAN by the rollup
- * worker's recompute (implementation plan §2.2). The entry-point rule that LATERAL encoded, root span
- * first, then the {@code seq → started_at → created_at} fallback chain, now lives in the recompute,
- * resolved once per trace at write time instead of once per trace per sweep.
+ * denormalized at ingest, and {@code call_site_id} is copied down by the rollup worker's recompute
+ * (implementation plan §2.2): the root span's, else the earliest-starting tagged span's. That rule
+ * lives in the recompute, resolved once per trace at write time instead of once per trace per sweep.
  *
  * <h2>Settling is a fact, not a wait</h2>
  *
@@ -48,9 +47,9 @@ public class BehaviorSubstrateRepository {
      * @param sessionId the producer session this trace belongs to, or null for anonymous traffic. v2
      *     synthesizes nothing to fill that hole (spec §2.1), so null is a real answer here and every
      *     consumer has to tolerate it.
-     * @param callSiteId the scope this trace's baseline belongs to, the ENTRY POINT's call site, copied
-     *     onto the trace from its root span by the rollup recompute, or {@link #UNATTRIBUTED} when the
-     *     producer tagged none. Behaviour is per call site, because a project's call sites are separate
+     * @param callSiteId the scope this trace's baseline belongs to, copied onto the trace by the rollup
+     *     recompute (the root span's call site, else the first one the turn reached), or {@link
+     *     #UNATTRIBUTED} when the producer tagged no span. Behaviour is per call site, because a project's call sites are separate
      *     products that ship separately; pooling them makes one call site's normal action the thing that
      *     hides another's novelty.
      * @param eventAt the trace's own start as an ISO-8601 instant, both the event clock every
@@ -81,9 +80,8 @@ public class BehaviorSubstrateRepository {
             SELECT tr.id                                          AS trace_id,
                    tr.session_id                                  AS session_id,
                    tr.project_version_id                          AS project_version_id,
-                   -- The entry point decides the scope: a trace legitimately spans several call sites,
-                   -- so a baseline scoped to a child would model "traces that happened to contain this
-                   -- tool" rather than "traffic that entered here".
+                   -- One call site decides the scope, the root's or else the first one reached: a trace
+                   -- legitimately spans several, and counting a turn in each would count it twice.
                    COALESCE(tr.call_site_id, '__unattributed__')   AS call_site_id,
                    -- The trace's own start. Trace carries no created_at, since when the row was written
                    -- is not a fact about the turn; every span-of-time rule reads started_at instead.

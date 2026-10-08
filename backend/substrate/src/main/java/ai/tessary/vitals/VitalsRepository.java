@@ -125,9 +125,9 @@ public class VitalsRepository {
      * Turn durations in a window, grouped by dimension — one row per completed turn.
      *
      * <p>The duration is {@code trace.latency_ms}, a stored column derived from the trace's own
-     * start and end. The dimension comes from the turn's entry point: for {@code call_site} that is the
-     * trace's own {@code call_site_id}, copied down from the root span by the rollup (implementation plan
-     * §2.2), which is one column read instead of a LATERAL per trace. For {@code model} it is the root
+     * start and end. For {@code call_site} the dimension is the trace's own {@code call_site_id}, copied
+     * down by the rollup (implementation plan §2.2) from the root span, else the earliest tagged span,
+     * which is one column read instead of a LATERAL per trace. For {@code model} it is the root
      * span's model, which root spans do not carry — so that view buckets everything as
      * {@code __unattributed__}, exactly as it did before, and the cost statistic is the one that
      * discriminates by model.

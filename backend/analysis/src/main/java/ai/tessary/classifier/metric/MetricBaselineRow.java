@@ -125,7 +125,7 @@ public record MetricBaselineRow(
     public static final class BucketKind {
         private BucketKind() {}
 
-        /** The entry-point call site, resolved root-span-first exactly as behaviour drift resolves it. */
+        /** The trace's call site, read from {@code trace.call_site_id} exactly as behaviour drift reads it. */
         public static final String CALL_SITE = "call_site";
 
         /** An {@code ActionSymbol} {@code kind:normalized-name}, so tool buckets match drift's alphabet. */
