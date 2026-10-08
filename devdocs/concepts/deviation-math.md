@@ -364,10 +364,10 @@ traffic after the reset only.
 ### The same engine on other trials
 
 Malformed Output runs this engine per call site, a trial being one output checked against its schema.
-Frustration runs it per call site with a **conversation** as the trial (`FrustrationRateService`): a
-conversation belongs to the call site of its first scored turn, and it is a failure when it holds an
-uncleared frustration detection. Like Malformed Output it rebuilds every pass, because a later turn can
-flag a conversation first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
+Frustration runs it per call site with a **session**, a conversation on one call site, as the trial
+(`FrustrationRateService`): a session is a failure when it holds an uncleared frustration detection on
+that call site. Like Malformed Output it rebuilds every pass, because a later turn can flag a session
+first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
 it in its original hour either way. Judging starts at `min_baseline_conversations = 100`, and the
 reference keeps learning until `freeze_baseline_conversations = 1,000`, as Groundedness's does. A
 state row built under another scorer version or other dials is reset with the note `tuning changed`
