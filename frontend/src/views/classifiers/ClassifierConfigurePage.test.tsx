@@ -25,6 +25,7 @@ import type {
   GroundednessStatus,
 } from "../../api/types";
 import { currentLocation, renderRoute } from "../../test/render";
+import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { ClassifierConfigurePage, DetectionRow } from "./ClassifierConfigurePage";
 import { ago } from "./shared";
 import { clockTime } from "./groundedness";
@@ -248,6 +249,18 @@ describe("the configure page", () => {
 
     await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-1", false));
     await waitFor(() => expect(listClassifiers).toHaveBeenCalledTimes(2));
+  });
+
+  // Bug: back on Classifiers within the staleTime, the Configure menu still says "On" and the card still draws.
+  it("marks the Classifiers charts and menu stale when the switch flips", async () => {
+    listClassifiers.mockResolvedValue([classifier({ name: "Tool error", detector: "tool_error", enabled: true })]);
+    setClassifierEnabled.mockResolvedValue({});
+    const qc = renderPage();
+    seedChartReads(qc);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Disable Tool error" }));
+
+    await waitFor(() => expect(chartReadsStale(qc)).toEqual([true, true]));
   });
 
   it("carries the mode and the call sites in Status", async () => {
@@ -529,6 +542,21 @@ describe("Groundedness", () => {
     expect(setClassifierEnabled).not.toHaveBeenCalled();
   });
 
+  // Bug: Groundedness turned off here still draws its card on Classifiers, with no "off" chip, until the staleTime ends.
+  it("marks the Classifiers charts and menu stale when it is turned off", async () => {
+    listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
+    getGroundednessStatus.mockResolvedValue(status({ state: "on", configured: true, available: true, ever_swept: true }));
+    setClassifierEnabled.mockResolvedValue({});
+    const qc = renderPage("clf-g");
+    seedChartReads(qc);
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Disable Groundedness" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Turn off" }));
+
+    await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledWith("clf-g", false));
+    await waitFor(() => expect(chartReadsStale(qc)).toEqual([true, true]));
+  });
+
   it("closes the restart guide", async () => {
     listClassifiers.mockResolvedValue([groundednessRow({ enabled: true })]);
     getGroundednessStatus.mockResolvedValue(
@@ -710,6 +738,18 @@ describe("a drift classifier's findings, detections and reset", () => {
     await waitFor(() => expect(setClassifierEnabled).toHaveBeenCalledTimes(2));
     expect(setClassifierEnabled).toHaveBeenLastCalledWith("clf-1", true);
     await waitFor(() => expect(listClassifiers).toHaveBeenCalledTimes(2));
+  });
+
+  // Bug: a paused classifier retried here still reads "Waiting" in the Configure menu on Classifiers.
+  it("marks the Classifiers charts and menu stale when a retry lands", async () => {
+    listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness: "provider_rejected" })]);
+    setClassifierEnabled.mockResolvedValue({});
+    const qc = renderPage();
+    seedChartReads(qc);
+
+    fireEvent.click(within(await waitFor(() => section("Status"))).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(chartReadsStale(qc)).toEqual([true, true]));
   });
 
   it("opens the reset question from Reset", async () => {

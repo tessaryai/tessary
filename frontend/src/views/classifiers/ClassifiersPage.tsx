@@ -82,7 +82,7 @@ export function ClassifiersPage() {
               onChange={(v) => setDays(Number(v) as ChartRange)}
               options={[...RANGES]}
             />
-            <ConfigureMenu classifiers={scopesQ.data?.classifiers ?? []} basePath={basePath} />
+            <ConfigureMenu classifiers={scopesQ.data?.classifiers} error={scopesQ.error} basePath={basePath} />
           </>
         }
       />

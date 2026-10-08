@@ -206,7 +206,7 @@ export function resolveState(
 
     // 4. Findings exist and none of them became a case. The distinction the glossary turns on:
     //    triage is what decides a finding is a real issue, and it has not. The findings themselves are
-    //    listed under Cases on this page, so there is no "review" link to offer.
+    //    listed in the Findings section below Cases on this page, so there is no "review" link to offer.
     return {
       key: "no-cases",
       title: "No open cases",

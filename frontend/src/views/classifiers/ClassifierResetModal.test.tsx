@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderRoute } from "../../test/render";
+import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import type { Classifier } from "../../api/types";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 
@@ -65,6 +66,22 @@ describe("ClassifierResetModal", () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(resetClassifier.mock.calls).toEqual([["clf-1"]]);
+  });
+
+  // Bug: after a reset the Classifiers cards still draw the deleted detections and the old baseline.
+  it("marks the Classifiers charts and menu stale once the reset lands", async () => {
+    const onClose = vi.fn();
+    const { queryClient } = renderRoute(<ClassifierResetModal classifier={classifier({})} onClose={onClose} />);
+    seedChartReads(queryClient);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Type the classifier name to confirm the reset"), {
+      target: { value: "Frustration" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(chartReadsStale(queryClient)).toEqual([true, true]);
   });
 
   it("warns a free classifier about triage cost but not about a provider", () => {

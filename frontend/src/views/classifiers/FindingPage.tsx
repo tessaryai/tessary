@@ -134,7 +134,7 @@ export function FindingPage() {
       ) : (
         <>
           <PageHeader
-            breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+            breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
             kicker={finding.detector ? detectorLabel(finding.detector) : "Finding"}
             title={finding.title}
           />
@@ -390,7 +390,7 @@ export function FindingPage() {
         : null;
     return (
       <PageHeader
-        breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+        breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
         kicker={
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>
@@ -455,7 +455,7 @@ export function FindingPage() {
       : null;
     return (
       <PageHeader
-        breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+        breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
         kicker={
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>

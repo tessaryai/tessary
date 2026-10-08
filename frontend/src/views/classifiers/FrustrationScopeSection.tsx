@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Classifier } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, LoadingRow, useToast } from "../../ui";
 
 /**
@@ -37,6 +38,7 @@ export function FrustrationScopeSection({ classifier }: { classifier: Classifier
     mutationFn: (callSiteIds: string[]) => api.setFrustrationScope(classifier.id, { call_site_ids: callSiteIds }),
     onSuccess: (result) => {
       qc.setQueryData(["frustration-scope", api.base, classifier.id], result);
+      invalidateClassifierReads(qc, api.base);
       setPicked(new Set(result.call_site_ids));
       toast.success("Call sites saved", "They apply to turns that arrive from now on.");
     },

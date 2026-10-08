@@ -93,9 +93,6 @@ export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
 };
 export type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
 export type ChartDay = S["ChartDay"];
-export type ChartBaseline = S["ChartBaseline"];
-export type ChartHeadline = S["HeadlineView"];
-export type ChartLearning = S["LearningView"];
 /** One finding that opened a case, drawn as a bar in the card's Cases strip. `end_at` is null while the case is open. */
 export type ChartCaseSpan = S["CaseSpan"];
 /** A classifier with no card for this scope, and why. */

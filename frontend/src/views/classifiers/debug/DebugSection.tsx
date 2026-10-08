@@ -14,12 +14,12 @@ import { MetricDriftDebug } from "./sections/MetricDriftDebug";
 /**
  * Everything the platform already computes for this classifier that the page above doesn't render:
  * sweep cursor/lease detail plus family-specific fitted state. Collapsed by default: the query only
- * runs once opened (`enabled: open`), so browsing the classifier list costs nothing extra, and this
- * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifiersPage.tsx`)
+ * runs once opened (`enabled: open`), so opening a configure page costs nothing extra, and this
+ * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifierConfigurePage.tsx`)
  * so its code isn't fetched until then either.
  *
  * Not part of the product surface: deleting this directory and its one mount point in
- * `ClassifiersPage.tsx` removes the feature cleanly, with no flag, no entitlement, and no route to
+ * `ClassifierConfigurePage.tsx` removes the feature cleanly, with no flag, no entitlement, and no route to
  * unregister.
  */
 export default function DebugSection({ classifier }: { classifier: Classifier }) {

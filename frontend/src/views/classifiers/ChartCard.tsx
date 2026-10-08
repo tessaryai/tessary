@@ -367,7 +367,7 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
             {lanes.length === 0 && <span className="text-subtle">None in this range</span>}
             <span className="flex-1" />
             {more > 0 && (
-              <Link to={`${basePath}/triage`} className="text-link hover:text-link-hover">
+              <Link to={`${basePath}/triage`} className="text-muted hover:text-fg transition-colors">
                 {`+${more} more in Triage`}
               </Link>
             )}

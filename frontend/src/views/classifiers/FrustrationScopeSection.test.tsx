@@ -7,6 +7,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier } from "../../api/types";
 import { renderRoute } from "../../test/render";
+import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { FrustrationScopeSection } from "./FrustrationScopeSection";
 
 const api = vi.hoisted(() => ({
@@ -61,6 +62,20 @@ describe("FrustrationScopeSection", () => {
 
     await waitFor(() => expect(api.setFrustrationScope).toHaveBeenCalledWith("clf-f", { call_site_ids: ["cs-memory"] }));
     expect(await screen.findByText("Call sites saved")).toBeTruthy();
+  });
+
+  // Bug: a call site dropped from the pick still charts Frustration on Classifiers, with no "off" chip, until the
+  // staleTime ends.
+  it("marks the Classifiers charts and menu stale on save", async () => {
+    api.setFrustrationScope.mockResolvedValue({ call_site_ids: ["cs-memory"] });
+    const { queryClient } = renderRoute(<FrustrationScopeSection classifier={FRUSTRATION} />);
+    seedChartReads(queryClient);
+    await waitFor(() => expect(box("Reply to the user").checked).toBe(true));
+
+    fireEvent.click(box("cs-memory"));
+    save();
+
+    await waitFor(() => expect(chartReadsStale(queryClient)).toEqual([true, true]));
   });
 
   it("says nothing is scored while no call site is picked", async () => {

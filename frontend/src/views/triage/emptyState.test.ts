@@ -103,8 +103,8 @@ describe("resolveState", () => {
     expect(s.nodes[0].tone).toBe("focus");
   });
 
-  // Bug: the open findings sent to the Classifiers page, which no longer lists them: they sit under Cases on
-  // Triage itself.
+  // Bug: the open findings sent to the Classifiers page, which no longer lists them: they sit in the Findings
+  // section below Cases on Triage itself.
   it("counts the open findings, and sends the reader to traces rather than to the Classifiers page", () => {
     const s = resolveState(watching({ open_findings: 2 }), onboarding(), BASE, HAS_PROVIDER);
     expect(s.key).toBe("no-cases");

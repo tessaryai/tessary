@@ -191,6 +191,31 @@ describe("ClassifiersPage", () => {
     expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/id-frustration");
   });
 
+  // Bug: while the classifiers load, the menu says there are none, and it is the only way to a configure page.
+  it("says the Configure menu is loading, not empty, while the classifiers load", async () => {
+    api.getClassifierChartScopes.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure classifiers" }));
+    const menu = screen.getByRole("menu", { name: "Configure a classifier" });
+
+    expect(within(menu).getByRole("status")).toBeTruthy();
+    expect(within(menu).queryByText("No classifiers yet.")).toBeNull();
+  });
+
+  // Bug: a failed read leaves the menu saying there are no classifiers, which is false.
+  it("says why the Configure menu could not be read, not that it is empty", async () => {
+    api.getClassifierChartScopes.mockRejectedValue(new ApiError(500, { code: "INTERNAL", message: "scopes failed" }));
+    renderPage();
+    await screen.findAllByText(/scopes failed/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure classifiers" }));
+    const menu = screen.getByRole("menu", { name: "Configure a classifier" });
+
+    expect(within(menu).getByText(/scopes failed/)).toBeTruthy();
+    expect(within(menu).queryByText("No classifiers yet.")).toBeNull();
+  });
+
   // Bug: a stale or mistyped call site reads as a quiet chart instead of saying the server refused it.
   it("says why the charts could not be read, and keeps the other section", async () => {
     api.getClassifierCharts.mockImplementation((scope: { callSiteId: string } | { tool: string }) =>

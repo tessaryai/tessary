@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import type { ClassifierMenuItem } from "../../api/types";
-import { Button, Input, cn } from "../../ui";
+import { Button, ErrorNote, Input, LoadingRow, cn } from "../../ui";
 import { useDropdown } from "../../ui/useDropdown";
 import { menuStatus } from "./chartRules";
 
@@ -110,8 +110,19 @@ export function ScopePicker({
   );
 }
 
-/** "Configure classifiers": every classifier with where it runs, each leading to its configure page. */
-export function ConfigureMenu({ classifiers, basePath }: { classifiers: ClassifierMenuItem[]; basePath: string }) {
+/**
+ * "Configure classifiers": every classifier with where it runs, each leading to its configure page. `classifiers` is
+ * undefined until the read lands, so the menu says it is loading or why it failed, never that there are none.
+ */
+export function ConfigureMenu({
+  classifiers,
+  error,
+  basePath,
+}: {
+  classifiers: ClassifierMenuItem[] | undefined;
+  error: unknown;
+  basePath: string;
+}) {
   const { open, setOpen, ref } = useDropdown();
   return (
     <div ref={ref} className="relative">
@@ -126,8 +137,11 @@ export function ConfigureMenu({ classifiers, basePath }: { classifiers: Classifi
       </Button>
       {open && (
         <div role="menu" aria-label="Configure a classifier" className={PANEL} style={{ boxShadow: "var(--shadow-md)" }}>
-          {classifiers.length === 0 && <p className="px-3 py-1.5 text-small text-muted">No classifiers yet.</p>}
-          {classifiers.map((c) => (
+          {classifiers === undefined && (
+            <div className="px-3 py-1.5">{error ? <ErrorNote error={error} /> : <LoadingRow />}</div>
+          )}
+          {classifiers?.length === 0 && <p className="px-3 py-1.5 text-small text-muted">No classifiers yet.</p>}
+          {classifiers?.map((c) => (
             <Link
               key={c.id}
               role="menuitem"

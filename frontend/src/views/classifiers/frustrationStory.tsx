@@ -33,7 +33,7 @@ export function FrustrationHeader({
   const caseRef = finding.caseId;
   return (
     <PageHeader
-      breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+      breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
       title={finding.title}
       subtitle={
         closed

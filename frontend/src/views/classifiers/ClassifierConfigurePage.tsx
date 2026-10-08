@@ -28,6 +28,7 @@ import type {
   GroundednessStatus,
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, LoadingRow, PageHeader, Section, Spinner, Toggle, cn } from "../../ui";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
@@ -145,7 +146,7 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
 
   const toggleM = useMutation({
     mutationFn: (enabled: boolean) => api.setClassifierEnabled(classifier.id, enabled),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["classifiers", api.base] }),
+    onSuccess: () => invalidateClassifierReads(qc, api.base),
   });
   const toggle = (enabled: boolean) => {
     if (enabled && classifier.detector === FRUSTRATION_DETECTOR) return setModal("frustration-enable");
@@ -487,7 +488,7 @@ function ProviderPauseCallout({
   const qc = useQueryClient();
   const retryM = useMutation({
     mutationFn: () => api.setClassifierEnabled(classifier.id, true),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["classifiers", api.base] }),
+    onSuccess: () => invalidateClassifierReads(qc, api.base),
   });
 
   return (
