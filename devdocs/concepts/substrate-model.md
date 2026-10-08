@@ -378,7 +378,8 @@ Ingest drains in batches. For each batch, in order:
 2. **Get-or-create traces**: `INSERT INTO trace ... ON CONFLICT (project_id, id) DO NOTHING`,
    identity fields only — never timing or rollup columns, which belong to §7 alone.
 3. **Apply the batch-coalesced trace updates (§7.1) first, then upsert spans and payloads**,
-   in one transaction.
+   in one transaction. The trace update also fills a null `session_id` or `thread_id` from this
+   batch (§6.3).
 
 Rows are created before anything references them, so every FK is satisfiable regardless of
 arrival order.
@@ -430,7 +431,8 @@ ON CONFLICT (project_id, trace_id, id) DO UPDATE
   trace exactly like a new span.
 - The payload row is written in the same transaction under the same `event_ts` guard.
 
-Trace and session upserts follow the same shape but may touch **identity fields only**. Ingest
+Trace and session upserts follow the same shape but may touch **identity fields only**, and on
+a trace only to fill a null `session_id` or `thread_id` (§6.3). Ingest
 remains at-least-once and idempotent: re-delivering a batch is a no-op.
 
 ### 6.3 Correlation propagation
@@ -445,6 +447,25 @@ the primary one; the partial index `ix_span_uncorrelated` (§8) keeps it cheap. 
 trace settles with no session id is marked `correlation_state = 'none'` — a terminal state, not
 left pending forever — which is what keeps the index near-empty for permanently anonymous
 traffic instead of it accumulating there indefinitely.
+
+**A later batch can give a trace its session.** A batch exporter ships the root last (§6.4), so
+a producer that sets `session.id` or `gen_ai.conversation.id` on the root alone sends a trace
+whose first batch has neither. The get-or-create in §6.1 step 2 does not change an existing row,
+so the step 3 trace update fills them instead: `session_id = COALESCE(t.session_id, …)`, the
+same for `thread_id`. The first value wins and is never replaced, so a trace cannot move to
+another session and a replay changes nothing. The update runs under the trace lock that step 3
+already holds, so it adds no lock.
+
+When the fill sets `session_id`, the same transaction copies it onto every span of that trace
+that has none, including spans already marked `'none'`. That is the one way out of the terminal
+state. It is done inline rather than by setting those spans back to `pending`, because the
+`'none'` pass reads the trace without a lock and can still see it anonymous, retiring the span a
+second time after the trace has its session. Writing the span row makes the two statements
+contend on that row, so the one that runs second sees the session.
+
+The fill re-arms a settled trace like any other arrival, and it settles again with its session.
+A sweep whose cursor already passed the trace's `started_at` does not visit it again (the
+behavior sweep's late-settle limit), so a verdict from that sweep keeps the anonymous view.
 
 ### 6.4 Roots, parents, and paths
 

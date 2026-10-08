@@ -32,8 +32,10 @@ import org.springframework.stereotype.Repository;
  * <ul>
  *   <li>{@link #getOrCreateAll}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
  *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
- *   <li>{@link #applyBatchTimers}: the only in-place update on this row, and it is {@code min}/{@code
- *       max} plus a monotonically-earlier deadline. Idempotent under replay by construction (§7.1).
+ *   <li>{@link #applyBatchTimers} and {@link #fillCorrelation}: the in-place updates on this row, under one
+ *       lock. The first is {@code min}/{@code max} plus a monotonically-earlier deadline (§7.1); the second
+ *       only ever turns a null session or thread into a value (§6.3). Both are idempotent under replay by
+ *       construction.
  *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
  *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
  *       permanent and undetectable, whereas a full recompute self-heals after any bug.
@@ -180,6 +182,63 @@ public class TraceV2Repository {
                     .param("rt" + i, u.hasRoot());
         }
         return spec.update();
+    }
+
+    /** The session and thread one batch saw on a trace's spans, either of which may be absent. */
+    public record CorrelationFill(
+            String traceId,
+            @Nullable String sessionId,
+            @Nullable String threadId) {}
+
+    /**
+     * Fill a trace's {@code session_id} and {@code thread_id} where they are still null (§6.3).
+     *
+     * <p>The get-or-create insert takes them from whichever batch arrives first, and a batch exporter ships
+     * the root last (§6.4). A producer that sets the session on the root alone would otherwise leave the
+     * trace anonymous for good. A value already set is never replaced, so a trace cannot move between
+     * sessions and a replay changes nothing.
+     *
+     * <p>Run after {@link #applyBatchTimers} in the same transaction, which already holds these rows
+     * {@code FOR UPDATE}, so this takes no lock that statement did not.
+     *
+     * @return the ids of the traces this call filled, usually none.
+     */
+    public List<String> fillCorrelation(String projectId, Collection<CorrelationFill> fills) {
+        List<CorrelationFill> sorted = fills.stream()
+                .filter(f -> f.sessionId() != null || f.threadId() != null)
+                .sorted(Comparator.comparing(CorrelationFill::traceId))
+                .toList();
+        if (sorted.isEmpty()) return List.of();
+
+        StringBuilder values = new StringBuilder();
+        for (int i = 0; i < sorted.size(); i++) {
+            values.append(i == 0 ? "" : ", ")
+                    .append("(:tid")
+                    .append(i)
+                    .append(", :sid")
+                    .append(i)
+                    .append("::text, :thr")
+                    .append(i)
+                    .append("::text)");
+        }
+        var spec = jdbc.sql("""
+                        UPDATE trace t SET
+                            session_id = COALESCE(t.session_id, v.session_id),
+                            thread_id  = COALESCE(t.thread_id, v.thread_id)
+                        FROM (VALUES """ + values + """
+                        ) AS v (trace_id, session_id, thread_id)
+                        WHERE t.project_id = :pid AND t.id = v.trace_id
+                          AND ((t.session_id IS NULL AND v.session_id IS NOT NULL)
+                               OR (t.thread_id IS NULL AND v.thread_id IS NOT NULL))
+                        RETURNING t.id
+                        """).param("pid", projectId);
+        for (int i = 0; i < sorted.size(); i++) {
+            CorrelationFill f = sorted.get(i);
+            spec = spec.param("tid" + i, f.traceId())
+                    .param("sid" + i, f.sessionId())
+                    .param("thr" + i, f.threadId());
+        }
+        return spec.query(String.class).list();
     }
 
     /** A claimed trace: the key the recompute runs against. */
