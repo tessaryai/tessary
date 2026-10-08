@@ -65,6 +65,7 @@ class AgenticRcaPromptTest {
             "list_spans",
             "list_sessions",
             "get_session",
+            "get_conversation",
             "list_cases",
             "get_case",
             "describe_dataset",

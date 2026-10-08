@@ -657,6 +657,28 @@ public class TraceV2Repository {
     }
 
     /**
+     * A conversation's turns, oldest first. A conversation is {@code COALESCE(thread_id, session_id)} and a turn
+     * is a top-level trace: the key and grain the frustration classifier scores at. Served by
+     * {@code ix_trace_conversation}, which is partial on {@code parent_trace_id IS NULL}.
+     */
+    public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
+        return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
+                        + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
+                        + " t.output_tokens, t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens,"
+                        + " t.total_tokens, t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans,"
+                        + " t.is_settled, t.input_preview, t.output_preview"
+                        + " FROM trace t"
+                        + " WHERE t.project_id = :pid AND COALESCE(t.thread_id, t.session_id) = :cid"
+                        + " AND t.parent_trace_id IS NULL AND NOT t.is_deleted"
+                        + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                .param("pid", projectId)
+                .param("cid", conversationId)
+                .param("limit", limit)
+                .query((rs, n) -> summary(rs))
+                .list();
+    }
+
+    /**
      * A session's totals: the SUM of its traces' already-materialized rollup columns, plus the count of
      * those that have not settled (§7.5).
      *

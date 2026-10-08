@@ -86,6 +86,15 @@ public final class SessionDtos {
             List<TraceDtos.TraceListItem> traces) {}
 
     /**
+     * One conversation's turns, the grain the frustration classifier scores and RCA cites. Carries no totals,
+     * because nothing reads them.
+     */
+    public record ConversationDetail(
+            String id,
+            @JsonProperty("traces_truncated") boolean tracesTruncated,
+            List<TraceDtos.TraceListItem> traces) {}
+
+    /**
      * Every span across a session's traces, in one read — the heavier sibling of {@link SessionDetail},
      * deliberately its own endpoint rather than a field on it (see {@link SessionsController}): a viewer
      * that only wants totals should never pay for span payloads it did not ask for.

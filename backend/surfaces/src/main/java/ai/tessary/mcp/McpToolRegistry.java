@@ -74,7 +74,7 @@ import org.springframework.stereotype.Component;
  *   <li><b>Query (read-only):</b> {@code query_count} / {@code query_timeseries} / {@code query_facets} /
  *       {@code query_search} over the aggregation-first datasets, and {@code describe_dataset}.</li>
  *   <li><b>Substrate lists (read-only):</b> {@code list_traces}, {@code list_spans},
- *       {@code list_sessions}, {@code get_session}: rollup rows and previews, paged with
+ *       {@code list_sessions}, {@code get_session}, {@code get_conversation}: rollup rows and previews, paged with
  *       {@code limit}/{@code cursor}. See {@link #registerSubstrateListTools()}.</li>
  *   <li><b>Classifiers (read-only):</b> {@code list_findings} / {@code get_finding} read the
  *       behaviour/metric/tool-error drift findings, and {@code get_finding_evidence} pages the
@@ -453,8 +453,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * The plural substrate readers: {@code list_traces}, {@code list_spans}, {@code list_sessions} and
-     * {@code get_session}. Each wraps the same seam a REST controller or service already reads (cursors are
+     * The plural substrate readers: {@code list_traces}, {@code list_spans}, {@code list_sessions},
+     * {@code get_session} and {@code get_conversation}. Each wraps the same seam a REST controller or service already reads (cursors are
      * shared via {@link TracePageCodec}, so a cursor minted here is readable there), so a list here cannot
      * disagree with the same list in the UI.
      *
@@ -587,6 +587,21 @@ public class McpToolRegistry {
                         Map.of("id", strField("Session id, e.g. a trace row's session or a span's session_id.")),
                         List.of("id")),
                 (ctx, args) -> getSession(ctx, requireStr(args, "id"))));
+
+        add(new McpTool(
+                "get_conversation",
+                "Fetch one conversation by id, scoped to this token's project: its turns (top-level traces)"
+                        + " oldest-first as the same rows list_traces returns, capped at "
+                        + SessionReadService.SESSION_TRACE_CAP + " with traces_truncated saying so. A"
+                        + " conversation is a trace's thread_id, else its session_id: the key a frustration"
+                        + " finding's session refs carry. Use get_session for a whole session with its totals.",
+                schema(
+                        Map.of(
+                                "id",
+                                strField("Conversation id, e.g. a frustration evidence row's sessionId, a trace's"
+                                        + " thread_id, or the session_id of an unthreaded trace.")),
+                        List.of("id")),
+                (ctx, args) -> getConversation(ctx, requireStr(args, "id"))));
     }
 
     /**
@@ -1534,6 +1549,13 @@ public class McpToolRegistry {
     private SessionDtos.SessionDetail getSession(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         return sessions.detail(projectId, id).orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
+    }
+
+    /** {@code get_conversation}: one conversation's turns, project-scoped like {@link #getSession}. */
+    private SessionDtos.ConversationDetail getConversation(TenantContext ctx, String id) {
+        String projectId = requireProject(ctx).id();
+        return sessions.conversation(projectId, id)
+                .orElseThrow(() -> new McpTool.ToolException("conversation not found: " + id));
     }
 
     // ------------------------------------------------------------------ trace/span read handlers

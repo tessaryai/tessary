@@ -250,6 +250,25 @@ public class SessionReadService {
     }
 
     /**
+     * One conversation's turns, oldest first, capped like {@link #detail}. A conversation is
+     * {@code COALESCE(thread_id, session_id)}, so it is a thread inside a session or a session's unthreaded
+     * turns, never a whole session; {@link #detail} answers that. Empty when no turn carries the key.
+     */
+    public Optional<SessionDtos.ConversationDetail> conversation(String projectId, String conversationId) {
+        List<TraceV2Repository.Summary> rows =
+                traces.listByConversation(projectId, conversationId, SESSION_TRACE_CAP + 1);
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        boolean truncated = rows.size() > SESSION_TRACE_CAP;
+        if (truncated) {
+            rows = rows.subList(0, SESSION_TRACE_CAP);
+        }
+        return Optional.of(new SessionDtos.ConversationDetail(
+                conversationId, truncated, rows.stream().map(TraceDtos::item).toList()));
+    }
+
+    /**
      * Every span across a session's traces, assembled exactly like {@link TracesController}'s single-trace
      * read (same {@link TracesController#toSpan}, same payload/tool-call/retrieval-doc joins) but batched
      * across a trace-id set instead of one trace. Empty when the project holds no such session.
