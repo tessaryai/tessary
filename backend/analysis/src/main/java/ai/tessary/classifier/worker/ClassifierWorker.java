@@ -408,8 +408,8 @@ public class ClassifierWorker {
     /**
      * Drop turns whose session this classifier has already flagged: a session with any detection nobody has
      * cleared is not scored again, whatever its band, and one whose flag was cleared is. A session is a
-     * conversation on one call site, so a flag on the reply call site does not stop a second picked call site
-     * in the same conversation.
+     * conversation on one call site, so a flag on the reply call site does not stop a second call site in the
+     * same conversation.
      *
      * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on is
      * the session, which is one event, not one per turn.
@@ -673,10 +673,13 @@ public class ClassifierWorker {
             obs = suppressUnclearedSessions(
                     job.projectId(),
                     signal,
-                    candidates.stream()
-                            .filter(SubstrateReadRepository.TurnCandidate::opensCallSiteTurn)
-                            .map(SubstrateReadRepository.TurnCandidate::observation)
-                            .toList());
+                    inCallSiteScope(
+                            job.projectId(),
+                            signal,
+                            candidates.stream()
+                                    .filter(SubstrateReadRepository.TurnCandidate::opensCallSiteTurn)
+                                    .map(SubstrateReadRepository.TurnCandidate::observation)
+                                    .toList()));
         } else {
             window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, pageSize);
             obs = inCallSiteScope(job.projectId(), signal, window);

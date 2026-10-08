@@ -22,6 +22,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../ui";
 import { Markdown, PayloadBody, parsePayload } from "../components/PayloadViewer";
 import type { ChatMessage } from "../components/PayloadViewer";
+import { DetectionMarker } from "./detection-marker";
 import { TOOL_CALL_ID, ToolCallBatch, toolStepFrom, toolStepOf } from "./detail-tool";
 import type { ToolStep } from "./detail-tool";
 import type { Span } from "./detail-data";
@@ -210,15 +211,33 @@ export function planConversation(spans: Span[]): ConversationPlan {
   }
   const prior = lastHuman > 0 ? fullest.slice(0, lastHuman) : [];
 
+  // The turn's own question is drawn even when an earlier message said the same words ("yes", twice):
+  // deduping it against the prior history left the turn with no question at all. Only the last human
+  // message of a span's input can be it, and only the first span to carry it draws it.
+  const questionSig = lastHuman >= 0 ? signatureOf(fullest[lastHuman]) : null;
+  let questionDrawn = false;
   const seen = new Set(prior.map(signatureOf));
   const take = (msgs: ChatMessage[]): ChatMessage[] => {
+    let questionAt = -1;
+    if (questionSig != null && !questionDrawn) {
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (isHumanSpeech(msgs[i])) {
+          questionAt = i;
+          break;
+        }
+      }
+    }
     const fresh: ChatMessage[] = [];
-    for (const m of msgs) {
+    msgs.forEach((m, i) => {
       const sig = signatureOf(m);
-      if (seen.has(sig)) continue;
+      if (i === questionAt && sig === questionSig) {
+        questionDrawn = true;
+      } else if (seen.has(sig)) {
+        return;
+      }
       seen.add(sig);
       fresh.push(m);
-    }
+    });
     return fresh;
   };
 
@@ -475,14 +494,26 @@ export function groupTools(items: ChatItem[]): GroupedItem[] {
   return out;
 }
 
-function Items({ items, failed, flagged }: { items: ChatItem[]; failed?: boolean; flagged?: boolean }) {
+function Items({ items, failed, marks = [] }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
+  const grouped = groupTools(items);
+  // The marks belong to the person's words: the last human message of the run, not the whole run.
+  let markedAt = -1;
+  if (marks.length > 0) {
+    for (let i = grouped.length - 1; i >= 0; i--) {
+      const g = grouped[i];
+      if (g.kind === "message" && isHumanSpeech(g.message)) {
+        markedAt = i;
+        break;
+      }
+    }
+  }
   return (
     <div className="flex flex-col gap-2">
-      {groupTools(items).map((group, i) =>
+      {grouped.map((group, i) =>
         group.kind === "tools" ? (
           <ToolCallBatch key={`t${i}`} steps={group.steps} />
         ) : (
-          <Turn key={`m${i}`} item={group} failed={failed} flagged={flagged} />
+          <Turn key={`m${i}`} item={group} failed={failed} marks={i === markedAt ? marks : []} />
         ),
       )}
     </div>
@@ -519,21 +550,22 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
 /**
  * Rendered dialogue for a run of items, the caller decides there are any.
  *
- * <p>`flagged` marks the run as the message a classifier fired on, drawn in the error tint so it reads
- * as the one the finding is about. It is not `failed`: nothing broke, the user's words were judged.
+ * <p>`marks` names the classifiers that flagged the person's message in this run. It is drawn on that
+ * message only, outlined with the classifiers' names under it. It is not `failed`: nothing broke, the
+ * user's words were judged.
  */
-export function ChatItems({ items, failed, flagged }: { items: ChatItem[]; failed?: boolean; flagged?: boolean }) {
-  return <Items items={items} failed={failed} flagged={flagged} />;
+export function ChatItems({ items, failed, marks }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
+  return <Items items={items} failed={failed} marks={marks} />;
 }
 
 function Turn({
   item,
   failed,
-  flagged,
+  marks,
 }: {
   item: Extract<ChatItem, { kind: "message" }>;
   failed?: boolean;
-  flagged?: boolean;
+  marks: string[];
 }) {
   const { label, side } = classify(item.message);
 
@@ -546,7 +578,7 @@ function Turn({
           {label}
         </span>
       )}
-      <Bubble side={side} failed={failed} flagged={flagged}>
+      <Bubble side={side} failed={failed} marked={marks.length > 0}>
         <Clamped>
           <div className="flex flex-col gap-2">
             {item.text.length > 0 && <Markdown>{item.text}</Markdown>}
@@ -554,6 +586,9 @@ function Turn({
           </div>
         </Clamped>
       </Bubble>
+      {marks.length > 0 && (
+        <DetectionMarker names={marks} className={side === "right" ? "self-end" : "self-start"} />
+      )}
     </div>
   );
 }
@@ -655,19 +690,19 @@ function Clamped({ children }: { children: React.ReactNode }) {
 function Bubble({
   side,
   failed,
-  flagged,
+  marked,
   children,
 }: {
   side: "left" | "right";
   failed?: boolean;
-  flagged?: boolean;
+  marked?: boolean;
   children: React.ReactNode;
 }) {
   const right = side === "right";
   return (
     <div className={cn("flex", right ? "justify-end" : "justify-start")}>
       <div
-        data-flagged={flagged ? "true" : undefined}
+        data-flagged={marked ? "true" : undefined}
         className={cn(
           "chat-bubble min-w-0 text-body py-2.5 px-3.5",
           right ? "bg-raised text-fg" : "bg-bg text-fg",
@@ -681,11 +716,9 @@ function Bubble({
             // Read by the fold's fade gradient, which has to end in this
             // bubble's own colour to look like the text runs out rather than
             // like a grey band was laid over it.
-            "--bubble-bg": flagged ? "var(--color-error-subtle)" : right ? "var(--color-raised)" : "var(--color-bg)",
+            "--bubble-bg": right ? "var(--color-raised)" : "var(--color-bg)",
             ...(failed ? { borderColor: "var(--color-error)" } : null),
-            ...(flagged
-              ? { background: "var(--color-error-subtle)", border: "1px solid var(--color-error)" }
-              : null),
+            ...(marked ? { border: "1px solid var(--color-error)" } : null),
           } as React.CSSProperties
         }
       >

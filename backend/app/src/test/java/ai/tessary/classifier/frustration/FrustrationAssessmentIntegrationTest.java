@@ -82,9 +82,6 @@ class FrustrationAssessmentIntegrationTest {
     ClassifierRepository classifiers;
 
     @Autowired
-    FrustrationScopeRepository scopes;
-
-    @Autowired
     ClassifierService classifierService;
 
     @Autowired
@@ -321,12 +318,11 @@ class FrustrationAssessmentIntegrationTest {
                 .id();
     }
 
-    /** The project's Frustration classifier, scoring call sites cs-1 and cs-2. */
+    /** The project's Frustration classifier, on every call site. */
     private ClassifierRow frustration(String pid) {
         classifierService.seedBuiltIns(pid);
         ClassifierRow signal =
                 ClassifierRows.byKey(classifiers, pid, "frustration").orElseThrow();
-        scopes.replace(pid, signal.id(), List.of("cs-1", "cs-2"));
         return signal;
     }
 
@@ -394,7 +390,6 @@ class FrustrationAssessmentIntegrationTest {
                 assessments,
                 detections,
                 classifiers,
-                scopes,
                 tx,
                 new FrustrationProperties(),
                 mapper,

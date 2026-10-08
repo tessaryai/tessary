@@ -178,6 +178,7 @@ describe("TraceRail", () => {
   const detail: TraceDetailView = {
     trace: TRACE_A,
     spans: [span({ id: "a-root", trace_id: "tr-a", kind: "agent", name: "turn one", input: j([{ role: "user", content: "first question" }]) })],
+    detections: [],
   };
 
   it("renders nothing without a trace, and the trace's views with one", async () => {
@@ -266,5 +267,19 @@ describe("SessionRail", () => {
 
     renderRoute(<SessionRail sessionId={null} onClose={() => {}} />);
     expect(screen.queryByRole("tab")).toBeNull();
+  });
+});
+
+describe("detections", () => {
+  it("marks the turn a classifier flagged, in its own trace only", async () => {
+    api.getSession.mockResolvedValue(
+      session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
+    );
+    renderSession();
+
+    const second = await screen.findByText("second question");
+    const marker = screen.getByText("Frustration");
+    expect(screen.getAllByText("Frustration")).toHaveLength(1);
+    expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

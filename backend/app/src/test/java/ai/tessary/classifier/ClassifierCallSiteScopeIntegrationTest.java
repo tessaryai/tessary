@@ -187,20 +187,26 @@ class ClassifierCallSiteScopeIntegrationTest {
     }
 
     /**
-     * Frustration keeps its own list, where empty means score nothing. A second list on the row would give it two
-     * answers to which call sites it scores.
+     * Frustration takes the same list as every other classifier, so it runs on every call site until one is set.
+     * Widening it never rewinds: a rewind would send the whole history to the model again.
      */
     @Test
-    void frustrationRefusesTheGenericListAndKeepsItsOwn() {
+    void frustrationTakesTheListAndWideningItDoesNotRewind() {
         String pid = project("scope-frustration").id();
         declare(pid, "cs-a");
+        declare(pid, "cs-b");
         ClassifierRow frustration = byKey(pid, BuiltInDetector.Kind.FRUSTRATION);
+        assertNull(frustration.callSiteIds(), "a new Frustration classifier runs on every call site");
 
-        TessaryException refused = assertThrows(
-                TessaryException.class, () -> service.setCallSiteIds(pid, frustration.id(), List.of("cs-a")));
+        service.setCallSiteIds(pid, frustration.id(), List.of("cs-a"));
+        assertEquals(
+                List.of("cs-a"), byKey(pid, BuiltInDetector.Kind.FRUSTRATION).callSiteIds());
+        sweptToTheHead(pid);
 
-        assertEquals(ClassifierError.FRUSTRATION_SCOPE_ELSEWHERE, refused.error());
+        service.setCallSiteIds(pid, frustration.id(), null);
+
         assertNull(byKey(pid, BuiltInDetector.Kind.FRUSTRATION).callSiteIds());
+        assertEquals(SWEPT_ID, cursorOf(pid, frustration), "Frustration checks the added call sites from now on");
     }
 
     /**

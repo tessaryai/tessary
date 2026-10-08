@@ -288,7 +288,8 @@ CREATE TABLE trace (
     total_cost          numeric(18,12),
     unpriced_spans      integer,
 
-    -- copied from the root span at rollup (§7.2)
+    -- copied from the spans at rollup (§7.2): previews from the root, call site from
+    -- the root else the earliest tagged span
     input_preview       text,
     output_preview      text,
     call_site_id        text,
@@ -377,7 +378,8 @@ Ingest drains in batches. For each batch, in order:
 2. **Get-or-create traces**: `INSERT INTO trace ... ON CONFLICT (project_id, id) DO NOTHING`,
    identity fields only — never timing or rollup columns, which belong to §7 alone.
 3. **Apply the batch-coalesced trace updates (§7.1) first, then upsert spans and payloads**,
-   in one transaction.
+   in one transaction. The trace update also fills a null `name`, `user_id`, `session_id` or
+   `thread_id` from this batch (§6.3).
 
 Rows are created before anything references them, so every FK is satisfiable regardless of
 arrival order.
@@ -429,7 +431,8 @@ ON CONFLICT (project_id, trace_id, id) DO UPDATE
   trace exactly like a new span.
 - The payload row is written in the same transaction under the same `event_ts` guard.
 
-Trace and session upserts follow the same shape but may touch **identity fields only**. Ingest
+Trace and session upserts follow the same shape but may touch **identity fields only**, and on
+a trace only to fill a null `name`, `user_id`, `session_id` or `thread_id` (§6.3). Ingest
 remains at-least-once and idempotent: re-delivering a batch is a no-op.
 
 ### 6.3 Correlation propagation
@@ -444,6 +447,28 @@ the primary one; the partial index `ix_span_uncorrelated` (§8) keeps it cheap. 
 trace settles with no session id is marked `correlation_state = 'none'` — a terminal state, not
 left pending forever — which is what keeps the index near-empty for permanently anonymous
 traffic instead of it accumulating there indefinitely.
+
+**A later batch can give a trace its name and its correlation.** A batch exporter ships the root
+last (§6.4), so the batch that creates a multi-batch trace often has no root. The trace name
+comes from the root span alone, and a producer that sets `user.id`, `session.id` or
+`gen_ai.conversation.id` on the root alone sends a first batch with none of them. The
+get-or-create in §6.1 step 2 does not change an existing row, so the step 3 trace update fills
+them instead: `name = COALESCE(t.name, …)`, the same for `user_id`, `session_id` and
+`thread_id`. The first value wins and is never replaced, so a trace cannot move to another
+session and a replay changes nothing. The update runs under the trace lock that step 3 already
+holds, so it adds no lock. `project_version_id` has no ingest source, so there is nothing to
+fill.
+
+When the fill sets `session_id`, the same transaction copies it onto every span of that trace
+that has none, including spans already marked `'none'`. That is the one way out of the terminal
+state. It is done inline rather than by setting those spans back to `pending`, because the
+`'none'` pass reads the trace without a lock and can still see it anonymous, retiring the span a
+second time after the trace has its session. Writing the span row makes the two statements
+contend on that row, so the one that runs second sees the session.
+
+The fill re-arms a settled trace like any other arrival, and it settles again with its session.
+A sweep whose cursor already passed the trace's `started_at` does not visit it again (the
+behavior sweep's late-settle limit), so a verdict from that sweep keeps the anonymous view.
 
 ### 6.4 Roots, parents, and paths
 
@@ -636,6 +661,15 @@ WITH agg AS (
        AND NOT is_deleted
      ORDER BY started_at, id
      LIMIT 1
+), tagged AS (
+    SELECT call_site_id
+      FROM span
+     WHERE project_id   = :project_id
+       AND trace_id     = :trace_id
+       AND call_site_id IS NOT NULL
+       AND NOT is_deleted
+     ORDER BY started_at, id
+     LIMIT 1
 )
 UPDATE trace t
    SET span_count         = agg.span_count,
@@ -654,19 +688,24 @@ UPDATE trace t
                                   ELSE t.input_preview END,
        output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                   ELSE t.output_preview END,
-       call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
-                                  ELSE t.call_site_id END,
+       call_site_id       = CASE WHEN t.has_root_span
+                                 THEN COALESCE(root.call_site_id, tagged.call_site_id)
+                                 ELSE t.call_site_id END,
        rolled_up_at       = now(),
        rolled_up_through  = agg.through,
        is_settled         = (t.rollup_due_at IS NULL)
-  FROM agg LEFT JOIN root ON true
+  FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
  WHERE t.project_id = :project_id AND t.id = :trace_id;
 ```
 
-The previews and call site are copied down from the root span, not stored by ingest — that is
+The previews and call site are copied down from the spans, not stored by ingest — that is
 what keeps the traces list a single-table read (rule 1) rather than a join to find each row's
-entry point. Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior
-value.
+entry point. The previews are the root's. The call site is the root's tag, else the
+earliest-starting tagged span's, because instrumentation tags the model-call span rather than the
+handler around it; the full rule is in
+[Call sites](../../docs/concepts/call-sites.mdx#a-trace-takes-the-first-call-site-it-reached).
+Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior value rather
+than taking a call site from a partial set of children.
 
 The aggregate reads one trace's spans through the primary key prefix — an indexed, clustered
 scan. `rollup_due_at` is never written here: the claim already cleared it, and if a span has
@@ -745,6 +784,9 @@ Two consequences are contractual:
 - **No surface may list sessions sorted by cost or tokens.** That is the one read shape this
   design does not serve; building it requires a session materialization with its own staleness
   contract, as a separate piece of work.
+- **A session list filters by its traces, never by a session aggregate.** It takes the traces
+  list's filters, and a session is listed when one of its traces passes every one of them: one
+  `EXISTS` over `ix_trace_session` per session row. The page is still chosen by recency.
 
 `session.last_activity_at` (§7.1) supports listing and sorting sessions by recency without any
 rollup.

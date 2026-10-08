@@ -275,7 +275,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
     }
 
     /**
-     * Every call site a classifier can be limited to: the ones the bundle declares, and the entry call site of every
+     * Every call site a classifier can be limited to: the ones the bundle declares, and the call site of every
      * settled trace. The trace half walks {@code ix_trace_scope_settled_started} one distinct key at a time, so it costs
      * one index probe per call site, not a scan of the project's traces. The {@code COALESCE} is spelled exactly as the
      * index spells it, literal and all, or the planner cannot match the expression.

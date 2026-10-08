@@ -25,11 +25,6 @@ public enum ClassifierError implements ErrorCode {
     // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
     CALL_SITE_SCOPE_UNSUPPORTED(
             HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
-    // Frustration keeps its own list (frustration_scope), which means "score nothing" when empty. A second list on
-    // the classifier row would give it two answers to one question.
-    FRUSTRATION_SCOPE_ELSEWHERE(
-            HttpStatus.UNPROCESSABLE_ENTITY,
-            "Frustration picks its call sites under its own setting, PUT /classifiers/%s/frustration-scope"),
     NOT_GROUNDEDNESS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no groundedness status — only the groundedness classifier does"),

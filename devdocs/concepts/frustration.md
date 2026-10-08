@@ -6,8 +6,8 @@ It has two halves: a scorer that flags single user turns with a hosted decision 
 that turns those flags into findings. Code: `backend/analysis/.../classifier/frustration/`. The rate
 arithmetic is [deviation-math.md](./deviation-math.md) §2; config keys are in
 [config-keys.md](../reference/config-keys.md) (`tessary.frustration.*` and the classifier blob);
-tables are in [data-model.md](../reference/data-model.md) (`frustration_scope`, `frustration_assessment`,
-`frustration_detection`, `frustration_state`).
+tables are in [data-model.md](../reference/data-model.md) (`frustration_assessment`, `frustration_detection`,
+`frustration_state`).
 
 ## Off by default
 
@@ -34,13 +34,14 @@ only a filtered subset of turns reaches it.
 
 One user turn can make several model calls: a router that picks a lane, the reply, a memory pass that
 updates notes about the user. Each is its own call site, and only the reply is a conversation the user
-reads. So the classifier scores only the call sites a person picks on it (`frustration_scope`, set with
-`PUT /classifiers/{id}/frustration-scope` or the picker in the classifier rail). Nothing is scored
-until a call site is picked. The picks are their own table rather than a `config_json` key, because a
-catalog version bump rewrites `config_json`. A new pick applies to spans the sweep reads after it; the
-cursor is not rewound, since that would spend the org's credit on history.
+reads. The classifier takes the same call-site list as every other one (`classifier.call_site_ids`, set
+with `PUT /classifiers/{id}/call-sites` or the picker in the classifier rail): null, the default, scores
+every call site, and a list scores only those. The worker applies the list before the detector sees a
+turn. A change applies to spans the sweep reads after it; the cursor is not rewound, since that would
+spend the org's credit on history. Until `0032` the list was its own table, `frustration_scope`, where
+no picks meant nothing was scored; `0032` moved the picks into `call_site_ids` and dropped the table.
 
-In each top-level trace, the span scored for a picked call site is its first `llm` or `agent` span by
+In each top-level trace, the span scored for a call site is its first `llm` or `agent` span by
 `(started_at, id)`: the call that received the user's message, before any tool round of the same call
 site. The four messages before it come from the two earlier turns of the conversation that reached the
 same call site; a turn that only ran a router or a memory pass is not one of them. A turn's user
@@ -70,13 +71,17 @@ A session is a conversation on one call site. The conversation is keyed `COALESC
 session_id)`; the call site is the scored span's, written into the detection's `evidence.call_site_id`
 and the assessment's `call_site_id`. A session's first flagged turn writes a `frustration_detection`
 row, and while that row stands uncleared the sweep sends none of the session's later turns. A flag on
-one call site does not stop another picked call site in the same conversation. Every sent turn, flagged
+one call site does not stop another call site in the same conversation. Every sent turn, flagged
 or not, is a `frustration_assessment` row with the exact request and response bodies.
+
+The trace and session views read the same uncleared rows (`storage/TraceDetectionRepository`): the
+Detected by filter and column on the traces list, and the marker on the flagged message in the detail
+views. A turn whose flag a `false_alarm` resolve cleared is not marked.
 
 ## The session is the trial
 
 The rate test is Tool Error's Bernoulli CUSUM, run per call site with a session as the trial instead
-of a tool call. A conversation that reaches two picked call sites is a trial on each, and a flag on one
+of a tool call. A conversation that reaches two call sites is a trial on each, and a flag on one
 never counts against the other, so the numerator and denominator are the same population. The finding
 cites the flagged turn itself, so RCA reads the turn where it happened.
 

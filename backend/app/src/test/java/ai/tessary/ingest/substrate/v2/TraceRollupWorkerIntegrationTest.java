@@ -260,7 +260,39 @@ class TraceRollupWorkerIntegrationTest {
         TraceV2Row row = require(traceId);
         assertEquals("what the user asked", row.inputPreview());
         assertEquals("what came back", row.outputPreview());
-        assertEquals("call-site-42", row.callSiteId(), "the entry point is the ROOT's, not any span's");
+        assertEquals("call-site-42", row.callSiteId(), "a tagged root wins over a tagged child");
+    }
+
+    @Test
+    @DisplayName("an untagged root takes its call site from the tagged span under it")
+    void anUntaggedRootTakesTheCallSiteOfItsTaggedChild() {
+        SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", t0, t0.plusSeconds(9));
+        fx.withPreviews(root, "what the user asked", "what came back", null);
+        SpanRow child = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(2));
+        fx.withPreviews(child, "an inner prompt", "an inner completion", "call-site-99");
+
+        rollUp(true);
+
+        assertEquals(
+                "call-site-99",
+                require(traceId).callSiteId(),
+                "instrument.md tags the model-call span, not the handler around it");
+    }
+
+    @Test
+    @DisplayName("an untagged root with several tagged spans takes the call site the turn reached first")
+    void anUntaggedRootTakesTheEarliestTaggedSpansCallSite() {
+        SpanRow root = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), null, "agent", t0, t0.plusSeconds(9));
+        SpanRow later = fx.span(
+                pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0.plusSeconds(5), t0.plusSeconds(8));
+        fx.withPreviews(later, "summarize", "summary", "call-site-summarizer");
+        SpanRow earlier = fx.span(
+                pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0.plusSeconds(1), t0.plusSeconds(4));
+        fx.withPreviews(earlier, "plan", "a plan", "call-site-planner");
+
+        rollUp(true);
+
+        assertEquals("call-site-planner", require(traceId).callSiteId());
     }
 
     @Test

@@ -8,7 +8,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import type { SessionDetailView, SessionListItemView, TraceListItemView, TracesPageView } from "../../api/types";
+import type {
+  Classifier,
+  SessionDetailView,
+  SessionListItemView,
+  TraceListItemView,
+  TracesPageView,
+} from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { TracesIndex } from "./TracesIndex";
 
@@ -19,6 +25,7 @@ const api = vi.hoisted(() => ({
   getSession: vi.fn(),
   getTrace: vi.fn(),
   getSessionSpans: vi.fn(),
+  listClassifiers: vi.fn(),
 }));
 
 vi.mock("../../tenant/TenantContext", () => ({
@@ -53,6 +60,7 @@ function trace(over: Partial<TraceListItemView> = {}): TraceListItemView {
     thread_id: null,
     user_id: null,
     unpriced_spans: 0,
+    detected_by: [],
     ...over,
   };
 }
@@ -81,11 +89,34 @@ function session(over: Partial<SessionListItemView> = {}): SessionListItemView {
     total_tokens: 30,
     unpriced_spans: 0,
     user_id: null,
+    detected_by: [],
     ...over,
   };
 }
 
 const page = (traces: TraceListItemView[], next_cursor: string | null = null): TracesPageView => ({ traces, next_cursor });
+
+function classifier(over: Partial<Classifier> = {}): Classifier {
+  return {
+    id: "cls-fr",
+    classifier_key: "frustration",
+    name: "Frustration",
+    detector: "frustration",
+    enabled: true,
+    built_in: true,
+    call_site_ids: null,
+    config_json: null,
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+    description: null,
+    mode: "discovery",
+    readiness: null,
+    version: 1,
+    ...over,
+  };
+}
+
+const FRUSTRATED = [{ classifier_id: "cls-fr", name: "Frustration" }];
 
 beforeEach(() => {
   api.listTraces.mockResolvedValue(page([trace()]));
@@ -93,6 +124,10 @@ beforeEach(() => {
   api.getTrace.mockImplementation(pending);
   api.getSession.mockImplementation(pending);
   api.getSessionSpans.mockImplementation(pending);
+  api.listClassifiers.mockResolvedValue([
+    classifier(),
+    classifier({ id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak" }),
+  ]);
 });
 
 afterEach(() => {
@@ -314,6 +349,76 @@ describe("kept for the tab", () => {
   });
 });
 
+describe("detected by", () => {
+  it("offers any detection and the classifiers these views show, and asks the server for the pick", async () => {
+    renderRoute(<TracesIndex />);
+    await screen.findByText("checkout-agent");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    const menu = screen.getByRole("group", { name: "Detected by" });
+    expect(within(menu).getByRole("button", { name: /All traces/ })).toBeTruthy();
+    expect(within(menu).queryByRole("button", { name: /Secret leak/ })).toBeNull();
+
+    fireEvent.click(within(menu).getByRole("button", { name: /Frustration/ }));
+    await waitFor(() => expect(lastListCall().detectedBy).toBe("cls-fr"));
+    expect(currentParams().get("detected_by")).toBe("cls-fr");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Detected by" })).getByRole("button", { name: /Any detection/ }),
+    );
+    await waitFor(() => expect(lastListCall().detectedBy).toBe("any"));
+  });
+
+  it("names the classifier on a flagged row and on no other", async () => {
+    api.listTraces.mockResolvedValue(
+      page([trace({ id: "tr-sad", name: "sad-turn", detected_by: FRUSTRATED }), trace({ id: "tr-calm", name: "calm-turn" })]),
+    );
+    renderRoute(<TracesIndex />);
+
+    const sad = (await screen.findByText("sad-turn")).closest("tr")!;
+    expect(within(sad).getByText("Frustration")).toBeTruthy();
+    const calm = screen.getByText("calm-turn").closest("tr")!;
+    expect(within(calm).queryByText("Frustration")).toBeNull();
+  });
+
+  it("says the picked classifier is off when it has nothing to match", async () => {
+    api.listClassifiers.mockResolvedValue([classifier({ enabled: false })]);
+    api.listTraces.mockResolvedValue(page([]));
+    renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-fr" });
+
+    expect(await screen.findByText("Frustration is off")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Frustration" }).getAttribute("href")).toContain(
+      "classifiers/detectors?classifier=cls-fr",
+    );
+  });
+
+  it("filters sessions by the same filters and marks the traces of an expanded session that did not match", async () => {
+    api.listSessions.mockResolvedValue({ sessions: [session({ detected_by: FRUSTRATED })], next_cursor: null });
+    api.getSession.mockResolvedValue({
+      traces: [trace({ id: "tr-calm", name: "calm-turn" }), trace({ id: "tr-sad", name: "sad-turn", detected_by: FRUSTRATED })],
+      matched_trace_ids: ["tr-sad"],
+    } as SessionDetailView);
+    renderRoute(<TracesIndex />, { route: "/traces?groupBy=session&status=error&detected_by=cls-fr" });
+
+    const row = (await screen.findAllByText("checkout +2"))[0].closest("tr")!;
+    expect(api.listSessions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "error", detectedBy: "cls-fr", hasCallSite: true }),
+    );
+    expect(within(row).getByText("Frustration")).toBeTruthy();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Expand session" }));
+    const calm = (await screen.findByText("calm-turn")).closest("tr")!;
+    expect(api.getSession).toHaveBeenLastCalledWith(
+      "sess-1",
+      expect.objectContaining({ status: "error", detectedBy: "cls-fr" }),
+    );
+    expect(within(calm).getByText("outside the filters:")).toBeTruthy();
+    const sad = screen.getByText("sad-turn").closest("tr")!;
+    expect(within(sad).queryByText("outside the filters:")).toBeNull();
+  });
+});
+
 describe("the empty list", () => {
   it("in a rolling range with no filters, offers all time and points at sources", async () => {
     api.listTraces.mockResolvedValue(page([]));
@@ -373,7 +478,9 @@ describe("grouped by session", () => {
 
     const row = (await screen.findAllByText("checkout +2"))[0].closest("tr")!;
     expect(currentParams().get("groupBy")).toBe("session");
-    expect(api.listSessions).toHaveBeenCalledWith({ limit: 50, cursor: undefined, include: "totals" });
+    expect(api.listSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50, cursor: undefined, include: "totals", hasCallSite: true }),
+    );
     expect(within(row).getByText("errored:")).toBeTruthy();
     expect(within(row).getByText("live")).toBeTruthy();
     expect(within(row).getByText("5m 0s")).toBeTruthy();

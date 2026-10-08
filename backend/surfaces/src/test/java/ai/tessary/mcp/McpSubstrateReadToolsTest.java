@@ -443,7 +443,7 @@ class McpSubstrateReadToolsTest {
 
     @Test
     void listSessions_delegatesScopedWithTheClampedPageSizeAndRendersVerbatim() throws Exception {
-        when(sessions.page(eq(PROJECT_ID), anyInt(), any(), eq(false)))
+        when(sessions.page(eq(PROJECT_ID), anyInt(), any(), eq(false), eq(TraceV2Repository.TraceQuery.NONE)))
                 .thenReturn(new SessionDtos.SessionsPage(
                         List.of(new SessionDtos.SessionListItem(
                                 "sess-1",
@@ -467,13 +467,14 @@ class McpSubstrateReadToolsTest {
                                 null,
                                 null,
                                 null,
-                                null)),
+                                null,
+                                List.of())),
                         "cursor-2"));
 
         JsonNode body = structured(mcp.callTool("list_sessions", "{\"limit\":500,\"cursor\":\"opaque-token\"}"));
 
         // The page size is clamped by the tool, not the service, and the cursor passes through untouched.
-        verify(sessions).page(PROJECT_ID, 100, "opaque-token", false);
+        verify(sessions).page(PROJECT_ID, 100, "opaque-token", false, TraceV2Repository.TraceQuery.NONE);
         assertEquals("sess-1", body.get("sessions").get(0).get("id").asText());
         assertEquals("user-9", body.get("sessions").get(0).get("user_id").asText());
         assertEquals("cursor-2", body.get("next_cursor").asText());
@@ -485,7 +486,7 @@ class McpSubstrateReadToolsTest {
      */
     @Test
     void getSession_rendersTheDetailVerbatimIncludingBothHonestyFlags() throws Exception {
-        when(sessions.detail(PROJECT_ID, "sess-1"))
+        when(sessions.detail(PROJECT_ID, "sess-1", TraceV2Repository.TraceQuery.NONE))
                 .thenReturn(Optional.of(new SessionDtos.SessionDetail(
                         "sess-1",
                         "user-9",
@@ -499,11 +500,13 @@ class McpSubstrateReadToolsTest {
                         new BigDecimal("0.0042"),
                         2L,
                         true,
-                        List.of(TraceDtos.item(summary("t-1", "2026-08-17T09:00:00Z", 0))))));
+                        TraceDtos.items(List.of(summary("t-1", "2026-08-17T09:00:00Z", 0)), List.of()),
+                        List.of(),
+                        null)));
 
         JsonNode body = structured(mcp.callTool("get_session", "{\"id\":\"sess-1\"}"));
 
-        verify(sessions).detail(PROJECT_ID, "sess-1");
+        verify(sessions).detail(PROJECT_ID, "sess-1", TraceV2Repository.TraceQuery.NONE);
         assertEquals("sess-1", body.get("id").asText());
         assertEquals(4, body.get("trace_count").asInt());
         assertEquals(1, body.get("unsettled_traces").asInt(), "one addend is still moving, so the totals are a floor");
@@ -519,7 +522,7 @@ class McpSubstrateReadToolsTest {
 
     @Test
     void getSession_unknownIdIsACleanToolErrorNotAn32603() throws Exception {
-        when(sessions.detail(eq(PROJECT_ID), any())).thenReturn(Optional.empty());
+        when(sessions.detail(eq(PROJECT_ID), any(), any())).thenReturn(Optional.empty());
 
         String text = errorText(mcp.callTool("get_session", "{\"id\":\"nope\"}"));
 
