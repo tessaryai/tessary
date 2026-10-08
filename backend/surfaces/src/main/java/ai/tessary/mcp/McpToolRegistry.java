@@ -1283,6 +1283,7 @@ public class McpToolRegistry {
                 strArg(args, "model"),
                 strArg(args, "kind"),
                 strArg(args, "call_site_id"),
+                null,
                 range == null ? null : range.from(),
                 range == null ? null : range.to(),
                 strArg(args, "status"),

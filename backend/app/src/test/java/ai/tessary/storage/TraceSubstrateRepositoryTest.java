@@ -28,7 +28,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 class TraceSubstrateRepositoryTest {
 
     private static final TraceV2Repository.TraceQuery NO_FILTER =
-            new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null);
+            new TraceV2Repository.TraceQuery(null, null, null, null, null, null, null, null);
 
     @Autowired
     TenantService tenants;
@@ -116,16 +116,17 @@ class TraceSubstrateRepositoryTest {
         String untagged = SubstrateV2Fixtures.traceId();
         fx.span(pid, untagged, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(10), t0.plusSeconds(11));
 
-        var byCallSite = new TraceV2Repository.TraceQuery(null, null, "checkout_summarizer", null, null, null, null);
+        var byCallSite =
+                new TraceV2Repository.TraceQuery(null, null, "checkout_summarizer", null, null, null, null, null);
         assertEquals(
                 List.of(tagged),
                 ids(v2traces.list(pid, byCallSite, null, 10, null, null, null)),
                 "only the trace with a tagged span, and the whole trace at that");
 
-        var byKind = new TraceV2Repository.TraceQuery(null, "tool", null, null, null, null, null);
+        var byKind = new TraceV2Repository.TraceQuery(null, "tool", null, null, null, null, null, null);
         assertEquals(List.of(tagged), ids(v2traces.list(pid, byKind, null, 10, null, null, null)));
 
-        var unknown = new TraceV2Repository.TraceQuery(null, null, "no_such_site", null, null, null, null);
+        var unknown = new TraceV2Repository.TraceQuery(null, null, "no_such_site", null, null, null, null, null);
         assertTrue(
                 v2traces.list(pid, unknown, null, 10, null, null, null).isEmpty(), "an unknown call site matches none");
 
@@ -133,6 +134,43 @@ class TraceSubstrateRepositoryTest {
                 2,
                 v2traces.list(pid, NO_FILTER, null, 10, null, null, null).size(),
                 "an untagged trace still lists when the filter is absent");
+    }
+
+    /**
+     * Call-site presence is the same semi-join as one call site, so "any" is every id together and "none" is the rest.
+     * Reading the root span's copy instead would drop a trace tagged only below its root from "any".
+     */
+    @Test
+    void callSitePresenceFilterSplitsTracesByAnyTaggedSpan() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-presence").project().id();
+        Instant t0 = Instant.parse("2026-08-12T07:00:00Z");
+
+        String rootTagged = SubstrateV2Fixtures.traceId();
+        SpanRow root = fx.span(pid, rootTagged, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        fx.withPreviews(root, "hi", "yo", "checkout_summarizer");
+
+        String childTagged = SubstrateV2Fixtures.traceId();
+        SpanRow parent = fx.span(
+                pid, childTagged, SubstrateV2Fixtures.spanId(), null, "agent", t0.plusSeconds(10), t0.plusSeconds(11));
+        SpanRow child = fx.span(
+                pid,
+                childTagged,
+                SubstrateV2Fixtures.spanId(),
+                parent.id(),
+                "llm",
+                t0.plusSeconds(10),
+                t0.plusSeconds(11));
+        fx.withPreviews(child, "hi", "yo", "refund_router");
+
+        String untagged = SubstrateV2Fixtures.traceId();
+        fx.span(pid, untagged, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(20), t0.plusSeconds(21));
+
+        var any = new TraceV2Repository.TraceQuery(null, null, null, true, null, null, null, null);
+        assertEquals(List.of(childTagged, rootTagged), ids(v2traces.list(pid, any, null, 10, null, null, null)));
+
+        var none = new TraceV2Repository.TraceQuery(null, null, null, false, null, null, null, null);
+        assertEquals(List.of(untagged), ids(v2traces.list(pid, none, null, 10, null, null, null)));
     }
 
     /**
@@ -246,6 +284,7 @@ class TraceSubstrateRepositoryTest {
                 ids(v2traces.list(
                         pid,
                         new TraceV2Repository.TraceQuery(
+                                null,
                                 null,
                                 null,
                                 null,
@@ -456,7 +495,7 @@ class TraceSubstrateRepositoryTest {
 
     private static TraceV2Repository.TraceQuery query(
             @org.jspecify.annotations.Nullable String status, @org.jspecify.annotations.Nullable String q) {
-        return new TraceV2Repository.TraceQuery(null, null, null, null, null, status, q);
+        return new TraceV2Repository.TraceQuery(null, null, null, null, null, null, status, q);
     }
 
     /** Arm, backdate the deadline, and run the worker once. */

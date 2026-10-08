@@ -113,7 +113,7 @@ class TracesControllerTest {
         fx.rollup(t.pid(), traceId, t0, null, true);
 
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(1, page.traces().size());
         var item = page.traces().get(0);
         assertEquals(traceId, item.id(), "the producer's trace id, not a surrogate");
@@ -181,7 +181,7 @@ class TracesControllerTest {
         fx.rollup(t.pid(), unpriced, t0, null, true);
 
         var byId = ok(controller.list(
-                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null))
+                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null))
                 .traces()
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(TraceDtos.TraceListItem::id, i -> i));
@@ -211,7 +211,7 @@ class TracesControllerTest {
         // The v1 cursor: [occurred_at, id] in a PreviewCursor envelope, no version tag.
         String legacy = ai.tessary.ingest.PreviewCursor.encode(t0 + "\u001f" + Ids.ulid(), 0);
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(traceId),
                 page.traces().stream().map(TraceDtos.TraceListItem::id).toList(),
@@ -222,7 +222,7 @@ class TracesControllerTest {
                 1,
                 ok(controller.list(
                                 t.ctx(), t.org(), t.proj(), null, garbage, null, null, null, null, null, null, null,
-                                null))
+                                null, null))
                         .traces()
                         .size(),
                 "and a garbled one does the same rather than 500");
@@ -238,15 +238,28 @@ class TracesControllerTest {
         fx.trace(t.pid(), older, t0);
         fx.trace(t.pid(), newer, t0.plusSeconds(60));
 
-        var first = ok(
-                controller.list(t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null));
+        var first = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.traces().stream().map(TraceDtos.TraceListItem::id).toList());
         assertNotNull(first.nextCursor(), "there is another page, so there is a cursor");
 
         var second = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), 1, first.nextCursor(), null, null, null, null, null, null, null, null));
+                t.ctx(),
+                t.org(),
+                t.proj(),
+                1,
+                first.nextCursor(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null));
         assertEquals(
                 List.of(older),
                 second.traces().stream().map(TraceDtos.TraceListItem::id).toList());

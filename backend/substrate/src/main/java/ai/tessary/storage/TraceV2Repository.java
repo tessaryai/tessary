@@ -404,6 +404,10 @@ public class TraceV2Repository {
      * becomes {@code EXISTS (SELECT 1 FROM span …)}, keep this trace when any of its spans matches,
      * which is a filter the planner can satisfy from an index and stop at the first hit.
      *
+     * <p>{@code hasCallSite} is the same semi-join over any call site: {@code true} keeps a trace when some span
+     * carries one, {@code false} keeps it when none does. So the {@code true} set is every {@code callSite} set
+     * together, and a trace tagged only below its root still counts.
+     *
      * <p>{@code status} reads the rollup: {@code error} means {@code error_count > 0}, {@code ok} means it
      * is zero. A trace that has never rolled up has a null {@code error_count} and is therefore neither;
      * it is excluded by an explicit status filter rather than silently counted as healthy.
@@ -412,6 +416,7 @@ public class TraceV2Repository {
             @Nullable String model,
             @Nullable String kind,
             @Nullable String callSite,
+            @Nullable Boolean hasCallSite,
             @Nullable String from,
             @Nullable String to,
             @Nullable String status,
@@ -546,6 +551,11 @@ public class TraceV2Repository {
         addExists(where, params, "provided_model_name", "model", query.model());
         addExists(where, params, "kind", "kind", query.kind());
         addExists(where, params, "call_site_id", "callSite", query.callSite());
+        if (query.hasCallSite() != null) {
+            where.append(query.hasCallSite() ? " AND EXISTS" : " AND NOT EXISTS")
+                    .append(" (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
+                            + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx.call_site_id IS NOT NULL)");
+        }
 
         String status = query.status();
         if (status != null && !status.isBlank()) {
