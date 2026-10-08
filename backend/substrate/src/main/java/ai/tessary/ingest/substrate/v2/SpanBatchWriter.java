@@ -66,8 +66,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       transaction below (see {@code commitBatch} for why they moved inside it). Both are
  *       {@code ON CONFLICT DO NOTHING}, so a redelivery is a no-op and every FK is satisfiable regardless
  *       of arrival order. Timing and rollup columns are never written here, they belong to §7 alone.
- *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the fill of a trace session or
- *       thread an earlier batch left null, the session activity fold, then the span upserts and their payload
+ *   <li><b>One transaction</b>: the batch-coalesced trace min/max + re-arm, the fill of a trace name, user,
+ *       session or thread an earlier batch left null, the session activity fold, then the span upserts and their payload
  *       rows under the same {@code event_ts} guard. A trace whose session was just filled has it copied onto
  *       its session-less spans in the same transaction.
  * </ol>
@@ -262,7 +262,9 @@ public class SpanBatchWriter {
         //
         // Safe ahead of the timer update below because getOrCreateAll is ON CONFLICT DO NOTHING, which takes
         // no lock on a row that already exists, so it cannot start the KEY SHARE the FOR UPDATE would then
-        // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes.
+        // have to upgrade. DO UPDATE here would reintroduce exactly the deadlock that comment describes. A trace
+        // handle this batch knows and the creating batch did not (the root ships last, §6.4) is filled by
+        // fillCorrelation instead, under the timer update's FOR UPDATE.
         List<Map.Entry<String, SessionFold>> newSessions = new ArrayList<>(bySession.entrySet());
         newSessions.sort(Map.Entry.comparingByKey());
         List<SessionRow> sessionRows = new ArrayList<>(newSessions.size());
@@ -321,8 +323,8 @@ public class SpanBatchWriter {
         traces.applyBatchTimers(projectId, timers);
 
         List<TraceV2Repository.CorrelationFill> fills = new ArrayList<>(byTrace.size());
-        byTrace.forEach((traceId, fold) ->
-                fills.add(new TraceV2Repository.CorrelationFill(traceId, fold.sessionId(), fold.threadId())));
+        byTrace.forEach((traceId, fold) -> fills.add(new TraceV2Repository.CorrelationFill(
+                traceId, fold.name(), fold.userId(), fold.sessionId(), fold.threadId())));
         List<String> filled = traces.fillCorrelation(projectId, fills);
 
         List<SessionRepository.Touch> touches = new ArrayList<>(bySession.size());

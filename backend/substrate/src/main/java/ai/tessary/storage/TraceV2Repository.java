@@ -34,8 +34,8 @@ import org.springframework.stereotype.Repository;
  *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
  *   <li>{@link #applyBatchTimers} and {@link #fillCorrelation}: the in-place updates on this row, under one
  *       lock. The first is {@code min}/{@code max} plus a monotonically-earlier deadline (§7.1); the second
- *       only ever turns a null session or thread into a value (§6.3). Both are idempotent under replay by
- *       construction.
+ *       only ever turns a null name, user, session or thread into a value (§6.3). Both are idempotent under
+ *       replay by construction.
  *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
  *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
  *       permanent and undetectable, whereas a full recompute self-heals after any bug.
@@ -184,28 +184,35 @@ public class TraceV2Repository {
         return spec.update();
     }
 
-    /** The session and thread one batch saw on a trace's spans, either of which may be absent. */
+    /**
+     * The handles one batch saw for a trace, any of which may be absent.
+     *
+     * @param name the batch's root span name; a child span never names its trace.
+     */
     public record CorrelationFill(
             String traceId,
+            @Nullable String name,
+            @Nullable String userId,
             @Nullable String sessionId,
             @Nullable String threadId) {}
 
     /**
-     * Fill a trace's {@code session_id} and {@code thread_id} where they are still null (§6.3).
+     * Fill a trace's {@code name}, {@code user_id}, {@code session_id} and {@code thread_id} where they are
+     * still null (§6.3).
      *
      * <p>The get-or-create insert takes them from whichever batch arrives first, and a batch exporter ships
-     * the root last (§6.4). A producer that sets the session on the root alone would otherwise leave the
-     * trace anonymous for good. A value already set is never replaced, so a trace cannot move between
+     * the root last (§6.4). A producer that sets them on the root alone would otherwise leave the trace
+     * unnamed and anonymous for good. A value already set is never replaced, so a trace cannot move between
      * sessions and a replay changes nothing.
      *
      * <p>Run after {@link #applyBatchTimers} in the same transaction, which already holds these rows
      * {@code FOR UPDATE}, so this takes no lock that statement did not.
      *
-     * @return the ids of the traces this call filled, usually none.
+     * @return the ids of the traces whose session this call filled, usually none.
      */
     public List<String> fillCorrelation(String projectId, Collection<CorrelationFill> fills) {
         List<CorrelationFill> sorted = fills.stream()
-                .filter(f -> f.sessionId() != null || f.threadId() != null)
+                .filter(f -> f.name() != null || f.userId() != null || f.sessionId() != null || f.threadId() != null)
                 .sorted(Comparator.comparing(CorrelationFill::traceId))
                 .toList();
         if (sorted.isEmpty()) return List.of();
@@ -215,31 +222,49 @@ public class TraceV2Repository {
             values.append(i == 0 ? "" : ", ")
                     .append("(:tid")
                     .append(i)
-                    .append(", :sid")
+                    .append(", :nm")
+                    .append(i)
+                    .append("::text, :uid")
+                    .append(i)
+                    .append("::text, :sid")
                     .append(i)
                     .append("::text, :thr")
                     .append(i)
                     .append("::text)");
         }
+        // `o` is the same row read before this statement writes it, so RETURNING can tell a session filled
+        // here from one the trace already had.
         var spec = jdbc.sql("""
                         UPDATE trace t SET
+                            name       = COALESCE(t.name, v.name),
+                            user_id    = COALESCE(t.user_id, v.user_id),
                             session_id = COALESCE(t.session_id, v.session_id),
                             thread_id  = COALESCE(t.thread_id, v.thread_id)
                         FROM (VALUES """ + values + """
-                        ) AS v (trace_id, session_id, thread_id)
+                        ) AS v (trace_id, name, user_id, session_id, thread_id)
+                        JOIN trace o ON o.project_id = :pid AND o.id = v.trace_id
                         WHERE t.project_id = :pid AND t.id = v.trace_id
-                          AND ((t.session_id IS NULL AND v.session_id IS NOT NULL)
+                          AND ((t.name IS NULL AND v.name IS NOT NULL)
+                               OR (t.user_id IS NULL AND v.user_id IS NOT NULL)
+                               OR (t.session_id IS NULL AND v.session_id IS NOT NULL)
                                OR (t.thread_id IS NULL AND v.thread_id IS NOT NULL))
-                        RETURNING t.id
+                        RETURNING t.id, (o.session_id IS NULL AND v.session_id IS NOT NULL) AS session_filled
                         """).param("pid", projectId);
         for (int i = 0; i < sorted.size(); i++) {
             CorrelationFill f = sorted.get(i);
             spec = spec.param("tid" + i, f.traceId())
+                    .param("nm" + i, f.name())
+                    .param("uid" + i, f.userId())
                     .param("sid" + i, f.sessionId())
                     .param("thr" + i, f.threadId());
         }
-        return spec.query(String.class).list();
+        return spec.query((rs, n) -> new Filled(rs.getString("id"), rs.getBoolean("session_filled"))).list().stream()
+                .filter(Filled::sessionFilled)
+                .map(Filled::traceId)
+                .toList();
     }
+
+    private record Filled(String traceId, boolean sessionFilled) {}
 
     /** A claimed trace: the key the recompute runs against. */
     public record Claim(String projectId, String traceId) {}

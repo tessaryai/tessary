@@ -378,8 +378,8 @@ Ingest drains in batches. For each batch, in order:
 2. **Get-or-create traces**: `INSERT INTO trace ... ON CONFLICT (project_id, id) DO NOTHING`,
    identity fields only — never timing or rollup columns, which belong to §7 alone.
 3. **Apply the batch-coalesced trace updates (§7.1) first, then upsert spans and payloads**,
-   in one transaction. The trace update also fills a null `session_id` or `thread_id` from this
-   batch (§6.3).
+   in one transaction. The trace update also fills a null `name`, `user_id`, `session_id` or
+   `thread_id` from this batch (§6.3).
 
 Rows are created before anything references them, so every FK is satisfiable regardless of
 arrival order.
@@ -432,7 +432,7 @@ ON CONFLICT (project_id, trace_id, id) DO UPDATE
 - The payload row is written in the same transaction under the same `event_ts` guard.
 
 Trace and session upserts follow the same shape but may touch **identity fields only**, and on
-a trace only to fill a null `session_id` or `thread_id` (§6.3). Ingest
+a trace only to fill a null `name`, `user_id`, `session_id` or `thread_id` (§6.3). Ingest
 remains at-least-once and idempotent: re-delivering a batch is a no-op.
 
 ### 6.3 Correlation propagation
@@ -448,13 +448,16 @@ trace settles with no session id is marked `correlation_state = 'none'` — a te
 left pending forever — which is what keeps the index near-empty for permanently anonymous
 traffic instead of it accumulating there indefinitely.
 
-**A later batch can give a trace its session.** A batch exporter ships the root last (§6.4), so
-a producer that sets `session.id` or `gen_ai.conversation.id` on the root alone sends a trace
-whose first batch has neither. The get-or-create in §6.1 step 2 does not change an existing row,
-so the step 3 trace update fills them instead: `session_id = COALESCE(t.session_id, …)`, the
-same for `thread_id`. The first value wins and is never replaced, so a trace cannot move to
-another session and a replay changes nothing. The update runs under the trace lock that step 3
-already holds, so it adds no lock.
+**A later batch can give a trace its name and its correlation.** A batch exporter ships the root
+last (§6.4), so the batch that creates a multi-batch trace often has no root. The trace name
+comes from the root span alone, and a producer that sets `user.id`, `session.id` or
+`gen_ai.conversation.id` on the root alone sends a first batch with none of them. The
+get-or-create in §6.1 step 2 does not change an existing row, so the step 3 trace update fills
+them instead: `name = COALESCE(t.name, …)`, the same for `user_id`, `session_id` and
+`thread_id`. The first value wins and is never replaced, so a trace cannot move to another
+session and a replay changes nothing. The update runs under the trace lock that step 3 already
+holds, so it adds no lock. `project_version_id` has no ingest source, so there is nothing to
+fill.
 
 When the fill sets `session_id`, the same transaction copies it onto every span of that trace
 that has none, including spans already marked `'none'`. That is the one way out of the terminal

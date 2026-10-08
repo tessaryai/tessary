@@ -29,6 +29,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -166,6 +167,70 @@ class SpanBatchWriterIntegrationTest {
         assertEquals("in-root", payload.input());
         assertNotNull(payload.attributes(), "the producer's whole attribute bag survives off-row");
         assertEquals("in-root", root.inputPreview(), "the preview is cut once, at write, so the list is one table");
+    }
+
+    @Test
+    @DisplayName("§6.3 — a root that ships in a later batch still names the trace and fills its correlation")
+    void write_aLaterBatchFillsTheTraceIdentityTheFirstLeftNull() {
+        String traceId = traceId("root-last");
+        // A batch exporter flushes on END, so the root ships after its children, often in another batch (§6.4).
+        writer.write(
+                pid,
+                List.of(span(
+                        "child", "root", traceId, KindNormalizer.LLM, t0.plusSeconds(1), t0.plusSeconds(2), Map.of())));
+        writer.write(
+                pid,
+                List.of(named(
+                        span(
+                                "root",
+                                null,
+                                traceId,
+                                KindNormalizer.AGENT,
+                                t0,
+                                t0.plusSeconds(3),
+                                correlation("sess-late", "user-late", "conv-late")),
+                        "checkout-turn")));
+
+        TraceV2Row trace = traces.findById(pid, traceId).orElseThrow();
+        assertEquals(
+                List.of("checkout-turn", "user-late", "sess-late", "conv-late"),
+                Arrays.asList(trace.name(), trace.userId(), trace.sessionId(), trace.threadId()),
+                "the first batch carried none of these, and the trace row it created must not keep them null");
+    }
+
+    @Test
+    @DisplayName("§6.3 — a trace keeps the first name and correlation it was given; a later batch cannot replace them")
+    void write_traceIdentityKeepsItsFirstValue() {
+        String traceId = traceId("first-wins");
+        writer.write(
+                pid,
+                List.of(named(
+                        span(
+                                "root",
+                                null,
+                                traceId,
+                                KindNormalizer.AGENT,
+                                t0,
+                                t0.plusSeconds(3),
+                                correlation("s1", "u1", "c1")),
+                        "first")));
+        writer.write(
+                pid,
+                List.of(named(
+                        span(
+                                "second-root",
+                                null,
+                                traceId,
+                                KindNormalizer.AGENT,
+                                t0.plusSeconds(4),
+                                t0.plusSeconds(5),
+                                correlation("s2", "u2", "c2")),
+                        "second")));
+
+        TraceV2Row trace = traces.findById(pid, traceId).orElseThrow();
+        assertEquals(
+                List.of("first", "u1", "s1", "c1"),
+                Arrays.asList(trace.name(), trace.userId(), trace.sessionId(), trace.threadId()));
     }
 
     @Test
@@ -652,6 +717,16 @@ class SpanBatchWriterIntegrationTest {
 
     private static Map<String, Object> meta(String sessionId) {
         return Map.of(GenAiAttributes.SESSION_ID, sessionId);
+    }
+
+    private static Map<String, Object> correlation(String sessionId, String userId, String conversationId) {
+        return Map.of(
+                GenAiAttributes.SESSION_ID,
+                sessionId,
+                "user.id",
+                userId,
+                GenAiAttributes.CONVERSATION_ID,
+                conversationId);
     }
 
     private static Map<String, Object> usageAttrs(@Nullable Long input, @Nullable Long output) {
