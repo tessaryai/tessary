@@ -14,6 +14,7 @@ import { ErrorNote, LoadingRow, Rail } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { ConversationView, TimelineView, TreeView } from "./detail-views";
+import { RawJsonView } from "./detail-json";
 import { clockLabel, traceSummary, useTraceDetail } from "./detail-data";
 
 export function TraceRail({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
@@ -57,6 +58,9 @@ export function TraceRail({ traceId, onClose }: { traceId: string | null; onClos
           {view === "tree" && <TreeView spans={spans} focusId={focusId} onSelect={setFocusId} />}
           {view === "timeline" && (
             <TimelineView trace={trace} spans={spans} focusId={focusId} onSelect={setFocusId} />
+          )}
+          {view === "json" && detail && (
+            <RawJsonView value={detail} fileName={`trace-${trace.id}.json`} foldDepth={2} />
           )}
         </TraceMedia>
       )}

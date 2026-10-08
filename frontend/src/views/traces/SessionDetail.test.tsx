@@ -203,6 +203,20 @@ describe("TraceRail", () => {
     expect(screen.queryByRole("tab")).toBeNull();
   });
 
+  it("shows the trace as the API sent it in JSON", async () => {
+    api.getTrace.mockResolvedValue(detail);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderRoute(<TraceRail traceId="tr-a" onClose={() => {}} />);
+
+    await screen.findByText("first question");
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(j([{ role: "user", content: "first question" }]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify(detail, null, 2));
+  });
+
   it("shows the read's error", async () => {
     api.getTrace.mockRejectedValue(new Error("rail read failed"));
     renderRoute(<TraceRail traceId="tr-a" onClose={() => {}} />);
@@ -224,6 +238,19 @@ describe("SessionRail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open session" }));
     expect(open).toHaveBeenCalledWith("/orgs/acme/projects/default/sessions/sess-1", "_blank");
     open.mockRestore();
+  });
+
+  it("shows the session and its spans as the API sent them in JSON", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderRoute(<SessionRail sessionId="sess-1" onClose={() => {}} />);
+
+    await screen.findByText("second question");
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
   });
 
   it("waits on both reads, and shows either one's error", async () => {
