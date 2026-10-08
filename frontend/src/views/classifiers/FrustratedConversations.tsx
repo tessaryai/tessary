@@ -308,7 +308,7 @@ function Conversation({ row, basePath }: { row: FrustratedConversation; basePath
             traces={loaded.map((d) => d.trace)}
             spansByTrace={spansByTrace}
             focusId={null}
-            flaggedTraceId={row.traceId}
+            marksByTrace={new Map([[row.traceId, ["Frustration"]]])}
           />
         )}
         </div>

@@ -138,8 +138,8 @@ public class VitalsService {
 
     private static Cost cost(Bucket cur, Bucket base) {
         // The denominator comes from the SPENDING population, not the root-span one. They are not the
-        // same set: an llm span tagged with a call site whose root span is not puts its cost in the
-        // call-site bucket and its turn in `__unattributed__`, so the bucket would read "spend, zero
+        // same set: a turn that reaches a second call site puts that llm span's cost in the second
+        // call-site bucket and its turn in the first, so the second bucket would read "spend, zero
         // turns" and could never flag. For `by=model` the mismatch is total — root spans carry no
         // model — which left cost flagging permanently dead on that view.
         long turns = cur.costTurns();

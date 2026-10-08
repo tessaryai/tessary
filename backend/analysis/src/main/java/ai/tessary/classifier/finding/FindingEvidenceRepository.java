@@ -363,8 +363,10 @@ public class FindingEvidenceRepository {
      * reachable on later pages rather than silently dropping out.
      *
      * <p>The join is LEFT and falls back to the trace's logical root for a trace-grain ref, so a
-     * behaviour-drift finding still renders a name and a time rather than an id and four dashes. A ref
-     * whose substrate has aged out keeps its ids and carries nulls.
+     * behaviour-drift finding still renders a name and a time rather than an id and four dashes. Its call
+     * site is the trace's, not that root's: the finding was bucketed by the trace's call site, and an
+     * untagged root takes it from a tagged span below. A ref whose substrate has aged out keeps its ids
+     * and carries nulls.
      *
      * <p><b>LATERAL, and one row per ref.</b> {@code is_logical_root} is not unique within a trace — it
      * marks every sub-agent boundary — so a plain {@code ON} with that fallback multiplied a trace-grain
@@ -403,7 +405,7 @@ public class FindingEvidenceRepository {
                 + " (e.span_id IS NULL AND t.rolled_up_at IS NULL) AS not_rolled_up,"
                 + " (e.span_id IS NULL AND COALESCE(t.unpriced_spans, 0) > 0) AS partial_cost,"
                 + " (e.span_id IS NULL AND COALESCE(t.is_settled, false) = false) AS stale_totals,"
-                + " s.call_site_id,"
+                + " CASE WHEN e.span_id IS NULL THEN t.call_site_id ELSE s.call_site_id END AS call_site_id,"
                 + " left(pl.input, " + PREVIEW_CHARS + ") AS input_preview,"
                 + " left(pl.output, " + PREVIEW_CHARS + ") AS output_preview,"
                 + (secretLeak

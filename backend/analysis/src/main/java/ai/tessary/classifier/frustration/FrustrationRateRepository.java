@@ -25,7 +25,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>A session is one trial: a conversation on one call site.</b> There is no session table: every fact is a
  * {@code GROUP BY conversation_id, call_site_id} over {@code frustration_assessment} under the current scorer. A
  * session is bucketed in the hour of its first scored turn on that call site. A conversation that reaches two
- * picked call sites is a trial on each, and a flag on one call site never counts against the other. A session is a
+ * call sites is a trial on each, and a flag on one call site never counts against the other. A session is a
  * failure while it carries an uncleared detection on its call site; a {@code false_alarm} resolve clears it and the
  * next replay counts it calm again.
  *

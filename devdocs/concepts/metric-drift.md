@@ -43,17 +43,17 @@ divergence metric is a one-liner. The bucketing is where this succeeds or fails.
 
 ### 2.1 The key
 
-**The bucket is the entry-point call site**, resolved exactly as behaviour drift resolves it:
-`BehaviorSubstrateRepository.SELECT_TRACE_HEAD`'s lateral join, root-span-first, with the
-`seq → started_at → created_at` fallback chain.
+**The bucket is the trace's call site**, read exactly as behaviour drift reads it:
+`trace.call_site_id` through `BehaviorSubstrateRepository.SELECT_TRACE_HEAD`. The rollup sets it
+to the root span's call site, else the earliest-starting tagged span's
+([Call sites](../../docs/concepts/call-sites.mdx#a-trace-takes-the-first-call-site-it-reached)).
 
-Do not re-derive this. That ordering exists because `seq` is NULL on every OTLP-ingested
-observation, and without the fallback 443 traces whose roots all carried one call site were
-scattered across six.
+Do not re-derive this. One column read by both classifiers is what stops them disagreeing about
+which bucket a trace belongs to.
 
-The reason the entry point wins over any child span: a trace legitimately spans several call
-sites, and a baseline scoped to a child models "traces that happened to contain this tool"
-rather than "traffic that entered here".
+A trace legitimately spans several call sites, and a turn's duration and cost are one number, so
+the turn counts under one of them: the root's, or else the first one the turn reached. Counting it
+under each would count it twice.
 
 ### 2.2 The rule for everything else
 
@@ -66,7 +66,7 @@ it exists to catch.
 
 | Dimension | Where it goes | Why |
 |---|---|---|
-| entry-point `call_site_id` | **bucket key** | permanent population difference |
+| trace `call_site_id` | **bucket key** | permanent population difference |
 | `environment_id` | **bucket key** | dev has cold starts and attached debuggers |
 | `project_version_id` | **epoch boundary**, not key | else every deploy is a cold start; mirrors `behavior_profile.opened_by_version_id` |
 | `call_site.model` | **cost predictor / drill-down**, not key | in the key, a silent reroute redefines normal |
@@ -130,7 +130,7 @@ derivation — whoever fills the rollups has to get these right too:
   Datadog report.
 - **Root spans carry no model.** `VitalsRepository` documents a bug from exactly this: bucketing
   cost by the span's own call site while counting turns by root span mixes two populations. Cost is
-  summed from llm leaves; the bucket key still comes from the root's entry-point call site (§2.1).
+  summed from llm leaves; the bucket key still comes from the trace's call site (§2.1).
   Never try to read a model off the root.
 
 **Unfinished traces are counted, not dropped.** `ended_at IS NULL` on a root span means the turn

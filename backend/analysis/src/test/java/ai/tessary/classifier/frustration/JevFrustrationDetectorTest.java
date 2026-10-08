@@ -99,8 +99,6 @@ class JevFrustrationDetectorTest {
     private final FrustrationAssessmentRepository assessments = mock(FrustrationAssessmentRepository.class);
     private final ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
     private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
-    private final FrustrationScopeRepository scopes = mock(FrustrationScopeRepository.class);
-    private final Set<String> picked = ConcurrentHashMap.newKeySet();
     private final FrustrationProperties props = new FrustrationProperties();
     private final StubClient client = new StubClient();
     private final Map<String, TurnFacts> facts = new HashMap<>();
@@ -116,7 +114,6 @@ class JevFrustrationDetectorTest {
     @BeforeEach
     void wire() {
         when(classifiers.findPause(PROJECT, CLASSIFIER)).thenReturn(Optional.empty());
-        when(scopes.callSites(PROJECT, CLASSIFIER)).thenAnswer(inv -> Set.copyOf(picked));
         when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(target));
         when(assessments.turnFacts(eq(PROJECT), any())).thenAnswer(inv -> facts);
         when(assessments.insert(any())).thenReturn(true);
@@ -148,7 +145,6 @@ class JevFrustrationDetectorTest {
                 assessments,
                 detections,
                 classifiers,
-                scopes,
                 TransactionOperations.withoutTransaction(),
                 props,
                 mapper,
@@ -304,21 +300,6 @@ class JevFrustrationDetectorTest {
         verify(assessments, times(3)).insert(any());
     }
 
-    /** Only the call sites picked on the classifier are scored: a router call beside the reply is never sent. */
-    @Test
-    void aCallSiteNobodyPickedIsNeverSent() {
-        SubstrateObservation reply = eligibleTurn("reply-1", "t-1", "conv-a", "cs-reply", 30);
-        SubstrateObservation router = eligibleTurn("router-1", "t-1", "conv-a", "cs-router", 30);
-        picked.remove("cs-router");
-        client.answer("reply-1", 0.1, 0.0);
-        client.answer("router-1", 0.9, 0.0);
-
-        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(router, reply));
-
-        assertEquals(Set.of("reply-1"), client.requests.keySet());
-        assertEquals(1, page.eligible());
-    }
-
     @Test
     void aFailedCallDoesNotStopItsConversation() {
         SubstrateObservation failed = eligibleTurn("t-1", "conv-a", 20);
@@ -442,7 +423,6 @@ class JevFrustrationDetectorTest {
     @Test
     void anIneligibleTurnOrOneWithNoConversationIsNotSent() {
         SubstrateObservation opener = observation("t-open");
-        picked.add("cs-t-open");
         facts.put("t-open", new TurnFacts("conv-a", NOW));
         when(assembler.assembleStructured(opener))
                 .thenReturn(Optional.of(new StructuredThread(List.of(), text("user", "hello"), 1)));
@@ -697,7 +677,7 @@ class JevFrustrationDetectorTest {
                 "span-" + key, PROJECT, traceId, "sess", callSiteId, null, null, "2026-09-21T11:59:00Z");
     }
 
-    /** A turn with a clean user, assistant, user, assistant prefix, on a picked call site. */
+    /** A turn with a clean user, assistant, user, assistant prefix. */
     private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv) {
         return eligibleTurn(traceId, conv, 60);
     }
@@ -714,7 +694,6 @@ class JevFrustrationDetectorTest {
     private SubstrateObservation eligibleTurn(
             String key, String traceId, @Nullable String conv, String callSiteId, long secondsAgo) {
         SubstrateObservation obs = observation(key, traceId, callSiteId);
-        picked.add(callSiteId);
         facts.put(traceId, new TurnFacts(conv, NOW.minusSeconds(secondsAgo)));
         when(assembler.assembleStructured(obs))
                 .thenReturn(Optional.of(new StructuredThread(

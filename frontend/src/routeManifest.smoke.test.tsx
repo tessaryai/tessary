@@ -312,6 +312,8 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   traces: {
     // The real `TracesPage` shape: `useObservedFacets` reads `p.traces` without `?.`.
     listTraces: () => Promise.resolve({ traces: [], next_cursor: null }),
+    // The Detected by filter offers the project's classifiers.
+    listClassifiers: EMPTY,
   },
   "traces/:traceId": {
     getTrace: NOT_FOUND("trace"),

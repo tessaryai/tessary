@@ -21,9 +21,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * Which call site a trace is scoped to, which decides its baseline. A trace can span several call sites; drift is
- * trace-grain and takes the entry point, not a child the agent reached. The rollup copies the root span's call site
- * onto the trace, so these seed spans, run the real rollup, and assert on {@link BehaviorSubstrateRepository}, shared
- * by every trace-grain classifier.
+ * trace-grain and takes one: the root span's, else the first one the turn reached. The rollup copies it onto the
+ * trace, so these seed spans, run the real rollup, and assert on {@link BehaviorSubstrateRepository}, shared by every
+ * trace-grain classifier.
  */
 @SpringBootTest
 class TraceScopeIntegrationTest {
@@ -57,13 +57,13 @@ class TraceScopeIntegrationTest {
     }
 
     @Test
-    @DisplayName("an untagged root leaves the trace unattributed rather than borrowing a child's scope")
-    void untaggedRootStaysUnattributed() {
+    @DisplayName("an untagged root takes the call site the turn reached first, not the lowest span id's")
+    void untaggedRootTakesTheEarliestTaggedSpansCallSite() {
         String pid = tenant("drift-scope-fallback").project().id();
         Instant t0 = Instant.now().minusSeconds(3_600);
         String traceId = SubstrateV2Fixtures.traceId();
 
-        // The root carries no call site: "none declared" is its own bucket, not a child's scope.
+        // The root is the untagged handler; the tag sits on the spans that cover each model or tool call.
         seedSpan(pid, traceId, "root", null, "agent", "loop", null, t0);
         seedSpan(pid, traceId, "aaaa-late", "root", "tool", "late", "policy.late", t0.plusSeconds(9));
         seedSpan(pid, traceId, "bbbb-early", "root", "llm", "early", "policy.early", t0.plusSeconds(1));
@@ -71,10 +71,7 @@ class TraceScopeIntegrationTest {
 
         BehaviorSubstrateRepository.TraceHead head = headOf(pid, traceId);
 
-        assertEquals(
-                BehaviorSubstrateRepository.UNATTRIBUTED,
-                head.callSiteId(),
-                "an untagged entry point is unattributed, never silently attributed to a child");
+        assertEquals("policy.early", head.callSiteId(), "earliest by started_at, though aaaa-late sorts first by id");
     }
 
     private BehaviorSubstrateRepository.TraceHead headOf(String projectId, String traceId) {

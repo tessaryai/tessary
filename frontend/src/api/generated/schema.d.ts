@@ -756,22 +756,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_getFrustrationScope"];
-        put: operations["ClassifierController_setFrustrationScope"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-tuning": {
         parameters: {
             query?: never;
@@ -2276,10 +2260,6 @@ export interface components {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
-        ApiResponseFrustrationScopeView: {
-            data?: components["schemas"]["FrustrationScopeView"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
         ApiResponseFrustrationTuningView: {
             data?: components["schemas"]["FrustrationTuningView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -3199,6 +3179,16 @@ export interface components {
             id: string;
             status: string;
         };
+        DetectionLabel: {
+            classifier_id: string;
+            name: string;
+        };
+        DetectionMark: {
+            classifier_id: string;
+            name: string;
+            span_id: string | null;
+            trace_id: string;
+        };
         Duration: {
             /** Format: int64 */
             baseline_p95_ms: number | null;
@@ -3443,9 +3433,6 @@ export interface components {
             minDecisionInterval: number;
             rate: components["schemas"]["RateDetail"];
             scorerVersion: string | null;
-        };
-        FrustrationScopeView: {
-            call_site_ids: string[];
         };
         FrustrationTuningView: {
             /** Format: int64 */
@@ -4356,10 +4343,12 @@ export interface components {
             secure?: boolean;
         };
         SessionDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             /** Format: int64 */
             error_count: number | null;
             id: string;
             last_activity_at: string;
+            matched_trace_ids: string[] | null;
             /** Format: int64 */
             span_count: number | null;
             started_at: string;
@@ -4383,6 +4372,7 @@ export interface components {
             cache_write_tokens: number | null;
             /** Format: int32 */
             call_site_count: number | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             dominant_call_site_id: string | null;
             /** Format: int64 */
             error_count: number | null;
@@ -4425,9 +4415,6 @@ export interface components {
         };
         SetEnabledRequest: {
             enabled: boolean;
-        };
-        SetFrustrationScopeRequest: {
-            call_site_ids: string[];
         };
         SetLaneModelRequest: {
             model_key: string;
@@ -4681,6 +4668,7 @@ export interface components {
             source: string | null;
         };
         TraceDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             spans: components["schemas"]["SpanView"][];
             trace: components["schemas"]["TraceListItem"];
         };
@@ -4690,6 +4678,7 @@ export interface components {
             /** Format: int64 */
             cache_write_tokens: number | null;
             call_site_id: string | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             ended_at: string | null;
             /** Format: int32 */
             error_count: number | null;
@@ -6451,62 +6440,6 @@ export interface operations {
             };
         };
     };
-    ClassifierController_getFrustrationScope: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
-                };
-            };
-        };
-    };
-    ClassifierController_setFrustrationScope: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetFrustrationScopeRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
-                };
-            };
-        };
-    };
     ClassifierController_getFrustrationTuning: {
         parameters: {
             query: {
@@ -7915,6 +7848,15 @@ export interface operations {
                 limit?: number;
                 cursor?: string;
                 include?: string;
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7940,6 +7882,15 @@ export interface operations {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -8134,6 +8085,7 @@ export interface operations {
                 status?: string;
                 q?: string;
                 sort?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {

@@ -14,7 +14,9 @@ import { ErrorNote, LoadingRow, Rail } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { ConversationView, TimelineView, TreeView } from "./detail-views";
+import { RawJsonView } from "./detail-json";
 import { clockLabel, traceSummary, useTraceDetail } from "./detail-data";
+import { namesBy } from "./detection-marker";
 
 export function TraceRail({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
   const { orgSlug, projectSlug } = useTenant();
@@ -28,6 +30,9 @@ export function TraceRail({ traceId, onClose }: { traceId: string | null; onClos
   const detail = q.data;
   const trace = detail?.trace;
   const spans = detail?.spans ?? [];
+  const detections = detail?.detections ?? [];
+  const marksBySpan = namesBy(detections, "span_id");
+  const turnMarks = [...new Set(detections.map((d) => d.name))];
 
   return (
     <Rail
@@ -53,10 +58,21 @@ export function TraceRail({ traceId, onClose }: { traceId: string | null; onClos
 
       {trace && (
         <TraceMedia>
-          {view === "conversation" && <ConversationView spans={spans} focusId={focusId} />}
-          {view === "tree" && <TreeView spans={spans} focusId={focusId} onSelect={setFocusId} />}
+          {view === "conversation" && <ConversationView spans={spans} focusId={focusId} marks={turnMarks} />}
+          {view === "tree" && (
+            <TreeView spans={spans} focusId={focusId} onSelect={setFocusId} marksBySpan={marksBySpan} />
+          )}
           {view === "timeline" && (
-            <TimelineView trace={trace} spans={spans} focusId={focusId} onSelect={setFocusId} />
+            <TimelineView
+              trace={trace}
+              spans={spans}
+              focusId={focusId}
+              onSelect={setFocusId}
+              marksBySpan={marksBySpan}
+            />
+          )}
+          {view === "json" && detail && (
+            <RawJsonView value={detail} fileName={`trace-${trace.id}.json`} foldDepth={2} />
           )}
         </TraceMedia>
       )}

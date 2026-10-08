@@ -31,7 +31,7 @@ These are protobuf fields on the OTLP (OpenTelemetry Protocol) span, not attribu
 
 | Attribute | Required | Carries | Constraints |
 | --- | --- | --- | --- |
-| `tessary.call_site.id` | Yes | Binds the span to its call site, and is denormalized onto its trace. | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
+| `tessary.call_site.id` | Yes | Binds the span to its call site. The trace takes the root span's call site, else the first tagged span's ([Call sites](/concepts/call-sites#a-trace-takes-the-first-call-site-it-reached)). | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
 
 This is the only `tessary.*` attribute with a reader. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
 

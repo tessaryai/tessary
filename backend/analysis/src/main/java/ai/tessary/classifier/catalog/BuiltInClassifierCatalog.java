@@ -122,8 +122,8 @@ public class BuiltInClassifierCatalog {
                     // it has to track the scorer: a stale description here gets written into production
                     // rows as fact.
                     "Frustration the agent caused, judged by TypeSafe's Jev decision model on your "
-                            + "OpenRouter or TypeSafe key. Off by default, and scores only the call sites you "
-                            + "pick. Scores a user message only when four text messages on the same call site "
+                            + "OpenRouter or TypeSafe key. Off by default. Scores every call site unless you "
+                            + "limit it to some. Scores a user message only when four text messages on the same call site "
                             + "precede it, and a session, one conversation on one call site, only until its "
                             + "first detection. Each call site learns its own normal rate of frustrated "
                             + "sessions and is watched from its first 100 with the same sequential "
@@ -135,14 +135,15 @@ public class BuiltInClassifierCatalog {
                     // ClassifierService re-syncs a built-in onto an already-seeded project only when the
                     // catalog version exceeds the stored one, so every threshold or config change below
                     // needs a bump or it reaches fresh installs only. 9 replaced the encoder config
-                    // wholesale; 10 re-syncs the description for picked call sites. The picks live in
-                    // frustration_scope, so a bump does not drop them.
-                    10,
+                    // wholesale; 10 re-syncs the description for picked call sites; 11 re-syncs it for
+                    // every call site by default. The list lives in classifier.call_site_ids, which a
+                    // re-sync never writes, so a bump does not drop it.
+                    11,
                     Capability.FRUSTRATION,
                     // TURN grain: the subject is what the USER said, and the user says it once. A turn
                     // lands as several observations (a wrapper span, a router, the reply, a memory pass,
                     // tool rounds), so scoring per observation would send one user message several times.
-                    // The sweep scores the first span of each picked call site in the turn.
+                    // The sweep scores the first span of each call site in the turn that it runs on.
                     Grain.TURN,
                     // Every key here is one FrustrationConfig parses. threshold is the flag cutoff on
                     // P(unhappy_with_assistant), set on a held-out labelled set; it is hashed into the

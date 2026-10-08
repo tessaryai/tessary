@@ -41,8 +41,6 @@ import {
   type GroundednessStatus,
   type ClassifierTuning,
   type SetClassifierTuningRequest,
-  type FrustrationScope,
-  type SetFrustrationScopeRequest,
   type BehaviorFinding,
   type BehaviorFindingDetail,
   type EvidenceSpanPage,
@@ -386,6 +384,18 @@ export function orgApi(orgSlug: string) {
 export type OrgApi = ReturnType<typeof orgApi>;
 
 /** Project-scoped API factory. Pass {orgSlug, projectSlug} once; everything is bound. */
+/** The traces list's filters, as the traces and sessions reads take them. */
+export type TraceFilterParams = {
+  kind?: string;
+  fromTimestamp?: string;
+  toTimestamp?: string;
+  status?: string;
+  q?: string;
+  callSite?: string;
+  hasCallSite?: boolean;
+  detectedBy?: string;
+};
+
 export function projectApi(orgSlug: string, projectSlug: string) {
   const base = `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}`;
 
@@ -505,13 +515,6 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
       http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`, {
-        method: "PUT",
-        body: JSON.stringify(req),
-      }),
-    /** The call sites the Frustration classifier scores. 422s for any other classifier. */
-    getFrustrationScope: (id: string) => http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`),
-    setFrustrationScope: (id: string, req: SetFrustrationScopeRequest) =>
-      http<FrustrationScope>(`${base}/classifiers/${enc(id)}/frustration-scope`, {
         method: "PUT",
         body: JSON.stringify(req),
       }),
@@ -636,6 +639,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       callSite?: string;
       /** true: traces with any call site; false: traces with none. */
       hasCallSite?: boolean;
+      /** A classifier id, or "any": traces a classifier flagged. */
+      detectedBy?: string;
       sort?: string;
     }) => {
       const p = new URLSearchParams();
@@ -660,7 +665,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // receiving spans is readable as the lower bound it is. There is deliberately no sort
     // parameter: ordering sessions by cost or tokens would mean summing every session in the
     // project before a page could be chosen.
-    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" }) => {
+    // The filters are the traces list's: a session is listed when one of its traces passes every one.
+    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) => {
       const p = new URLSearchParams();
       Object.entries(params ?? {}).forEach(([k, v]) => {
         if (v != null && v !== "") p.set(k, String(v));
@@ -669,7 +675,15 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       return http<SessionsPageView>(`${base}/sessions${qs ? `?${qs}` : ""}`);
     },
 
-    getSession: (sessionId: string) => http<SessionDetailView>(`${base}/sessions/${enc(sessionId)}`),
+    /** One session. Given the traces list's filters, `matched_trace_ids` names the traces that pass them. */
+    getSession: (sessionId: string, filters?: TraceFilterParams) => {
+      const p = new URLSearchParams();
+      Object.entries(filters ?? {}).forEach(([k, v]) => {
+        if (v != null && v !== "") p.set(k, String(v));
+      });
+      const qs = p.toString();
+      return http<SessionDetailView>(`${base}/sessions/${enc(sessionId)}${qs ? `?${qs}` : ""}`);
+    },
 
     /** Every span across a session's traces, in one read: see {@link SessionSpansView}. */
     getSessionSpans: (sessionId: string) =>

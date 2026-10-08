@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierService;
+import ai.tessary.plan.Capability;
 import ai.tessary.storage.RetrievedDocRepository;
 import ai.tessary.storage.RetrievedDocRow;
 import ai.tessary.storage.SessionRepository;
@@ -18,7 +21,9 @@ import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
+import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
@@ -73,6 +78,12 @@ class SessionsControllerTest {
     @Autowired
     RetrievedDocRepository retrievedDocs;
 
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    ClassifierService classifierService;
+
     private SubstrateV2Fixtures fx;
     private TenantContext ctx;
     private String org;
@@ -114,7 +125,8 @@ class SessionsControllerTest {
         fx.withUsage(
                 fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null), 10L, 5L);
 
-        var detail = ok(controller.detail(ctx, org, proj, sessionId));
+        var detail =
+                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
         assertEquals(sessionId, detail.id());
         assertEquals(2, detail.traceCount());
         assertEquals(1, detail.unsettledTraces(), "one trace is still receiving spans, so the sum is a lower bound");
@@ -131,7 +143,22 @@ class SessionsControllerTest {
 
         assertEquals(
                 HttpStatus.NOT_FOUND,
-                assertThrows(ResponseStatusException.class, () -> controller.detail(ctx, org, proj, "no-such-session"))
+                assertThrows(
+                                ResponseStatusException.class,
+                                () -> controller.detail(
+                                        ctx,
+                                        org,
+                                        proj,
+                                        "no-such-session",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null))
                         .getStatusCode());
     }
 
@@ -144,7 +171,8 @@ class SessionsControllerTest {
         fx.session(pid, older, t0);
         fx.session(pid, newer, t0.plusSeconds(600));
 
-        var first = ok(controller.list(ctx, org, proj, 1, null, null));
+        var first = ok(
+                controller.list(ctx, org, proj, 1, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
@@ -152,7 +180,8 @@ class SessionsControllerTest {
         assertNotNull(first.nextCursor());
         assertNull(first.sessions().get(0).traceCount(), "totals are not computed unless include=totals is asked for");
 
-        var second = ok(controller.list(ctx, org, proj, 1, first.nextCursor(), null));
+        var second = ok(controller.list(
+                ctx, org, proj, 1, first.nextCursor(), null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(older),
                 second.sessions().stream().map(SessionDtos.SessionListItem::id).toList());
@@ -211,7 +240,8 @@ class SessionsControllerTest {
                 5L);
         fx.rollup(pid, t3, t0.plusSeconds(60), null, true);
 
-        var page = ok(controller.list(ctx, org, proj, 50, null, "totals"));
+        var page = ok(controller.list(
+                ctx, org, proj, 50, null, "totals", null, null, null, null, null, null, null, null, null));
         SessionDtos.SessionListItem item = page.sessions().stream()
                 .filter(s -> s.id().equals(sessionId))
                 .findFirst()
@@ -406,7 +436,8 @@ class SessionsControllerTest {
         spans.upsertAll(spanRows);
         String trimmedTrace = traceRows.get(cap).id();
 
-        var detail = ok(controller.detail(ctx, org, proj, sessionId));
+        var detail =
+                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
         assertEquals(cap, detail.traces().size());
         assertTrue(detail.tracesTruncated(), "one trace past the cap is a truncated session, not a full one");
 
@@ -416,6 +447,147 @@ class SessionsControllerTest {
         assertTrue(
                 got.spans().stream().noneMatch(s -> trimmedTrace.equals(s.traceId())),
                 "the spans describe the same capped traces the detail read lists");
+    }
+
+    @Test
+    @DisplayName("a session matches the filters only when one of its traces passes every one of them")
+    void aSessionMatchesOnlyWhenOneTracePassesEveryFilter() {
+        var fix = TenantFixture.bootstrap(
+                tenants, "sessions-filtered", o -> capabilities.grant(o.id(), Capability.FRUSTRATION));
+        var fctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String fpid = fix.project().id();
+        String forg = fix.org().slug();
+        String fproj = fix.project().slug();
+        ClassifierRow frustration = frustrationClassifier(fpid);
+        Instant t0 = Instant.parse("2026-08-14T10:00:00Z");
+
+        // Session A: one trace both errored and flagged.
+        String sessionA = SubstrateV2Fixtures.sessionId();
+        String a1 = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, a1, sessionA, t0);
+        errors(fpid, a1, 1);
+        flag(fpid, frustration.id(), a1, "span-a1");
+
+        // Session B: the error and the flag are on different traces.
+        String sessionB = SubstrateV2Fixtures.sessionId();
+        String b1 = SubstrateV2Fixtures.traceId();
+        String b2 = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, b1, sessionB, t0.plusSeconds(60));
+        fx.trace(fpid, b2, sessionB, t0.plusSeconds(120));
+        errors(fpid, b1, 1);
+        errors(fpid, b2, 0);
+        flag(fpid, frustration.id(), b2, "span-b2");
+
+        var label = new TraceDtos.DetectionLabel(frustration.id(), frustration.name());
+        var flagged = ok(controller.list(
+                fctx,
+                forg,
+                fproj,
+                50,
+                null,
+                "totals",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(sessionB, sessionA),
+                flagged.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
+                "both sessions hold a flagged trace");
+        assertEquals(
+                List.of(List.of(label), List.of(label)),
+                flagged.sessions().stream()
+                        .map(SessionDtos.SessionListItem::detectedBy)
+                        .toList());
+
+        var erroredAndFlagged = ok(controller.list(
+                fctx,
+                forg,
+                fproj,
+                50,
+                null,
+                "totals",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "error",
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(sessionA),
+                erroredAndFlagged.sessions().stream()
+                        .map(SessionDtos.SessionListItem::id)
+                        .toList(),
+                "B's error and flag sit on different traces, so no one trace of B passes both filters");
+    }
+
+    @Test
+    @DisplayName("a session's detail names the traces that pass the filters and the spans a classifier flagged")
+    void sessionDetailNamesMatchedTracesAndFlaggedSpans() {
+        var fix = TenantFixture.bootstrap(
+                tenants, "session-detail-filtered", o -> capabilities.grant(o.id(), Capability.FRUSTRATION));
+        var fctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String fpid = fix.project().id();
+        String forg = fix.org().slug();
+        String fproj = fix.project().slug();
+        ClassifierRow frustration = frustrationClassifier(fpid);
+        Instant t0 = Instant.parse("2026-08-14T11:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String quiet = SubstrateV2Fixtures.traceId();
+        String flaggedTrace = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, quiet, sessionId, t0);
+        fx.trace(fpid, flaggedTrace, sessionId, t0.plusSeconds(60));
+        flag(fpid, frustration.id(), flaggedTrace, "span-scored");
+
+        var mark = new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored");
+        var filtered = ok(controller.detail(
+                fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, frustration.id()));
+        assertEquals(List.of(flaggedTrace), filtered.matchedTraceIds());
+        assertEquals(List.of(mark), filtered.detections());
+        assertEquals(2, filtered.traces().size(), "the detail still lists every trace of the session");
+
+        var unfiltered = ok(
+                controller.detail(fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, null));
+        assertNull(unfiltered.matchedTraceIds(), "no filter, so nothing to match against");
+        assertEquals(List.of(mark), unfiltered.detections());
+    }
+
+    private ClassifierRow frustrationClassifier(String projectId) {
+        classifierService.seedBuiltIns(projectId);
+        return classifierService.list(projectId).stream()
+                .filter(c -> c.classifierKey().equals("frustration"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void errors(String projectId, String traceId, int errorCount) {
+        jdbc.sql("UPDATE trace SET error_count = :n WHERE project_id = :pid AND id = :id")
+                .param("n", errorCount)
+                .param("pid", projectId)
+                .param("id", traceId)
+                .update();
+    }
+
+    private void flag(String projectId, String classifierId, String traceId, String spanId) {
+        jdbc.sql("INSERT INTO frustration_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " subject_span_id, severity, confidence, evidence)"
+                        + " VALUES (:id, :pid, :cid, 'frustration', :trace, :trace, :span, 'warn', 'high',"
+                        + " CAST('{\"score\":0.71}' AS jsonb))")
+                .param("id", Ids.ulid())
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("trace", traceId)
+                .param("span", spanId)
+                .update();
     }
 
     private static <T> T ok(ApiResponse<T> response) {
