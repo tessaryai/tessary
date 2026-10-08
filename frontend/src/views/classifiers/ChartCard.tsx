@@ -23,6 +23,7 @@ import {
   headlineOf,
   lanesOf,
   laneTooltip,
+  MAX_LANES,
   percent,
   toAxis,
   xTicks,
@@ -36,10 +37,13 @@ const MR = 8;
 const MT = 10;
 const PB = 130;
 const H = 150;
-const STRIP_H = 40;
+const STRIP_H = 52;
 /** About half the width of a day label ("Sep 24") in pixels; a tick label that would overflow the edge is anchored to it. */
 const TICK_HALF = 22;
 const LANE_Y = (k: number) => 4 + k * 12;
+/** The vertical centre of lane k: the strip's labels sit on it, so "Cases" lines up with the first bar. */
+const LANE_MID = (k: number) => LANE_Y(k) + 3;
+const STRIP_TEXT = "absolute -translate-y-1/2 text-small leading-none whitespace-nowrap";
 const DAY_MS = 86_400_000;
 
 type Point = { i: number; v: number };
@@ -404,21 +408,24 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
         </div>
 
         <div className="mt-1 pt-1.5 border-t border-border">
-          <div className="flex items-center gap-3 h-5 text-small">
-            <span className="text-muted">Cases</span>
-            {lanes.length === 0 && <span className="text-muted">None in this range</span>}
-            <span className="flex-1" />
+          <div className="relative">
+            <span className={`${STRIP_TEXT} text-muted`} style={{ left: 0, top: LANE_MID(0) }}>
+              Cases
+            </span>
+            {lanes.length === 0 && (
+              <span className={`${STRIP_TEXT} text-muted`} style={{ left: ML, top: LANE_MID(0) }}>
+                None in this range
+              </span>
+            )}
             {more > 0 && (
               <Link
                 to={`${basePath}/triage`}
-                className="text-accent hover:text-accent-hover transition-colors"
-                style={{ transitionDuration: "var(--duration-micro)" }}
+                className={`${STRIP_TEXT} text-accent hover:text-accent-hover transition-colors`}
+                style={{ right: 0, top: LANE_MID(MAX_LANES), transitionDuration: "var(--duration-micro)" }}
               >
                 {`+${more} more in Triage`}
               </Link>
             )}
-          </div>
-          <div className="relative">
             <svg viewBox={`0 0 ${W} ${STRIP_H}`} aria-hidden="true" className="block w-full h-auto">
               {laneBoxes.map((l, k) => (
                 <rect

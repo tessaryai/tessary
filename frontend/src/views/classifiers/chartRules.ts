@@ -18,6 +18,9 @@ import type {
 } from "../../api/types";
 import { PROVIDER_PAUSES } from "./shared";
 
+/** The most case bars a card draws; the rest are counted as "+N more". */
+export const MAX_LANES = 3;
+
 export type AxisUnit = "percent" | "seconds" | "usd" | "count";
 
 /** The unit a card's values are drawn in on its axis. */
@@ -193,7 +196,7 @@ export function lanesOf(spans: ChartCaseSpan[]): { lanes: ChartCaseSpan[]; more:
   const ranked = [...spans].sort(
     (a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Date.parse(b.start_at) - Date.parse(a.start_at),
   );
-  const lanes = ranked.slice(0, 3).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
+  const lanes = ranked.slice(0, MAX_LANES).sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
   return { lanes, more: spans.length - lanes.length };
 }
 
