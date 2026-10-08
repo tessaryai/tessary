@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -181,10 +182,10 @@ class McpControllerTest {
     }
 
     private JsonNode getConversation(String id) throws Exception {
-        JsonNode result = call("""
+        JsonNode result = call(String.format(Locale.ROOT, """
             {"jsonrpc":"2.0","id":26,"method":"tools/call",
              "params":{"name":"get_conversation","arguments":{"id":"%s"}}}
-            """.formatted(id)).get("result");
+            """, id)).get("result");
         assertEquals(false, result.get("isError").asBoolean(), result::toString);
         return result.get("structuredContent");
     }
