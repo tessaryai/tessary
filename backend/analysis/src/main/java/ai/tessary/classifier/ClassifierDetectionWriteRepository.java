@@ -190,44 +190,61 @@ public class ClassifierDetectionWriteRepository {
             String subjectStartedAt) {}
 
     /**
-     * Of {@code traceIds}, the ones whose conversation this classifier has a detection for that nobody
-     * has cleared. The conversation is {@code COALESCE(trace.thread_id, trace.session_id)}, the key such a
-     * classifier writes into {@code subject_session_id}; a trace with neither is in no conversation and
-     * is never returned. Reads the detection table's partial index on uncleared rows.
+     * Of {@code turns}, the ones whose session this classifier has a detection for that nobody has cleared. A
+     * session is a conversation on one call site: the conversation is {@code COALESCE(trace.thread_id,
+     * trace.session_id)}, the key such a classifier writes into {@code subject_session_id}, and the call site is
+     * the one it writes into {@code evidence.call_site_id}. A trace in no conversation is never returned. Reads
+     * the detection table's partial index on uncleared rows.
      */
-    public Set<String> tracesInUnclearedFlaggedConversations(
-            String detectorKind, String projectId, String classifierId, Collection<String> traceIds) {
+    public Set<CallSiteTurn> unclearedFlaggedSessions(
+            String detectorKind, String projectId, String classifierId, Collection<CallSiteTurn> turns) {
         String table = requireTable(detectorKind);
-        if (traceIds.isEmpty()) return Set.of();
-        return new HashSet<>(jdbc.sql("SELECT t.id FROM trace t"
-                        + " WHERE t.project_id = :pid AND t.id IN (:traces)"
-                        + " AND EXISTS (SELECT 1 FROM " + table + " d"
-                        + "   WHERE d.project_id = :pid AND d.classifier_id = :sid"
-                        + "     AND d.subject_session_id = COALESCE(t.thread_id, t.session_id)"
-                        + "     AND d.cleared_at IS NULL)")
+        if (turns.isEmpty()) return Set.of();
+        Set<CallSiteTurn> flagged = new HashSet<>(jdbc.sql(
+                        "SELECT DISTINCT t.id, COALESCE(d.evidence ->> 'call_site_id', '')"
+                                + " FROM trace t JOIN " + table + " d"
+                                + "   ON d.project_id = t.project_id AND d.classifier_id = :sid"
+                                + "  AND d.subject_session_id = COALESCE(t.thread_id, t.session_id)"
+                                + "  AND d.cleared_at IS NULL"
+                                + " WHERE t.project_id = :pid AND t.id IN (:traces)")
                 .param("pid", projectId)
                 .param("sid", classifierId)
-                .param("traces", traceIds)
-                .query(String.class)
+                .param(
+                        "traces",
+                        turns.stream().map(CallSiteTurn::traceId).distinct().toList())
+                .query((rs, n) -> new CallSiteTurn(rs.getString(1), rs.getString(2)))
                 .list());
+        flagged.retainAll(new HashSet<>(turns));
+        return flagged;
     }
 
+    /** One call site's part of a turn: the trace and the call site. */
+    public record CallSiteTurn(String traceId, String callSiteId) {}
+
     /**
-     * Clear this classifier's detections in each of {@code sessionIds}, the conversations a human ruled not
-     * frustrated: every uncleared row keyed to one of them gets {@code cleared_at = now}. Rows already cleared keep
-     * their first clear time. Returns how many rows it cleared.
+     * Clear this classifier's detections in each of {@code sessionIds} on {@code callSiteId}, the sessions a
+     * human ruled not frustrated: every uncleared row keyed to one of those conversations on that call site gets
+     * {@code cleared_at = now}. The same conversation's flags on other call sites stand. Rows already cleared
+     * keep their first clear time. Returns how many rows it cleared.
      */
     public int clearSessions(
-            String detectorKind, String projectId, String classifierId, Collection<String> sessionIds, String now) {
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            String callSiteId,
+            Collection<String> sessionIds,
+            String now) {
         String table = requireTable(detectorKind);
         if (sessionIds.isEmpty()) return 0;
         return jdbc.sql("UPDATE " + table + " SET cleared_at = :now"
                         + " WHERE project_id = :pid AND classifier_id = :sid"
-                        + " AND subject_session_id IN (:sessions) AND cleared_at IS NULL")
+                        + " AND subject_session_id IN (:sessions)"
+                        + " AND COALESCE(evidence ->> 'call_site_id', '') = :callSite AND cleared_at IS NULL")
                 .param("now", now)
                 .param("pid", projectId)
                 .param("sid", classifierId)
                 .param("sessions", sessionIds)
+                .param("callSite", callSiteId)
                 .update();
     }
 

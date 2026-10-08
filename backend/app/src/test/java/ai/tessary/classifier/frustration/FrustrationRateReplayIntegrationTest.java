@@ -64,22 +64,27 @@ class FrustrationRateReplayIntegrationTest {
     @Autowired
     RateClassifierFixture fixture;
 
+    /**
+     * A session is a conversation on one call site. Keyed on the conversation alone, conv-a counts once, on cs-a
+     * where it was first scored, and its flag on cs-b makes cs-a fail although nothing on cs-a frustrated anyone.
+     */
     @Test
-    void aConversationIsOneTrialOnItsFirstScoredCallSiteAndHourAndFailsOnlyWhileFlagged() {
+    void aSessionIsOneTrialPerCallSiteInItsFirstHourThereAndFailsOnlyWhileFlagged() {
         String pid = fixture.project("fr-tally", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant h10 = Instant.now().minus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
 
-        // Calm on cs-a, then flagged on a later turn on cs-b: a failure on cs-a, in its first hour.
+        // Calm on cs-a, then flagged on a later turn on cs-b: a calm trial on cs-a and a failure on cs-b, each in
+        // its own first hour.
         fixture.frustrationAssessment(
                 pid, signal, "a1", "conv-a", "cs-a", h10.plus(Duration.ofMinutes(5)), false, VERSION);
         fixture.frustrationAssessment(
                 pid, signal, "a2", "conv-a", "cs-b", h10.plus(Duration.ofHours(2)), true, VERSION);
-        flag(pid, signal, "a2", "conv-a", false);
+        flag(pid, signal, "a2", "conv-a", "cs-b", false);
         // Flagged, then cleared by a false-alarm resolve: a trial, not a failure.
         fixture.frustrationAssessment(
                 pid, signal, "b1", "conv-b", "cs-a", h10.plus(Duration.ofMinutes(30)), true, VERSION);
-        flag(pid, signal, "b1", "conv-b", true);
+        flag(pid, signal, "b1", "conv-b", "cs-a", true);
         fixture.frustrationAssessment(
                 pid, signal, "c1", "conv-c", "cs-b", h10.plus(Duration.ofMinutes(70)), false, VERSION);
         fixture.frustrationAssessment(
@@ -95,8 +100,9 @@ class FrustrationRateReplayIntegrationTest {
         assertEquals(
                 List.of(
                         new HourlyToolTally(h10.toString(), FrustrationRateRepository.UNASSIGNED, 1, 0),
-                        new HourlyToolTally(h10.toString(), "cs-a", 2, 1),
-                        new HourlyToolTally(h10.plus(Duration.ofHours(1)).toString(), "cs-b", 1, 0)),
+                        new HourlyToolTally(h10.toString(), "cs-a", 2, 0),
+                        new HourlyToolTally(h10.plus(Duration.ofHours(1)).toString(), "cs-b", 1, 0),
+                        new HourlyToolTally(h10.plus(Duration.ofHours(2)).toString(), "cs-b", 1, 1)),
                 tallies);
         assertEquals(
                 h10.plus(Duration.ofHours(2)),
@@ -228,21 +234,24 @@ class FrustrationRateReplayIntegrationTest {
                         start.plus(Duration.ofHours(h)).plusSeconds(c),
                         flagged,
                         VERSION);
-                if (flagged) flag(pid, signal, id, "conv-" + id, false);
+                if (flagged) flag(pid, signal, id, "conv-" + id, callSite, false);
             }
         }
     }
 
-    private void flag(String pid, ClassifierRow signal, String traceId, String conversation, boolean cleared) {
+    private void flag(
+            String pid, ClassifierRow signal, String traceId, String conversation, String callSite, boolean cleared) {
         jdbc.sql("INSERT INTO " + "frustration_detection"
                         + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
-                        + " severity, confidence, cleared_at)"
-                        + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high', :cleared)")
+                        + " severity, confidence, evidence, cleared_at)"
+                        + " VALUES (:id, :pid, :cid, 'frustration', :conv, :trace, 'warn', 'high',"
+                        + " jsonb_build_object('call_site_id', CAST(:callSite AS text)), :cleared)")
                 .param("id", Ids.ulid())
                 .param("pid", pid)
                 .param("cid", signal.id())
                 .param("conv", conversation)
                 .param("trace", traceId)
+                .param("callSite", callSite)
                 .param("cleared", cleared ? Instant.now().toString() : null)
                 .update();
     }

@@ -70,7 +70,7 @@ public class FrustrationAssessmentRepository {
                         VALUES (:id, :pid, :cid, :traceId, :spanId, :conversationId, :callSiteId, :startedAt,
                             :frustrated, :scorerVersion, :provider, :model, CAST(:request AS jsonb),
                             CAST(:response AS jsonb), :inputTokens, :costUsd, :latencyMs)
-                        ON CONFLICT (project_id, classifier_id, trace_id, scorer_version) DO NOTHING
+                        ON CONFLICT (project_id, classifier_id, trace_id, (COALESCE(call_site_id, '')), scorer_version) DO NOTHING
                         """)
                         .param("id", a.id())
                         .param("pid", a.projectId())

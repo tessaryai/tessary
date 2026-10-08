@@ -8,14 +8,17 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierMetricsView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
+import ai.tessary.classifier.ClassifierDtos.FrustrationScopeView;
 import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
+import ai.tessary.classifier.ClassifierDtos.SetFrustrationScopeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
 import ai.tessary.classifier.ClassifierDtos.ToolErrorRateView;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
+import ai.tessary.classifier.frustration.FrustrationScope;
 import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
@@ -45,16 +48,19 @@ public class ClassifierController {
 
     private final ClassifierService service;
     private final FrustrationTuning frustrationTuning;
+    private final FrustrationScope frustrationScope;
     private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
 
     public ClassifierController(
             ClassifierService service,
             FrustrationTuning frustrationTuning,
+            FrustrationScope frustrationScope,
             GroundednessStatus groundednessStatus,
             TenantPathResolver resolver) {
         this.service = service;
         this.frustrationTuning = frustrationTuning;
+        this.frustrationScope = frustrationScope;
         this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
     }
@@ -175,6 +181,35 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         String projectId = r.project().id();
         return ApiResponse.ok(frustrationTuning.view(projectId, service.get(projectId, id)));
+    }
+
+    /** The call sites the Frustration classifier scores. 422s for any other classifier. */
+    @GetMapping("/{id}/frustration-scope")
+    public ApiResponse<FrustrationScopeView> getFrustrationScope(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        String projectId = r.project().id();
+        return ApiResponse.ok(frustrationScope.view(projectId, service.get(projectId, id)));
+    }
+
+    /**
+     * Pick the call sites the Frustration classifier scores, replacing the earlier picks. Turns already swept are
+     * not sent again. 422s for any other classifier.
+     */
+    @PutMapping("/{id}/frustration-scope")
+    public ApiResponse<FrustrationScopeView> setFrustrationScope(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @Valid @RequestBody SetFrustrationScopeRequest req) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "pick the call sites the frustration classifier scores");
+        String projectId = r.project().id();
+        return ApiResponse.ok(frustrationScope.set(projectId, service.get(projectId, id), req.callSiteIds()));
     }
 
     /**

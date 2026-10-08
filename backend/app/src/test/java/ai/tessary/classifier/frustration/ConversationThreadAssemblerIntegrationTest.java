@@ -55,6 +55,8 @@ class ConversationThreadAssemblerIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    private static final String CHAT = "cs-chat";
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -168,7 +170,7 @@ class ConversationThreadAssemblerIntegrationTest {
 
         seedTurn(pid, sessionId, base.plusMillis(1_000), user("deploy the app"), assistant("On it."));
         String busy = SubstrateV2Fixtures.traceId();
-        fx.turn(pid, busy, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Fixed it."));
+        turn(pid, busy, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Fixed it."));
         for (int i = 1; i <= 45; i++) {
             fx.spanSeed(pid)
                     .traceId(busy)
@@ -215,7 +217,7 @@ class ConversationThreadAssemblerIntegrationTest {
         SpanRef parent =
                 seedTurn(pid, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Let me retry."));
         String child = SubstrateV2Fixtures.traceId();
-        fx.turn(pid, child, sessionId, base.plusMillis(2_500), null, assistant("sub-agent notes"));
+        turn(pid, child, sessionId, base.plusMillis(2_500), null, assistant("sub-agent notes"));
         jdbc.sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
                 .param("parent", parent.traceId())
                 .param("pid", pid)
@@ -238,12 +240,90 @@ class ConversationThreadAssemblerIntegrationTest {
 
         seedTurn(pid, sessionId, base.plusMillis(1_000), user("deploy the app"), assistant("On it."));
         seedTurn(pid, sessionId, base.plusMillis(2_000), user("still failing"), assistant("Let me retry."));
-        fx.turn(pid, SubstrateV2Fixtures.traceId(), sessionId, base.plusMillis(2_500), null, assistant("Also this."));
+        turn(pid, SubstrateV2Fixtures.traceId(), sessionId, base.plusMillis(2_500), null, assistant("Also this."));
         SpanRef scoredRef = seedTurn(pid, sessionId, base.plusMillis(3_000), user("nevermind"), null);
 
         assertTrue(new FrustrationTurnBuilder(assembler)
                 .buildTurn(scored(pid, scoredRef))
                 .isEmpty());
+    }
+
+    /**
+     * A turn that calls a router, the reply and a memory pass, each its own call site: the thread is the reply's. Read
+     * across call sites, each earlier turn's user message is the router's prompt and its reply joins the router's and
+     * the memory pass's JSON; a turn that never reached the reply still counts as one of its turns.
+     */
+    @Test
+    void theThreadIsReadFromTheScoredCallSiteOnly() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "thread-call-site").project().id();
+        Instant base = Instant.now();
+        String sessionId = SubstrateV2Fixtures.sessionId();
+
+        seedRoutedTurn(pid, sessionId, base.plusMillis(1_000), "it still fails", "Sorry, I will look into it.");
+        String background = SubstrateV2Fixtures.traceId();
+        fx.spanSeed(pid)
+                .traceId(background)
+                .sessionId(sessionId)
+                .callSiteId("cs-memory")
+                .at(base.plusMillis(1_500))
+                .payload(user("summarize the user"), assistant("{\\\"notes\\\":[]}"))
+                .write();
+        seedRoutedTurn(pid, sessionId, base.plusMillis(2_000), "same error again", "Please clear the cache and retry.");
+        SpanRef scoredRef = seedRoutedTurn(pid, sessionId, base.plusMillis(3_000), "this is useless", null);
+
+        FrustrationTurnBuilder.EligibleTurn turn = new FrustrationTurnBuilder(assembler)
+                .buildTurn(scored(pid, scoredRef))
+                .orElseThrow();
+
+        assertEquals(
+                new FrustrationTurnBuilder.TurnState(
+                        "this is useless",
+                        List.of(
+                                new FrustrationTurnBuilder.EarlierMessage("user", "it still fails"),
+                                new FrustrationTurnBuilder.EarlierMessage("assistant", "Sorry, I will look into it."),
+                                new FrustrationTurnBuilder.EarlierMessage("user", "same error again"),
+                                new FrustrationTurnBuilder.EarlierMessage(
+                                        "assistant", "Please clear the cache and retry."))),
+                turn.state());
+        assertEquals(3, turn.userTurn(), "the memory-only turn is not one of the reply's turns");
+    }
+
+    /**
+     * One turn of a routed chat app: a router call, the reply on {@link #CHAT}, then a memory pass, under one trace.
+     * Returns the reply span.
+     */
+    private SpanRef seedRoutedTurn(
+            String pid,
+            String sessionId,
+            Instant at,
+            String userText,
+            @org.jspecify.annotations.Nullable String replyText) {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .callSiteId("cs-router")
+                .at(at)
+                .payload(
+                        user("recent messages: user: " + userText + " output JSON:"),
+                        assistant("{\\\"lane\\\":\\\"SUPPORT\\\"}"))
+                .write();
+        SpanRef reply = fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .callSiteId(CHAT)
+                .at(at.plusMillis(1))
+                .payload(user(userText), replyText == null ? null : assistant(replyText))
+                .writeRef();
+        fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .callSiteId("cs-memory")
+                .at(at.plusMillis(2))
+                .payload(user("update memory"), assistant("{\\\"tone\\\":\\\"annoyed\\\"}"))
+                .write();
+        return reply;
     }
 
     private SubstrateObservation scored(String pid, SpanRef ref) {
@@ -254,7 +334,24 @@ class ConversationThreadAssemblerIntegrationTest {
 
     private SpanRef seedTurn(
             String pid, String sessionId, Instant at, String input, @org.jspecify.annotations.Nullable String output) {
-        return fx.turn(pid, SubstrateV2Fixtures.traceId(), sessionId, at, input, output);
+        return turn(pid, SubstrateV2Fixtures.traceId(), sessionId, at, input, output);
+    }
+
+    /** One turn: one trace with a root {@code llm} span on {@link #CHAT}. Returns the span. */
+    private SpanRef turn(
+            String pid,
+            String traceId,
+            String sessionId,
+            Instant at,
+            @org.jspecify.annotations.Nullable String input,
+            @org.jspecify.annotations.Nullable String output) {
+        return fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .callSiteId(CHAT)
+                .at(at)
+                .payload(input, output)
+                .writeRef();
     }
 
     /**
@@ -275,6 +372,7 @@ class ConversationThreadAssemblerIntegrationTest {
                 .traceId(traceId)
                 .sessionId(sessionId)
                 .threadId(threadId)
+                .callSiteId(CHAT)
                 .kind("agent")
                 .at(at)
                 .payload(userInput, assistantOut)
@@ -283,6 +381,7 @@ class ConversationThreadAssemblerIntegrationTest {
                 .traceId(traceId)
                 .sessionId(sessionId)
                 .threadId(threadId)
+                .callSiteId(CHAT)
                 .kind("llm")
                 .model("gpt-x")
                 .at(at.plusMillis(1))

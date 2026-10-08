@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
+import ai.tessary.classifier.frustration.FrustrationScopeRepository;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
@@ -33,9 +34,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Frustration is {@link ClassifierModelModule.Grain#TURN}: one user message per turn, though a turn lands as many
- * spans. Pins the structural rule (root trace, root span, dialogue kind) against real Postgres both ways: the fan-out
- * collapses to one detection, and a bare {@code llm} root with no agent wrapper is still scored, which a {@code
+ * Frustration is {@link ClassifierModelModule.Grain#TURN}: one user message per turn and picked call site, though a
+ * turn lands as many spans. Pins the rule (top-level trace, dialogue kind, the first span of a picked call site)
+ * against real Postgres: a turn that calls a router, the reply and a memory pass is scored once, on the reply; a
+ * sub-agent trace is not a turn; and a bare {@code llm} root with no agent wrapper is still scored, which a {@code
  * kind='agent'} filter would silence.
  */
 @SpringBootTest
@@ -43,6 +45,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 class ClassifierTurnGrainIntegrationTest {
 
     private static final String FRUSTRATED = "this is frustrating, you're not listening";
+    private static final String REPLY = ClassifierConversations.CALL_SITE;
 
     @Autowired
     SessionRepository sessions;
@@ -74,6 +77,9 @@ class ClassifierTurnGrainIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    FrustrationScopeRepository scopes;
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -88,15 +94,20 @@ class ClassifierTurnGrainIntegrationTest {
                 .project()
                 .id();
         service.seedBuiltIns(pid);
-        service.setEnabled(
-                pid,
-                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id(),
-                true);
+        String id =
+                ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id();
+        scopes.replace(pid, id, List.of(REPLY));
+        service.setEnabled(pid, id, true);
         return pid;
     }
 
+    /**
+     * The shape of a chat app that calls a router, then the reply, then a memory pass, each its own call site, under
+     * one wrapper span. Every span carries the frustrated text, so any span scored besides the reply's first shows as
+     * an extra detection. Read by root span, the turn is the wrapper's; read by trace, the router is first.
+     */
     @Test
-    void oneTurnFiresOnceOnItsRootSpanDespiteTheSpanFanOut() {
+    void aTurnIsScoredOnceOnTheFirstSpanOfThePickedCallSite() {
         String pid = bootstrapGranted("turn-grain");
         Instant now = Instant.now();
 
@@ -104,27 +115,29 @@ class ClassifierTurnGrainIntegrationTest {
         // Frustration sends a turn only after two earlier exchanges.
         ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
 
-        String rootTraceId = SubstrateV2Fixtures.traceId();
-        // The turn root. Every other span carries the same frustrated text, so a leak shows as an extra detection.
-        SpanRef root = seedSpan(pid, rootTraceId, sessionId, null, "agent", "agent", now);
-        SpanRef twin = seedSpan(pid, rootTraceId, sessionId, root.spanId(), "llm", "chat", now);
-        seedSpan(pid, rootTraceId, sessionId, twin.spanId(), "llm", "chat", now);
+        String turnTraceId = SubstrateV2Fixtures.traceId();
+        SpanRef wrapper = seedSpan(pid, turnTraceId, sessionId, null, null, "agent", "agent", now);
+        seedSpan(pid, turnTraceId, sessionId, wrapper.spanId(), "cs-router", "llm", "chat", now.plusMillis(1));
+        SpanRef reply =
+                seedSpan(pid, turnTraceId, sessionId, wrapper.spanId(), REPLY, "llm", "chat", now.plusMillis(2));
+        seedSpan(pid, turnTraceId, sessionId, wrapper.spanId(), REPLY, "llm", "chat", now.plusMillis(3));
+        seedSpan(pid, turnTraceId, sessionId, wrapper.spanId(), "cs-memory", "llm", "chat", now.plusMillis(4));
 
-        // A sub-agent trace: its root is parentless and kind=agent, excluded only by parent_trace_id.
+        // A sub-agent trace on the reply call site: excluded only by parent_trace_id.
         String subTraceId = SubstrateV2Fixtures.traceId();
-        seedSubAgentTrace(pid, subTraceId, rootTraceId, sessionId, now);
-        seedSpan(pid, subTraceId, sessionId, null, "agent", "sub", now);
+        seedSubAgentTrace(pid, subTraceId, turnTraceId, sessionId, now);
+        seedSpan(pid, subTraceId, sessionId, null, REPLY, "agent", "sub", now);
 
         List<ClassifierEventView> events = sweepUntilDetected(pid);
 
         assertEquals(1, events.size(), "one user-facing turn produces exactly one frustration detection");
         // The subject is the turn, which is the trace.
         assertEquals("trace", events.get(0).subjectKind());
+        assertEquals(turnTraceId, events.get(0).subjectId(), "the detection is anchored on the turn, not a sub-agent");
         assertEquals(
-                rootTraceId,
-                events.get(0).subjectId(),
-                "the detection is anchored on the turn, not the twin, an inner call, or a sub-agent");
-        assertEquals(rootTraceId, events.get(0).traceId());
+                reply.spanId(),
+                flaggedSpan(pid, turnTraceId),
+                "the reply's first call, not the router, the memory pass or the reply's later call");
     }
 
     @Test
@@ -137,13 +150,13 @@ class ClassifierTurnGrainIntegrationTest {
         ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
 
         String firstTurn = SubstrateV2Fixtures.traceId();
-        seedSpan(pid, firstTurn, sessionId, null, "agent", "agent", now);
+        seedSpan(pid, firstTurn, sessionId, null, REPLY, "agent", "agent", now);
         List<ClassifierEventView> afterFirst = sweepUntilDetected(pid);
         assertEquals(1, afterFirst.size(), "the first frustrated turn flags the conversation");
 
         // Same text, so it would score identically; only the flagged conversation keeps it quiet.
         String secondTurn = SubstrateV2Fixtures.traceId();
-        seedSpan(pid, secondTurn, sessionId, null, "agent", "agent", now.plusSeconds(30));
+        seedSpan(pid, secondTurn, sessionId, null, REPLY, "agent", "agent", now.plusSeconds(30));
         sweepOnce(pid);
 
         List<ClassifierEventView> afterSecond = service.eventsForClassifier(
@@ -167,7 +180,7 @@ class ClassifierTurnGrainIntegrationTest {
         // No agent wrapper: the llm call is the trace's root span and the user-facing turn.
         String sessionId = SubstrateV2Fixtures.sessionId();
         ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
-        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, "llm", "chat", now);
+        SpanRef only = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, REPLY, "llm", "chat", now);
 
         List<ClassifierEventView> events = sweepUntilDetected(pid);
 
@@ -181,6 +194,7 @@ class ClassifierTurnGrainIntegrationTest {
             String traceId,
             String sessionId,
             @Nullable String parentSpanId,
+            @Nullable String callSiteId,
             String kind,
             String name,
             Instant at) {
@@ -188,6 +202,7 @@ class ClassifierTurnGrainIntegrationTest {
                 .traceId(traceId)
                 .sessionId(sessionId)
                 .parentSpanId(parentSpanId)
+                .callSiteId(callSiteId)
                 .kind(kind)
                 .name(name)
                 .model("llm".equals(kind) ? "gpt-x" : null)
@@ -239,6 +254,16 @@ class ClassifierTurnGrainIntegrationTest {
                 false,
                 at.toString(),
                 false)));
+    }
+
+    /** The span the classifier flagged in {@code traceId}. */
+    private String flaggedSpan(String pid, String traceId) {
+        return jdbc.sql(
+                        "SELECT subject_span_id FROM frustration_detection WHERE project_id = :pid AND subject_trace_id = :trace")
+                .param("pid", pid)
+                .param("trace", traceId)
+                .query(String.class)
+                .single();
     }
 
     /** Ticks until the sweep has read past the newest span, without asserting it fired. */

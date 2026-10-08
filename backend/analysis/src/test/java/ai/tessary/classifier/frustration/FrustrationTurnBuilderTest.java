@@ -47,7 +47,7 @@ class FrustrationTurnBuilderTest {
         int turns = (int)
                 earlier.stream().map(SubstrateObservation::traceId).distinct().count();
         SubstrateReadRepository substrate = mock(SubstrateReadRepository.class);
-        when(substrate.priorTurns(anyString(), anyString(), anyInt()))
+        when(substrate.priorTurns(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(new SubstrateReadRepository.PriorTurns(earlier, turns));
         return new FrustrationTurnBuilder(new ConversationThreadAssembler(substrate), caps)
                 .buildTurn(chronological[chronological.length - 1])

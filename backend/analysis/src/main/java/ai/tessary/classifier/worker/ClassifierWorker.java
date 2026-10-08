@@ -28,7 +28,6 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -407,29 +406,37 @@ public class ClassifierWorker {
     }
 
     /**
-     * Drop turns whose conversation this classifier has already flagged: a conversation with any detection
-     * nobody has cleared is not scored again, whatever its band, and one whose flag was cleared is.
+     * Drop turns whose session this classifier has already flagged: a session with any detection nobody has
+     * cleared is not scored again, whatever its band, and one whose flag was cleared is. A session is a
+     * conversation on one call site, so a flag on the reply call site does not stop a second picked call site
+     * in the same conversation.
      *
      * <p>A turn-grain classifier's subject is what the user said, but the thing an operator acts on is
-     * the conversation, which is one event, not one per turn.
+     * the session, which is one event, not one per turn.
      */
-    private List<SubstrateObservation> suppressUnclearedConversations(
+    private List<SubstrateObservation> suppressUnclearedSessions(
             String projectId, ClassifierRow signal, List<SubstrateObservation> candidates) {
         if (candidates.isEmpty()) return candidates;
-        Set<String> traces =
-                candidates.stream().map(SubstrateObservation::traceId).collect(Collectors.toSet());
-        Set<String> flagged =
-                detections.tracesInUnclearedFlaggedConversations(signal.detector(), projectId, signal.id(), traces);
+        Set<ClassifierDetectionWriteRepository.CallSiteTurn> turns =
+                candidates.stream().map(ClassifierWorker::callSiteTurn).collect(Collectors.toSet());
+        Set<ClassifierDetectionWriteRepository.CallSiteTurn> flagged =
+                detections.unclearedFlaggedSessions(signal.detector(), projectId, signal.id(), turns);
         if (flagged.isEmpty()) return candidates;
-        List<SubstrateObservation> kept =
-                candidates.stream().filter(o -> !flagged.contains(o.traceId())).toList();
+        List<SubstrateObservation> kept = candidates.stream()
+                .filter(o -> !flagged.contains(callSiteTurn(o)))
+                .toList();
         StructuredLog.debug(log, "signal.sweep.conversation-suppressed")
-                .message("skipped %d turn(s) in conversations already flagged", candidates.size() - kept.size())
+                .message("skipped %d turn(s) in sessions already flagged", candidates.size() - kept.size())
                 .field("signal", signal.classifierKey())
                 .field("suppressed", candidates.size() - kept.size())
                 .field("scored", kept.size())
                 .log();
         return kept;
+    }
+
+    private static ClassifierDetectionWriteRepository.CallSiteTurn callSiteTurn(SubstrateObservation o) {
+        return new ClassifierDetectionWriteRepository.CallSiteTurn(
+                o.traceId(), Objects.requireNonNull(o.callSiteId(), "a turn candidate has a call site"));
     }
 
     /**
@@ -632,13 +639,13 @@ public class ClassifierWorker {
             window = candidates.stream()
                     .map(SubstrateReadRepository.TurnCandidate::observation)
                     .toList();
-            obs = suppressUnclearedConversations(
+            obs = suppressUnclearedSessions(
                     job.projectId(),
                     signal,
-                    oneScoredObservationPerTurn(candidates.stream()
-                            .filter(SubstrateReadRepository.TurnCandidate::turnRoot)
+                    candidates.stream()
+                            .filter(SubstrateReadRepository.TurnCandidate::opensCallSiteTurn)
                             .map(SubstrateReadRepository.TurnCandidate::observation)
-                            .toList()));
+                            .toList());
         } else {
             window = substrate.observationsAfter(job.projectId(), cursorAt, cursorId, pageSize);
             obs = window;
@@ -791,37 +798,9 @@ public class ClassifierWorker {
     }
 
     /**
-     * At most one scored observation per turn, keeping the earliest by the window's {@code
-     * (created_at, id)} order. The structural turn-root filter already drops inner calls and the
-     * {@code agent}/{@code llm} twin, so this only bites when a producer emits several parentless
-     * root spans under one turn: several sequential top-level LLM calls answering one user message.
-     * Those are one user utterance, and the classifier must speak once about it.
-     *
-     * <p>Scope is the window, not all history: frustration's detection table keys on the trace, so a
-     * turn whose roots straddle a batch boundary is a write-time conflict rather than something this
-     * filter has to catch, and it's left doing the one job it's right for, not scoring the same turn
-     * several times inside one batch.
-     *
-     * <p>An observation with no turn context is never folded into another; it keys on its own id, so
-     * an unparented span stays its own unit rather than colliding with one.
-     */
-    private static List<SubstrateObservation> oneScoredObservationPerTurn(List<SubstrateObservation> window) {
-        Set<String> seenTurns = new HashSet<>();
-        List<SubstrateObservation> kept = new ArrayList<>(window.size());
-        for (SubstrateObservation o : window) {
-            if (seenTurns.add(o.traceId())) kept.add(o);
-        }
-        return kept;
-    }
-
-    /**
      * Write a fired detection into this classifier's own table, carrying the producer subject the
      * detection is about (the session it belongs to, null for anonymous traffic, its trace, and its
      * span) plus the detector's severity, confidence band, and evidence.
-     *
-     * <p>The turn-grain duplicate is fixed by the table, not a lookup: the detection table's unique
-     * key is the trace, the grain the classifier judges at, so a second parentless root span under
-     * one turn conflicts on write rather than needing to be checked for.
      *
      * <p>Fail-soft: a persistence failure degrades to a logged warning so one bad detection never
      * fails the sweep or blocks the cursor.
