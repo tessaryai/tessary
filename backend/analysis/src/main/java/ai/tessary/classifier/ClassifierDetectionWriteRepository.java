@@ -82,6 +82,16 @@ public class ClassifierDetectionWriteRepository {
         return tables.writesDetections(detectorKind);
     }
 
+    /** Delete every detection this classifier wrote. Returns 0 for a kind that writes none. */
+    public int deleteByClassifier(String detectorKind, String projectId, String classifierId) {
+        String table = tableFor(detectorKind);
+        if (table == null) return 0;
+        return jdbc.sql("DELETE FROM " + table + " WHERE project_id = :pid AND classifier_id = :sid")
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .update();
+    }
+
     /**
      * Insert one fired detection, or do nothing if this classifier has already spoken about this subject.
      *

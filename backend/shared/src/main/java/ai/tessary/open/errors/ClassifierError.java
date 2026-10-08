@@ -27,6 +27,8 @@ public enum ClassifierError implements ErrorCode {
     PROVIDER_REQUIRED(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
+    /** A reset while a worker holds the sweep job: that sweep would write its cursor back over the reset. */
+    SWEEP_RUNNING(HttpStatus.CONFLICT, "Classifier '%s' is checking traces right now. Try the reset again in a minute"),
     // NO_REPO_TO_RULE_AGAINST used to sit here: a 409 on `Run analysis` for a project with no git
     // integration, back when the only Layer-2 lane rules against a committed spec. It is gone rather than
     // deprecated because the state it named cannot occur — a repo-less project is now ruled on the

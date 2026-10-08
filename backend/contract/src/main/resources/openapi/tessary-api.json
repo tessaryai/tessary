@@ -14394,6 +14394,60 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/reset" : {
+      "post" : {
+        "operationId" : "ClassifierController_reset",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseClassifierView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/tool-error-rates" : {
       "get" : {
         "operationId" : "ClassifierController_toolErrorRates",

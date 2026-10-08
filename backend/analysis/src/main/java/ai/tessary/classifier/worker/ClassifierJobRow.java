@@ -31,6 +31,8 @@ public record ClassifierJobRow(
         int pageRetries) {
     public static final String PENDING = JobStatus.PENDING;
 
+    public static final String CLAIMED = JobStatus.CLAIMED;
+
     /**
      * Terminal past the attempt cap, distinct from {@link JobStatus#FAILED} (still retryable). A signal job is
      * resurrected by every heartbeat's re-pend, so its cap-crossing needs a state that routine re-pend

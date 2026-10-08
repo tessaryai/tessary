@@ -454,6 +454,9 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         body: JSON.stringify({ enabled }),
       }),
     listClassifierHealth: () => http<ClassifierHealth[]>(`${base}/classifiers/health`),
+    /** Forget what the classifier found and learned, and check every kept trace again. 409s while it sweeps. */
+    resetClassifier: (id: string) =>
+      http<Classifier>(`${base}/classifiers/${enc(id)}/reset`, { method: "POST" }),
     /**
      * The detections one classifier produced, newest-first: the traces that tripped it. This is
      * the full high-recall set, which is what the detail rail shows.

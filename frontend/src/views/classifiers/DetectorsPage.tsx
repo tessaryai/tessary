@@ -31,6 +31,7 @@ import type {
 } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Spinner, Toggle, cn } from "../../ui";
+import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
 import { GroundednessEnableModal } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
@@ -704,6 +705,7 @@ function ClassifierRail({
 }) {
   const { api } = useTenant();
   const [restarting, setRestarting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const isMetricDrift = classifier != null && METRIC_DRIFT_DETECTORS.has(classifier.detector);
   const hasFindings = classifier != null && FINDING_DETECTORS.has(classifier.detector);
 
@@ -826,12 +828,22 @@ function ClassifierRail({
         )}
       </RailBlock>
 
+      <RailBlock label="Reset">
+        <p className="text-muted m-0 mb-2.25 text-small">
+          Delete what this classifier found and learned, and check every kept trace again.
+        </p>
+        <Button size="sm" variant="danger" onClick={() => setResetting(true)}>
+          Reset classifier
+        </Button>
+      </RailBlock>
+
       <div className="border-t border-border mt-4.5 pt-4.5">
         <Suspense fallback={<LoadingRow />}>
           <DebugSection classifier={classifier} />
         </Suspense>
       </div>
 
+      {resetting && <ClassifierResetModal classifier={classifier} onClose={() => setResetting(false)} />}
       {groundedness && restarting && (
         <GroundednessRestartModal
           classifierId={classifier.id}

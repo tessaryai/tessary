@@ -26,6 +26,7 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,16 +45,19 @@ public class ClassifierController {
     private static final int DEFAULT_EVENT_LIMIT = 200;
 
     private final ClassifierService service;
+    private final ClassifierReset reset;
     private final FrustrationTuning frustrationTuning;
     private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
 
     public ClassifierController(
             ClassifierService service,
+            ClassifierReset reset,
             FrustrationTuning frustrationTuning,
             GroundednessStatus groundednessStatus,
             TenantPathResolver resolver) {
         this.service = service;
+        this.reset = reset;
         this.frustrationTuning = frustrationTuning;
         this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
@@ -106,6 +110,23 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "enable or disable signals");
         ClassifierRow row = service.setEnabled(r.project().id(), id, req.enabled());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /**
+     * Reset the classifier: delete what it detected and learned, close its unruled findings, and check
+     * every kept trace again from the start. See {@link ClassifierReset}. 409s while a sweep is running.
+     */
+    @PostMapping("/{id}/reset")
+    public ApiResponse<ClassifierView> reset(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "reset a classifier");
+        ClassifierRow row = reset.reset(r.project().id(), id, ctx.userEmail());
         return ApiResponse.ok(
                 ClassifierView.of(row, service.readiness(r.project().id(), row)));
     }

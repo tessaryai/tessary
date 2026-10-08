@@ -51,6 +51,17 @@ public class ToolErrorStateRepository {
         return template.replace("{key}", keyColumn).replace("{table}", table);
     }
 
+    /**
+     * Delete every carried state in the project, so the next replay rebuilds each one from the start of
+     * its window. A delete, not {@link #resetAndRelearn}: that writes a {@code reset_at} fence, and a
+     * rebuild skips every bucket before the fence.
+     */
+    public int deleteAll(String projectId) {
+        return jdbc.sql(sql("DELETE FROM {table} WHERE project_id = :pid"))
+                .param("pid", projectId)
+                .update();
+    }
+
     /** Every carried state in the project, keyed by tool. Empty for a project that has never swept. */
     public Map<String, CarriedState> byTool(String projectId) {
         return list(projectId).stream().collect(Collectors.toMap(CarriedState::toolKey, c -> c));
