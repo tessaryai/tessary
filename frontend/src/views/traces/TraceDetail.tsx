@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Trace interior — the full page. Conversation | Tree | Timeline over the trace's
- * real span tree, rather than a
- * fourth tab: judgment is a separate question from execution and stays put while
- * the execution views switch underneath.
+ * real span tree, plus JSON, the response as the API sent it. Judgment is not a
+ * view: it is a separate question from execution and stays put while the
+ * execution views switch underneath.
  *
  * URL contract (every state a URL):
- *   ?view=tree|timeline (conversation default) · ?span=<spanId>.
+ *   ?view=tree|timeline|json (conversation default) · ?span=<spanId>.
  */
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -14,6 +14,7 @@ import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { ConversationView, TimelineView, TreeView } from "./detail-views";
+import { RawJsonView } from "./detail-json";
 import { clockLabel, traceSummary, useTraceDetail } from "./detail-data";
 
 export function TraceDetail() {
@@ -86,7 +87,7 @@ export function TraceDetail() {
           />
 
           <div className="flex items-center gap-2.5 mt-1.5 mx-0 mb-4.5">
-            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} />
+            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} json />
           </div>
 
           <div className="flex items-start gap-6">
@@ -96,6 +97,9 @@ export function TraceDetail() {
                 {view === "tree" && <TreeView spans={spans} focusId={focusId} onSelect={select} />}
                 {view === "timeline" && (
                   <TimelineView trace={trace} spans={spans} focusId={focusId} onSelect={select} />
+                )}
+                {view === "json" && detail && (
+                  <RawJsonView value={detail} fileName={`trace-${trace.id}.json`} foldDepth={2} />
                 )}
               </TraceMedia>
             </div>

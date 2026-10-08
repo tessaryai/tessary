@@ -8,7 +8,7 @@ import { cn } from "../../ui";
 import { MediaResolverContext } from "../components/PayloadViewer";
 import { useTenant } from "../../tenant/TenantContext";
 
-export type TraceView = "conversation" | "tree" | "timeline";
+export type TraceView = "conversation" | "tree" | "timeline" | "json";
 
 /**
  * Teaches the payload viewers inside a trace how to reach an externalized image.
@@ -40,23 +40,26 @@ const VIEWS: { id: TraceView; label: string }[] = [
   { id: "tree", label: "Tree" },
   { id: "timeline", label: "Timeline" },
 ];
+const WITH_JSON = [...VIEWS, { id: "json" as const, label: "JSON" }];
 
 /** Renderings of execution only — judgment is the pill, never a view. */
 export function ViewSegment({
   view,
   onChange,
   compact,
+  json,
 }: {
   view: TraceView;
   onChange: (v: TraceView) => void;
   compact?: boolean;
+  json?: boolean;
 }) {
   return (
     <div
       role="tablist"
       aria-label="Trace view"
       className="inline-flex overflow-hidden rounded-control border border-border-strong">
-      {VIEWS.map((v, i) => (
+      {(json ? WITH_JSON : VIEWS).map((v, i) => (
         <button
           key={v.id}
           type="button"
