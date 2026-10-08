@@ -551,8 +551,9 @@ public class TraceV2Repository {
         addExists(where, params, "provided_model_name", "model", query.model());
         addExists(where, params, "kind", "kind", query.kind());
         addExists(where, params, "call_site_id", "callSite", query.callSite());
-        if (query.hasCallSite() != null) {
-            where.append(query.hasCallSite() ? " AND EXISTS" : " AND NOT EXISTS")
+        Boolean hasCallSite = query.hasCallSite();
+        if (hasCallSite != null) {
+            where.append(hasCallSite ? " AND EXISTS" : " AND NOT EXISTS")
                     .append(" (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
                             + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx.call_site_id IS NOT NULL)");
         }
