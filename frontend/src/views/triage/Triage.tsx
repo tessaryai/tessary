@@ -7,9 +7,10 @@
  * (`ix_eval_case_live_rank`). Muted cases and the week's closures are a filter, not furniture. Findings
  * below it holds what has not become a case yet (see `OpenFindings`).
  *
- * With no open case, Cases says "Nothing needs you." unless the empty-state ladder still has a step for
- * the reader to take (no classifier, baselines fitting, no provider key, a stopped exporter): then the
- * setup screen takes the section, because an all-clear line there would hide what to do next.
+ * Until a case or a finding is open, the setup screen (traces → findings → cases) takes the Cases section and
+ * Findings is not drawn: two empty tables say less than the pipeline, which shows what is being watched. Once
+ * a finding is open with no case, Cases says "Nothing needs you." above the findings list, unless the
+ * empty-state ladder still has a step for the reader to take (no provider key, a stopped exporter).
  *
  * This reads `GET {base}/cases` — an indexed table read. The CUSUM replay that
  * decides what is degrading runs on a worker, never on this page load.
@@ -72,6 +73,10 @@ export function Triage() {
           canConfigure: canAddProvider,
         })
       : null;
+  const showSetup = setup != null && needsSetupScreen(setup);
+  // Findings waits for something to list: a setup screen over a queue with no open finding stands alone.
+  const showFindings =
+    triageQ.isError || (triageQ.data != null && !(showSetup && (triageQ.data.watching.open_findings ?? 0) === 0));
 
   return (
     <>
@@ -106,9 +111,9 @@ export function Triage() {
 
           {/* Which empty state it is, and where it sends the reader, is `resolveState`'s call; see its
               header for why an empty queue is several states and not one. */}
-          {setup && needsSetupScreen(setup) && <PipelineEmpty state={setup} />}
+          {showSetup && <PipelineEmpty state={setup} />}
 
-          {triageQ.data && !(setup && needsSetupScreen(setup)) && (
+          {triageQ.data && !showSetup && (
             <>
               <ListChassis>
                 {shown.map((c) => (
@@ -126,7 +131,7 @@ export function Triage() {
           )}
         </Section>
 
-        <OpenFindings basePath={basePath} />
+        {showFindings && <OpenFindings basePath={basePath} />}
       </div>
 
       {/* Pulse strip — renders in BOTH states. */}

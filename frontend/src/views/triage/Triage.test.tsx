@@ -131,14 +131,29 @@ describe("the open cases", () => {
     expect(await screen.findByText("triage unavailable")).toBeTruthy();
   });
 
-  // Bug: a watched project with nothing open gets the full-page setup screen ("Nothing to review") in place of
-  // the Cases list, pushing the findings it does have out of sight.
-  it("says nothing needs you when no case is open and every stage is running", async () => {
+  // Bug: a watched project with nothing open shows two empty tables, and loses the pipeline that proves its
+  // traces are arriving and being evaluated.
+  it("shows the pipeline and no tables while no case or finding is open", async () => {
     api.getTriage.mockResolvedValue(triage({ cases: [] }));
     renderPage();
 
+    expect(await within(section("Cases")).findByText("Nothing to review")).toBeTruthy();
+    expect(screen.queryByText("Nothing needs you.")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: "Findings" })).toBeNull();
+  });
+
+  // Bug: open findings with no case get the full-page setup screen in place of the Cases list, pushing the
+  // findings out of sight.
+  it("says nothing needs you above the findings once a finding is open and no case is", async () => {
+    api.getTriage.mockResolvedValue(
+      triage({ cases: [], watching: { ...WATCHING, open_findings: 1 } as TriageView["watching"] }),
+    );
+    api.listBehaviorFindings.mockResolvedValue({ findings: [finding("a")] });
+    renderPage();
+
     expect(await within(section("Cases")).findByText("Nothing needs you.")).toBeTruthy();
-    expect(screen.queryByText("Nothing to review")).toBeNull();
+    expect(screen.queryByText("No open cases")).toBeNull();
+    expect(await within(section("Findings")).findByText("Finding a")).toBeTruthy();
   });
 
   // Bug: the setup screen dropped with the empty list, so a project with no classifier running reads as all
@@ -151,7 +166,7 @@ describe("the open cases", () => {
 
     expect(await within(section("Cases")).findByText("No classifiers running")).toBeTruthy();
     expect(screen.queryByText("Nothing needs you.")).toBeNull();
-    expect(await within(section("Findings")).findByText("No open findings.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Findings" })).toBeNull();
   });
 
   // Bug: a stopped exporter hidden behind "Nothing needs you.", which reads as all clear while nothing arrives.
@@ -265,6 +280,12 @@ const finding = (id: string, over: Partial<BehaviorFinding> = {}) =>
   }) as BehaviorFinding;
 
 describe("the findings", () => {
+  // Findings is drawn once the case queue has said something is open, so wait for the cases first.
+  const renderLoaded = async () => {
+    renderPage();
+    await screen.findByText("Case a");
+  };
+
   // Bug: a closed finding, or one that already became a case, listed again under Findings; or a sound finding
   // still waiting for its case dropped from both lists.
   it("lists the open findings that are not yet a case, with their classifier, call site and triage", async () => {
@@ -278,7 +299,7 @@ describe("the findings", () => {
         finding("f", { triageStatus: "in_flight", callSiteId: null }),
       ],
     });
-    renderPage();
+    await renderLoaded();
 
     const findings = section("Findings");
     const a = (await within(findings).findByText("Finding a")).closest("tr")!;
@@ -321,7 +342,7 @@ describe("the findings", () => {
   // Bug: the row opens on a mouse click only, so a keyboard or screen reader cannot open any finding from Triage.
   it("links each finding's title to its own page, so a keyboard can open it", async () => {
     api.listBehaviorFindings.mockResolvedValue({ findings: [finding("f/1")] });
-    renderPage();
+    await renderLoaded();
 
     const link = await within(section("Findings")).findByRole("link", { name: "Finding f/1" });
     expect(link.getAttribute("href")).toBe("/orgs/acme/projects/default/classifiers/findings/f%2F1");
@@ -333,7 +354,7 @@ describe("the findings", () => {
     api.listBehaviorFindings.mockResolvedValue({
       findings: [finding("b", { triageStatus: "done", triageVerdict: "negative", triageAction: "closed" })],
     });
-    renderPage();
+    await renderLoaded();
 
     expect(await within(section("Findings")).findByText("No open findings.")).toBeTruthy();
     expect(screen.queryByText("Finding b")).toBeNull();
@@ -341,7 +362,7 @@ describe("the findings", () => {
 
   it("says why the findings could not be read", async () => {
     api.listBehaviorFindings.mockRejectedValue(new Error("findings unavailable"));
-    renderPage();
+    await renderLoaded();
 
     expect(await within(section("Findings")).findByText("findings unavailable")).toBeTruthy();
     expect(screen.queryByText("No open findings.")).toBeNull();

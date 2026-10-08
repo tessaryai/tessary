@@ -121,12 +121,12 @@ describe("resolveState", () => {
     expect(s.body).toBe("1 finding is open. Triage hasn't determined that it is a real issue.");
   });
 
-  // Bug: an all-clear line drawn over a state that still has a step to take, or the setup screen pushed over the
-  // two states Triage now answers with one line and the findings list.
-  it("asks for the setup screen only where the reader has a step to take", () => {
+  // Bug: an all-clear line drawn over a state that still has a step to take, or over an empty queue whose only
+  // proof of watching is the pipeline; or the setup screen pushed over open findings Triage lists below Cases.
+  it("asks for the setup screen until a finding is open, and after that only where there is a step to take", () => {
     const at = (w: Partial<TriageView["watching"]>, o: Partial<Onboarding> = {}, p = HAS_PROVIDER) =>
       needsSetupScreen(resolveState(watching(w), onboarding(o), BASE, p));
-    expect(at({ open_findings: 0 })).toBe(false);
+    expect(at({ open_findings: 0 })).toBe(true);
     expect(at({ open_findings: 2 })).toBe(false);
     expect(at({ classifiers: 0 })).toBe(true);
     expect(at({}, { stage: "fitting" })).toBe(true);
