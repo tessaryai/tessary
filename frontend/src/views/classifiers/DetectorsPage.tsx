@@ -33,7 +33,6 @@ import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, PageHeader, Rail, Spinner, Toggle, cn } from "../../ui";
 import { ClassifierResetModal } from "./ClassifierResetModal";
 import { FRUSTRATION_DETECTOR, FrustrationEnableModal } from "./FrustrationEnableModal";
-import { FrustrationScopeSection } from "./FrustrationScopeSection";
 import { GroundednessEnableModal } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
 import { GroundednessTurnOffModal } from "./GroundednessTurnOffModal";
@@ -813,17 +812,17 @@ function ClassifierRail({
         </RailBlock>
       )}
 
-      {classifier.detector === FRUSTRATION_DETECTOR ? (
+      {!UNSCOPED_DETECTORS.has(classifier.detector) && (
         <RailBlock label="Call sites">
-          <FrustrationScopeSection classifier={classifier} />
+          {classifier.detector === FRUSTRATION_DETECTOR && (
+            <p className="text-subtle m-0 mb-2.5 text-small">
+              To spend less, limit it to the call sites that reply to the user. Routers and memory passes are
+              not conversations.
+            </p>
+          )}
+          {/* Keyed so a switch to another row seeds the form from that row's list. */}
+          <CallSitesSection key={classifier.id} classifier={classifier} />
         </RailBlock>
-      ) : (
-        !UNSCOPED_DETECTORS.has(classifier.detector) && (
-          <RailBlock label="Call sites">
-            {/* Keyed so a switch to another row seeds the form from that row's list. */}
-            <CallSitesSection key={classifier.id} classifier={classifier} />
-          </RailBlock>
-        )
       )}
 
       <RailBlock

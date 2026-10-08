@@ -302,27 +302,6 @@ public final class ClassifierDtos {
     }
 
     /**
-     * The call sites the Frustration classifier scores. Empty until a user picks one, and then nothing is sent.
-     *
-     * @param callSiteIds the picked call site ids, in id order
-     */
-    public record FrustrationScopeView(
-            @JsonProperty("call_site_ids") List<String> callSiteIds) {
-
-        public FrustrationScopeView {
-            callSiteIds = List.copyOf(callSiteIds);
-        }
-    }
-
-    /**
-     * Request body for {@code PUT .../classifiers/{id}/frustration-scope}: the call sites to score, replacing the
-     * earlier picks. Pick the call site that answers the user, not a router or a memory call beside it.
-     */
-    public record SetFrustrationScopeRequest(
-            @JsonProperty("call_site_ids") @NotNull @Size(max = 200)
-            List<@NotBlank String> callSiteIds) {}
-
-    /**
      * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.
      *
      * <p>{@code w1_floor} is the dial: the smallest move worth reporting, at a full window. A thin window

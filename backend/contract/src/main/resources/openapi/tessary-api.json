@@ -756,27 +756,6 @@
         ],
         "type" : "object"
       },
-      "ApiResponseFrustrationScopeView" : {
-        "properties" : {
-          "data" : {
-            "anyOf" : [
-              {
-                "$ref" : "#/components/schemas/FrustrationScopeView"
-              },
-              {
-                "type" : "null"
-              }
-            ]
-          },
-          "meta" : {
-            "$ref" : "#/components/schemas/ResponseMeta"
-          }
-        },
-        "required" : [
-          "meta"
-        ],
-        "type" : "object"
-      },
       "ApiResponseFrustrationTuningView" : {
         "properties" : {
           "data" : {
@@ -5621,20 +5600,6 @@
         ],
         "type" : "object"
       },
-      "FrustrationScopeView" : {
-        "properties" : {
-          "call_site_ids" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          }
-        },
-        "required" : [
-          "call_site_ids"
-        ],
-        "type" : "object"
-      },
       "FrustrationTuningView" : {
         "properties" : {
           "arl_target" : {
@@ -9630,23 +9595,6 @@
         },
         "required" : [
           "enabled"
-        ],
-        "type" : "object"
-      },
-      "SetFrustrationScopeRequest" : {
-        "properties" : {
-          "call_site_ids" : {
-            "items" : {
-              "minLength" : 1,
-              "type" : "string"
-            },
-            "maxItems" : 200,
-            "minItems" : 0,
-            "type" : "array"
-          }
-        },
-        "required" : [
-          "call_site_ids"
         ],
         "type" : "object"
       },
@@ -14452,122 +14400,6 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseListClassifierEventView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "classifier-controller"
-        ]
-      }
-    },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope" : {
-      "get" : {
-        "operationId" : "ClassifierController_getFrustrationScope",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "classifier-controller"
-        ]
-      },
-      "put" : {
-        "operationId" : "ClassifierController_setFrustrationScope",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/SetFrustrationScopeRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
                 }
               }
             },

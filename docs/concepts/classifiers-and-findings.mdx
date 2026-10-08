@@ -43,9 +43,9 @@ A flagged answer is not a finding on its own. Each call site learns its normal s
 
 A classifier runs on every call site until you limit it. Open the classifier under **Classifiers**, choose **Only some** under **Call sites**, and switch on the call sites it should check. Spans of other call sites are skipped, and so are spans with no call site. A span with no call site of its own counts as its trace's call site when another span of that trace carries one.
 
-This is how you spend less on `groundedness`: it sends only the answers of the call sites you picked.
+This is how you spend less on `groundedness` and `frustration`: they send only the call sites you picked. For `frustration`, keep the call sites that reply to the user, see [Limit the call sites to score](/classifiers/frustration#limit-the-call-sites-to-score).
 
-When you add a call site, `secret_leak` and `malformed_output` go back and check its past spans. `groundedness` checks it from now on, because going back would send its whole history to the model again. `tool_error` always runs on every call site, because it watches a tool across all of them. `frustration` has its own call-site picker, and scores nothing until you use it: see [Pick the call sites to score](/classifiers/frustration#pick-the-call-sites-to-score).
+When you add a call site, `secret_leak` and `malformed_output` go back and check its past spans. `groundedness` and `frustration` check it from now on, because going back would send their whole history to the model again. `tool_error` always runs on every call site, because it watches a tool across all of them.
 
 ## Fitting a baseline, and why a new project waits
 

@@ -21,19 +21,17 @@ The frustration classifier finds sessions where users get frustrated with your a
 
 The banner goes away, and the classifier's row reads as enabled. Tessary encrypts a key you paste here and uses it across your organization.
 
-## Pick the call sites to score
+## Limit the call sites to score
 
-The classifier scores nothing until you pick at least one call site.
+The classifier scores every call site until you limit it.
 
 1. Open **Classifiers** and select the **Frustration** row.
-2. Under **Call sites**, select each call site that replies to the user.
+2. Under **Call sites**, choose **Only some**, and switch on each call site that replies to the user.
 3. Select **Save call sites**.
 
-Pick only the calls whose answers the user reads. One user message can start several model calls, for example a router that picks a lane, the reply, and a memory pass that updates notes about the user. Each one is a separate call site. Pick the reply. The router and the memory pass get a prompt that your code built, not the user's words, so scoring them costs money and tells you nothing.
+Limit it to the calls whose answers the user reads. One user message can start several model calls, for example a router that picks a lane, the reply, and a memory pass that updates notes about the user. Each one is a separate call site. Keep the reply. The router and the memory pass get a prompt that your code built, not the user's words, so scoring them costs money and tells you nothing.
 
-A call site with the **Chat turn** label is one that your pipeline bundle declares as a chat turn.
-
-A new pick applies to messages that arrive after you save. Messages that the classifier already read are not scored again.
+A change applies to messages that arrive after you save. Messages that the classifier already read are not scored again.
 
 ## What is sent, and to whom
 
@@ -52,13 +50,13 @@ Scoring costs about $0.04 per 1,000 messages. Your provider bills each call to y
 
 ## Which messages are scored
 
-Only messages on a call site that you picked are scored. For each turn, Tessary reads the first call to that call site and the two earlier turns of the same session that reached it.
+Only messages on the call sites that the classifier runs on are scored. For each turn, Tessary reads the first call to that call site and the two earlier turns of the same session that reached it.
 
 A user message is scored only when the four messages before it are user, assistant, user, assistant, and each has text. So:
 
 - A session's first two user messages are never scored.
 - A message whose previous assistant turn ended on a tool call with no text is not scored.
-- A session here is the messages on one call site that share a trace's thread ID, or its session ID when it has no thread. If you pick two call sites, one conversation is two sessions, and each is scored and counted on its own.
+- A session here is the messages on one call site that share a trace's thread ID, or its session ID when it has no thread. If one conversation reaches two call sites, it is two sessions, and each is scored and counted on its own.
 - Once one message in a session is flagged, the rest of that session is not scored.
 
 The classifier sweeps new traces continuously, so a message is scored shortly after it arrives.

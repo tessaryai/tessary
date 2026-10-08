@@ -121,3 +121,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0031-classifier-call-site-scope.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0032-frustration-call-site-ids.sql
+      relativeToChangelogFile: false
