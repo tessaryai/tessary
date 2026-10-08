@@ -724,6 +724,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getFrustrationScope"];
+        put: operations["ClassifierController_setFrustrationScope"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-tuning": {
         parameters: {
             query?: never;
@@ -782,6 +798,22 @@ export interface paths {
         get?: never;
         put: operations["ClassifierController_setMode"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["ClassifierController_reset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2204,6 +2236,10 @@ export interface components {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFrustrationScopeView: {
+            data?: components["schemas"]["FrustrationScopeView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseFrustrationTuningView: {
             data?: components["schemas"]["FrustrationTuningView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2874,6 +2910,7 @@ export interface components {
             id: string;
             occurred_at: string | null;
             project_version_id: string | null;
+            session_id: string | null;
             severity: string | null;
             subject_id: string;
             subject_kind: string;
@@ -3254,6 +3291,9 @@ export interface components {
             minDecisionInterval: number;
             rate: components["schemas"]["RateDetail"];
             scorerVersion: string | null;
+        };
+        FrustrationScopeView: {
+            call_site_ids: string[];
         };
         FrustrationTuningView: {
             /** Format: int64 */
@@ -4221,6 +4261,9 @@ export interface components {
         };
         SetEnabledRequest: {
             enabled: boolean;
+        };
+        SetFrustrationScopeRequest: {
+            call_site_ids: string[];
         };
         SetLaneModelRequest: {
             model_key: string;
@@ -6181,6 +6224,62 @@ export interface operations {
             };
         };
     };
+    ClassifierController_getFrustrationScope: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
+                };
+            };
+        };
+    };
+    ClassifierController_setFrustrationScope: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFrustrationScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
+                };
+            };
+        };
+    };
     ClassifierController_getFrustrationTuning: {
         parameters: {
             query: {
@@ -6277,6 +6376,32 @@ export interface operations {
                 "application/json": components["schemas"]["SetModeRequest"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
+    ClassifierController_reset: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

@@ -130,6 +130,7 @@ public class ClassifierDetectionRepository {
                 rs.getInt("classifier_version"),
                 java.util.Objects.requireNonNull(subjectKind, "verdict.subject_kind is NOT NULL"),
                 java.util.Objects.requireNonNull(subjectId, "signal detection subject id is present"),
+                rs.getString("session_id"),
                 rs.getString("trace_id"),
                 rs.getString("project_version_id"),
                 rs.getString("severity"), // the detection's coarse severity

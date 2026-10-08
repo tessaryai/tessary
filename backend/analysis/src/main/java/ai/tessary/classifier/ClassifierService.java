@@ -534,6 +534,9 @@ public class ClassifierService {
         if (BuiltInDetector.Kind.TOOL_ERROR.equals(before.detector())) {
             throw new TessaryException(ClassifierError.CALL_SITE_SCOPE_UNSUPPORTED, before.classifierKey());
         }
+        if (BuiltInDetector.Kind.FRUSTRATION.equals(before.detector())) {
+            throw new TessaryException(ClassifierError.FRUSTRATION_SCOPE_ELSEWHERE, before.id());
+        }
         List<String> scope = callSiteIds == null
                 ? null
                 : callSiteIds.stream().distinct().sorted().toList();

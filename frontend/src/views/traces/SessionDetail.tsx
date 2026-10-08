@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Session interior — the full page, opened from the rail's ⤢. Same shell as TraceDetail: Conversation |
- * Tree | Timeline over the session's spans, stitched across every trace in it. No Verdicts panel here —
+ * Tree | Timeline over the session's spans, stitched across every trace in it, plus JSON, the session and
+ * its spans as the API sent them. No Verdicts panel here —
  * judgment is per-trace, and a session-wide verdicts read is out of scope (see detail-views.tsx's
  * SessionConversationView doc comment).
  *
- * URL contract: ?view=tree|timeline (conversation default).
+ * URL contract: ?view=tree|timeline|json (conversation default).
  */
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
+import { RawJsonView } from "./detail-json";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
 export function SessionDetail() {
@@ -68,7 +70,7 @@ export function SessionDetail() {
           />
 
           <div className="flex items-center gap-2.5 mt-1.5 mx-0 mb-4.5">
-            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} />
+            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} json />
           </div>
 
           <TraceMedia>
@@ -86,6 +88,18 @@ export function SessionDetail() {
                 onSelect={select}
               />
             )}
+            {view === "json" &&
+              (spansQ.data ? (
+                <RawJsonView
+                  value={{ session: detail, spans: spansQ.data }}
+                  fileName={`session-${detail.id}.json`}
+                  foldDepth={3}
+                />
+              ) : spansQ.isFetching ? (
+                <LoadingRow />
+              ) : (
+                <ErrorNote error={spansQ.error ?? "This session's spans could not be loaded."} />
+              ))}
           </TraceMedia>
         </>
       )}

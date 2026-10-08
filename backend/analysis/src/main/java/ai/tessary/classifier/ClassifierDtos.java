@@ -70,7 +70,8 @@ public final class ClassifierDtos {
      * {@link ClassifierService#events}/{@link ClassifierService#eventsForClassifier}.
      * {@code id} is the verdict id (the detection's stable id); {@code classifierId}
      * / {@code classifierVersion} come from the JOINed definition; {@code subjectId} is the finest-grain subject
-     * id named by {@code subjectKind}; {@code traceId} is the owning trace when the subject is a trace or an
+     * id named by {@code subjectKind}; {@code sessionId} is the session the subject belongs to, null for
+     * anonymous traffic (the Classifiers rail's deep-link anchor); {@code traceId} is the owning trace when the subject is a trace or an
      * observation (the Explore deep-link anchor), null for context-grain detections; {@code detectedAt} is
      * {@code verdict.created_at}. {@code severity} is
      * kept for wire-shape compatibility but is always {@code null}: no per-detection severity is persisted.
@@ -81,6 +82,7 @@ public final class ClassifierDtos {
             @JsonProperty("classifier_version") int classifierVersion,
             @JsonProperty("subject_kind") String subjectKind,
             @JsonProperty("subject_id") String subjectId,
+            @JsonProperty("session_id") @Nullable String sessionId,
             @JsonProperty("trace_id") @Nullable String traceId,
             @JsonProperty("project_version_id") @Nullable String projectVersionId,
             @Nullable String severity,
@@ -254,8 +256,8 @@ public final class ClassifierDtos {
      * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
      * is derived by the replay.
      *
-     * @param unassignedConversations conversations in the replay window whose first scored turn had no call
-     *     site; they are never judged, and are counted so the gap is visible
+     * @param unassignedConversations sessions in the replay window scored with no call site, before call sites
+     *     were picked; they are never judged, and are counted so the gap is visible
      */
     public record FrustrationTuningView(
             double threshold,
@@ -298,6 +300,27 @@ public final class ClassifierDtos {
         public static final String IN_CONTROL = "in_control";
         public static final String ALARMING = "alarming";
     }
+
+    /**
+     * The call sites the Frustration classifier scores. Empty until a user picks one, and then nothing is sent.
+     *
+     * @param callSiteIds the picked call site ids, in id order
+     */
+    public record FrustrationScopeView(
+            @JsonProperty("call_site_ids") List<String> callSiteIds) {
+
+        public FrustrationScopeView {
+            callSiteIds = List.copyOf(callSiteIds);
+        }
+    }
+
+    /**
+     * Request body for {@code PUT .../classifiers/{id}/frustration-scope}: the call sites to score, replacing the
+     * earlier picks. Pick the call site that answers the user, not a router or a memory call beside it.
+     */
+    public record SetFrustrationScopeRequest(
+            @JsonProperty("call_site_ids") @NotNull @Size(max = 200)
+            List<@NotBlank String> callSiteIds) {}
 
     /**
      * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.

@@ -1467,7 +1467,7 @@ final class SampleShowcase {
 
     /**
      * Frustration's rate test over the scored turns: a thread is one trial on the call site of its scored
-     * turn's root span, and fails when that turn was flagged. Members are the sessions, witnesses each
+     * turn, and fails when that turn was flagged. Members are the sessions, witnesses each
      * frustrated session followed by the turn that fired.
      */
     private static RateStat frustrationRate(List<ScoredTurn> turns, Instant onset) {

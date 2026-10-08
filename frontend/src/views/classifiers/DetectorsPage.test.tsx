@@ -229,6 +229,7 @@ function event(overrides: Partial<ClassifierEvent>): ClassifierEvent {
     classifier_version: 1,
     subject_kind: "span",
     subject_id: "s1",
+    session_id: null,
     trace_id: null,
     project_version_id: null,
     severity: "warn",
@@ -250,6 +251,24 @@ describe("DetectionRow", () => {
   it("falls back to detected_at when occurred_at is null (a row from before migration 0012)", () => {
     renderRoute(<DetectionRow event={event({ occurred_at: null, detected_at: OLD })} />);
     expect(screen.queryByText(ago(OLD))).not.toBeNull();
+  });
+
+  it("opens the session on the flagged span, not the trace, when the detection belongs to a session", () => {
+    renderRoute(
+      <DetectionRow event={event({ trace_id: "t1", session_id: "sess-1", subject_kind: "span", subject_id: "sp1" })} />,
+      { route: "/classifiers", path: "classifiers" },
+    );
+    fireEvent.click(screen.getByRole("link"));
+    expect(currentLocation()).toBe("/sessions/sess-1?span=sp1");
+  });
+
+  it("opens the trace when the detection has no session (anonymous traffic)", () => {
+    renderRoute(
+      <DetectionRow event={event({ trace_id: "t1", session_id: null, subject_kind: "span", subject_id: "sp1" })} />,
+      { route: "/classifiers", path: "classifiers" },
+    );
+    fireEvent.click(screen.getByRole("link"));
+    expect(currentLocation()).toBe("/traces/t1");
   });
 });
 
@@ -531,7 +550,7 @@ describe("the detail rail", () => {
     expect(within(r).getByText("not json")).toBeTruthy();
     expect(within(r).getByText("42")).toBeTruthy();
     expect(within(r).getByText("low confidence")).toBeTruthy();
-    expect(within(r).getByText("25 most recent · select one to open the trace")).toBeTruthy();
+    expect(within(r).getByText("25 most recent · select one to open its session")).toBeTruthy();
     expect(listClassifierEvents).toHaveBeenCalledWith("clf-c", 25);
   });
 

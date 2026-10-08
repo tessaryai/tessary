@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0030-classifier-call-site-scope
+--changeset evals:0031-classifier-call-site-scope
 -- The call sites a classifier runs on. NULL runs it on every call site, which is how every classifier
 -- ran before. A list is never empty: a classifier that should run nowhere is turned off instead.
 -- Tenant-controlled like enabled and mode, so a catalog re-sync never writes it.

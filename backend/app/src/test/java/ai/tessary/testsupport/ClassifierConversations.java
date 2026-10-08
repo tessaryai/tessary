@@ -10,12 +10,16 @@ import java.util.List;
  * before it are user, assistant, user, assistant, each with text. Without it a fixture asserts on a turn production
  * never scores, and the failure reads as a cursor or grain bug.
  *
- * <p>Call before the turn under test, in the same session. Each preamble turn is one trace with a root {@code llm}
- * span, stamped earlier and written first, since the thread window orders by {@code (created_at, trace_id, id)}.
+ * <p>Call before the turn under test, in the same session, and put that turn on {@link #CALL_SITE}: earlier turns
+ * are read from the scored turn's own call site. Each preamble turn is one trace with a root {@code llm} span,
+ * stamped earlier and written first, since the thread window orders by {@code (created_at, trace_id, id)}.
  */
 public final class ClassifierConversations {
 
     private ClassifierConversations() {}
+
+    /** The call site every preamble turn is on; pick it on the classifier for the turn under test to be scored. */
+    public static final String CALL_SITE = "cs-chat";
 
     /** How far before {@code beforeTs} the first preamble turn is stamped, clear of any same-timestamp group. */
     private static final int PREAMBLE_LEAD_SECONDS = 120;
@@ -52,6 +56,7 @@ public final class ClassifierConversations {
         return fx.spanSeed(projectId)
                 .traceId(SubstrateV2Fixtures.traceId())
                 .sessionId(sessionId)
+                .callSiteId(CALL_SITE)
                 .kind("llm")
                 .name("chat")
                 .model("gpt-x")

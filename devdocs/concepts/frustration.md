@@ -1,12 +1,12 @@
 # Frustration
 
 Frustration watches whether users become frustrated with the agent, per call site, and opens a case
-when a call site's rate of frustrated conversations rises above the rate it learned as its own normal.
+when a call site's rate of frustrated sessions rises above the rate it learned as its own normal.
 It has two halves: a scorer that flags single user turns with a hosted decision model, and a rate test
 that turns those flags into findings. Code: `backend/analysis/.../classifier/frustration/`. The rate
 arithmetic is [deviation-math.md](./deviation-math.md) §2; config keys are in
 [config-keys.md](../reference/config-keys.md) (`tessary.frustration.*` and the classifier blob);
-tables are in [data-model.md](../reference/data-model.md) (`frustration_assessment`,
+tables are in [data-model.md](../reference/data-model.md) (`frustration_scope`, `frustration_assessment`,
 `frustration_detection`, `frustration_state`).
 
 ## Off by default
@@ -30,6 +30,24 @@ so `platform_unavailable` never happens here.
 It is not a per-observation LLM call in the catalog's cost sense: it is a hosted classifier call, and
 only a filtered subset of turns reaches it.
 
+## Which call sites are scored
+
+One user turn can make several model calls: a router that picks a lane, the reply, a memory pass that
+updates notes about the user. Each is its own call site, and only the reply is a conversation the user
+reads. So the classifier scores only the call sites a person picks on it (`frustration_scope`, set with
+`PUT /classifiers/{id}/frustration-scope` or the picker in the classifier rail). Nothing is scored
+until a call site is picked. The picks are their own table rather than a `config_json` key, because a
+catalog version bump rewrites `config_json`. A new pick applies to spans the sweep reads after it; the
+cursor is not rewound, since that would spend the org's credit on history.
+
+In each top-level trace, the span scored for a picked call site is its first `llm` or `agent` span by
+`(started_at, id)`: the call that received the user's message, before any tool round of the same call
+site. The four messages before it come from the two earlier turns of the conversation that reached the
+same call site; a turn that only ran a router or a memory pass is not one of them. A turn's user
+messages are those after its input's last assistant message, so a call site that sends the whole chat
+on every call gives each turn once, and a context block it sends under the user role is not read as
+the user's words.
+
 ## Which turns are sent
 
 A turn is sent only when the four messages before it are user, assistant, user, assistant, each with
@@ -46,24 +64,25 @@ A turn is flagged when `P(unhappy_with_assistant)` exceeds `threshold` (0.40, a 
 its shape and the threshold hash into `scorer_version`, so changing any of them starts a new set of
 assessment rows rather than mixing scales.
 
-## One flag per conversation
+## One flag per session
 
-A conversation is keyed `COALESCE(thread_id, session_id)`. Its first flagged turn writes a
-`frustration_detection` row, and while that row stands uncleared the sweep sends none of the
-conversation's later turns. Every sent turn, flagged or not, is a `frustration_assessment` row with the
-exact request and response bodies.
+A session is a conversation on one call site. The conversation is keyed `COALESCE(thread_id,
+session_id)`; the call site is the scored span's, written into the detection's `evidence.call_site_id`
+and the assessment's `call_site_id`. A session's first flagged turn writes a `frustration_detection`
+row, and while that row stands uncleared the sweep sends none of the session's later turns. A flag on
+one call site does not stop another picked call site in the same conversation. Every sent turn, flagged
+or not, is a `frustration_assessment` row with the exact request and response bodies.
 
-## The conversation is the trial
+## The session is the trial
 
-The rate test is Tool Error's Bernoulli CUSUM, run per call site with a conversation as the trial
-instead of a tool call. A conversation belongs to the call site of its first scored turn, and stays
-there: a flag on a later turn at another call site counts against the first call site, so the
-numerator and denominator are the same population. The finding cites the flagged turn itself, so RCA
-reads the turn where it happened.
+The rate test is Tool Error's Bernoulli CUSUM, run per call site with a session as the trial instead
+of a tool call. A conversation that reaches two picked call sites is a trial on each, and a flag on one
+never counts against the other, so the numerator and denominator are the same population. The finding
+cites the flagged turn itself, so RCA reads the turn where it happened.
 
-A conversation is a failure while it holds an uncleared flag. The replay rebuilds from the tables on
-every pass, so a conversation flagged on a later turn becomes a failure in its original hour, and one
-cleared by a `false_alarm` resolve stops being one.
+A session is a failure while it holds an uncleared flag. The replay rebuilds from the tables on every
+pass, so a session flagged on a later turn becomes a failure in the hour of its first scored turn, and
+one cleared by a `false_alarm` resolve stops being one.
 
 ## The learned rate, and what it cannot see
 
@@ -72,7 +91,7 @@ the reference keeps learning each later hour until it holds `freeze_baseline_con
 then stops moving. A blob without `freeze_baseline_conversations` freezes the reference the moment
 judging starts. The reference is its own past, not a shipped number. The consequence is plain: a call
 site that frustrates users from its first day learns that as its normal and is flagged only if it gets
-worse. A call site too quiet to reach 100 conversations inside the 28-day replay window is never
+worse. A call site too quiet to reach 100 sessions inside the 28-day replay window is never
 judged, and its Tuning row says `learning n/100`.
 
 ## What a case says, and what a resolve does
@@ -89,6 +108,6 @@ sessions that show it.
 Resolving the case, either way, zeroes the accumulator and drops the reference, so the call site
 learns its rate again from the traffic after the resolve (Tool Error keeps its reference on reset; this
 one does not, on purpose). `fixed` does only that. `false_alarm` also clears the flag on every
-conversation cited by any finding in the case, so they stop counting as failures and their later turns
-are sent again. The cost of re-learning: a case resolved as `fixed` before the fix lands teaches the
+session cited by any finding in the case, on that finding's call site only, so they stop counting as
+failures and their later turns are sent again. The cost of re-learning: a case resolved as `fixed` before the fix lands teaches the
 degraded rate as the new normal.

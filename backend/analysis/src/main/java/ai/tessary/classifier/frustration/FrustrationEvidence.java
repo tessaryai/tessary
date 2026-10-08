@@ -74,8 +74,7 @@ public final class FrustrationEvidence {
     /**
      * One frustrated session the finding cites.
      *
-     * @param callSiteId the flagged turn's own call site, which can differ from the finding's: a conversation
-     *     counts on the call site of its first scored turn
+     * @param callSiteId the flagged turn's call site, which is the finding's
      * @param cleared true once a {@code false_alarm} resolve cleared the conversation's flag
      * @param sessionId the flagged trace's session, which the page links to for the whole conversation;
      *     null when the trace carries none

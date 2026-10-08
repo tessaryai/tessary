@@ -5,7 +5,10 @@ import type { Classifier } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, LoadingRow, SegmentedControl, Toggle, useToast } from "../../ui";
 
-/** Tool error buckets by tool across call sites, so the server refuses a call-site list for it. */
+/**
+ * Tool error buckets by tool across call sites, so the server refuses a call-site list for it. Frustration is not
+ * here: it has its own picker, `FrustrationScopeSection`.
+ */
 export const UNSCOPED_DETECTORS: ReadonlySet<string> = new Set(["tool_error"]);
 
 type Scope = "all" | "some";

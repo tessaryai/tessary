@@ -53,12 +53,13 @@ public class FrustrationDetailService {
     public FrustratedSessionPage page(
             FindingRow finding, @Nullable CauseRef cause, int limit, @Nullable String cursor) {
         int offset = decode(cursor);
-        WitnessPage witnesses =
-                rates.witnessPage(finding.projectId(), finding.subjectId(), finding.id(), cause, limit, offset);
+        String callSite = finding.nativeCauseKey();
+        WitnessPage witnesses = rates.witnessPage(
+                finding.projectId(), finding.subjectId(), callSite, finding.id(), cause, limit, offset);
         List<String> ids = witnesses.traceIds();
-        Map<String, FlaggedTurn> flagged = rates.flaggedTurns(finding.projectId(), finding.subjectId(), ids);
+        Map<String, FlaggedTurn> flagged = rates.flaggedTurns(finding.projectId(), finding.subjectId(), callSite, ids);
         Map<String, ConversationContext> context =
-                rates.conversationContext(finding.projectId(), ids, FrustrationEvidence.CONTEXT_TURNS_BEFORE);
+                rates.conversationContext(finding.projectId(), callSite, ids, FrustrationEvidence.CONTEXT_TURNS_BEFORE);
         List<FrustratedConversationView> rows = new ArrayList<>(ids.size());
         for (String trace : ids) {
             FlaggedTurn turn = flagged.get(trace);

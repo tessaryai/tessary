@@ -56,6 +56,7 @@ class FrustrationDetailServiceTest {
         public WitnessPage witnessPage(
                 String projectId,
                 String classifierId,
+                String callSiteId,
                 String findingId,
                 @Nullable CauseRef cause,
                 int limit,
@@ -67,7 +68,8 @@ class FrustrationDetailServiceTest {
         }
 
         @Override
-        public Map<String, FlaggedTurn> flaggedTurns(String projectId, String classifierId, List<String> traceIds) {
+        public Map<String, FlaggedTurn> flaggedTurns(
+                String projectId, String classifierId, String callSiteId, List<String> traceIds) {
             Map<String, FlaggedTurn> out = new HashMap<>();
             for (String t : traceIds) if (turns.containsKey(t)) out.put(t, turns.get(t));
             return out;
@@ -75,7 +77,7 @@ class FrustrationDetailServiceTest {
 
         @Override
         public Map<String, ConversationContext> conversationContext(
-                String projectId, List<String> traceIds, int before) {
+                String projectId, String callSiteId, List<String> traceIds, int before) {
             return traceIds.isEmpty()
                     ? Map.of()
                     : Map.of(traceIds.get(0), new ConversationContext("sess_1", List.of("tr_0")));

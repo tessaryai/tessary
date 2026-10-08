@@ -3,11 +3,13 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
@@ -257,6 +259,36 @@ class ClassifierDefinitionIntegrationTest {
                 List.of(),
                 body(controller.getFrustrationTuning(ctx, org, proj, frustration.id()))
                         .callSites());
+
+        assertEquals(
+                new ClassifierDtos.FrustrationScopeView(List.of()),
+                body(controller.getFrustrationScope(ctx, org, proj, frustration.id())),
+                "nothing is scored until a user picks a call site");
+        assertEquals(
+                new ClassifierDtos.FrustrationScopeView(List.of("cs-chat", "cs-support")),
+                body(controller.setFrustrationScope(
+                        ctx,
+                        org,
+                        proj,
+                        frustration.id(),
+                        new ClassifierDtos.SetFrustrationScopeRequest(List.of("cs-support", "cs-chat", "cs-chat")))),
+                "each pick is kept once, in id order");
+        assertEquals(
+                new ClassifierDtos.FrustrationScopeView(List.of("cs-chat", "cs-support")),
+                body(controller.getFrustrationScope(ctx, org, proj, frustration.id())));
+        assertEquals(
+                new ClassifierDtos.FrustrationScopeView(List.of("cs-chat")),
+                body(controller.setFrustrationScope(
+                        ctx,
+                        org,
+                        proj,
+                        frustration.id(),
+                        new ClassifierDtos.SetFrustrationScopeRequest(List.of("cs-chat")))),
+                "a new pick replaces the old one");
+        assertThrows(
+                TessaryException.class,
+                () -> controller.getFrustrationScope(ctx, org, proj, costDrift.id()),
+                "only the Frustration classifier picks call sites");
 
         ClassifierDtos.ClassifierDailyVolumeView volume = body(controller.dailyMetrics(ctx, org, proj, 3));
         assertEquals(3, volume.days().size());

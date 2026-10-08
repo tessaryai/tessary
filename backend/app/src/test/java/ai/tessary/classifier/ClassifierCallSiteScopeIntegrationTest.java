@@ -187,6 +187,23 @@ class ClassifierCallSiteScopeIntegrationTest {
     }
 
     /**
+     * Frustration keeps its own list, where empty means score nothing. A second list on the row would give it two
+     * answers to which call sites it scores.
+     */
+    @Test
+    void frustrationRefusesTheGenericListAndKeepsItsOwn() {
+        String pid = project("scope-frustration").id();
+        declare(pid, "cs-a");
+        ClassifierRow frustration = byKey(pid, BuiltInDetector.Kind.FRUSTRATION);
+
+        TessaryException refused = assertThrows(
+                TessaryException.class, () -> service.setCallSiteIds(pid, frustration.id(), List.of("cs-a")));
+
+        assertEquals(ClassifierError.FRUSTRATION_SCOPE_ELSEWHERE, refused.error());
+        assertNull(byKey(pid, BuiltInDetector.Kind.FRUSTRATION).callSiteIds());
+    }
+
+    /**
      * The picker offers what the bundle declares and what traffic arrived on. Missing the traced half leaves a project
      * with no bundle nothing to pick; listing the untagged pile would offer a call site that is not one.
      */
@@ -229,6 +246,7 @@ class ClassifierCallSiteScopeIntegrationTest {
     private Project project(String name) {
         Project project = TenantFixture.bootstrap(tenants, name, org -> {
                     capabilities.grant(org.id(), Capability.GROUNDEDNESS);
+                    capabilities.grant(org.id(), Capability.FRUSTRATION);
                 })
                 .project();
         service.seedBuiltIns(project.id());

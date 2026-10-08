@@ -41,8 +41,8 @@ import org.springframework.transaction.support.TransactionOperations;
  * Frustration's rate test: per call site, whether the share of conversations frustrated with the agent has risen
  * above the rate that call site learned as its normal.
  *
- * <p><b>tool_error's engine, not a copy of it</b>, as Malformed Output uses it: a conversation is a Bernoulli
- * trial on the call site of its first scored turn, and it fails when it carries an uncleared frustration flag.
+ * <p><b>tool_error's engine, not a copy of it</b>, as Malformed Output uses it: a session, a conversation on one
+ * call site, is a Bernoulli trial on that call site, and it fails when it carries an uncleared frustration flag.
  * The hourly tallies ({@link FrustrationRateRepository}) are replayed through {@link ToolErrorTrend} on
  * {@link FrustrationConfig#engine()}. Judging starts once the reference holds {@code min_baseline_conversations},
  * and the reference keeps learning each later hour until it holds {@code freeze_baseline_conversations}, then
