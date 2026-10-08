@@ -169,8 +169,9 @@ Close with:
 - **What the user configures**: each environment variable or secret you introduced, by exact name,
   and the exact file, secret store, or deployment setting it goes in. If a value goes somewhere you
   cannot reach, leave a named placeholder and say so.
-- **What still keeps a classifier quiet** even with the right shape: frustration scores only the
-  call sites picked in its scope in Tessary, and needs a provider key. Groundedness and malformed
+- **What still keeps a classifier quiet** even with the right shape: frustration runs only once it
+  is turned on with a provider key, and it scores every call site until the user limits it. Name the
+  call sites that reply to the user, so they can limit it to those. Groundedness and malformed
   output need the call site's shape and output schema from the `.tessary/` bundle the evals plugin
   writes.
 - **The next call site** you recommend, and why.
