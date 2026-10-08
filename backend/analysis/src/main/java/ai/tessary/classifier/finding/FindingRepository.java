@@ -674,6 +674,20 @@ public class FindingRepository {
     }
 
     /**
+     * Close every open finding of one classifier that has no ruling yet. A ruled finding is a decision a
+     * person or Layer 2 made, and a positive one backs a case, so those stay as they are.
+     */
+    public int closeUnruled(String projectId, String classifierKey, String now) {
+        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
+                        + " WHERE project_id = :pid AND classifier_key = :key AND " + LIVE
+                        + " AND triage_verdict IS NULL")
+                .param("now", now)
+                .param("pid", projectId)
+                .param("key", classifierKey)
+                .update();
+    }
+
+    /**
      * Close every open finding linked to a case, in the same transaction as the case's own close — a
      * case resolved or absorbed closes what it holds, whoever or whatever closed it.
      */

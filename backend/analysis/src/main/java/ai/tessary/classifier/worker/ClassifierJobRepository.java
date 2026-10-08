@@ -301,6 +301,54 @@ public class ClassifierJobRepository {
                 .update();
     }
 
+    /** What {@link #restart} did to the classifier's sweep job. */
+    public enum Restart {
+        /** The cursor is back at the start and the job is due. */
+        RESTARTED,
+        /** No job row yet: the first sweep starts from the beginning anyway. */
+        NO_JOB,
+        /** A worker holds the job, so nothing changed. */
+        SWEEP_RUNNING
+    }
+
+    /**
+     * A person's reset: the cursor goes back to the start, and the job is due now with a clean failure
+     * record and no {@code caught_up_at}, as if it had never run.
+     *
+     * <p>Unlike {@link #rewindCursor} this revives a {@code dead} job: the dead-letter floor stops the
+     * heartbeat from looping on a failing sweep, and a person who confirmed a reset twice is asking for
+     * exactly one more try.
+     *
+     * <p>Call it inside the transaction that clears the classifier's output. The row stays locked until
+     * that transaction commits, and {@link #claimBatch} skips locked rows, so no sweep can start between
+     * this check and the deletes that follow it.
+     */
+    public Restart restart(String projectId, String classifierId) {
+        Optional<String> status = jdbc.sql("""
+            SELECT status FROM job
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            FOR UPDATE
+            """)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .query(String.class)
+                .optional();
+        if (status.isEmpty()) return Restart.NO_JOB;
+        if (ClassifierJobRow.CLAIMED.equals(status.get())) return Restart.SWEEP_RUNNING;
+        jdbc.sql("""
+            UPDATE job SET cursor_at = NULL, cursor_id = NULL, status = 'pending',
+                           attempts = 0, page_retries = 0, last_error = NULL,
+                           lease_owner = NULL, lease_expires_at = NULL,
+                           payload = COALESCE(payload, '{}'::jsonb) - 'caught_up_at', updated_at = :now
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            """)
+                .param("now", Instant.now().toString())
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .update();
+        return Restart.RESTARTED;
+    }
+
     /**
      * Mark a sweep failure. Below {@code maxAttempts}, the job stays {@code failed} — retryable, resurrected
      * by the next {@link #enqueue} call like any other terminal state. At or over the cap, it moves to the

@@ -47,6 +47,14 @@ public class GroundednessAssessmentRepository {
         this.jdbc = jdbc;
     }
 
+    /** Delete every assessment this classifier made. */
+    public int deleteByClassifier(String projectId, String classifierId) {
+        return jdbc.sql("DELETE FROM groundedness_assessment WHERE project_id = :pid AND classifier_id = :cid")
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .update();
+    }
+
     /**
      * Insert {@code a} unless this scorer already assessed its span. Returns whether it was written.
      *

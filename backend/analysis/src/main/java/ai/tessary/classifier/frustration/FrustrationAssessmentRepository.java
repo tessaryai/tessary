@@ -61,6 +61,14 @@ public class FrustrationAssessmentRepository {
         this.jdbc = jdbc;
     }
 
+    /** Delete every assessment this classifier made, and the shadow rows that hang off them. */
+    public int deleteByClassifier(String projectId, String classifierId) {
+        return jdbc.sql("DELETE FROM frustration_assessment WHERE project_id = :pid AND classifier_id = :cid")
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .update();
+    }
+
     /** Insert {@code a} unless this scorer already assessed its turn. Returns whether it was written. */
     public boolean insert(Assessment a) {
         return jdbc.sql("""
