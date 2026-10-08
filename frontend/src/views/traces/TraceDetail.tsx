@@ -91,7 +91,7 @@ export function TraceDetail() {
           />
 
           <div className="flex items-center gap-2.5 mt-1.5 mx-0 mb-4.5">
-            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} json />
+            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} />
           </div>
 
           <div className="flex items-start gap-6">
