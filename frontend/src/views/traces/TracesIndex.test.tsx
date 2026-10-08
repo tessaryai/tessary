@@ -104,6 +104,7 @@ function classifier(over: Partial<Classifier> = {}): Classifier {
     detector: "frustration",
     enabled: true,
     built_in: true,
+    call_site_ids: null,
     config_json: null,
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
