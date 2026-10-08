@@ -17,6 +17,10 @@ import org.springframework.stereotype.Repository;
  * <p>The union's {@code classifier_id} column holds the classifier key, so the definition's id
  * and version come from a JOIN on {@code classifier_key = d.classifier_id}.
  *
+ * <p>The session is the flagged trace's {@code session_id}, not the union's {@code subject_session_id}: Frustration
+ * stores the conversation key, {@code COALESCE(thread_id, session_id)}, there, which names no {@code session} row
+ * when the trace carries a thread.
+ *
  * <p>Detection ids are their own id space: a stored link to an old verdict id resolves to
  * nothing.
  *
@@ -36,13 +40,14 @@ public class ClassifierDetectionRepository {
         String relation = "(" + detectionTables.unionSql() + ") d";
         this.select = "SELECT d.id AS id, s.id AS classifier_id, "
                 + "s.version AS classifier_version, d.subject_kind AS subject_kind, "
-                + "d.subject_session_id AS session_id, d.subject_trace_id AS trace_id, "
+                + "t.session_id AS session_id, d.subject_trace_id AS trace_id, "
                 + "d.subject_span_id AS span_id, "
                 + "d.project_version_id AS project_version_id, d.evidence AS evidence, "
                 + "d.severity AS severity, d.confidence AS confidence, d.created_at AS created_at, "
                 + "d.subject_started_at AS subject_started_at "
                 + "FROM " + relation + " "
-                + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id ";
+                + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id "
+                + "LEFT JOIN trace t ON t.project_id = d.project_id AND t.id = d.subject_trace_id ";
         this.modeCountsSql = "SELECT\n"
                 + "  COUNT(*) FILTER (WHERE confidence = 'low')                        AS low_count,\n"
                 + "  COUNT(*) FILTER (WHERE confidence = 'high' OR confidence IS NULL) AS high_count\n"

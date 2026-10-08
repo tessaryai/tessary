@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier;
 
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -14,7 +16,7 @@ import org.springframework.stereotype.Repository;
 public class ClassifierRepository {
 
     private static final String COLS = "id, project_id, classifier_key, name, description, detector, "
-            + "config_json, built_in, version, enabled, mode, created_at, updated_at";
+            + "config_json, built_in, version, enabled, mode, created_at, updated_at, call_site_ids";
 
     private final JdbcClient jdbc;
 
@@ -48,9 +50,9 @@ public class ClassifierRepository {
     public void insert(ClassifierRow row) {
         jdbc.sql("""
             INSERT INTO classifier (id, project_id, classifier_key, name, description, detector, config_json,
-                                built_in, version, enabled, mode, created_at, updated_at)
+                                built_in, version, enabled, mode, created_at, updated_at, call_site_ids)
             VALUES (:id, :pid, :key, :name, :desc, :detector, :config,
-                    :builtIn, :version, :enabled, :mode, :createdAt, :updatedAt)
+                    :builtIn, :version, :enabled, :mode, :createdAt, :updatedAt, :callSiteIds)
             """)
                 .param("id", row.id())
                 .param("pid", row.projectId())
@@ -65,6 +67,7 @@ public class ClassifierRepository {
                 .param("mode", row.mode())
                 .param("createdAt", row.createdAt())
                 .param("updatedAt", row.updatedAt())
+                .param("callSiteIds", toArray(row.callSiteIds()))
                 .update();
     }
 
@@ -86,6 +89,20 @@ public class ClassifierRepository {
     public int setMode(String projectId, String id, String mode) {
         return jdbc.sql("UPDATE classifier SET mode = :mode, updated_at = :now WHERE project_id = :pid AND id = :id")
                 .param("mode", mode)
+                .param("now", Instant.now().toString())
+                .param("pid", projectId)
+                .param("id", id)
+                .update();
+    }
+
+    /**
+     * Set the call sites the classifier runs on, {@code null} for every call site. Tenant-controlled like
+     * {@code mode}; does NOT bump {@code version}. Returns rows affected (0 = not found).
+     */
+    public int setCallSiteIds(String projectId, String id, @Nullable List<String> callSiteIds) {
+        return jdbc.sql("UPDATE classifier SET call_site_ids = :ids, updated_at = :now"
+                        + " WHERE project_id = :pid AND id = :id")
+                .param("ids", toArray(callSiteIds))
                 .param("now", Instant.now().toString())
                 .param("pid", projectId)
                 .param("id", id)
@@ -171,6 +188,17 @@ public class ClassifierRepository {
                 rs.getBoolean("enabled"),
                 rs.getString("mode"),
                 rs.getString("created_at"),
-                rs.getString("updated_at"));
+                rs.getString("updated_at"),
+                callSiteIds(rs.getArray("call_site_ids")));
+    }
+
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = every call site; empty is refused
+    private static String @Nullable [] toArray(@Nullable List<String> callSiteIds) {
+        return callSiteIds == null ? null : callSiteIds.toArray(String[]::new);
+    }
+
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = every call site; empty is refused
+    private static @Nullable List<String> callSiteIds(@Nullable Array array) throws SQLException {
+        return array == null ? null : List.of((String[]) array.getArray());
     }
 }

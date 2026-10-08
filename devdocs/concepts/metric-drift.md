@@ -336,6 +336,10 @@ observe → settle → fold into current window → close window → compare ×2
   thin, with a minimum-sample floor below which nothing is compared.
 - **Epoch.** A deploy does not reset the window, it re-pins the reference. The baseline changelog
   records every re-pin, as behaviour drift's does.
+- **Call-site list.** A classifier limited to some call sites drops the other samples before they
+  fold. A turn bucket is one call site, so it stays whole or goes. A tool bucket keeps only its
+  in-scope calls, so a change to the list changes its population: the rolling reference takes that in
+  within two windows, and a shift against the pinned reference is what *absorb* is for. Nothing resets.
 - **Watermark.** `counted_through_at` / `counted_through_id` share the counters' lifetime, so a
   re-sweep cannot double-count. Behaviour drift's profile needed this after observing
   `trace_count` 565 against 443 distinct traces; do not repeat the mistake.

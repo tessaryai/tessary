@@ -11,6 +11,7 @@ import ai.tessary.classifier.ClassifierDtos.ClassifierView;
 import ai.tessary.classifier.ClassifierDtos.FrustrationScopeView;
 import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
+import ai.tessary.classifier.ClassifierDtos.SetCallSitesRequest;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
 import ai.tessary.classifier.ClassifierDtos.SetFrustrationScopeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
@@ -153,6 +154,29 @@ public class ClassifierController {
         ClassifierRow row = service.setMode(r.project().id(), id, req.mode());
         return ApiResponse.ok(
                 ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /** Limit the classifier to some call sites, or run it on every call site again; mirrors {@link #setMode}. */
+    @PutMapping("/{id}/call-sites")
+    public ApiResponse<ClassifierView> setCallSites(
+            TenantContext ctx,
+            @PathVariable String orgSlug,
+            @PathVariable String projectSlug,
+            @PathVariable String id,
+            @Valid @RequestBody SetCallSitesRequest req) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        r.require(Permission.ORG_MANAGE, "choose the call sites a classifier runs on");
+        ClassifierRow row = service.setCallSiteIds(r.project().id(), id, req.callSiteIds());
+        return ApiResponse.ok(
+                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+    }
+
+    /** The call sites a classifier can be limited to: those the bundle declares and those traces arrived on. */
+    @GetMapping("/call-sites")
+    public ApiResponse<List<String>> callSites(
+            TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
+        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
+        return ApiResponse.ok(service.knownCallSiteIds(r.project().id()));
     }
 
     /**

@@ -1285,6 +1285,26 @@
         ],
         "type" : "object"
       },
+      "ApiResponseListString" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseListToolErrorRateView" : {
         "properties" : {
           "data" : {
@@ -4087,6 +4107,15 @@
           "built_in" : {
             "type" : "boolean"
           },
+          "call_site_ids" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
+          },
           "classifier_key" : {
             "type" : "string"
           },
@@ -4136,6 +4165,7 @@
         },
         "required" : [
           "built_in",
+          "call_site_ids",
           "classifier_key",
           "config_json",
           "created_at",
@@ -9575,6 +9605,23 @@
         ],
         "type" : "object"
       },
+      "SetCallSitesRequest" : {
+        "properties" : {
+          "call_site_ids" : {
+            "items" : {
+              "minLength" : 1,
+              "type" : "string"
+            },
+            "maxItems" : 2147483647,
+            "minItems" : 1,
+            "type" : [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type" : "object"
+      },
       "SetEnabledRequest" : {
         "properties" : {
           "enabled" : {
@@ -13914,6 +13961,52 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/call-sites" : {
+      "get" : {
+        "operationId" : "ClassifierController_callSites",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseListString"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events" : {
       "get" : {
         "operationId" : "ClassifierController_events",
@@ -14099,6 +14192,70 @@
             }
           }
         ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseClassifierView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/call-sites" : {
+      "put" : {
+        "operationId" : "ClassifierController_setCallSites",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "id",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          }
+        ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCallSitesRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {

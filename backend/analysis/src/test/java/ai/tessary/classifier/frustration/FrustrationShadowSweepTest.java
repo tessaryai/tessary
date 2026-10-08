@@ -238,7 +238,8 @@ class FrustrationShadowSweepTest {
                 true,
                 "tracking",
                 "2026-10-01T00:00:00Z",
-                "2026-10-01T00:00:00Z");
+                "2026-10-01T00:00:00Z",
+                null);
         when(classifiers.findById("p1", "c1")).thenReturn(Optional.of(row));
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", true))).thenReturn(List.of());
         when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))

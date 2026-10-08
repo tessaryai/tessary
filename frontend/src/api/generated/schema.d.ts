@@ -580,6 +580,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_callSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events": {
         parameters: {
             query?: never;
@@ -637,6 +653,22 @@ export interface paths {
         };
         get: operations["ClassifierController_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["ClassifierController_setCallSites"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2310,6 +2342,10 @@ export interface components {
             data?: components["schemas"]["SourceResponse"][] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseListString: {
+            data?: string[] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseListToolErrorRateView: {
             data?: components["schemas"]["ToolErrorRateView"][] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2903,6 +2939,7 @@ export interface components {
         };
         ClassifierView: {
             built_in: boolean;
+            call_site_ids: string[] | null;
             classifier_key: string;
             config_json: string | null;
             created_at: string;
@@ -4231,6 +4268,9 @@ export interface components {
         SessionsPage: {
             next_cursor: string | null;
             sessions: components["schemas"]["SessionListItem"][];
+        };
+        SetCallSitesRequest: {
+            call_site_ids?: string[] | null;
         };
         SetEnabledRequest: {
             enabled: boolean;
@@ -5958,6 +5998,31 @@ export interface operations {
             };
         };
     };
+    ClassifierController_callSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListString"];
+                };
+            };
+        };
+    };
     ClassifierController_events: {
         parameters: {
             query: {
@@ -6048,6 +6113,36 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
+    ClassifierController_setCallSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCallSitesRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
