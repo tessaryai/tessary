@@ -288,7 +288,8 @@ CREATE TABLE trace (
     total_cost          numeric(18,12),
     unpriced_spans      integer,
 
-    -- copied from the root span at rollup (§7.2)
+    -- copied from the spans at rollup (§7.2): previews from the root, call site from
+    -- the root else the earliest tagged span
     input_preview       text,
     output_preview      text,
     call_site_id        text,
@@ -636,6 +637,15 @@ WITH agg AS (
        AND NOT is_deleted
      ORDER BY started_at, id
      LIMIT 1
+), tagged AS (
+    SELECT call_site_id
+      FROM span
+     WHERE project_id   = :project_id
+       AND trace_id     = :trace_id
+       AND call_site_id IS NOT NULL
+       AND NOT is_deleted
+     ORDER BY started_at, id
+     LIMIT 1
 )
 UPDATE trace t
    SET span_count         = agg.span_count,
@@ -654,19 +664,24 @@ UPDATE trace t
                                   ELSE t.input_preview END,
        output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                   ELSE t.output_preview END,
-       call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
-                                  ELSE t.call_site_id END,
+       call_site_id       = CASE WHEN t.has_root_span
+                                 THEN COALESCE(root.call_site_id, tagged.call_site_id)
+                                 ELSE t.call_site_id END,
        rolled_up_at       = now(),
        rolled_up_through  = agg.through,
        is_settled         = (t.rollup_due_at IS NULL)
-  FROM agg LEFT JOIN root ON true
+  FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
  WHERE t.project_id = :project_id AND t.id = :trace_id;
 ```
 
-The previews and call site are copied down from the root span, not stored by ingest — that is
+The previews and call site are copied down from the spans, not stored by ingest — that is
 what keeps the traces list a single-table read (rule 1) rather than a join to find each row's
-entry point. Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior
-value.
+entry point. The previews are the root's. The call site is the root's tag, else the
+earliest-starting tagged span's, because instrumentation tags the model-call span rather than the
+handler around it; the full rule is in
+[Call sites](../../docs/concepts/call-sites.mdx#a-trace-takes-the-first-call-site-it-reached).
+Gated on `has_root_span`, so a trace whose root hasn't landed yet keeps its prior value rather
+than taking a call site from a partial set of children.
 
 The aggregate reads one trace's spans through the primary key prefix — an indexed, clustered
 scan. `rollup_due_at` is never written here: the claim already cleared it, and if a span has

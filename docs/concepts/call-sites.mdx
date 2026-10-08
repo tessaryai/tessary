@@ -20,11 +20,21 @@ Four properties of the tag decide whether attribution works:
 
 [Tag your call sites](/instrument/call-site-tag) is the procedure. It is a plain span attribute on tracing you already have, so there is nothing to install.
 
-### A trace inherits its entry point's call site
+### A trace takes the first call site it reached
 
-Spans carry the tag; traces inherit one. When a trace's rollup runs, Tessary copies the call site off that trace's root span onto the trace itself. That copied value is what "this call site's turns" means, and both the duration and cost classifiers read that one column, so they cannot disagree about which bucket a trace belongs to.
+Spans carry the tag; traces inherit one. When a trace's rollup runs, Tessary copies one call site onto the trace itself:
 
-The consequence worth knowing: tagging an inner span but not the span that starts the turn leaves the trace itself unattributed, even though the trace contains a tagged span.
+1. The root span's call site, if the root span has one.
+2. If not, the call site of the tagged span that started first. A tie on start time goes to the lower span id.
+3. If no span in the trace has a tag, the trace has no call site.
+
+That copied value is what "this call site's turns" means, and both the duration and cost classifiers read that one column, so they cannot disagree about which bucket a trace belongs to.
+
+The second step exists because the tag goes on the span that covers the model call, and the root is usually a request handler or an agent span with no tag. Such a trace takes the call site of its first model call.
+
+A turn can reach more than one call site, for example a planner and then a summarizer. The turn still counts under one call site, the first one it reached, because a turn's duration and cost are one number and counting them in two buckets would count them twice. Each span keeps its own tag, so span-grain checks such as `malformed_output` and `groundedness` still run on the summarizer's span with the summarizer's call site. A classifier limited to some call sites runs on a span with no tag of its own when any span in its trace is at one of those call sites.
+
+Tessary reads the call site only after the root span arrives. Until then, the trace keeps the call site it had, so a rollup that runs before the root arrives cannot pick a call site from only some of the spans.
 
 ## Why untagged spans are not usable
 

@@ -252,11 +252,15 @@ public class TraceV2Repository {
      * {@code input_tokens = 0} and {@code output_tokens = 0}, and zero is not null, so counting those
      * would trip the marker on traces that represent no spend and withhold them from cost-drift scoring.
      *
-     * <p>The previews and the call site are copied down from the root span, not stored by ingest: that
+     * <p>The previews and the call site are copied down from the spans, not stored by ingest: that
      * is what keeps the traces list a single-table read (spec rule 1) rather than a join to find each
-     * row's entry point. They are a replacement like everything else here, gated on {@code has_root_span}
-     * so a trace whose root has not landed yet keeps whatever it had rather than being blanked by a
-     * rollup that fired between a child and its parent.
+     * row's entry point. The previews are the root's. The call site is the root's when the root carries
+     * one, else the earliest-starting tagged span's: instrumentation tags the span around the model call,
+     * not the handler that encloses it, so an untagged root is the normal case, not a gap. When a turn
+     * reaches several call sites, the first one it reached is the turn's, and each span keeps its own.
+     * They are a replacement like everything else here, gated on {@code has_root_span} so a trace whose
+     * root has not landed yet keeps whatever it had rather than being blanked, or attributed from a
+     * partial set of children, by a rollup that fired between a child and its parent.
      *
      * @return the outcome, or empty if the trace was deleted under the worker.
      */
@@ -290,6 +294,15 @@ public class TraceV2Repository {
                                AND NOT is_deleted
                              ORDER BY started_at, id
                              LIMIT 1
+                        ), tagged AS (
+                            SELECT call_site_id
+                              FROM span
+                             WHERE project_id   = :pid
+                               AND trace_id     = :tid
+                               AND call_site_id IS NOT NULL
+                               AND NOT is_deleted
+                             ORDER BY started_at, id
+                             LIMIT 1
                         )
                         UPDATE trace t
                            SET span_count         = agg.span_count,
@@ -308,12 +321,13 @@ public class TraceV2Repository {
                                                          ELSE t.input_preview END,
                                output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                                          ELSE t.output_preview END,
-                               call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
+                               call_site_id       = CASE WHEN t.has_root_span
+                                                         THEN COALESCE(root.call_site_id, tagged.call_site_id)
                                                          ELSE t.call_site_id END,
                                rolled_up_at       = now(),
                                rolled_up_through  = agg.through,
                                is_settled         = (t.rollup_due_at IS NULL)
-                          FROM agg LEFT JOIN root ON true
+                          FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
                          WHERE t.project_id = :pid AND t.id = :tid
                         RETURNING t.is_settled, t.span_count
                         """)
