@@ -728,7 +728,10 @@ public class ClassifierChartRepository {
         return out;
     }
 
-    /** Open cases per tool key, over Tool Errors and tool-grain Duration Drift. */
+    /**
+     * Open cases per tool key, over Tool Errors and tool-grain Duration Drift. A tool-grain duration bucket also
+     * holds {@code mcp:} and {@code retrieval:} actions, and only {@code tool:} keys are tools.
+     */
     public Map<String, Integer> openCasesByTool(String projectId) {
         Map<String, Integer> out = new HashMap<>();
         jdbc.sql("""
@@ -743,6 +746,7 @@ public class ClassifierChartRepository {
                             JOIN metric_baseline mb ON mb.project_id = f.project_id AND mb.id = f.subject_id
                            WHERE f.project_id = :pid AND c.state = 'open' AND f.subject_kind = 'metric_baseline'
                              AND mb.bucket_kind = 'tool' AND mb.measure = 'tool_duration') x
+                         WHERE k LIKE 'tool:%'
                          GROUP BY k
                         """)
                 .param("pid", projectId)

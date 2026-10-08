@@ -416,6 +416,24 @@ class ClassifierChartRepositoryIntegrationTest {
         assertEquals(Map.of("tool:search", 1), charts.openCasesByTool(pid));
     }
 
+    /**
+     * A tool-grain duration bucket also holds MCP and retrieval actions. Only {@code tool:} keys are tools, so an
+     * open case on {@code mcp:} or {@code retrieval:} never lists a tool with a raw key.
+     */
+    @Test
+    void toolOpenCases_countOnlyToolKeys() {
+        String pid = project("chart-tool-keys", Capability.DURATION_DRIFT);
+        ClassifierRow drift = fixture.builtIn(pid, BuiltInDetector.Kind.DURATION_DRIFT);
+        long seq = 1;
+        for (String key : List.of("tool:search", "mcp:fetch_page", "retrieval:kb")) {
+            String bucket = baseline(pid, drift, "tool_duration", "tool", key);
+            String open = caseRow(pid, seq++, "metric_drift", "metric_baseline", bucket, "open", null);
+            finding(pid, "duration_drift", "metric_baseline", bucket, "cs-a", "2026-10-01T00:00:00Z", open);
+        }
+
+        assertEquals(Map.of("tool:search", 1), charts.openCasesByTool(pid));
+    }
+
     // ---- seeds --------------------------------------------------------------------------------------
 
     private String project(String slug, Capability capability) {
