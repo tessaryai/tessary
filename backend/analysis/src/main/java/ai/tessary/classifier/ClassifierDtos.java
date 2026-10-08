@@ -65,7 +65,8 @@ public final class ClassifierDtos {
      * {@link ClassifierService#events}/{@link ClassifierService#eventsForClassifier}.
      * {@code id} is the verdict id (the detection's stable id); {@code classifierId}
      * / {@code classifierVersion} come from the JOINed definition; {@code subjectId} is the finest-grain subject
-     * id named by {@code subjectKind}; {@code traceId} is the owning trace when the subject is a trace or an
+     * id named by {@code subjectKind}; {@code sessionId} is the session the subject belongs to, null for
+     * anonymous traffic (the Classifiers rail's deep-link anchor); {@code traceId} is the owning trace when the subject is a trace or an
      * observation (the Explore deep-link anchor), null for context-grain detections; {@code detectedAt} is
      * {@code verdict.created_at}. {@code severity} is
      * kept for wire-shape compatibility but is always {@code null}: no per-detection severity is persisted.
@@ -76,6 +77,7 @@ public final class ClassifierDtos {
             @JsonProperty("classifier_version") int classifierVersion,
             @JsonProperty("subject_kind") String subjectKind,
             @JsonProperty("subject_id") String subjectId,
+            @JsonProperty("session_id") @Nullable String sessionId,
             @JsonProperty("trace_id") @Nullable String traceId,
             @JsonProperty("project_version_id") @Nullable String projectVersionId,
             @Nullable String severity,
