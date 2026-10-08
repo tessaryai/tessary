@@ -18,7 +18,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, AlertTriangle } from "lucide-react";
 import type {
   BehaviorFinding,
   Classifier,
@@ -169,9 +169,11 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
         subtitle={classifier.description ?? "No description."}
         actions={
           <>
+            {/* Grey words beside a warning icon; the error itself is spelled out in Status. */}
             {health?.status === "failed" && (
-              <span className="text-warning text-label" title={health.last_error ?? undefined}>
-                sweep failing
+              <span className="flex items-center gap-1.5 text-small text-fg-secondary whitespace-nowrap">
+                <AlertTriangle size={13} strokeWidth={1.75} className="text-warning shrink-0" aria-hidden="true" />
+                Sweep failing
               </span>
             )}
             <StatusWords
@@ -205,7 +207,7 @@ function Configure({ classifier, basePath }: { classifier: Classifier; basePath:
         {!UNSCOPED_DETECTORS.has(classifier.detector) && (
           <Section title="Call sites">
             {classifier.detector === FRUSTRATION_DETECTOR && (
-              <p className="text-subtle m-0 mb-2.5 text-small">
+              <p className="text-muted m-0 mb-2.5 text-small">
                 To spend less, limit it to the call sites that reply to the user. Routers and memory passes are not
                 conversations.
               </p>
@@ -326,7 +328,7 @@ function StatusWords({
     return (
       <Link
         to={providersPath}
-        className="flex items-center gap-1.5 text-muted hover:text-fg transition-colors text-small"
+        className="flex items-center gap-1.5 text-accent hover:text-accent-hover transition-colors text-small"
         title={paused.explained}
       >
         <AlertCircle size={13} strokeWidth={1.75} className="text-error" aria-hidden="true" />
@@ -396,6 +398,7 @@ function callSitesFact(classifier: Classifier): string {
   if (UNSCOPED_DETECTORS.has(classifier.detector)) return "Every tool";
   const count = classifier.call_site_ids?.length;
   if (count === undefined) return "Every call site";
+  if (count === 0) return "No call sites";
   return `${count} call site${count === 1 ? "" : "s"}`;
 }
 
@@ -424,10 +427,11 @@ function StatusBlock({
           callout rather than as one more line inside them. */}
       {health?.status === "failed" && (
         <div
-          className="text-warning border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small"
+          className="flex items-start gap-2 border border-border-strong rounded-card py-2.25 px-2.75 mb-3 text-small"
           style={{ backgroundColor: "var(--color-warning-subtle)" }}
         >
-          Sweep failing: {health.last_error ?? "unknown error"}
+          <AlertTriangle size={14} strokeWidth={1.75} className="text-warning mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="text-fg-secondary">Sweep failing: {health.last_error ?? "unknown error"}</span>
         </div>
       )}
       {classifier.readiness === WAITING_ON_SCHEMAS && <p className="text-muted m-0 mb-3 text-small">{SCHEMAS_EXPLAINED}</p>}
@@ -500,7 +504,7 @@ function ProviderPauseCallout({
         <Button size="sm" variant="secondary" loading={retryM.isPending} onClick={() => retryM.mutate()}>
           Retry
         </Button>
-        <Link to={providersPath} className="text-muted hover:text-fg transition-colors text-small">
+        <Link to={providersPath} className="text-accent hover:text-accent-hover transition-colors text-small">
           Settings, Providers
         </Link>
       </div>
@@ -567,7 +571,7 @@ function Findings({ classifier }: { classifier: Classifier }) {
       {findingsQ.isLoading && <LoadingRow />}
       {findingsQ.isError && <ErrorNote error={findingsQ.error} />}
       {findingsQ.isSuccess && findings.length === 0 && (
-        <p className="text-subtle m-0 text-small">
+        <p className="text-muted m-0 text-small">
           Nothing has drifted. This classifier opens a finding when a whole population moves, not when one trace looks
           odd.
         </p>
@@ -619,9 +623,9 @@ function FindingRow({
   return (
     <div>
       <div className="text-fg text-small">{finding.title}</div>
-      <div className="text-subtle mt-0.75 text-label">{chainWords(finding)}</div>
+      <div className="text-muted mt-0.75 text-label">{chainWords(finding)}</div>
       {summary && <p className={cn("text-muted mt-1.25 mx-0 mb-0 text-small", !expanded && "line-clamp-2")}>{summary}</p>}
-      {expanded && <div className="font-mono text-subtle mt-1.5 text-label">{finding.causeKey}</div>}
+      {expanded && <div className="font-mono text-muted mt-1.5 text-label">{finding.causeKey}</div>}
       <div className="flex flex-wrap items-center gap-2 mt-1.75">
         <VerbButton
           kind="filled"
@@ -670,7 +674,7 @@ function Detections({ classifier }: { classifier: Classifier }) {
       {detectionsQ.isLoading && <LoadingRow />}
       {detectionsQ.isError && <ErrorNote error={detectionsQ.error} />}
       {detectionsQ.isSuccess && detections.length === 0 && (
-        <p className="text-subtle m-0 text-small">
+        <p className="text-muted m-0 text-small">
           {classifier.enabled
             ? "This classifier hasn't fired on anything yet. Quiet is healthy."
             : "Disabled, so it isn't sweeping. Past detections stay on the traces they were written to."}
@@ -734,14 +738,14 @@ export function DetectionRow({ event }: { event: ClassifierEvent }) {
   const body = (
     <>
       <div className="flex items-baseline gap-2.5">
-        <span className={cn("shrink-0 font-mono text-label uppercase", severe ? "text-warning" : "text-subtle")}>
+        <span className={cn("shrink-0 font-mono text-label uppercase", severe ? "text-warning" : "text-muted")}>
           {event.severity ?? "–"}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-fg text-small">
           {event.trace_id ?? `${event.subject_kind} ${event.subject_id}`}
         </span>
-        {event.confidence === "low" && <span className="shrink-0 text-subtle text-label">low confidence</span>}
-        <span className="shrink-0 text-subtle text-label">{ago(event.occurred_at ?? event.detected_at)}</span>
+        {event.confidence === "low" && <span className="shrink-0 text-muted text-label">low confidence</span>}
+        <span className="shrink-0 text-muted text-label">{ago(event.occurred_at ?? event.detected_at)}</span>
       </div>
       {summary && <div className="text-muted mt-1 text-small">{summary}</div>}
     </>

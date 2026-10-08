@@ -181,7 +181,7 @@ describe("ChartCard", () => {
   it("reads a day's numbers from the keyboard: today first, then one day back per arrow", () => {
     renderCard(card({}));
 
-    const chart = screen.getByRole("img", { name: /Frustration/ });
+    const chart = screen.getByRole("group", { name: /Frustration/ });
     fireEvent.focus(chart);
     expect(screen.getByRole("tooltip").textContent).toContain("Oct 8");
     expect(screen.getByRole("tooltip").textContent).toContain("8 of 100 conversations");
@@ -189,5 +189,20 @@ describe("ChartCard", () => {
     fireEvent.keyDown(chart, { key: "ArrowLeft" });
     expect(screen.getByRole("tooltip").textContent).toContain("Oct 7");
     expect(screen.getByRole("tooltip").textContent).toContain("4 of 100 conversations");
+  });
+
+  // Bug: the arrows move the crosshair, but a screen reader hears nothing as the day changes.
+  it("tells a screen reader each day the arrows move to", () => {
+    renderCard(card({}));
+
+    const chart = screen.getByRole("group", { name: /Frustration/ });
+    expect(chart.getAttribute("aria-roledescription")).toBe("chart");
+    fireEvent.focus(chart);
+    fireEvent.keyDown(chart, { key: "ArrowLeft" });
+
+    const live = within(screen.getByRole("region", { name: "Frustration" })).getByRole("status");
+    expect(live.textContent).toContain("Oct 7");
+    expect(live.textContent).toContain("4 of 100 conversations");
+    expect(screen.getByRole("group", { name: /Frustration/, description: /Oct 7/ })).toBe(chart);
   });
 });

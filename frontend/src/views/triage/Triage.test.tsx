@@ -318,6 +318,17 @@ describe("the findings", () => {
     expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/findings/f%2F1");
   });
 
+  // Bug: the row opens on a mouse click only, so a keyboard or screen reader cannot open any finding from Triage.
+  it("links each finding's title to its own page, so a keyboard can open it", async () => {
+    api.listBehaviorFindings.mockResolvedValue({ findings: [finding("f/1")] });
+    renderPage();
+
+    const link = await within(section("Findings")).findByRole("link", { name: "Finding f/1" });
+    expect(link.getAttribute("href")).toBe("/orgs/acme/projects/default/classifiers/findings/f%2F1");
+    fireEvent.click(link);
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/findings/f%2F1");
+  });
+
   it("says when no finding is open", async () => {
     api.listBehaviorFindings.mockResolvedValue({
       findings: [finding("b", { triageStatus: "done", triageVerdict: "negative", triageAction: "closed" })],

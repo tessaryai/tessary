@@ -188,6 +188,13 @@ describe("the configure page", () => {
     expect(await within(await waitFor(() => section("Status"))).findByText("2 call sites")).toBeTruthy();
   });
 
+  // Bug: Status said "0 call sites" where the Configure menu says "On, no call sites" for the same classifier.
+  it("says no call sites in Status when the list is empty, as the Configure menu does", async () => {
+    listClassifiers.mockResolvedValue([classifier({ call_site_ids: [] })]);
+    renderPage();
+    expect(await within(await waitFor(() => section("Status"))).findByText("No call sites")).toBeTruthy();
+  });
+
   it("gives a drift classifier the call-site list and the tuning form", async () => {
     listClassifiers.mockResolvedValue([
       classifier({ id: "clf-c", name: "Cost drift", detector: "cost_drift", call_site_ids: ["a", "b"] }),
@@ -315,7 +322,7 @@ describe("the status beside the switch", () => {
     });
     renderPage("clf-a");
 
-    await screen.findByText("sweep failing");
+    await screen.findByText("Sweep failing");
     screen.getByText("3 detections 7d");
     within(section("Status")).getByText("Sweep failing: judge timed out");
   });
@@ -327,7 +334,7 @@ describe("the status beside the switch", () => {
     renderPage("clf-a");
 
     await screen.findByText("1 detection 7d");
-    expect(screen.queryByText("sweep failing")).toBeNull();
+    expect(screen.queryByText("Sweep failing")).toBeNull();
   });
 
   // Bug: a classifier with nothing to judge yet reads "quiet 7d", which says it looked and found nothing.

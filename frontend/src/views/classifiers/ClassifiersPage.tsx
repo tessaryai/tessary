@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl } from "../../ui";
+import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl, Spinner } from "../../ui";
 import { CONTAINER } from "./shared";
 import { FrustrationBanner } from "./FrustrationBanner";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
@@ -119,7 +119,7 @@ export function ClassifiersPage() {
             {callSites.length === 0 ? (
               <p className="text-body text-muted">No call sites yet.</p>
             ) : (
-              <Charts query={siteQ} basePath={basePath} empty="Nothing to chart for this call site in this range." />
+              <Charts query={siteQ} days={days} basePath={basePath} empty="Nothing to chart for this call site in this range." />
             )}
           </Section>
 
@@ -146,7 +146,7 @@ export function ClassifiersPage() {
               {tools.length === 0 ? (
                 <p className="text-body text-muted">No tool was called in this range.</p>
               ) : (
-                <Charts query={toolQ} basePath={basePath} empty="Nothing to chart for this tool in this range." />
+                <Charts query={toolQ} days={days} basePath={basePath} empty="Nothing to chart for this tool in this range." />
               )}
             </Section>
           </div>
@@ -157,8 +157,9 @@ export function ClassifiersPage() {
 }
 
 /**
- * The cards for one scope. A new range keeps the scope's old cards on screen while it reads; a new scope does not,
- * because one call site's charts under another's name would mislead.
+ * The cards for one scope. A new range keeps the scope's old cards on screen while it reads, with a line above them
+ * saying the new range is loading; a new scope does not, because one call site's charts under another's name would
+ * mislead.
  */
 function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRange) {
   const { api } = useTenant();
@@ -173,10 +174,12 @@ function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRa
 
 function Charts({
   query,
+  days,
   basePath,
   empty,
 }: {
   query: ReturnType<typeof useCharts>;
+  days: ChartRange;
   basePath: string;
   empty: string;
 }) {
@@ -184,11 +187,26 @@ function Charts({
   if (query.isError) return <ErrorNote error={query.error} />;
   const data: ClassifierCharts | undefined = query.data;
   if (!data) return null;
-  if (data.cards.length === 0 && data.chips.length === 0) return <p className="text-body text-muted">{empty}</p>;
+  const stale = query.isPlaceholderData;
+  const reading = stale && (
+    <div role="status" className="flex items-center gap-2 mb-3 text-small text-muted">
+      <Spinner size="sm" />
+      <span>{`Loading the last ${days} days…`}</span>
+    </div>
+  );
+  if (data.cards.length === 0 && data.chips.length === 0) {
+    return (
+      <>
+        {reading}
+        <p className="text-body text-muted">{empty}</p>
+      </>
+    );
+  }
   return (
     <>
+      {reading}
       {data.cards.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div aria-busy={stale} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {data.cards.map((c) => (
             <ChartCard key={c.classifier_id + (c.measure ?? "")} card={c} basePath={basePath} />
           ))}

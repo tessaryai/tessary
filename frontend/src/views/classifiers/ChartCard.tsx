@@ -3,11 +3,14 @@
  * One classifier's chart for one call site or one tool: the last 7 days against the baseline, the daily series over
  * the range, and the cases it opened.
  *
- * Every card has the same height whatever it holds, so a grid of them lines up: the rows are fixed, the chart keeps
- * its aspect ratio, and the cases strip always keeps room for three lanes. Everything is grey except the delta,
- * which is red when the measure got worse and green when it got better (rateStory.tsx).
+ * Every card has the same height whatever it holds, so a grid of them lines up: the rows are fixed, the chart is a
+ * fixed height, and the cases strip always keeps room for three lanes. Everything is grey except the delta, which is
+ * red when the measure got worse and green when it got better (rateStory.tsx).
+ *
+ * The chart's coordinates are CSS pixels: the SVG takes its width from the card, measured, so its tick text is the
+ * small type size at every card width instead of scaling with it.
  */
-import { useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ChartCard as Card, ChartDay } from "../../api/types";
 import { Badge, cn } from "../../ui";
@@ -26,16 +29,16 @@ import {
   yAxis,
 } from "./chartRules";
 
-const W = 520;
+/** The chart's width before the card is measured, and where it cannot be (a test's DOM has no layout). */
+const FALLBACK_W = 520;
 const ML = 48;
 const MR = 8;
 const MT = 10;
 const PB = 130;
 const H = 150;
-const PW = W - ML - MR;
 const STRIP_H = 40;
-/** About half the width of a day label ("Sep 24") in chart units; a tick label that would overflow the edge is anchored to it. */
-const TICK_HALF = 18;
+/** About half the width of a day label ("Sep 24") in pixels; a tick label that would overflow the edge is anchored to it. */
+const TICK_HALF = 22;
 const LANE_Y = (k: number) => 4 + k * 12;
 const DAY_MS = 86_400_000;
 
@@ -73,9 +76,32 @@ function runs<T>(items: (T | null)[]): T[][] {
 
 const rateOf = (d: ChartDay): number | null => (d.checked ? (d.flagged ?? 0) / d.checked : null);
 
+/** The width of the element `ref` lands on, in CSS pixels, kept current as it resizes. */
+function useWidth() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(FALLBACK_W);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => {
+      if (el.clientWidth > 0) setWidth(el.clientWidth);
+    };
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
+
 export function ChartCard({ card, basePath }: { card: Card; basePath: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const [laneHover, setLaneHover] = useState<number | null>(null);
+  // Only a keyboard reader hears the days: a mouse moving over the chart would otherwise talk over everything.
+  const [keyboard, setKeyboard] = useState(false);
+  const [boxRef, W] = useWidth();
+  const PW = W - ML - MR;
+  const liveId = useId();
 
   const head = headlineOf(card);
   const unit = axisUnitOf(card);
@@ -155,7 +181,7 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
         <span className="flex-1" />
         {card.learning && (
           <span className="flex items-center gap-2 shrink-0 text-small text-muted tabular-nums">
-            <span aria-hidden="true" className="block w-20 h-1 rounded-micro bg-raised overflow-hidden">
+            <span aria-hidden="true" className="block w-20 h-1 rounded-micro bg-border overflow-hidden">
               <span
                 className="block h-full bg-fg-secondary"
                 style={{ width: `${Math.min(100, (card.learning.learned / Math.max(1, card.learning.needed)) * 100)}%` }}
@@ -187,15 +213,23 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
           <span>Per day, UTC</span>
         </div>
 
-        <div className="relative">
+        <div ref={boxRef} className="relative">
           <svg
             viewBox={`0 0 ${W} ${H}`}
             className="block w-full h-auto overflow-visible"
-            role="img"
-            aria-label={`${card.name}, last ${n} days`}
+            role="group"
+            aria-roledescription="chart"
+            aria-label={`${card.name}, ${n === 1 ? "last day" : `last ${n} days`}. The arrow keys move through the days.`}
+            aria-describedby={liveId}
             tabIndex={0}
-            onFocus={() => setHover((h) => h ?? n - 1)}
-            onBlur={() => setHover(null)}
+            onFocus={() => {
+              setKeyboard(true);
+              setHover((h) => h ?? n - 1);
+            }}
+            onBlur={() => {
+              setKeyboard(false);
+              setHover(null);
+            }}
             onKeyDown={onKeyDown}
           >
             {axis.ticks.map((t) => (
@@ -213,9 +247,8 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
                   y={y(t.value)}
                   textAnchor="end"
                   dominantBaseline="middle"
-                  fontSize={11}
-                  fill="var(--color-subtle)"
-                  className="font-mono"
+                  fill="var(--color-muted)"
+                  className="font-mono text-small"
                 >
                   {t.label}
                 </text>
@@ -227,7 +260,7 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
               return (
                 <g key={t.index}>
                   <line x1={px} x2={px} y1={PB} y2={PB + 4} stroke="var(--color-chart-grid)" strokeWidth={1} />
-                  <text x={px} y={H - 4} textAnchor={anchor} fontSize={11} fill="var(--color-subtle)" className="font-mono">
+                  <text x={px} y={H - 4} textAnchor={anchor} fill="var(--color-muted)" className="font-mono text-small">
                     {t.label}
                   </text>
                 </g>
@@ -327,9 +360,15 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
               />
             )}
 
-            {baseBand && <LineLabel y={y(baseBand.p95) - 4}>Baseline</LineLabel>}
-            {baseRate != null && <LineLabel y={y(toAxis(unit, baseRate)) - 4}>{`Baseline ${percent(baseRate)}`}</LineLabel>}
-            {arming != null && <LineLabel y={y(arming) - 4}>{`${arming} in a day opens a finding`}</LineLabel>}
+            {baseBand && (
+              <LineLabel x={W - MR} y={y(baseBand.p95) - 4}>
+                Baseline
+              </LineLabel>
+            )}
+            {baseRate != null && (
+              <LineLabel x={W - MR} y={y(toAxis(unit, baseRate)) - 4}>{`Baseline ${percent(baseRate)}`}</LineLabel>
+            )}
+            {arming != null && <LineLabel x={W - MR} y={y(arming) - 4}>{`${arming} in a day opens a finding`}</LineLabel>}
 
             {hover != null && (
               <line x1={x(hover)} x2={x(hover)} y1={MT} y2={PB} stroke="var(--color-fg)" strokeWidth={1} strokeOpacity={0.35} />
@@ -359,15 +398,22 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
           {hover != null && (
             <Tooltip left={(x(hover) / W) * 100} top="4px" transform={tipSide(x(hover), false)} lines={dayTooltip(card, hover)} />
           )}
+          <div id={liveId} role="status" className="sr-only">
+            {keyboard && hover != null ? dayTooltip(card, hover).join(", ") : ""}
+          </div>
         </div>
 
         <div className="mt-1 pt-1.5 border-t border-border">
           <div className="flex items-center gap-3 h-5 text-small">
             <span className="text-muted">Cases</span>
-            {lanes.length === 0 && <span className="text-subtle">None in this range</span>}
+            {lanes.length === 0 && <span className="text-muted">None in this range</span>}
             <span className="flex-1" />
             {more > 0 && (
-              <Link to={`${basePath}/triage`} className="text-muted hover:text-fg transition-colors">
+              <Link
+                to={`${basePath}/triage`}
+                className="text-accent hover:text-accent-hover transition-colors"
+                style={{ transitionDuration: "var(--duration-micro)" }}
+              >
                 {`+${more} more in Triage`}
               </Link>
             )}
@@ -426,18 +472,17 @@ export function ChartCard({ card, basePath }: { card: Card; basePath: string }) 
 }
 
 /** The label of a dashed reference line, ringed in the card's colour so it stays legible over the series. */
-function LineLabel({ y, children }: { y: number; children: string }) {
+function LineLabel({ x, y, children }: { x: number; y: number; children: string }) {
   return (
     <text
-      x={W - MR}
+      x={x}
       y={y}
       textAnchor="end"
-      fontSize={11}
       fill="var(--color-muted)"
       stroke="var(--color-surface)"
       strokeWidth={3}
       paintOrder="stroke"
-      className="font-mono"
+      className="font-mono text-small"
     >
       {children}
     </text>

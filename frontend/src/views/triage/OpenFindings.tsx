@@ -13,7 +13,7 @@
  */
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AlertCircle, ChevronRight } from "lucide-react";
 import type { BehaviorFinding } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
@@ -38,14 +38,14 @@ export function OpenFindings({ basePath }: { basePath: string }) {
     queryFn: () => api.listBehaviorFindings(),
   });
   const open = useMemo(() => (findingsQ.data?.findings ?? []).filter(awaitsCase), [findingsQ.data]);
-  const openFinding = (id: string) => navigate(`${basePath}/classifiers/findings/${encodeURIComponent(id)}`);
+  const findingPath = (id: string) => `${basePath}/classifiers/findings/${encodeURIComponent(id)}`;
 
   return (
     <Section title="Findings" count={findingsQ.data && open.length > 0 ? open.length : undefined}>
       {findingsQ.isLoading && <TableSkeleton rows={3} cols={5} />}
       {findingsQ.isError && <ErrorNote error={findingsQ.error} />}
       {findingsQ.data && open.length === 0 && (
-        <div className="bg-surface border border-border rounded-card text-subtle py-3.5 px-4 text-small">
+        <div className="bg-surface border border-border rounded-card text-muted py-3.5 px-4 text-small">
           No open findings.
         </div>
       )}
@@ -63,9 +63,18 @@ export function OpenFindings({ basePath }: { basePath: string }) {
           </THead>
           <TBody>
             {open.map((f) => (
-              <TR key={f.id} interactive onClick={() => openFinding(f.id)}>
-                <TD className="text-fg truncate" style={{ maxWidth: 0 }} title={f.title}>
-                  {f.title}
+              // The whole row opens the finding for a mouse; the title is the link a keyboard and a screen reader
+              // reach, and it stops its click so one press is one navigation.
+              <TR key={f.id} interactive onClick={() => navigate(findingPath(f.id))}>
+                <TD className="truncate" style={{ maxWidth: 0 }} title={f.title}>
+                  <Link
+                    to={findingPath(f.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-accent hover:text-accent-hover transition-colors"
+                    style={{ transitionDuration: "var(--duration-micro)" }}
+                  >
+                    {f.title}
+                  </Link>
                 </TD>
                 <TD className="text-muted truncate">{f.detector ? detectorLabel(f.detector) : "–"}</TD>
                 <TD className="font-mono text-muted truncate" style={{ maxWidth: 0 }}>

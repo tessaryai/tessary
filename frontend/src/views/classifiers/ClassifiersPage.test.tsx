@@ -112,7 +112,7 @@ describe("ClassifiersPage", () => {
     await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
     expect(api.getClassifierChartScopes).toHaveBeenCalledWith(28);
     expect(api.getClassifierCharts).toHaveBeenCalledWith({ callSiteId: "kb_answer.generate" }, 28);
-    expect(within(await callSiteSection()).getByRole("button", { name: "Call site" }).textContent).toContain("kb_answer.generate");
+    expect(within(await callSiteSection()).getByRole("button", { name: "Call site: kb_answer.generate" })).toBeTruthy();
   });
 
   // Bug: the Tool section charts a tool the selected call site never calls, though one it calls is busy.
@@ -137,11 +137,11 @@ describe("ClassifiersPage", () => {
     renderPage();
     await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
 
-    fireEvent.click(within(await callSiteSection()).getByRole("button", { name: "Call site" }));
+    fireEvent.click(within(await callSiteSection()).getByRole("button", { name: "Call site: kb_answer.generate" }));
     const list = screen.getByRole("listbox", { name: "Call sites" });
     expect(within(list).getByRole("option", { name: /kb_answer\.generate.*2 open cases/ })).toBeTruthy();
     expect(within(list).getByRole("option", { name: /triage_router\.classify.*New, learning/ })).toBeTruthy();
-    fireEvent.change(within(list).getByRole("textbox", { name: "Search call sites" }), { target: { value: "triage" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search call sites" }), { target: { value: "triage" } });
     expect(within(list).queryByRole("option", { name: /support_agent/ })).toBeNull();
     fireEvent.click(within(list).getByRole("option", { name: /triage_router\.classify/ }));
 
@@ -155,7 +155,7 @@ describe("ClassifiersPage", () => {
     renderPage();
     await within(await toolSection()).findByRole("region", { name: "Tool Errors" });
 
-    fireEvent.click(within(await toolSection()).getByRole("button", { name: "Tool" }));
+    fireEvent.click(within(await toolSection()).getByRole("button", { name: "Tool: search_orders" }));
     const list = screen.getByRole("listbox", { name: "Tools" });
     const groups = within(list).getAllByRole("group");
     expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual(["Called by this call site", "Other tools"]);
@@ -163,6 +163,58 @@ describe("ClassifiersPage", () => {
 
     fireEvent.click(within(groups[0]).getByRole("option", { name: /lookup_customer/ }));
     await waitFor(() => expect(api.getClassifierCharts).toHaveBeenCalledWith({ tool: "tool:lookup_customer" }, 28));
+  });
+
+  // Bug: the pickers work by mouse only: no arrow keys, and focus is lost after a pick or Escape.
+  it("moves through a picker with the arrow keys and gives focus back after a pick or Escape", async () => {
+    renderPage();
+    await within(await toolSection()).findByRole("region", { name: "Tool Errors" });
+    const trigger = within(await toolSection()).getByRole("button", { name: "Tool: search_orders" });
+
+    fireEvent.click(trigger);
+    const list = screen.getByRole("listbox", { name: "Tools" });
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /search_orders/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /lookup_customer/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /classify_ticket/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole("listbox", { name: "Tools" })).getByRole("option", { name: /lookup_customer/ }));
+    expect(await within(await toolSection()).findByRole("button", { name: "Tool: lookup_customer" })).toBe(trigger);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  // Bug: the search box of a picker is a dead end for the keyboard: the arrows never reach the options under it.
+  it("moves from a picker's search box into its options with the down arrow", async () => {
+    renderPage();
+    await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
+
+    fireEvent.click(within(await callSiteSection()).getByRole("button", { name: "Call site: kb_answer.generate" }));
+    const search = screen.getByRole("textbox", { name: "Search call sites" });
+    expect(document.activeElement).toBe(search);
+    fireEvent.change(search, { target: { value: "triage" } });
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(
+      within(screen.getByRole("listbox", { name: "Call sites" })).getByRole("option", { name: /triage_router\.classify/ }),
+    );
+  });
+
+  // Bug: after a new range is picked, the old range's cards stay up with nothing to say they are out of date.
+  it("says a new range is loading while the old range's cards stay up", async () => {
+    renderPage();
+    const site = await callSiteSection();
+    await within(site).findByRole("region", { name: "Frustration" });
+    expect(within(site).queryByText(/Loading the last/)).toBeNull();
+
+    api.getClassifierCharts.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "90d" }));
+
+    expect(await within(site).findByText("Loading the last 90 days…")).toBeTruthy();
+    expect(within(site).getByRole("region", { name: "Frustration" })).toBeTruthy();
   });
 
   // Bug: the range control redraws nothing, or moves only one of the two sections.
@@ -189,6 +241,35 @@ describe("ClassifiersPage", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: /Frustration.*On, 2 call sites/ }));
 
     expect(currentLocation()).toBe("/orgs/acme/projects/default/classifiers/id-frustration");
+  });
+
+  // Bug: the Configure menu says it is a menu but takes no arrow keys, stays open when focus leaves it, and drops
+  // focus on Escape.
+  it("moves through the Configure menu with the arrow keys, and gives focus back on Escape", async () => {
+    renderPage();
+    await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
+    const trigger = screen.getByRole("button", { name: "Configure classifiers" });
+
+    fireEvent.click(trigger);
+    const items = within(screen.getByRole("menu", { name: "Configure a classifier" })).getAllByRole("menuitem");
+    expect(items).toHaveLength(3);
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1], { key: "End" });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(items[2], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(items[2], { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    const first = within(screen.getByRole("menu", { name: "Configure a classifier" })).getAllByRole("menuitem")[0];
+    fireEvent.blur(first, { relatedTarget: screen.getByRole("button", { name: "7d" }) });
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   // Bug: while the classifiers load, the menu says there are none, and it is the only way to a configure page.
