@@ -5,7 +5,9 @@ import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -26,6 +28,8 @@ public final class ClassifierDtos {
             int version,
             boolean enabled,
             String mode,
+            /** The call sites the classifier runs on, or null when it runs on every call site. */
+            @JsonProperty("call_site_ids") @Nullable List<String> callSiteIds,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt,
             /**
@@ -53,6 +57,7 @@ public final class ClassifierDtos {
                     r.version(),
                     r.enabled(),
                     r.mode(),
+                    r.callSiteIds(),
                     r.createdAt(),
                     r.updatedAt(),
                     readiness);
@@ -105,6 +110,11 @@ public final class ClassifierDtos {
 
     /** Set the operating point of a classifier: {@code discovery} (high recall) | {@code tracking} (precise). */
     public record SetModeRequest(@NotNull String mode) {}
+
+    /** Limit a classifier to some call sites, or {@code null} to run it on every call site again. Never empty. */
+    public record SetCallSitesRequest(
+            @JsonProperty("call_site_ids") @Nullable @Size(min = 1)
+            List<@NotBlank String> callSiteIds) {}
 
     /**
      * Sweep-job health for one classifier: makes a failing sweep observable in the product instead

@@ -453,6 +453,14 @@ export function projectApi(orgSlug: string, projectSlug: string) {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       }),
+    /** Limit a classifier to some call sites, or `null` to run it on every call site again. */
+    setClassifierCallSites: (id: string, callSiteIds: string[] | null) =>
+      http<Classifier>(`${base}/classifiers/${enc(id)}/call-sites`, {
+        method: "PUT",
+        body: JSON.stringify({ call_site_ids: callSiteIds }),
+      }),
+    /** The call sites a classifier can be limited to: declared in the bundle, or seen on traces. */
+    listClassifierCallSites: () => http<string[]>(`${base}/classifiers/call-sites`),
     listClassifierHealth: () => http<ClassifierHealth[]>(`${base}/classifiers/health`),
     /**
      * The detections one classifier produced, newest-first: the traces that tripped it. This is

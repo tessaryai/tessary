@@ -20,6 +20,11 @@ public enum ClassifierError implements ErrorCode {
     NOT_FRUSTRATION(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
+    UNKNOWN_CALL_SITE(HttpStatus.UNPROCESSABLE_ENTITY, "This project has no call site '%s'"),
+    // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket
+    // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
+    CALL_SITE_SCOPE_UNSUPPORTED(
+            HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
     NOT_GROUNDEDNESS(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no groundedness status — only the groundedness classifier does"),

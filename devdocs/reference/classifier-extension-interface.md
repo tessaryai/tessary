@@ -127,6 +127,12 @@ public record SweepOutcome(int scanned, int fired) {}
 `kinds()` is a set rather than a single value because one sweep legitimately serves a family:
 `MetricDriftSweep` runs both `duration_drift` and `cost_drift` from one bean over one baseline store.
 
+**A sweep applies the classifier's call-site list itself.** `ClassifierRow.callSiteIds()` is the
+list, null for every call site, and `ClassifierRow.runsOn` is the test. The worker filters what an
+observation- or turn-grain detector is sent, but it cannot see inside a sweep, so a sweep that ignores
+the list runs on every call site and nothing fails. `MetricDriftSweep` filters its samples; `tool_error`
+does not read the list yet, so `ClassifierService#setCallSiteIds` refuses one for it.
+
 `SweepContext` carries the two records every sweep already took as its two arguments and nothing
 else — no repositories, no catalog, no worker, no clock. An implementation injects the collaborators
 it needs like any other Spring bean. Widening this later costs one field; narrowing it after

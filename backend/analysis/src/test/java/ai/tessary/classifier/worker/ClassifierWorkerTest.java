@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -324,6 +325,99 @@ class ClassifierWorkerTest {
         verify(jobs).markSwept("job-1", createdAt(tail), handle(tail));
         verify(catchUp).caughtUp(any(), any(), eq(createdAt(tail)));
         verify(jobs, never()).markFailed(anyString(), any(), anyInt());
+    }
+
+    /**
+     * A classifier scoped to some call sites scores only their spans, and its cursor still moves past the rest. Filtering
+     * the window rather than what is scored would leave the cursor on an out-of-scope span and re-read it every tick.
+     */
+    @Test
+    void aScopedClassifierScoresOnlyItsCallSitesAndStillMovesPastTheRest() {
+        ClassifierWorker worker = worker(3);
+        armSignal(ClassifierRowBuilder.of(BuiltInDetector.Kind.REGEX)
+                .discovery()
+                .onCallSites("cs-a")
+                .build());
+        SubstrateObservation inScope = span(0, "cs-a");
+        SubstrateObservation otherCallSite = span(1, "cs-b");
+        SubstrateObservation untagged = span(2, null);
+        List<SubstrateObservation> window = List.of(inScope, otherCallSite, untagged);
+        when(substrate.observationsAfter(PROJECT, null, null, 3)).thenReturn(window);
+        when(substrate.callSitesByTrace(PROJECT, Set.of("trace-2"))).thenReturn(Map.of());
+
+        worker.sweepForTest(job());
+
+        verify(detector).sweepBatch(any(), eq(List.of(inScope)), any());
+        verify(jobs).markSwept("job-1", createdAt(window), handle(window));
+    }
+
+    /**
+     * A page with nothing in scope sends nothing to the detector and still moves the cursor. An encoder-backed
+     * detector handed an empty batch would open a model call for nothing.
+     */
+    @Test
+    void aPageWithNothingInScopeSendsNothingAndStillMovesTheCursor() {
+        ClassifierProperties props = new ClassifierProperties();
+        props.setEncoderBatchSize(2);
+        ClassifierWorker worker = worker(props, new ClassifierSweepRegistry(TestObjectProvider.of()));
+        String kind = BuiltInDetector.Kind.GROUNDEDNESS;
+        when(signals.findById(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(
+                        ClassifierRowBuilder.of(kind).onCallSites("cs-a").build()));
+        when(catalog.grainFor(kind)).thenReturn(Grain.OBSERVATION);
+        when(detections.writesDetections(kind)).thenReturn(true);
+        when(catalog.detectorFor(kind)).thenReturn(detector);
+        List<SubstrateObservation> window = List.of(span(0, "cs-b"), span(1, "cs-c"));
+        when(substrate.observationsAfter(PROJECT, null, null, 2)).thenReturn(window);
+
+        worker.sweepForTest(job());
+
+        verify(detector, never()).sweepBatch(any(), any(), any());
+        verify(jobs).advanceCursor(eq("job-1"), anyString(), eq(createdAt(window)), eq(handle(window)), anyLong());
+    }
+
+    /**
+     * A span with no call site of its own takes its trace's: a tool span under a tagged LLM span is that call site's
+     * traffic. Reading only the span's own column would leave every child span unchecked.
+     */
+    @Test
+    void anUntaggedSpanInATraceTaggedOnAnotherSpanIsInScope() {
+        ClassifierWorker worker = worker(2);
+        armSignal(ClassifierRowBuilder.of(BuiltInDetector.Kind.REGEX)
+                .discovery()
+                .onCallSites("cs-a")
+                .build());
+        SubstrateObservation childOfInScope = span(0, null);
+        SubstrateObservation childOfOther = span(1, null);
+        when(substrate.observationsAfter(PROJECT, null, null, 2)).thenReturn(List.of(childOfInScope, childOfOther));
+        when(substrate.callSitesByTrace(PROJECT, Set.of("trace-0", "trace-1")))
+                .thenReturn(Map.of("trace-0", Set.of("cs-a"), "trace-1", Set.of("cs-b")));
+
+        worker.sweepForTest(job());
+
+        verify(detector).sweepBatch(any(), eq(List.of(childOfInScope)), any());
+    }
+
+    /**
+     * A detector that pays for each turn it is sent is never sent an out-of-scope turn. Scoping after the provider
+     * call would save nothing, and saving those calls is the point of the scope.
+     */
+    @Test
+    void aScopedPagedDetectorIsNeverSentAnOutOfScopeTurn() {
+        when(signals.findById(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(
+                        ClassifierRowBuilder.of(KIND).onCallSites("cs-a").build()));
+        when(catalog.grainFor(KIND)).thenReturn(Grain.OBSERVATION);
+        when(detections.writesDetections(KIND)).thenReturn(true);
+        FakePaged paged = new FakePaged(page(Status.SCORED, 1, 0));
+        when(catalog.detectorFor(KIND)).thenReturn(paged);
+        org.mockito.Mockito.lenient().when(catchUp.kinds()).thenReturn(Set.of(KIND));
+        SubstrateObservation inScope = span(0, "cs-a");
+        when(substrate.observationsAfter(PROJECT, null, null, PAGE)).thenReturn(List.of(inScope, span(1, "cs-b")));
+
+        worker().sweepForTest(job());
+
+        assertEquals(List.of(List.of(inScope)), paged.scoredPages);
     }
 
     /**
@@ -642,7 +736,12 @@ class ClassifierWorkerTest {
 
     /** An enabled observation-grain classifier whose detector fires on nothing. */
     private void armSignal(String kind) {
-        when(signals.findById(PROJECT, CLASSIFIER)).thenReturn(Optional.of(enabled(kind)));
+        armSignal(enabled(kind));
+    }
+
+    private void armSignal(ClassifierRow row) {
+        String kind = row.detector();
+        when(signals.findById(PROJECT, CLASSIFIER)).thenReturn(Optional.of(row));
         when(catalog.grainFor(kind)).thenReturn(Grain.OBSERVATION);
         when(detections.writesDetections(kind)).thenReturn(true);
         when(catalog.detectorFor(kind)).thenReturn(detector);
@@ -703,6 +802,11 @@ class ClassifierWorkerTest {
                     "span-" + i, PROJECT, "trace-" + i, null, null, null, "ok", "2026-09-13T00:00:0" + i + "Z"));
         }
         return out;
+    }
+
+    private static SubstrateObservation span(int i, @Nullable String callSiteId) {
+        return TestObservations.llm(
+                "span-" + i, PROJECT, "trace-" + i, null, callSiteId, null, "ok", "2026-09-13T00:00:0" + i + "Z");
     }
 
     private static List<SubstrateObservation> observations() {

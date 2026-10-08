@@ -271,7 +271,13 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
             for (Measured spec : turnMeasures) {
                 folded = folded.plus(foldMeasure(
-                        job.projectId(), signal, config, spec, turnSamples(heads, turns, spec), confirmed, now));
+                        job.projectId(),
+                        signal,
+                        config,
+                        spec,
+                        inCallSiteScope(signal, turnSamples(heads, turns, spec)),
+                        confirmed,
+                        now));
             }
         }
 
@@ -281,7 +287,8 @@ public class MetricDriftSweep implements ClassifierSweep {
             // MetricSource.ToolMetrics has a single `duration` field and tool_duration is the only measure
             // at this grain. A second span-grain measure would have to select its own value per span, the
             // way turnSamples takes a spec and reads that measure off the turn.
-            Map<Bucket, List<Sample>> byTool = toolSamples(heads, source.toolMetrics(job.projectId(), heads, tally));
+            Map<Bucket, List<Sample>> byTool =
+                    inCallSiteScope(signal, toolSamples(heads, source.toolMetrics(job.projectId(), heads, tally)));
             for (Measured spec : spanMeasures) {
                 folded = folded.plus(foldMeasure(job.projectId(), signal, config, spec, byTool, confirmed, now));
             }
@@ -572,6 +579,24 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
         }
         return byBucket;
+    }
+
+    /**
+     * Drop the samples whose entry point is outside the classifier's call sites, and any bucket left empty. A turn
+     * bucket is one call site, so it stays whole or goes. A tool bucket keeps only its in-scope traffic, which is a
+     * change of population when the scope changes; the rolling reference absorbs it within two windows, and a shift
+     * against the pinned reference is the absorb verb's to settle (metric-drift.md §5).
+     */
+    private static Map<Bucket, List<Sample>> inCallSiteScope(ClassifierRow signal, Map<Bucket, List<Sample>> byBucket) {
+        if (signal.callSiteIds() == null) return byBucket;
+        Map<Bucket, List<Sample>> kept = new LinkedHashMap<>();
+        for (Map.Entry<Bucket, List<Sample>> e : byBucket.entrySet()) {
+            List<Sample> inScope = e.getValue().stream()
+                    .filter(sample -> signal.runsOn(sample.callSiteId()))
+                    .toList();
+            if (!inScope.isEmpty()) kept.put(e.getKey(), inScope);
+        }
+        return kept;
     }
 
     // -----------------------------------------------------------------------------------------------

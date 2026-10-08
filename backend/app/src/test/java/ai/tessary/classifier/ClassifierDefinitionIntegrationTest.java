@@ -98,7 +98,8 @@ class ClassifierDefinitionIntegrationTest {
                 true, // enabled: the zombie state this test retires
                 ClassifierRow.Mode.DISCOVERY,
                 now,
-                now));
+                now,
+                null));
 
         service.resyncBuiltIns(project);
 
@@ -141,7 +142,8 @@ class ClassifierDefinitionIntegrationTest {
                 true,
                 ClassifierRow.Mode.DISCOVERY,
                 now,
-                now));
+                now,
+                null));
 
         service.resyncBuiltIns(project);
 

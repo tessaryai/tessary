@@ -4,6 +4,7 @@ package ai.tessary.classifier;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog.BuiltIn;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierModelModule;
 import ai.tessary.classifier.catalog.ClassifierSeedListener;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
@@ -173,7 +174,8 @@ public class ClassifierService {
                         // BuiltInClassifierCatalog for the measurement.
                         b.defaultMode(),
                         now,
-                        now));
+                        now,
+                        null));
                 inserted++;
             } else if (existing.builtIn() && existing.version() < b.version()) {
                 signals.updateDefinition(new ClassifierRow(
@@ -189,7 +191,8 @@ public class ClassifierService {
                         existing.enabled(),
                         existing.mode(), // preserve the tenant's operating point across a re-seed
                         existing.createdAt(),
-                        now));
+                        now,
+                        existing.callSiteIds()));
             }
         }
         if (inserted > 0) {
@@ -514,6 +517,63 @@ public class ClassifierService {
             throw new TessaryException(ClassifierError.NOT_FOUND, id);
         }
         return get(projectId, id);
+    }
+
+    /**
+     * Limit the classifier to {@code callSiteIds}, or run it on every call site again with {@code null}. Each id must
+     * be one {@link SubstrateReadRepository#knownCallSiteIds} lists.
+     *
+     * <p>A change that adds a call site rewinds the cursor of a classifier that scores spans with no model, so the
+     * added call site's history is checked rather than read as clean: the same reason as {@link
+     * #rewindForCallSiteFact}. A classifier that sends each span or turn to a model is not rewound, because the rewind
+     * would send the whole history again; it checks the added call site from now on. A window classifier is not
+     * rewound either: its cursor feeds fitted state, and replaying it would count traffic twice.
+     */
+    public ClassifierRow setCallSiteIds(String projectId, String id, @Nullable List<String> callSiteIds) {
+        ClassifierRow before = get(projectId, id);
+        if (BuiltInDetector.Kind.TOOL_ERROR.equals(before.detector())) {
+            throw new TessaryException(ClassifierError.CALL_SITE_SCOPE_UNSUPPORTED, before.classifierKey());
+        }
+        List<String> scope = callSiteIds == null
+                ? null
+                : callSiteIds.stream().distinct().sorted().toList();
+        if (scope != null) {
+            Set<String> known = substrate.knownCallSiteIds(projectId);
+            List<String> unknown =
+                    scope.stream().filter(c -> !known.contains(c)).toList();
+            if (!unknown.isEmpty()) {
+                throw new TessaryException(ClassifierError.UNKNOWN_CALL_SITE, String.join("', '", unknown));
+            }
+        }
+        if (signals.setCallSiteIds(projectId, id, scope) == 0) {
+            throw new TessaryException(ClassifierError.NOT_FOUND, id);
+        }
+        List<String> was = before.callSiteIds();
+        boolean widened = was != null && (scope == null || !was.containsAll(scope));
+        boolean rewound = widened && rewindsOnWiden(before.detector()) && jobs.rewindCursor(projectId, id) > 0;
+        StructuredLog.info(log, Markers.OPS, "classifier.call-sites.set")
+                .message(
+                        "%s now runs on %s%s",
+                        before.classifierKey(),
+                        scope == null ? "every call site" : scope.size() + " call site(s)",
+                        rewound ? ", cursor rewound" : "")
+                .field("project", projectId)
+                .field("signal", before.classifierKey())
+                .field("callSites", scope == null ? -1 : scope.size())
+                .field("widened", widened)
+                .field("rewound", rewound)
+                .log();
+        return get(projectId, id);
+    }
+
+    /** The call sites a classifier in this project can be limited to, sorted. */
+    public List<String> knownCallSiteIds(String projectId) {
+        return List.copyOf(substrate.knownCallSiteIds(projectId));
+    }
+
+    private boolean rewindsOnWiden(String detector) {
+        return catalog.grainFor(detector) == ClassifierModelModule.Grain.OBSERVATION
+                && !BuiltInDetector.Kind.ENCODER_BACKED.contains(detector);
     }
 
     /**

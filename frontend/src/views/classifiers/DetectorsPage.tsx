@@ -48,6 +48,7 @@ import {
   rowState,
   writeSetupFlag,
 } from "./groundedness";
+import { CallSitesSection, UNSCOPED_DETECTORS } from "./CallSitesSection";
 import { METRIC_DRIFT_DETECTORS, TuningSection } from "./TuningSection";
 import {
   CONTAINER,
@@ -689,6 +690,11 @@ function NotScoringCallout({ label, onRestart }: { label: string; onRestart: () 
   );
 }
 
+function callSiteMeta(classifier: Classifier): string {
+  const count = classifier.call_site_ids?.length;
+  return count === undefined ? "" : ` · ${count} call site${count === 1 ? "" : "s"}`;
+}
+
 function ClassifierRail({
   classifier,
   health,
@@ -727,7 +733,7 @@ function ClassifierRail({
       open
       onClose={onClose}
       title={classifier.name}
-      meta={`${classifier.enabled ? "Enabled" : "Disabled"} · ${classifier.mode}`}
+      meta={`${classifier.enabled ? "Enabled" : "Disabled"} · ${classifier.mode}${callSiteMeta(classifier)}`}
       aria-label={`${classifier.name} detail`}
     >
       <p className="text-muted m-0 text-body">
@@ -795,6 +801,13 @@ function ClassifierRail({
       {isMetricDrift && (
         <RailBlock label="Tuning">
           <TuningSection classifier={classifier} />
+        </RailBlock>
+      )}
+
+      {!UNSCOPED_DETECTORS.has(classifier.detector) && (
+        <RailBlock label="Call sites">
+          {/* Keyed so a switch to another row seeds the form from that row's list. */}
+          <CallSitesSection key={classifier.id} classifier={classifier} />
         </RailBlock>
       )}
 

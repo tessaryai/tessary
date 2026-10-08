@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier;
 
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 public final class ClassifierRowBuilder {
@@ -16,6 +17,7 @@ public final class ClassifierRowBuilder {
     private boolean enabled = true;
     private String mode = ClassifierRow.Mode.TRACKING;
     private String at = "now";
+    private @Nullable List<String> callSiteIds;
 
     private ClassifierRowBuilder(String detector) {
         this.detector = detector;
@@ -68,6 +70,11 @@ public final class ClassifierRowBuilder {
         return this;
     }
 
+    public ClassifierRowBuilder onCallSites(String... ids) {
+        this.callSiteIds = List.of(ids);
+        return this;
+    }
+
     public ClassifierRowBuilder at(String value) {
         this.at = value;
         return this;
@@ -87,6 +94,7 @@ public final class ClassifierRowBuilder {
                 enabled,
                 mode,
                 at,
-                at);
+                at,
+                callSiteIds);
     }
 }

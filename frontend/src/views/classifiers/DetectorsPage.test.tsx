@@ -60,6 +60,7 @@ vi.mock("../../tenant/TenantContext", async (importOriginal) => {
         resolveBehaviorFinding,
         getClassifierTuning: () => new Promise(() => {}),
         getClassifierDebug: () => new Promise(() => {}),
+        listClassifierCallSites: () => new Promise(() => {}),
         getModelSettings: () => new Promise(() => {}),
       },
       orgApi: { base: "/api/orgs/acme", listProviderCredentials: () => new Promise(() => {}) },
@@ -95,6 +96,7 @@ function classifier(overrides: Partial<Classifier>): Classifier {
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
     readiness: null,
+    call_site_ids: null,
     ...overrides,
   };
 }

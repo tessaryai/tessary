@@ -3,6 +3,7 @@ package ai.tessary.classifier;
 
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.worker.ClassifierWorker;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -17,6 +18,8 @@ import org.jspecify.annotations.Nullable;
  * @param mode the operating point ({@link Mode}): {@code discovery} (high recall, the default) or
  *     {@code tracking} (high precision). Tenant-controlled like {@link #enabled}; never bumps
  *     {@link #version} and is never clobbered by a built-in catalog re-seed.
+ * @param callSiteIds the call sites this classifier runs on, or {@code null} for every call site. Never
+ *     empty. Tenant-controlled like {@link #mode}, and never clobbered by a catalog re-seed either.
  */
 public record ClassifierRow(
         String id,
@@ -31,7 +34,20 @@ public record ClassifierRow(
         boolean enabled,
         String mode,
         String createdAt,
-        String updatedAt) {
+        String updatedAt,
+        @Nullable List<String> callSiteIds) {
+
+    public ClassifierRow {
+        callSiteIds = callSiteIds == null ? null : List.copyOf(callSiteIds);
+    }
+
+    /**
+     * Whether this classifier runs on traffic attributed to {@code callSiteId}. Traffic with no call site
+     * is in scope only when the classifier runs on every call site.
+     */
+    public boolean runsOn(@Nullable String callSiteId) {
+        return callSiteIds == null || (callSiteId != null && callSiteIds.contains(callSiteId));
+    }
 
     /**
      * The classifier's operating point — the discovery-vs-tracking precision modes. {@code discovery}

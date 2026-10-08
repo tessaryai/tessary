@@ -61,7 +61,20 @@ public final class ClassifierRows {
             boolean enabled) {
         String now = Instant.now().toString();
         ClassifierRow row = new ClassifierRow(
-                id, projectId, classifierKey, name, null, detector, configJson, false, 1, enabled, mode, now, now);
+                id,
+                projectId,
+                classifierKey,
+                name,
+                null,
+                detector,
+                configJson,
+                false,
+                1,
+                enabled,
+                mode,
+                now,
+                now,
+                null);
         rows.insert(row);
         return row;
     }
