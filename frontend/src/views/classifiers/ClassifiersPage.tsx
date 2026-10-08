@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl, Spinner } from "../../ui";
+import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl } from "../../ui";
 import { CONTAINER } from "./shared";
 import { FrustrationBanner } from "./FrustrationBanner";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
@@ -188,12 +188,7 @@ function Charts({
   const data: ClassifierCharts | undefined = query.data;
   if (!data) return null;
   const stale = query.isPlaceholderData;
-  const reading = stale && (
-    <div role="status" className="flex items-center gap-2 mb-3 text-small text-muted">
-      <Spinner size="sm" />
-      <span>{`Loading the last ${days} days…`}</span>
-    </div>
-  );
+  const reading = stale && <LoadingRow className="mb-3" label={`Loading the last ${days} days…`} />;
   if (data.cards.length === 0 && data.chips.length === 0) {
     return (
       <>
