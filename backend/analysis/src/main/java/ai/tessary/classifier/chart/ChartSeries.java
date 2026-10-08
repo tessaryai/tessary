@@ -89,10 +89,14 @@ final class ChartSeries {
         return new HeadlineView(pooledP95, p95 == null ? null : pooledP95 - p95);
     }
 
-    /** Detections the bar counts over the last seven days. A count has no baseline, so no delta. */
+    /**
+     * Every detection on the scope over the last seven days: the sum of {@code total}, not of what the bar counts. The
+     * bar can count the whole project (a user classifier) or one pattern in its band (Secret Leak). A count has no
+     * baseline, so no delta.
+     */
     static HeadlineView countHeadline(List<ChartDay> days) {
         long count = 0;
-        for (ChartDay d : lastWeek(days)) count += nz(d.count());
+        for (ChartDay d : lastWeek(days)) count += nz(d.total());
         return new HeadlineView((double) count, null);
     }
 

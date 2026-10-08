@@ -3,6 +3,7 @@ package ai.tessary.classifier.chart;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -154,6 +155,33 @@ class ClassifierChartControllerIntegrationTest {
         assertEquals(1, menu.path("call_site_count").asInt());
         assertFalse(menu.path("all_call_sites").asBoolean(), "frustration is always a pick list");
         assertEquals(List.of("cs-a", "cs-b"), scopes.path("call_sites").findValuesAsText("call_site_id"));
+    }
+
+    /** A waiting classifier judges nothing, so it alone does not make a call site "New, learning". */
+    @Test
+    void callSiteLearning_countsOnlyClassifiersThatAreOnNotWaiting() throws Exception {
+        Signed me = signUp("chart-learning@example.com");
+        String pid = me.project().id();
+        capabilities.grant(me.org().id(), Capability.MALFORMED_OUTPUT);
+        declare(pid, "cs-a", null);
+        declare(pid, "cs-b", "{\"type\":\"object\"}");
+        fixture.builtIn(pid, BuiltInDetector.Kind.MALFORMED_OUTPUT);
+        jdbc.sql("UPDATE classifier SET enabled = FALSE WHERE project_id = :pid AND detector <> :malformed")
+                .param("pid", pid)
+                .param("malformed", BuiltInDetector.Kind.MALFORMED_OUTPUT)
+                .update();
+
+        JsonNode scopes = data(me, "/chart-scopes?days=7");
+
+        assertFalse(callSite(scopes, "cs-a").path("learning").asBoolean(), "Malformed Output waits for a schema here");
+        assertTrue(callSite(scopes, "cs-b").path("learning").asBoolean(), "Malformed Output is on and has no baseline");
+    }
+
+    private static JsonNode callSite(JsonNode scopes, String id) {
+        for (JsonNode n : scopes.path("call_sites")) {
+            if (id.equals(n.path("call_site_id").asText())) return n;
+        }
+        throw new AssertionError("no " + id + " in " + scopes.path("call_sites"));
     }
 
     // ---- helpers ------------------------------------------------------------------------------------

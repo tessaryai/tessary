@@ -419,15 +419,17 @@ public class ClassifierChartService {
     }
 
     /**
-     * A call site reads "New, learning" when at least one rate or drift classifier runs on it and every one that
-     * does is still learning.
+     * A call site reads "New, learning" when at least one rate or drift classifier is on for it and every one that
+     * is on is still learning. A waiting classifier (Malformed Output with no schema) judges nothing, so it does not
+     * count.
      */
     private boolean newAndLearning(Reads p, List<ClassifierRow> rows, String cs) {
         boolean any = false;
         for (ClassifierRow row : rows) {
             boolean rate = RATE_KINDS.contains(row.detector());
             if (!rate && !DRIFT_KINDS.contains(row.detector())) continue;
-            if (!ChartSeries.forCallSite(row, cs, p.facts(row)).on()) continue;
+            if (!ChartSeries.Availability.ON.equals(
+                    ChartSeries.forCallSite(row, cs, p.facts(row)).state())) continue;
             any = true;
             boolean learning = rate
                     ? ChartSeries.rateBaseline(

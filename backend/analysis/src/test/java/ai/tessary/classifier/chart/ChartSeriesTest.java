@@ -186,6 +186,25 @@ class ChartSeriesTest {
         assertEquals(ChartDay.count("2026-10-08", 2, 5), ChartSeries.countDay("2026-10-08", 4, 2, 5, arming));
     }
 
+    /**
+     * The bar can count more than the call site holds (a user classifier counts the whole project) or less (Secret
+     * Leak counts its busiest pattern in the band). The headline counts the call site's own detections.
+     */
+    @Test
+    void countHeadline_sumsEveryDetectionOfTheLastWeekNotWhatTheBarCounts() {
+        LocalDate from = ChartSeries.fromDay(TODAY, 28);
+        Map<LocalDate, ChartDay> rows = Map.of(
+                TODAY.minusDays(7),
+                ChartDay.count(TODAY.minusDays(7).toString(), 9, 9),
+                TODAY.minusDays(3),
+                ChartDay.count(TODAY.minusDays(3).toString(), 6, 2),
+                TODAY,
+                ChartDay.count(TODAY.toString(), 1, 3));
+        List<ChartDay> days = ChartSeries.dense(from, TODAY, rows, ChartSeries::emptyCount);
+
+        assertEquals(new HeadlineView(5.0, null), ChartSeries.countHeadline(days));
+    }
+
     private static CarriedState state(long calls, long failures) {
         ToolErrorRate baseline = new ToolErrorRate();
         baseline.addCounts(calls, failures);
