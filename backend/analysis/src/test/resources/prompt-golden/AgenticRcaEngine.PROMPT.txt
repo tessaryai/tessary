@@ -21,7 +21,7 @@ agent, its code, its prompt, its tools or its data.
 ## Read first
 
 - `dossier/finding.md`: the claim, what it is over, and since when.
-- `dossier/evidence.json`: the classifier's own numbers, verbatim.
+- `dossier/evidence.md`: the classifier's own numbers and evidence rows.
 {method_line}
 - `dossier/tools.md`: the MCP tools that reach the rows, traces, spans and sessions.
 

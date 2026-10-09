@@ -24,7 +24,8 @@
  * prompt describes:
  *
  *   dossier/finding.md      the claim, its cause, its windows, and the size of each evidence role
- *   dossier/evidence.json   the detector's own numbers, verbatim
+ *   dossier/method.md       how the detector works, when it has a method card
+ *   dossier/detections.md   a groundedness finding's flagged answers
  *
  * That is the whole dossier. NO hydrated traces: the agent pages the finding's evidence refs over
  * MCP (get_finding_evidence → get_trace / get_span) and cites the ids it actually fetched, so the

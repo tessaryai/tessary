@@ -195,10 +195,9 @@ public class RcaAnalysisService {
     private Map<String, String> dossierFiles(RcaReportRow report, FindingClaim finding) {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("finding.md", findingDoc(report, finding));
-        // A dedicated per-shape assembler when this classifier's payload matches one (see
-        // ClassifierDossierAssembler's dispatch-by-shape note) — the same one BehaviorTriageEngine.
-        // dossier() uses, so triage and RCA never disagree about what a classifier's evidence looks
-        // like. DossierPayload.forAgent's strip-only pass is still the fallback for everything else.
+        // A dedicated per-shape assembler writes markdown when this classifier's payload matches one (see
+        // ClassifierDossierAssembler's dispatch-by-shape note); any other payload is the stripped JSON, fenced,
+        // so the file is markdown under one name for every classifier.
         String payload = ClassifierDossierAssembler.assemble(
                         mapper,
                         evidence,
@@ -206,9 +205,9 @@ public class RcaAnalysisService {
                         finding.id(),
                         evidenceCounts(finding),
                         finding.payloadJson())
-                .orElseGet(() -> DossierPayload.forAgent(mapper, finding.payloadJson()));
+                .orElseGet(() -> fenced(DossierPayload.forAgent(mapper, finding.payloadJson())));
         if (payload != null && !payload.isBlank()) {
-            files.put("evidence.json", payload);
+            files.put(EVIDENCE_FILE, payload);
         }
         String method = AgenticRcaEngine.method(finding.classifierKey());
         if (method != null) files.put(AgenticRcaEngine.METHOD_FILE, method);
@@ -230,6 +229,13 @@ public class RcaAnalysisService {
 
     /** {@code dossier/finding.md} — what the classifier claims, over what, and how many refs it recorded
      *  per role, which is what says whether the evidence can be read whole or has to be sampled. */
+    static final String EVIDENCE_FILE = "evidence.md";
+
+    private static @Nullable String fenced(@Nullable String json) {
+        if (json == null || json.isBlank()) return null;
+        return "# Classifier evidence\n\n```json\n" + json.strip() + "\n```\n";
+    }
+
     private static String findingDoc(RcaReportRow report, FindingClaim finding) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n");

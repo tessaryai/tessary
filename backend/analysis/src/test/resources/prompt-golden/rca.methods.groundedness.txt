@@ -11,7 +11,7 @@ nothing checkable in them, are not scored and are not trials. A trace is one tri
 site it had an answer scored on, and it fails while one of those answers holds an uncleared flag.
 
 ## Reading the evidence
-Numbers are in `dossier/evidence.json`. `witness` trace rows are every trace with a flagged answer since the onset. `witness` span rows are each flagged answer;
+Numbers are in `dossier/evidence.md`. `witness` trace rows are every trace with a flagged answer since the onset. `witness` span rows are each flagged answer;
 on `get_finding_evidence` each carries `flaggedSentences`, the sentences the model marked, with
 their scores. The question, the answer and the retrieved documents are in the span body, from
 `get_span`. `member` trace rows are every trace scored on the call site since the onset. There

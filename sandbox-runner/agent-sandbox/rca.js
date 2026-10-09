@@ -17,7 +17,7 @@
  * backend's prompt describes:
  *
  *   dossier/finding.md      the claim, its cause, its window, and the size of each evidence role
- *   dossier/evidence.json   the detector's own numbers, verbatim
+ *   dossier/evidence.md     the detector's own numbers and evidence rows
  *   dossier/method.md       how the classifier measures, when it has a method file
  *   dossier/tools.md        the MCP tools that reach the rows
  *

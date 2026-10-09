@@ -8,7 +8,7 @@ violates the schema. For a gen_ai message envelope, the final assistant message 
 validated. Only call sites with a declared schema are counted.
 
 ## Reading the evidence
-Numbers are in `dossier/evidence.json`. `witness` rows are the failing outputs since the onset,
+Numbers are in `dossier/evidence.md`. `witness` rows are the failing outputs since the onset,
 capped at 50; each carries its `violation` message, and `get_span` shows the output. There are no `member`
 rows: the denominator is a count. There are no `baseline` rows: the normal rate is a number, not
 a set of rows.

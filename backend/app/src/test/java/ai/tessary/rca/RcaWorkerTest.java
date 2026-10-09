@@ -191,7 +191,7 @@ class RcaWorkerTest {
         // The dossier is the claim, the numbers, the method and the tools only: the agent pages evidence over MCP,
         // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
-        assertEquals(Set.of("finding.md", "evidence.json", "method.md", "tools.md"), dossier.keySet());
+        assertEquals(Set.of("finding.md", "evidence.md", "method.md", "tools.md"), dossier.keySet());
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
         assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
         String findingDoc = dossier.get("finding.md");

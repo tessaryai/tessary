@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -49,9 +50,48 @@ class SharedFindingTableIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
-    /** The dossier reads the first page in the detector's order and needs the cursor to say whether more follow. */
+    /** Catches healthy members crowding the failing rows out of the dossier's bounded read. */
     @Test
-    @DisplayName("the evidence page is the unpaged order's head, and the counts report every role")
+    @DisplayName("witness rows lead the evidence head, then baseline, then members")
+    void theEvidenceHeadLeadsWithWitnessThenBaseline() {
+        Project p = project("finding-evidence-claim-first");
+        String findingId = firing(p, "gram-claim-first");
+        String now = Instant.now().toString();
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(
+                        FindingEvidenceRepository.Ref.span("m-0", "s-0"),
+                        FindingEvidenceRepository.Ref.span("m-1", "s-1"),
+                        FindingEvidenceRepository.Ref.span("m-2", "s-2")),
+                now);
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(
+                        FindingEvidenceRepository.Ref.span("w-0", "s-0"),
+                        FindingEvidenceRepository.Ref.span("w-1", "s-1")),
+                now);
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.BASELINE,
+                List.of(FindingEvidenceRepository.Ref.trace("b-0")),
+                now);
+
+        FindingEvidenceRepository.Head head = evidence.claimFirst(p.id(), findingId, 4);
+
+        assertEquals(
+                List.of("witness:w-0", "witness:w-1", "baseline:b-0", "member:m-0"),
+                head.rows().stream().map(r -> r.role() + ':' + r.traceId()).toList());
+        assertTrue(head.more());
+    }
+
+    /** The dossier reads a bounded head of the evidence, the claim's rows first, and needs to know whether more follow. */
+    @Test
+    @DisplayName("the evidence head leads with the claim's rows, and the counts report every role")
     void evidencePagesInStableOrderAndCountsEveryRole() {
         Project p = project("finding-evidence-paging");
         String findingId = firing(p, "gram-paging");
@@ -73,16 +113,18 @@ class SharedFindingTableIntegrationTest {
         List<String> unpaged = evidence.listByFinding(p.id(), findingId).stream()
                 .map(r -> r.role() + ':' + r.id())
                 .toList();
-        FindingEvidenceRepository.Page head = evidence.page(p.id(), findingId, 3);
+        FindingEvidenceRepository.Head head = evidence.claimFirst(p.id(), findingId, 3);
         assertEquals(
-                unpaged.subList(0, 3),
+                unpaged.stream()
+                        .filter(r -> r.startsWith(FindingEvidenceRow.Role.BASELINE + ":"))
+                        .toList(),
                 head.rows().stream().map(r -> r.role() + ':' + r.id()).toList(),
-                "the paged order must be the unpaged order");
-        assertNotNull(head.nextCursor(), "a page that stopped short of the set says more rows follow");
+                "with no witness rows the baseline side leads, ahead of the members");
+        assertTrue(head.more(), "a head that stopped short of the set says more rows follow");
 
-        FindingEvidenceRepository.Page whole = evidence.page(p.id(), findingId, 50);
+        FindingEvidenceRepository.Head whole = evidence.claimFirst(p.id(), findingId, 50);
         assertEquals(8, whole.rows().size());
-        assertNull(whole.nextCursor(), "a page that exhausted the set mints no cursor");
+        assertFalse(whole.more(), "a head that exhausted the set says nothing follows");
 
         // Every role is reported, so a detector with no reference side reads as an explicit zero.
         var counts = evidence.countsByRole(p.id(), findingId);
@@ -279,8 +321,8 @@ class SharedFindingTableIntegrationTest {
         assertEquals(ClassifierError.FINDING_NOT_FOUND, e.error(), "a cross-tenant id must not read as forbidden");
 
         assertTrue(
-                evidence.page(stranger.id(), findingId, 100).rows().isEmpty(),
-                "the page's own project predicate is what makes the service guard belt-and-braces");
+                evidence.claimFirst(stranger.id(), findingId, 100).rows().isEmpty(),
+                "the read's own project predicate is what makes the service guard belt-and-braces");
         assertEquals(
                 0L,
                 evidence.countsByRole(stranger.id(), findingId).get(FindingEvidenceRow.Role.MEMBER),

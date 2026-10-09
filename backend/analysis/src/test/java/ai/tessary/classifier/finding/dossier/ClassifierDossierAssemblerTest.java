@@ -35,8 +35,8 @@ class ClassifierDossierAssemblerTest {
                 PROJECT_ID + "-e" + i, PROJECT_ID, FINDING_ID, null, "trace-" + i, "span-" + i, role, i, "t0");
     }
 
-    private static FindingEvidenceRepository.Page pageOf(List<FindingEvidenceRow> rows, boolean more) {
-        return new FindingEvidenceRepository.Page(rows, more ? "cursor" : null);
+    private static FindingEvidenceRepository.Head headOf(List<FindingEvidenceRow> rows, boolean more) {
+        return new FindingEvidenceRepository.Head(rows, more);
     }
 
     @Test
@@ -52,7 +52,7 @@ class ClassifierDossierAssemblerTest {
                  "onset_at":"2026-08-01T00:00:00Z","window":{"opened_at":"2026-08-01T00:00:00Z","closed_at":"2026-08-02T00:00:00Z","kind":"recomputed"}}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
+        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(headOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -80,8 +80,8 @@ class ClassifierDossierAssemblerTest {
                  "cause_kind":"frustration_rate","workflow_key":"","native_cause_key":"support-chat"}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt()))
-                .thenReturn(pageOf(
+        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), anyInt()))
+                .thenReturn(headOf(
                         List.of(
                                 new FindingEvidenceRow(
                                         "e1", PROJECT_ID, FINDING_ID, "conv-1", null, null, "witness", 0, "t0"),
@@ -117,7 +117,7 @@ class ClassifierDossierAssemblerTest {
                  ]}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
+        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(headOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -137,8 +137,8 @@ class ClassifierDossierAssemblerTest {
         List<FindingEvidenceRow> rows =
                 List.of(row(FindingEvidenceRow.Role.MEMBER, 1), row(FindingEvidenceRow.Role.MEMBER, 2));
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
-                .thenReturn(pageOf(rows, false));
+        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
+                .thenReturn(headOf(rows, false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 2, 0, 0, 0), payload);
@@ -159,8 +159,8 @@ class ClassifierDossierAssemblerTest {
             page.add(row(FindingEvidenceRow.Role.MEMBER, i));
         }
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
-                .thenReturn(pageOf(page, true)); // more rows exist
+        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
+                .thenReturn(headOf(page, true)); // more rows exist
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 50_000, 0, 0, 0), payload);

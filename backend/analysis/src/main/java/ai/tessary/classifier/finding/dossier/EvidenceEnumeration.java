@@ -33,23 +33,22 @@ final class EvidenceEnumeration {
         }
 
         int cap = ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP;
-        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, cap);
-        List<FindingEvidenceRow> rows = page.rows();
-        boolean complete = total <= cap && page.nextCursor() == null;
+        FindingEvidenceRepository.Head head = evidence.claimFirst(projectId, findingId, cap);
+        List<FindingEvidenceRow> rows = head.rows();
+        boolean complete = total <= cap && !head.more();
 
         if (complete) {
             sb.append(String.format(
                     Locale.ROOT,
-                    "Complete enumeration — every evidence row this finding recorded (%d total), in the"
-                            + " detector's own (role, rank, id) order:%n%n",
+                    "Complete enumeration — every evidence row this finding recorded (%d total), `witness`"
+                            + " first, then `baseline`, then the rest:%n%n",
                     rows.size()));
         } else {
             sb.append(String.format(
                     Locale.ROOT,
                     "DECLARED SELECTION, not the full population: the first %d of %d total evidence"
-                            + " row(s), in the detector's own (role, rank, id) order — the same"
-                            + " deterministic order get_finding_evidence pages in, so continuing from"
-                            + " here (not re-sampling) reaches the rest. Population by role:%n%n",
+                            + " row(s), `witness` first, then `baseline`, then the rest. Page a role in"
+                            + " full with get_finding_evidence. Population by role:%n%n",
                     rows.size(),
                     total));
             for (String role : FindingEvidenceRow.Role.ALL) {

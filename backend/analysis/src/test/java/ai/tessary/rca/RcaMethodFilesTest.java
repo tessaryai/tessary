@@ -75,8 +75,8 @@ class RcaMethodFilesTest {
 
             assertFalse(
                     GET_FINDING.matcher(method).find(),
-                    key + ": numbers are in evidence.json; get_finding is the finding the agent must not look up");
-            assertTrue(method.contains("evidence.json"), key + ": say where the numbers are");
+                    key + ": numbers are in evidence.md; get_finding is the finding the agent must not look up");
+            assertTrue(method.contains("evidence.md"), key + ": say where the numbers are");
             List<String> headings =
                     method.lines().filter(l -> l.startsWith("#")).skip(1).toList();
             assertEquals(SECTIONS, headings, key + ": only the four instrument sections, no cause list");

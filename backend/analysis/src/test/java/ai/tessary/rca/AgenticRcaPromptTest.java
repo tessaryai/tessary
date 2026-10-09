@@ -165,7 +165,7 @@ class AgenticRcaPromptTest {
         assertTrue(prompt.contains("flagged traces in the evidence: 12"), prompt);
         assertTrue(prompt.contains("time budget: 15 minutes"), prompt);
         assertTrue(prompt.contains("`dossier/tools.md`"), "tools.md is a first read");
-        assertTrue(prompt.contains("`dossier/evidence.json`"), "evidence.json is a first read");
+        assertTrue(prompt.contains("`dossier/evidence.md`"), "evidence.md is a first read");
         assertFalse(prompt.contains("\n\n\n"), "a snippet left out leaves no blank gap");
     }
 
