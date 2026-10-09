@@ -76,6 +76,9 @@ async def main() -> None:
         span.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens)
         span.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens)
         span.set_attribute(
+            "gen_ai.usage.cache_read.input_tokens", usage.input_tokens_details.cached_tokens
+        )
+        span.set_attribute(
             "gen_ai.output.messages",
             json.dumps([{
                 "role": "assistant",
@@ -90,7 +93,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`context_wrapper.usage` totals the tokens for every model request in the run, so the span reports the whole run's usage.
+`context_wrapper.usage` totals the tokens for every model request in the run, so the span reports the whole run's usage. OpenAI counts cached tokens inside `input_tokens` and reports them again under `input_tokens_details.cached_tokens`. Set the cache attribute too, or Tessary prices cached input as full-price input.
 
 <Warning>
   Keep `tessary.call_site.id` a literal string, never an f-string or a variable. [The call-site tag](/instrument/call-site-tag#four-rules-that-are-not-negotiable) explains why: a computed value cannot be traced back to the code that produced it.
