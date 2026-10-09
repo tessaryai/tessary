@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,51 +108,50 @@ public class RcaAnalysisService {
     /**
      * What the run needs from the finding's evidence rows.
      *
-     * <p>Every trace and session id in the evidence is citable, whatever its role. The flagged count is the
-     * narrowest set the classifier drew: {@code witness} rows where it wrote any, since a witness is a member
-     * the detector singled out (tool error's members are every call, its witnesses the failing ones), and the
-     * population roles otherwise. Session-grain refs (no trace id) are counted the same way; only frustration
-     * writes them, and its grain is sessions.
+     * <p>The flagged rows are the narrowest set the classifier drew: {@code witness} rows where it wrote any, since
+     * a witness is a member the detector singled out (tool error's members are every call, its witnesses the
+     * failing ones), and the population roles otherwise. A cause may cite a flagged row or a {@code baseline} row,
+     * never a member the detector did not flag: it would read as explained when it is healthy. Session-grain refs
+     * (no trace id) are counted the same way; only frustration writes them, and its grain is sessions.
      */
     private AgenticRcaEngine.Evidence evidence(String projectId, String findingId) {
-        Set<String> traces = new LinkedHashSet<>();
-        Set<String> sessions = new LinkedHashSet<>();
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnessTraces = new LinkedHashSet<>();
         Set<String> populationTraces = new LinkedHashSet<>();
+        // Sessions named by a session-grain ref (no trace id) decide the grain; any session a flagged row names
+        // is citable.
+        Set<String> witnessSessionRefs = new LinkedHashSet<>();
+        Set<String> populationSessionRefs = new LinkedHashSet<>();
         Set<String> witnessSessions = new LinkedHashSet<>();
         Set<String> populationSessions = new LinkedHashSet<>();
         for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
-            if (row.traceId() == null) {
-                if (row.sessionId() == null) continue;
-                sessions.add(row.sessionId());
-                if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
-                    witnessSessions.add(row.sessionId());
-                } else if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
-                    populationSessions.add(row.sessionId());
-                }
+            if (FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
+                if (row.traceId() != null) baseline.add(row.traceId());
                 continue;
             }
-            traces.add(row.traceId());
-            if (row.sessionId() != null) sessions.add(row.sessionId());
-            if (FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
-                baseline.add(row.traceId());
-            } else if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
-                witnessTraces.add(row.traceId());
-            } else if (FLAGGED_WHEN_NO_WITNESS.contains(row.role())) {
-                populationTraces.add(row.traceId());
+            boolean witness = FindingEvidenceRow.Role.WITNESS.equals(row.role());
+            if (!witness && !FLAGGED_WHEN_NO_WITNESS.contains(row.role())) continue;
+            if (row.traceId() != null) {
+                (witness ? witnessTraces : populationTraces).add(row.traceId());
+            } else if (row.sessionId() != null) {
+                (witness ? witnessSessionRefs : populationSessionRefs).add(row.sessionId());
             }
+            if (row.sessionId() != null) (witness ? witnessSessions : populationSessions).add(row.sessionId());
         }
-        Set<String> flaggedTraces = witnessTraces.isEmpty() ? populationTraces : witnessTraces;
-        Set<String> flaggedSessions = witnessSessions.isEmpty() ? populationSessions : witnessSessions;
+        boolean anyWitness = !witnessTraces.isEmpty() || !witnessSessionRefs.isEmpty();
+        Set<String> flaggedTraces = anyWitness ? witnessTraces : populationTraces;
+        Set<String> flaggedSessionRefs = anyWitness ? witnessSessionRefs : populationSessionRefs;
+        Set<String> citableSessions = anyWitness ? witnessSessions : populationSessions;
         // A trace cited on both sides is flagged: it is what the claim is about, not a comparison anchor.
         baseline.removeAll(flaggedTraces);
-        boolean sessionGrain = !flaggedSessions.isEmpty();
+        Set<String> citableTraces = new LinkedHashSet<>(flaggedTraces);
+        citableTraces.addAll(baseline);
+        boolean sessionGrain = !flaggedSessionRefs.isEmpty();
         return new AgenticRcaEngine.Evidence(
-                traces,
-                sessions,
+                citableTraces,
+                citableSessions,
                 !baseline.isEmpty(),
-                sessionGrain ? flaggedSessions.size() : flaggedTraces.size(),
+                sessionGrain ? flaggedSessionRefs.size() : flaggedTraces.size(),
                 sessionGrain ? "sessions" : "traces");
     }
 
@@ -227,15 +227,23 @@ public class RcaAnalysisService {
                 finding.evidenceCount(FindingEvidenceRow.Role.CHANGEPOINT));
     }
 
-    /** {@code dossier/finding.md} — what the classifier claims, over what, and how many refs it recorded
-     *  per role, which is what says whether the evidence can be read whole or has to be sampled. */
     static final String EVIDENCE_FILE = "evidence.md";
 
+    /** A raw payload as markdown. The fence is longer than any backtick run in the JSON, so a string value that
+     *  holds a code block cannot close it early. */
     private static @Nullable String fenced(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
-        return "# Classifier evidence\n\n```json\n" + json.strip() + "\n```\n";
+        int longest = 0;
+        for (var m = BACKTICKS.matcher(json); m.find(); )
+            longest = Math.max(longest, m.group().length());
+        String fence = "`".repeat(Math.max(3, longest + 1));
+        return "# Classifier evidence\n\n" + fence + "json\n" + json.strip() + "\n" + fence + "\n";
     }
 
+    private static final Pattern BACKTICKS = Pattern.compile("`+");
+
+    /** {@code dossier/finding.md} — what the classifier claims, over what, and how many refs it recorded
+     *  per role, which is what says whether the evidence can be read whole or has to be sampled. */
     private static String findingDoc(RcaReportRow report, FindingClaim finding) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n");

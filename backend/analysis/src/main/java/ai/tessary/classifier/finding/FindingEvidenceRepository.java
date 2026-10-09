@@ -259,15 +259,22 @@ public class FindingEvidenceRepository {
      * {@code witness}, then {@code baseline}, then every other role, each in the detector's own order. A
      * population of healthy members must not crowd the failing rows out of a bounded read.
      *
-     * <p>Over-fetches by one, so whether more follow needs no count.
+     * <p>One bounded read per tier, each ordered the way {@code ix_finding_evidence_finding} stores it, so a
+     * six-figure member population is never sorted whole. Over-fetches by one, so whether more follow needs no
+     * count.
      */
     public Head claimFirst(String projectId, String findingId, int limit) {
-        List<FindingEvidenceRow> rows = jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
-                        + " WHERE project_id = :pid AND finding_id = :fid"
-                        + " ORDER BY CASE role WHEN 'witness' THEN 0 WHEN 'baseline' THEN 1 ELSE 2 END, "
-                        + ORDER + " LIMIT :n")
+        String where = " FROM finding_evidence WHERE project_id = :pid AND finding_id = :fid AND ";
+        String tail = " ORDER BY " + ORDER + " LIMIT :n)";
+        List<FindingEvidenceRow> rows = jdbc.sql("(SELECT " + COLS + ", 0 AS tier" + where + "role = :witness" + tail
+                        + " UNION ALL (SELECT " + COLS + ", 1 AS tier" + where + "role = :baseline" + tail
+                        + " UNION ALL (SELECT " + COLS + ", 2 AS tier" + where + "role NOT IN (:witness, :baseline)"
+                        + tail
+                        + " ORDER BY tier, " + ORDER + " LIMIT :n")
                 .param("pid", projectId)
                 .param("fid", findingId)
+                .param("witness", FindingEvidenceRow.Role.WITNESS)
+                .param("baseline", FindingEvidenceRow.Role.BASELINE)
                 .param("n", limit + 1)
                 .query((rs, n) -> map(rs))
                 .list();

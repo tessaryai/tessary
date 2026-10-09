@@ -184,23 +184,32 @@ class RcaSynthesisOutputTest {
         assertTrue(out.verdictNote().contains("corrected"), out.verdictNote());
     }
 
-    /** `change` is what marks a cause as current-format, so a cause without a valid one, or a valid type, is dropped. */
+    /** `change` is what marks a cause as current-format, so a cause without a valid one is dropped. */
     @ParameterizedTest
-    @ValueSource(
-            strings = {
-                "\"change\":\"standing\",\"type\":\"prompt\",",
-                "\"change\":\"changed\",\"type\":\"prompt\",",
-                "\"type\":\"prompt\",",
-                "\"change\":\"change\",\"type\":\"vibes\",",
-                "\"change\":\"change\","
-            })
-    void aCauseWithoutAValidChangeAndTypeIsDropped(String labels) {
-        String valid = "\"change\":\"standing\",\"type\":\"prompt\",";
-        String unlabelled = cause("Unlabelled", "high", 1, "\"tr-1\"", "").replace(valid, labels);
+    @ValueSource(strings = {"\"change\":\"changed\",\"type\":\"prompt\",", "\"type\":\"prompt\","})
+    void aCauseWithoutAValidChangeIsDropped(String labels) {
+        String unlabelled = cause("Unlabelled", "high", 1, "\"tr-1\"", "")
+                .replace("\"change\":\"standing\",\"type\":\"prompt\",", labels);
 
         RcaSynthesisOutput.Parsed out = parse(reply("causes_identified", unlabelled));
 
-        assertEquals(labels.equals(valid) ? List.of("Unlabelled") : List.of(), titles(out), labels);
+        assertEquals(List.of(), titles(out), labels);
+        assertTrue(out.verdictNote().contains("valid `change`"), out.verdictNote());
+    }
+
+    /** Catches a well-evidenced cause lost to an off-list type or a capitalised label. */
+    @Test
+    void labelsIgnoreCaseAndAnUnknownTypeReadsAsOther() {
+        String loose = cause("Loose labels", "High", 1, "\"tr-1\"", "")
+                .replace(
+                        "\"change\":\"standing\",\"type\":\"prompt\",",
+                        "\"change\":\" Change \",\"type\":\"tooling\",");
+
+        Cause c = parse(reply("causes_identified", loose)).causes().get(0);
+
+        assertEquals("high", c.confidence());
+        assertEquals("change", c.change());
+        assertEquals("other", c.type());
     }
 
     /** The schema caps causes at four; the parser holds the line when a reply ignores it, keeping the top four. */

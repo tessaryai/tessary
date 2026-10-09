@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -22,10 +23,11 @@ import org.slf4j.LoggerFactory;
  * immutable report unchecked. One parser for every report kind:
  *
  * <ul>
- *   <li>A cause's trace and session ids are checked against this finding's own evidence. A hallucinated
+ *   <li>A cause's trace and session ids are checked against this finding's flagged and baseline evidence. A hallucinated
  *       receipt is worse than none, so unknown ids are dropped, and a cause left citing nothing is dropped.</li>
  *   <li>A cause below {@code medium} is not a cause, so one whose confidence is not {@code high} or
- *       {@code medium} is dropped.</li>
+ *       {@code medium} is dropped, and so is one without a valid {@code change}. An unknown {@code type} reads as
+ *       {@code other}. Labels are compared ignoring case.</li>
  *   <li>Without a cloned repo there is no file or commit to point at, so {@code path} and {@code commit} are
  *       cleared.</li>
  *   <li>The verdict is {@code causes_identified} or {@code no_cause_found}; a {@code causes_identified} with no
@@ -117,14 +119,17 @@ final class RcaSynthesisOutput {
         for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
             String title = c.title();
             if (title == null || title.isBlank()) continue;
-            if (c.confidence() == null || !CONFIDENCES.contains(c.confidence())) {
+            String confidence = label(c.confidence());
+            if (!CONFIDENCES.contains(confidence)) {
                 belowMedium++;
                 continue;
             }
-            if (c.change() == null || !CHANGES.contains(c.change()) || c.type() == null || !TYPES.contains(c.type())) {
+            String change = label(c.change());
+            if (!CHANGES.contains(change)) {
                 unlabelled++;
                 continue;
             }
+            String type = TYPES.contains(label(c.type())) ? label(c.type()) : "other";
             List<String> traces = kept(c.evidence_trace_ids(), citableTraceIds);
             List<String> sessions = kept(c.evidence_session_ids(), citableSessionIds);
             if (traces.isEmpty() && sessions.isEmpty()) {
@@ -134,9 +139,9 @@ final class RcaSynthesisOutput {
             Integer claimed = c.affected_count();
             causes.add(new Cause(
                     title,
-                    c.confidence(),
-                    c.change(),
-                    c.type(),
+                    confidence,
+                    change,
+                    type,
                     blankToNull(c.what_happens()),
                     blankToNull(c.how_it_caused_this()),
                     blankToNull(c.next_step()),
@@ -148,7 +153,7 @@ final class RcaSynthesisOutput {
         if (unreceipted > 0 || belowMedium > 0 || unlabelled > 0) {
             log.warn(
                     "rca analysis project={} dropped {} cause(s) citing nothing of this finding, {} below medium"
-                            + " and {} without a valid change or type",
+                            + " and {} without a valid change",
                     projectId,
                     unreceipted,
                     belowMedium,
@@ -168,8 +173,9 @@ final class RcaSynthesisOutput {
         String verdictNote = null;
         if (claimed && causes.isEmpty()) {
             verdictNote = "> **Verdict downgraded by the platform.** The analysis returned `causes_identified`,"
-                    + " but no cause at high or medium confidence cited a trace or session from this finding's"
-                    + " evidence, so none survived. Recorded as `no_cause_found`.";
+                    + " but no cause survived validation: each needs high or medium confidence, a valid `change`,"
+                    + " and a trace or session from this finding's flagged or baseline evidence. Recorded as"
+                    + " `no_cause_found`.";
             log.warn("rca analysis project={} downgraded verdict causes_identified -> no_cause_found", projectId);
         } else if (!claimed && !causes.isEmpty()) {
             verdictNote = "> **Verdict corrected by the platform.** The analysis did not return `causes_identified`,"
@@ -211,6 +217,11 @@ final class RcaSynthesisOutput {
     private static List<String> kept(@Nullable List<String> ids, Set<String> citable) {
         if (ids == null) return List.of();
         return new LinkedHashSet<>(ids).stream().filter(citable::contains).toList();
+    }
+
+    /** A label as the schema spells it: the model may capitalise or pad an enum value. */
+    private static String label(@Nullable String v) {
+        return v == null ? "" : v.strip().toLowerCase(Locale.ROOT);
     }
 
     private static @Nullable String blankToNull(@Nullable String v) {

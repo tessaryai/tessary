@@ -12,12 +12,10 @@ import java.util.Locale;
  * in this package, deciding whether the finding's evidence table is small enough to enumerate whole or
  * large enough that only a DECLARED selection is shown.
  *
- * <p>The read is bounded to {@link ClassifierDossierAssembler#SMALL_EVIDENCE_SET_CAP}+1 rows either
- * way ({@link FindingEvidenceRepository#page} over-fetches by one the same way {@code McpToolRegistry
- * .getTrace} does, for the same reason — the extra row's mere existence answers "is this the whole
- * population" without a second query), so a 200,000-row finding costs the same one bounded read as a
- * 20-row one: the declared selection IS that same bounded page, just labelled differently depending on
- * whether it turned out to be everything.
+ * <p>The read is bounded to {@link ClassifierDossierAssembler#SMALL_EVIDENCE_SET_CAP}+1 rows either way
+ * ({@link FindingEvidenceRepository#claimFirst} over-fetches by one, so the extra row's existence answers "is this the
+ * whole population" without a second query). The declared selection IS that bounded read, labelled differently
+ * depending on whether it turned out to be everything.
  */
 final class EvidenceEnumeration {
 

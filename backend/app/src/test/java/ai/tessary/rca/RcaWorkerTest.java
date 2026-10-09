@@ -140,7 +140,7 @@ class RcaWorkerTest {
         assertEquals(1, ev.flaggedCount(), "the flagged side counted the whole population instead of the failures");
         assertEquals("traces", ev.grain());
         assertTrue(ev.baselinePresent());
-        assertEquals(Set.of(baselineTrace, failingTrace, healthyA, healthyB), ev.citableTraceIds());
+        assertEquals(Set.of(failingTrace, baselineTrace), ev.citableTraceIds(), "a healthy member is not citable");
     }
 
     @Test
@@ -324,7 +324,8 @@ class RcaWorkerTest {
         assertEquals(2, ev.flaggedCount(), "the frustrated sessions, not the calm one");
         assertEquals("sessions", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB, calm)), ev.toString());
+        assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB)), ev.toString());
+        assertFalse(ev.citableSessionIds().contains(calm), "a calm session is not citable");
         assertTrue(ev.citableTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
@@ -398,7 +399,7 @@ class RcaWorkerTest {
         assertEquals(2, ev.flaggedCount(), "the flagged traces, not the clean member");
         assertEquals("traces", ev.grain());
         assertFalse(ev.baselinePresent());
-        assertEquals(Set.of(flaggedA, clean, flaggedB), ev.citableTraceIds());
+        assertEquals(Set.of(flaggedA, flaggedB), ev.citableTraceIds(), "a clean member is not citable");
         assertFalse(capturedDossier().containsKey("detections.md"), "flagged sentences are read over MCP");
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();

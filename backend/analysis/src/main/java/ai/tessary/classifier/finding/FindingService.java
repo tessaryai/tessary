@@ -252,13 +252,11 @@ public class FindingService {
      */
     public Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> flaggedSentences(
             String projectId, String findingId, Collection<SpanRef> refs) {
-        // Every classifier's witness page asks, and only groundedness has an answer: settle the kind on the
-        // one row read before paying for the flag-layer guard.
-        boolean groundednessFinding = findings.findById(projectId, findingId)
-                .map(f -> FindingRow.Cause.GROUNDEDNESS_RATE.equals(f.causeKind()))
-                .orElse(false);
-        if (!groundednessFinding) return Map.of();
-        return groundedness.flaggedSentences(requireReachableFinding(projectId, findingId), refs);
+        // Every classifier's witness page asks, and only groundedness has an answer: one row read settles the
+        // kind before the flag-layer guard runs on that same row.
+        FindingRow finding = findings.findById(projectId, findingId).orElse(null);
+        if (finding == null || !FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Map.of();
+        return groundedness.flaggedSentences(requireReachable(projectId, finding), refs);
     }
 
     /**
@@ -274,8 +272,12 @@ public class FindingService {
     private FindingRow requireReachableFinding(String projectId, String findingId) {
         FindingRow finding = findings.findById(projectId, findingId)
                 .orElseThrow(() -> new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId));
+        return requireReachable(projectId, finding);
+    }
+
+    private FindingRow requireReachable(String projectId, FindingRow finding) {
         if (classifiers.unavailableDetectorKinds(projectId).contains(finding.classifierKey())) {
-            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
+            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
         }
         return finding;
     }

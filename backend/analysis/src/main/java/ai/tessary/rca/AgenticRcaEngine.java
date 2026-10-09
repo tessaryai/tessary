@@ -245,7 +245,7 @@ public class AgenticRcaEngine {
                 log.warn("rca agentic project={} job={} returned no detailed_report", job.projectId(), job.id());
             }
             log.info(
-                    "rca agentic project={} job={} kind={} verdict={} downgraded={} causes={} ruled_out={} repo={}",
+                    "rca agentic project={} job={} kind={} verdict={} verdict_corrected={} causes={} ruled_out={} repo={}",
                     job.projectId(),
                     job.id(),
                     report.reportKind(),
@@ -307,6 +307,12 @@ public class AgenticRcaEngine {
         }
     }
 
+    /** The budget the agent is told: the sandbox boot and the clone spend part of the hard timeout, so
+     *  telling the agent the whole window would let it run into the kill and lose every cause it has. */
+    static long timeBudgetMinutes(long timeoutMs) {
+        return Math.max(1, timeoutMs * 4 / 5 / 60_000);
+    }
+
     /**
      * The one investigative prompt, filled for this run. Package-private and static so
      * {@code AgenticRcaPromptTest} can pin it without a Spring context; it reads nothing but its arguments.
@@ -314,12 +320,6 @@ public class AgenticRcaEngine {
      * <p>{@code {onset_commit}} in the repo snippet is left in place: the sandbox resolves it after the clone,
      * from the {@code onset_at} this class sends beside the clone URL.
      */
-    /** The budget the agent is told: the sandbox boot and the clone spend part of the hard timeout, so
-     *  telling the agent the whole window would let it run into the kill and lose every cause it has. */
-    static long timeBudgetMinutes(long timeoutMs) {
-        return Math.max(1, timeoutMs * 4 / 5 / 60_000);
-    }
-
     static String buildPrompt(
             RcaReportRow report,
             String findingId,
