@@ -225,10 +225,11 @@ class RcaControllerTest {
         reports.complete(
                 report.jobId(),
                 "done",
-                RcaReportRow.Verdict.MODEL_CHANGE,
+                RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                 "A canary model served the flagged traces.",
                 "[]",
-                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"evidence_trace_ids\":[]}]",
+                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"change\":\"change\",\"type\":\"model\","
+                        + "\"evidence_trace_ids\":[]}]",
                 "## r",
                 true);
         jobs.markDone(report.jobId());
@@ -237,7 +238,7 @@ class RcaControllerTest {
                 Map.of(
                         caseId,
                         new RcaReportRepository.CaseLead(
-                                RcaReportRow.Verdict.MODEL_CHANGE, "A canary model served the flagged traces.")),
+                                RcaReportRow.Verdict.CAUSES_IDENTIFIED, "A canary model served the flagged traces.")),
                 reports.leadsByCase(projectId, List.of(caseId)));
         assertEquals(Map.of(), reports.leadsByCase(projectId, List.of()));
     }

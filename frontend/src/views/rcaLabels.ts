@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { RcaCause } from "../api/types";
 import type { BadgeTone, Status } from "../ui";
 
 /**
@@ -56,7 +57,7 @@ export type CauseKind =
   | "groundedness"
   | "other";
 
-/** The three row labels of a cause card. The agent never writes these: they follow from the case type. */
+/** The three row labels of a cause card. The agent never writes these: they follow from the cause and the case type. */
 export type CauseLabels = { change: string; how: string; next: string };
 
 const HOW: Record<CauseKind, string> = {
@@ -72,8 +73,33 @@ const HOW: Record<CauseKind, string> = {
   other: "Why it changed",
 };
 
-/** A proven cause says what the movement is and what to do; a lead says why it might be and how to confirm it. */
-export function causeLabels(kind: CauseKind, proven: boolean): CauseLabels {
+/** A cause written by the current analysis carries `change`. A cause on an older report has none, and is still
+ *  shown as it was written. */
+export function isCurrentCause(cause: Pick<RcaCause, "change">): boolean {
+  return cause.change != null;
+}
+
+/** Whether a cause is shown as a cause. Every current cause is; on an older report only a high one is, and the
+ *  rest are leads. */
+export function shownAsCause(cause: Pick<RcaCause, "change" | "confidence">): boolean {
+  return isCurrentCause(cause) || cause.confidence === "high";
+}
+
+/**
+ * A current cause takes its first label from whether something changed or the agent always does it, and reads
+ * the same at high and medium. An older cause takes it from the case type, and a lead says why it might be and
+ * how to confirm it.
+ */
+export function causeLabels(kind: CauseKind, cause: Pick<RcaCause, "change" | "confidence">): CauseLabels {
+  if (isCurrentCause(cause)) {
+    const standing = cause.change === "standing";
+    return {
+      change: standing ? "What the agent does" : "What changed",
+      how: kind === "other" && standing ? "Why it happens" : HOW[kind],
+      next: "What to do",
+    };
+  }
+  const proven = cause.confidence === "high";
   const agent = kind === "frustration" || kind === "groundedness";
   return {
     change: agent ? "What the agent did" : "What changed",

@@ -14,85 +14,68 @@ public final class RcaDtos {
     private RcaDtos() {}
 
     /**
-     * One checklist item: a structural cause the movement was measured against, plus the analysis's
-     * own call on what that measurement means.
+     * One entry under "What else was checked".
      *
-     * <p>Wire name and column stay {@code ruled_out} for continuity with reports written before the
-     * checks became subjective.
+     * <p>A report written now stores each candidate cause the analysis ruled out as one plain sentence in
+     * {@code question}, with assessment {@code ruled_out} and no {@code detail} or {@code measurement}. A report
+     * written before that stored one entry per measured checklist item, with every assessment below and a
+     * {@code detail}; those rows are read unchanged.
      *
-     * @param check the check id — {@link RcaChecklist.Measurement#check}
-     * @param passed legacy view of the assessment: true only when it is {@code ruled_out}
-     * @param detail the analysis's reasoning for its assessment
-     * @param assessment {@code ruled_out} | {@code contributing} | {@code explains} | {@code unknown}
-     * @param measurement the numbers that were measured, which the assessment is a judgment of
-     * @param question the check as a plain question, as the analysis wrote it; null on a check it skipped
-     *     and on reports written before the field existed
+     * @param check a stable id: {@code ruled_out_<n>} on a current report, the checklist id on an older one
+     * @param passed true only when the assessment is {@code ruled_out}
+     * @param detail the analysis's reasoning on an older report; null on a current one
+     * @param assessment {@code ruled_out}, or on an older report also {@code contributing}, {@code explains}
+     *     or {@code unknown}
+     * @param measurement the measured numbers on an older report; null on a current one
+     * @param question the ruled-out candidate as a plain sentence; on an older report the check as a question,
+     *     null when it was skipped or written before the field existed
      */
     public record RuledOutCheck(
             String check,
             boolean passed,
-            String detail,
+            @Nullable String detail,
             String assessment,
             @Nullable String measurement,
             @Nullable String question) {
 
-        /** {@code assessment} values — how much of the movement this check accounts for. */
+        /** The one {@code assessment} value written now. */
         public static final class Assessment {
             private Assessment() {}
 
-            /** Measured and does not explain any of the movement. */
             public static final String RULED_OUT = "ruled_out";
-            /** Part of the story, but not the whole of it. */
-            public static final String CONTRIBUTING = "contributing";
-            /** Accounts for the movement on its own. */
-            public static final String EXPLAINS = "explains";
-            /** The evidence does not settle it either way. */
-            public static final String UNKNOWN = "unknown";
-
-            static String normalize(@Nullable String v) {
-                return switch (v == null ? "" : v) {
-                    case RULED_OUT, CONTRIBUTING, EXPLAINS -> v;
-                    default -> UNKNOWN;
-                };
-            }
         }
 
-        /** An item the analysis assessed, over the measurement it was given. */
-        public static RuledOutCheck assessed(
-                String check, @Nullable String question, @Nullable String assessment, String detail, String measured) {
-            String normalized = Assessment.normalize(assessment);
-            return new RuledOutCheck(
-                    check, Assessment.RULED_OUT.equals(normalized), detail, normalized, measured, question);
-        }
-
-        /** An item the analysis skipped — the measurement stands on its own, unjudged. */
-        public static RuledOutCheck unassessed(String check, String measured) {
-            return new RuledOutCheck(
-                    check, false, "The analysis did not assess this check.", Assessment.UNKNOWN, measured, null);
+        /** The {@code index}-th (1-based) candidate the analysis ruled out, as the sentence it wrote. */
+        public static RuledOutCheck ruledOut(int index, String sentence) {
+            return new RuledOutCheck("ruled_out_" + index, true, null, Assessment.RULED_OUT, null, sentence);
         }
     }
 
     /**
-     * One cause a report found, the same shape for every report kind: what changed (or, on a frustration or
-     * groundedness report, what the agent did), how that produced what the classifier saw, and what to do
-     * next. The prose fields are plain language for a reader with no context; the receipts are the id lists.
+     * One cause a report found, the same shape for every report kind. The prose fields are plain language for
+     * a reader with no context; the receipts are the id lists.
      *
-     * @param confidence {@code high} when proven, {@code medium} or {@code low} for a lead
-     * @param whatChanged null when the analysis wrote nothing, and on older reports that had no such field
+     * <p>A cause is current-format when it carries {@code change}. Older causes have no {@code change} or
+     * {@code type}, may be {@code low}, and name their kind on {@code attribution.kind}.
+     *
+     * @param confidence {@code high} or {@code medium}; {@code low} only on older reports
+     * @param change {@code change} (something changed over time) or {@code standing} (something the agent always
+     *     does); null on older reports
+     * @param type {@code code}, {@code prompt}, {@code tool}, {@code model}, {@code traffic}, {@code upstream},
+     *     {@code data} or {@code other}; null on older reports
+     * @param whatChanged what the cause does; null when the analysis wrote nothing
      * @param howItCausedThis null on every report written before the field existed
-     * @param nextStep for a proven cause, what to do; for a lead, what would confirm it
+     * @param nextStep what to fix
      * @param attribution null when the analysis attributed nothing
-     * @param evidenceTraceIds trace ids from the finding's own evidence refs: either side on a metric
-     *     cause, the flagged turns on a frustration one, the traces with a flagged answer on a groundedness
-     *     one (at least one there)
-     * @param evidenceSessionIds frustrated sessions from the finding's own evidence refs; at least one on a
-     *     frustration cause, none on any other
-     * @param affectedCount how many flagged sessions or traces show it; never fewer than a frustration or
-     *     groundedness cause cites
+     * @param evidenceTraceIds trace ids from the finding's own evidence
+     * @param evidenceSessionIds session ids from the finding's own evidence
+     * @param affectedCount how many flagged rows the cause explains
      */
     public record Cause(
             String title,
             String confidence,
+            @Nullable String change,
+            @Nullable String type,
             @JsonProperty("what_changed") @Nullable String whatChanged,
             @JsonProperty("how_it_caused_this") @Nullable String howItCausedThis,
             @JsonProperty("next_step") @Nullable String nextStep,
@@ -102,7 +85,7 @@ public final class RcaDtos {
             @JsonProperty("affected_count") int affectedCount) {
 
         public static final String HIGH = "high";
-        public static final List<String> CONFIDENCES = List.of(HIGH, "medium", "low");
+        public static final String MEDIUM = "medium";
     }
 
     /**
@@ -125,6 +108,8 @@ public final class RcaDtos {
     record StoredCause(
             @Nullable String title,
             @Nullable String confidence,
+            @Nullable String change,
+            @Nullable String type,
             @Nullable String what_changed,
             @Nullable String how_it_caused_this,
             @Nullable String next_step,
@@ -146,6 +131,8 @@ public final class RcaDtos {
             return new Cause(
                     title == null ? "" : title,
                     confidence == null ? "low" : confidence,
+                    change,
+                    type,
                     firstPresent(what_changed, rationale, what_the_agent_did),
                     firstPresent(how_it_caused_this),
                     firstPresent(next_step, fix_suggestion),
@@ -189,19 +176,14 @@ public final class RcaDtos {
     /**
      * Where in the repo a cause comes from.
      *
-     * @param kind {@code prompt} | {@code code} | {@code tool} | {@code model} | {@code unknown}
+     * @param kind {@code prompt}, {@code code}, {@code tool}, {@code model} or {@code unknown} on older reports;
+     *     null on current ones, whose cause carries {@code type} instead
      */
     public record Attribution(
-            String kind,
+            @Nullable String kind,
             @Nullable String path,
             @Nullable String commit,
-            @Nullable String excerpt) {
-
-        /** {@code kind} values. Anything else a model returns reads as {@link #UNKNOWN}. */
-        public static final List<String> KINDS = List.of("prompt", "code", "tool", "model", "unknown");
-
-        public static final String UNKNOWN = "unknown";
-    }
+            @Nullable String excerpt) {}
 
     public record RcaReportView(
             String id,
@@ -225,7 +207,8 @@ public final class RcaDtos {
             /** One plain sentence; see {@link RcaDtos#summaryOf}. */
             @Nullable String summary,
             @JsonProperty("ruled_out") List<RuledOutCheck> ruledOut,
-            /** Proven causes first, then leads; in stored order, which the cause filters index into. */
+            /** High first, then medium (and low on older reports); in stored order, which the cause filters index
+             *  into. */
             List<Cause> causes,
             @JsonProperty("detailed_report") @Nullable String detailedReport,
             String engine,

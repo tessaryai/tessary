@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
@@ -19,6 +20,7 @@ import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -245,6 +247,19 @@ public class FindingService {
     }
 
     /**
+     * The flagged sentences of the answers in {@code refs}, each as text with its score, for a {@code
+     * groundedness_rate} finding's witness span rows on the agent door. Any other finding has none.
+     */
+    public Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> flaggedSentences(
+            String projectId, String findingId, Collection<SpanRef> refs) {
+        // Every classifier's witness page asks, and only groundedness has an answer: one row read settles the
+        // kind before the flag-layer guard runs on that same row.
+        FindingRow finding = findings.findById(projectId, findingId).orElse(null);
+        if (finding == null || !FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Map.of();
+        return groundedness.flaggedSentences(requireReachable(projectId, finding), refs);
+    }
+
+    /**
      * Tenant + existence guard for one finding, extended to the flag layer: a finding whose classifier
      * the org does not have is a 404, exactly as the classifier itself is. Without this, hiding a
      * classifier would still leave its findings reachable — and WRITABLE — by id, so a stale tab could
@@ -257,8 +272,12 @@ public class FindingService {
     private FindingRow requireReachableFinding(String projectId, String findingId) {
         FindingRow finding = findings.findById(projectId, findingId)
                 .orElseThrow(() -> new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId));
+        return requireReachable(projectId, finding);
+    }
+
+    private FindingRow requireReachable(String projectId, FindingRow finding) {
         if (classifiers.unavailableDetectorKinds(projectId).contains(finding.classifierKey())) {
-            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
+            throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, finding.id());
         }
         return finding;
     }

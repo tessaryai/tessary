@@ -141,21 +141,22 @@ class McpCaseToolsTest {
 
         assertEquals("rca-4", body.get("rca_report_id").asText());
         JsonNode rca = body.get("rca");
-        assertEquals("model_change", rca.get("verdict").asText());
+        assertEquals("causes_identified", rca.get("verdict").asText());
         assertEquals(
                 "## Why\nThe judge model changed.", rca.get("detailed_report").asText());
+        JsonNode cause = rca.get("causes").get(0);
+        assertEquals("Model swap on 2026-08-14", cause.get("title").asText());
+        assertEquals("change", cause.get("change").asText());
+        assertEquals("model", cause.get("type").asText());
         assertEquals(
-                "Model swap on 2026-08-14",
-                rca.get("causes").get(0).get("title").asText());
-        assertEquals(
-                "The provider rotated the default.",
-                rca.get("causes").get(0).get("what_changed").asText());
+                "The provider rotated the default.", cause.get("what_changed").asText());
         assertFalse(rca.has("hypotheses"), "every case type answers in causes now");
+        JsonNode ruledOut = rca.get("ruled_out").get(0);
         assertEquals(
-                "Did the traffic mix change?",
-                rca.get("ruled_out").get(0).get("question").asText());
-        assertEquals("traffic_mix", rca.get("ruled_out").get(0).get("check").asText());
-        assertTrue(rca.get("ruled_out").get(0).get("passed").asBoolean());
+                "The traffic mix held flat through the window.",
+                ruledOut.get("question").asText());
+        assertEquals("ruled_out_1", ruledOut.get("check").asText());
+        assertTrue(ruledOut.get("passed").asBoolean());
     }
 
     /** A running report is named, not rendered: an all-null shell reads as "concluded nothing", not "not finished". */
@@ -305,17 +306,14 @@ class McpCaseToolsTest {
                 0.95,
                 -0.4,
                 "done",
-                "model_change",
+                "causes_identified",
                 "The judge model changed mid-window.",
-                List.of(RuledOutCheck.assessed(
-                        "traffic_mix",
-                        "Did the traffic mix change?",
-                        RuledOutCheck.Assessment.RULED_OUT,
-                        "Mix held flat.",
-                        "chi2 = 0.4")),
+                List.of(RuledOutCheck.ruledOut(1, "The traffic mix held flat through the window.")),
                 List.of(new Cause(
                         "Model swap on 2026-08-14",
                         "high",
+                        "change",
+                        "model",
                         "The provider rotated the default.",
                         null,
                         null,

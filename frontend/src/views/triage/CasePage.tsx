@@ -6,7 +6,7 @@
  * run), how big it was, and the failures themselves. Everything else is gone.
  *
  * <h2>The answer sits above the figure</h2>
- * The proven causes are what a reader came here for, so they are carded
+ * The causes are what a reader came here for, so they are carded
  * directly under the headline and the magnitude follows them. The figure is the
  * SIZE of the answer, not the answer, and a page that opens with a chart makes
  * a reader scroll past the measurement to reach the finding. The checks stay
@@ -52,7 +52,7 @@ import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
-import { rcaRunning, shiftKind, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
+import { rcaRunning, shiftKind, shownAsCause, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
 import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
@@ -134,11 +134,13 @@ export function CasePage() {
       void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
     },
   });
-  // The press sends the case id and nothing else: the server resolves the finding behind it, and
-  // that id is all that reaches the analysis lane. A case with no finding cannot be analysed, which
-  // is what `rca_available` already says.
+  // The first press sends the case id and nothing else: the server locks the case, resolves the finding
+  // behind it, and that id is all that reaches the analysis lane. A case with no finding cannot be analysed,
+  // which is what `rca_available` already says. Once a report exists the case trigger would coalesce onto it,
+  // so "Re-run RCA" re-runs that report instead, which starts a fresh analysis of the same finding.
   const rcaM = useMutation({
-    mutationFn: () => api.runCaseRca(caseId ?? ""),
+    mutationFn: () =>
+      detail?.rca_report_id != null ? api.rerunRca(detail.rca_report_id) : api.runCaseRca(caseId ?? ""),
     onSuccess: invalidate,
   });
   // A report EXISTS from the moment the run is queued, so "is there a report" is the wrong question
@@ -592,10 +594,11 @@ function affectedUnit(kind: CauseKind): [string, string] {
 }
 
 /**
- * The answer, carded directly under the headline: every proven cause, each on its own card.
+ * The answer, carded directly under the headline: every cause, each on its own card with its confidence.
  *
- * <p>With no proven cause the block says so first, gives the run's summary, and only then shows the leads,
- * labelled as leads. Leads never appear beside a proven cause here; the report page lists them.
+ * <p>An older report graded some causes as leads. With no proven cause there, the block says so first, gives
+ * the run's summary, and only then shows the leads, labelled as leads. Leads never appear beside a proven
+ * cause here; the report page lists them.
  *
  * <p>It also owns the in-flight state, so "Analyzing" appears once and in the place the answer will
  * land rather than under a heading further down the page.
@@ -621,7 +624,7 @@ function Why({
           <div className="flex items-center gap-2.5">
             <StatusPill status="running" label="Analyzing" />
             <span className="text-muted text-body">
-              Reading the evidence and bracketing the change point.
+              Reading the evidence and looking for the cause.
             </span>
           </div>
         </Card>
@@ -633,14 +636,14 @@ function Why({
   if (!report || report.status === "failed") return null;
 
   const indexed = report.causes.map((cause, index) => ({ cause, index }));
-  const proven = indexed.filter((k) => k.cause.confidence === "high");
-  const shown = proven.length > 0 ? proven : indexed;
+  const causes = indexed.filter((k) => shownAsCause(k.cause));
+  const shown = causes.length > 0 ? causes : indexed;
   const summary = report.summary ?? (report.verdict ? RCA_VERDICT_LABEL[report.verdict] : null);
 
   return (
-    <Block label="Why" note={proven.length > 0 ? undefined : "No cause proven"}>
+    <Block label="Why" note={causes.length > 0 ? undefined : "No cause proven"}>
       <div className="flex flex-col gap-3">
-        {proven.length === 0 && summary && (
+        {causes.length === 0 && summary && (
           <p className="m-0 text-body text-fg" style={{ maxWidth: 700 }}>
             {summary}
           </p>
@@ -681,8 +684,9 @@ function Why({
 /**
  * What else was checked — the working behind the answer, below the figure.
  *
- * <p>Every check that was measured, asked as the analysis phrased it, with its assessment and the answer.
- * None of it is the conclusion, which is why it sits under the figure rather than at the top.
+ * <p>Every candidate the analysis ruled out, as the sentence it wrote. An older report lists every check it
+ * measured instead, asked as the analysis phrased it, with its assessment, its id and the answer. None of it is
+ * the conclusion, which is why it sits under the figure rather than at the top.
  */
 function Checks({ report, analysing }: { report: RcaReport | undefined; analysing: boolean }) {
   // The card above owns the in-flight state, and there is nothing to say before a run.
@@ -704,6 +708,7 @@ function Checks({ report, analysing }: { report: RcaReport | undefined; analysin
   const checks = report.ruled_out;
   if (checks.length === 0) return null;
   const eliminated = checks.filter((c) => c.assessment === "ruled_out").length;
+  const reasoned = checks.some((c) => c.detail);
 
   return (
     <Block label="What else was checked">
@@ -715,11 +720,11 @@ function Checks({ report, analysing }: { report: RcaReport | undefined; analysin
           <div
             key={c.check}
             className="grid items-baseline bg-surface gap-4 py-2.75 px-3.5"
-            style={{ gridTemplateColumns: "minmax(0, 260px) 92px 1fr" }}
+            style={{ gridTemplateColumns: reasoned ? "minmax(0, 260px) 92px 1fr" : "minmax(0, 1fr) 92px" }}
           >
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className="text-fg text-small">{c.question ?? c.check}</span>
-              {c.question && (
+              {c.question && c.detail && (
                 <span className="font-mono text-subtle text-label" style={{ overflowWrap: "anywhere" }}>
                   {c.check}
                 </span>
@@ -731,9 +736,7 @@ function Checks({ report, analysing }: { report: RcaReport | undefined; analysin
             >
               {(c.assessment ?? "unknown").replace(/_/g, " ")}
             </span>
-            <span className="text-muted text-small">
-              {c.detail}
-            </span>
+            {reasoned && <span className="text-muted text-small">{c.detail}</span>}
           </div>
         ))}
       </ListChassis>

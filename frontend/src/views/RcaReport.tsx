@@ -6,7 +6,15 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useProjectApi, useTenant } from "../tenant/TenantContext";
 import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn } from "../ui";
 import { Markdown } from "./components/PayloadViewer";
-import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning, shiftKind, type CauseKind } from "./rcaLabels";
+import {
+  RCA_JOB_STATUS,
+  RCA_VERDICT_LABEL,
+  RCA_VERDICT_TONE,
+  rcaRunning,
+  shiftKind,
+  shownAsCause,
+  type CauseKind,
+} from "./rcaLabels";
 import { CauseCard } from "./components/CauseCard";
 import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
@@ -14,10 +22,10 @@ import type { RcaReport as RcaReportView, RcaRuledOutCheck } from "../api/types"
 
 /**
  * One RCA report — the immutable per-finding drill-in behind the case page's "Run RCA" action.
- * Reads top-to-bottom: the movement, the verdict and its one-sentence summary, the proven causes on the
- * same card the case page uses, the checklist of structural causes with the analysis's call on each
- * (shown even when all were ruled out — the eliminated boring causes are what make the causes
- * trustworthy), the agent's full write-up with all of its evidence, and last the leads it could not prove.
+ * Reads top-to-bottom: the movement, the verdict and its one-sentence summary, the causes on the same card
+ * the case page uses, what the analysis ruled out (the eliminated candidates are what make the causes
+ * trustworthy), and the agent's full write-up with all of its evidence. An older report shows its checklist
+ * of structural causes in place of the ruled-out list, and ends with the leads it could not prove.
  */
 
 const METRIC_LABEL: Record<string, string> = {
@@ -34,7 +42,7 @@ function windowLabel(iso: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" });
 }
 
-/** How each checklist item renders, by the analysis's own assessment. */
+/** How each entry renders, by the analysis's own assessment. A current report only writes `ruled_out`. */
 const ASSESSMENT: Record<string, { glyph: string; label: string; className: string }> = {
   ruled_out: { glyph: "✓", label: "Ruled out", className: "bg-success-subtle text-success" },
   contributing: { glyph: "!", label: "Contributing", className: "bg-warning-subtle text-warning" },
@@ -42,15 +50,21 @@ const ASSESSMENT: Record<string, { glyph: string; label: string; className: stri
   unknown: { glyph: "?", label: "Unresolved", className: "bg-surface-2 text-muted" },
 };
 
+/** An older report's entries are measured checklist items, each with the analysis's reasoning in `detail`. */
 function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
+  const checklist = checks.some((c) => c.detail);
   return (
     <Card className="border border-border">
       <div className="px-3.5 pt-3.5 pb-1">
-        <div className="text-h3 text-fg">Checklist</div>
-        <p className="text-small text-muted mt-0.5">
-          Structural causes measured before the investigation, each assessed by the analysis against your repo. An
-          item marked <span className="text-fg">explains</span> is the root cause.
-        </p>
+        <div className="text-h3 text-fg">{checklist ? "Checklist" : "What else was checked"}</div>
+        {checklist ? (
+          <p className="text-small text-muted mt-0.5">
+            Structural causes measured before the investigation, each assessed by the analysis against your repo. An
+            item marked <span className="text-fg">explains</span> is the root cause.
+          </p>
+        ) : (
+          <p className="text-small text-muted mt-0.5">Candidate causes the analysis ruled out, each with its reason.</p>
+        )}
       </div>
       <div className="flex flex-col gap-0.5 px-1.5 pb-2.5">
         {checks.map((c) => {
@@ -69,8 +83,8 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
               </span>
               <div className="min-w-0">
                 <span className="text-body font-medium text-fg">{c.question ?? c.check}</span>
-                {c.question && <span className="block font-mono text-label text-subtle">{c.check}</span>}
-                <p className="text-small text-muted mt-0.5">{c.detail}</p>
+                {c.question && c.detail && <span className="block font-mono text-label text-subtle">{c.check}</span>}
+                {c.detail && <p className="text-small text-muted mt-0.5">{c.detail}</p>}
                 {c.measurement && (
                   <pre className="text-label text-subtle font-mono mt-1.5 whitespace-pre-wrap break-words">
                     {c.measurement}
@@ -186,8 +200,8 @@ export function RcaReport() {
   const frustration = r.report_kind === "frustration_causes";
   const groundedness = r.report_kind === "groundedness_causes";
   const kind = reportCauseKind(r);
-  const proven = r.causes.filter((c) => c.confidence === "high");
-  const leads = r.causes.filter((c) => c.confidence !== "high");
+  const proven = r.causes.filter(shownAsCause);
+  const leads = r.causes.filter((c) => !shownAsCause(c));
   const subtitle = frustration || groundedness
     ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
         groundedness ? "Flagged answers" : "Frustrated sessions"
@@ -240,8 +254,7 @@ export function RcaReport() {
       {running && (
         <div className="py-6 flex items-center gap-2 text-small text-muted">
           <Spinner size="sm" />
-          Analyzing. Tessary measures the structural causes, then an agent reads your repo and traces. This can
-          take several minutes.
+          Analyzing. An agent reads your traces and your repo to find the cause. This can take several minutes.
         </div>
       )}
 

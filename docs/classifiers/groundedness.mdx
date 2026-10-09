@@ -132,20 +132,18 @@ The question, answer, and documents are read from the trace when you open the pa
 
 ## Run RCA on the case
 
-Select **Run RCA** on the case. Root-cause analysis reads the newest flagged answers the finding cites, each with its question, flagged sentences, and documents. It opens traces when it needs more and, with a connected repository, reads your code. It checks each flag against its documents first: a flagged sentence the documents do support is a false alarm, not a cause. It returns one of two verdicts: **Causes identified** or **No cause found**.
+Select **Run RCA** on the case. Root-cause analysis reads the flagged answers the finding cites, each with its flagged sentences, question, and documents. With a connected repository, it also reads your code. It returns one of two verdicts: **Causes identified** or **No cause found**.
 
-Causes are grouped by why the answers went beyond their documents, for example:
+A cause can be something that changed, such as a commit, a prompt, or the documents in the index. It can also be something the agent always does. Each cause is graded on its own: **High** when the analysis found the mechanism and sees its effect in the cited traces, **Medium** when it shows one of the two. Anything less is not reported as a cause.
 
-- Retrieval served wrong, stale, or too few documents.
-- The prompt asks for more than the documents hold.
-- The answer merges or misreads the documents.
+The case page cards every cause, high first. Each cause shows:
 
-The case page cards each proven cause, one with high confidence. When no cause is proven, it says so, gives the summary, and shows the leads, each with its confidence: medium or low. Each cause shows:
-
-- **What the agent did**, **Why answers went unsupported**, and **What to do**. On a lead, the last two read **Why it might be** and **To confirm**.
+- **What changed** or **What the agent does**, then **Why answers went unsupported** and **What to do**.
 - How many flagged answers show it.
-- Where it comes from: a prompt, code, a tool, or the model, with the file, commit, and excerpt when one lines up.
+- The prompt, code, or data line behind it, with the file, commit, and excerpt when one lines up.
 - The traces that show it. On the case, the **Show** button on a cause, such as **Show 12 answers**, narrows the **Flagged answers** list to that cause. The buttons above the list, such as **All · 48** and **Cause 1 · 12**, switch between causes.
+
+**What else was checked** lists the candidate causes the analysis ruled out, each with its reason.
 
 [Root-cause analysis](/concepts/root-cause-analysis#on-a-groundedness-case) covers how the report checks its own citations.
 

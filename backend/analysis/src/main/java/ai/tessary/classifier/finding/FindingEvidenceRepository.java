@@ -239,7 +239,7 @@ public class FindingEvidenceRepository {
      *
      * <p>Unpaged, so it is for the callers that render a finding's own page and hold the result in
      * memory. A population can now be six figures; a reader that does not need all of it at once takes
-     * {@link #page} instead.
+     * {@link #spanPage} or {@link #claimFirst} instead.
      */
     public List<FindingEvidenceRow> listByFinding(String projectId, String findingId) {
         return jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
@@ -251,29 +251,35 @@ public class FindingEvidenceRepository {
                 .list();
     }
 
-    /** A page of a finding's evidence and the cursor that resumes after it, null when this was the last. */
-    public record Page(
-            List<FindingEvidenceRow> rows, @Nullable String nextCursor) {}
+    /** The first rows of a finding's evidence, and whether more follow. */
+    public record Head(List<FindingEvidenceRow> rows, boolean more) {}
 
     /**
-     * The first page of a finding's evidence in the detector's own order, with a cursor that is non-null
-     * when more rows follow.
+     * The first {@code limit} rows of a finding's evidence with the rows that carry the claim first:
+     * {@code witness}, then {@code baseline}, then every other role, each in the detector's own order. A
+     * population of healthy members must not crowd the failing rows out of a bounded read.
      *
-     * <p>Over-fetches by one, as every keyset reader here does, so a next page needs no count.
+     * <p>One bounded read per tier, each ordered the way {@code ix_finding_evidence_finding} stores it, so a
+     * six-figure member population is never sorted whole. Over-fetches by one, so whether more follow needs no
+     * count.
      */
-    public Page page(String projectId, String findingId, int limit) {
-        List<FindingEvidenceRow> rows = jdbc.sql("SELECT " + COLS + " FROM finding_evidence"
-                        + " WHERE project_id = :pid AND finding_id = :fid"
-                        + " ORDER BY " + ORDER + " LIMIT :n")
+    public Head claimFirst(String projectId, String findingId, int limit) {
+        String where = " FROM finding_evidence WHERE project_id = :pid AND finding_id = :fid AND ";
+        String tail = " ORDER BY " + ORDER + " LIMIT :n)";
+        List<FindingEvidenceRow> rows = jdbc.sql("(SELECT " + COLS + ", 0 AS tier" + where + "role = :witness" + tail
+                        + " UNION ALL (SELECT " + COLS + ", 1 AS tier" + where + "role = :baseline" + tail
+                        + " UNION ALL (SELECT " + COLS + ", 2 AS tier" + where + "role NOT IN (:witness, :baseline)"
+                        + tail
+                        + " ORDER BY tier, " + ORDER + " LIMIT :n")
                 .param("pid", projectId)
                 .param("fid", findingId)
+                .param("witness", FindingEvidenceRow.Role.WITNESS)
+                .param("baseline", FindingEvidenceRow.Role.BASELINE)
                 .param("n", limit + 1)
                 .query((rs, n) -> map(rs))
                 .list();
-        if (rows.size() <= limit) return new Page(rows, null);
-        // Seeded from the last row of THIS page, never from the over-fetched row: that one is the first
-        // row of the next page and seeding from it would skip it.
-        return new Page(List.copyOf(rows.subList(0, limit)), encodeCursor(rows.get(limit - 1)));
+        if (rows.size() <= limit) return new Head(rows, false);
+        return new Head(List.copyOf(rows.subList(0, limit)), true);
     }
 
     /**
@@ -350,10 +356,8 @@ public class FindingEvidenceRepository {
 
     /**
      * One page of a finding's evidence refs in the detector's own order, optionally narrowed to a role,
-     * with the span each ref names joined on. Same order and over-fetch as {@link #page}, so the dossier's
-     * enumeration and a reader paging this see the population in the same sequence; kept separate from
-     * {@link #page} because the enumeration wants ids and nothing else, while a reader judging one row — a
-     * person at the table, an agent on the MCP door — needs the row to say something.
+     * with the span each ref names joined on, so a reader judging one row (a person at the table, an
+     * agent on the MCP door) sees what was measured on it.
      *
      * <p>The keyset is {@code (role, rank, id)}, not {@code rank}: rank is neither dense nor unique
      * across the set (two roles number from zero independently, and gaps appear where a re-record
@@ -468,7 +472,7 @@ public class FindingEvidenceRepository {
                 .list();
         List<SpanRef> refs = rows.stream().map(Seeded::ref).toList();
         if (refs.size() <= limit) return new SpanPage(refs, null);
-        // Seeded from the last row of THIS page, exactly as page() does, the over-fetched row is the
+        // Seeded from the last row of THIS page: the over-fetched row is the
         // first row of the NEXT page, and seeding from it would skip it.
         Seeded last = rows.get(limit - 1);
         return new SpanPage(
@@ -552,10 +556,6 @@ public class FindingEvidenceRepository {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    private static String encodeCursor(FindingEvidenceRow last) {
-        return encodeCursor(last.role(), last.rank(), last.id());
     }
 
     /** The keyset, from its three parts, shared so the ref page and the span page tokenize identically. */

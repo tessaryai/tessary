@@ -18,7 +18,7 @@ public interface RcaSandbox {
      * Run the agent over the finding's evidence and (when the project has one) its repository. This
      * is not fail-open: it always either returns a completed run or throws {@link
      * ai.tessary.open.errors.TessaryException} — a user-triggered RCA must stamp
-     * {@code failed} rather than silently degrade to a bogus "inconclusive" verdict.
+     * {@code failed} rather than silently degrade to a bogus "no cause found" verdict.
      */
     SandboxRun run(SandboxRequest req);
 
@@ -29,6 +29,8 @@ public interface RcaSandbox {
      *     project with no repository connected: the run is evidence-only and the sandbox skips the
      *     clone entirely (see {@code AgenticRcaEngine} on the ceiling that lowers)
      * @param headSha commit to check out; null with {@code cloneUrl}
+     * @param onsetAt the finding's onset (ISO-8601), from which the sandbox resolves the commit live at the
+     *     onset after the clone; null with {@code cloneUrl}
      * @param files evidence dossier, relative path → content, written under the sandbox dossier dir
      * @param prompt the analysis task handed to the agent
      * @param jsonSchema schema the agent's final output is constrained to
@@ -45,6 +47,7 @@ public interface RcaSandbox {
             String subjectId,
             @Nullable String cloneUrl,
             @Nullable String headSha,
+            @Nullable String onsetAt,
             Map<String, String> files,
             String prompt,
             String jsonSchema,

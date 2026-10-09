@@ -57,6 +57,33 @@ test('rca.js checks out the requested commit, quarantines agent config, and runs
   assert.deepEqual(configs[0].permission.edit, { '*': 'deny' }, 'RCA never edits');
 });
 
+test('rca.js names the commit live at the onset in the prompt, or unknown before the first commit', async () => {
+  const dir = tmp('lanes-onset-');
+  const commit = (message, date) => {
+    execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', message], {
+      env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    });
+    return execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD']).toString().trim();
+  };
+  execFileSync('git', ['-C', dir, 'init', '--quiet']);
+  const live = commit('live at the onset', '2026-09-01T00:00:00Z');
+  const head = commit('after the onset', '2026-09-10T00:00:00Z');
+  const run = (onsetAt) => runLane('rca.js', {
+    clone_url: `file://${dir}`,
+    head_sha: head,
+    onset_at: onsetAt,
+    prompt: 'commit {onset_commit}; again {onset_commit}',
+    files: {},
+  });
+  const sent = ({ result }) => {
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout).turns[0].input;
+  };
+
+  assert.match(sent(await run('2026-09-05T00:00:00Z')), new RegExp(`^commit ${live}; again ${live}`));
+  assert.match(sent(await run('2026-08-01T00:00:00Z')), /^commit unknown; again unknown/);
+});
+
 test('rca.js without a clone_url still investigates, with no repo', async () => {
   const { result, workDir } = await runLane('rca.js', { files: { 'finding.md': 'the claim' } });
 

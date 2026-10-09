@@ -183,6 +183,8 @@ const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS || 180_000);
  *   <li>a hard {@code timeout} — the backstop for a network stall, which no prompt setting covers.
  * </ul>
  *
+ * <p>stdout comes back trimmed, for the callers that read an answer from git (a sha from rev-list).
+ *
  * <p>stderr is captured and scrubbed rather than discarded, so the thrown error can say
  * <em>why</em>. That is the whole point: "Authentication failed" and "connection timed out" are
  * different operational problems and used to be the same opaque sentence. Args are never echoed —
@@ -191,9 +193,9 @@ const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS || 180_000);
  */
 function git(args) {
   try {
-    execFileSync('git', ['-c', 'credential.helper=', ...args], {
-      // stdin/stdout ignored, stderr captured: the reason is worth having, the output never is.
-      stdio: ['ignore', 'ignore', 'pipe'],
+    return execFileSync('git', ['-c', 'credential.helper=', ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
       killSignal: 'SIGKILL',
       env: {
@@ -203,7 +205,7 @@ function git(args) {
         SSH_ASKPASS: '',
         GIT_CONFIG_NOSYSTEM: '1',
       },
-    });
+    }).trim();
   } catch (e) {
     const verb = args[0];
     if (e && (e.code === 'ETIMEDOUT' || e.signal === 'SIGKILL')) {

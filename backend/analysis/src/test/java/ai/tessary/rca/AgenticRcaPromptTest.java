@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,27 +23,24 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The prompt the agentic lane hands the Claude-in-E2B session, pinned where it names MCP tools and where
- * it must stay silent.
+ * The prompt, the tools file and the schema the RCA agent reads, pinned where they name MCP tools, where Java fills
+ * them, and where they must stay silent.
  *
- * <p>Two things are load-bearing here. First, this is the one agent the platform drives itself: the MCP
- * paragraph is the agent's tool catalogue, so a stale name in it does not degrade gracefully — it costs
- * the run a turn on {@code unknown tool} and teaches the agent the catalogue is unreliable. Nothing else
- * pinned this string, which is how {@code run_triage} survived the sweep that updated the registry, the
- * {@code initialize} instructions and two javadocs.
+ * <p>Two things are load-bearing here. First, this is the one agent the platform drives itself: {@code tools.md} is
+ * the agent's tool catalogue, so a stale name in it does not degrade gracefully — it costs the run a turn on
+ * {@code unknown tool} and teaches the agent the catalogue is unreliable.
  *
- * <p>Second, the CONTEXT FIREWALL. Layer 2 rules on the same finding with a cheap model and writes its
- * verdict onto the row; none of that may reach this prompt, including the fact that it happened. RCA is
- * the only check on the gate triage keeps, and an agent told "an earlier pass found this real" is not
- * performing that check. The vocabulary assertion below is the cheap half of the enforcement; the
- * structural half is {@code FindingRepository.findClaim}, which cannot read those columns at all.
+ * <p>Second, the CONTEXT FIREWALL. Layer 2 rules on the same finding with a cheap model and writes its verdict onto
+ * the row; none of that may reach what this agent reads, including the fact that it happened. RCA is the only check
+ * on the gate triage keeps, and an agent told "an earlier pass found this real" is not performing that check. The
+ * vocabulary assertion below is the cheap half of the enforcement; the structural half is
+ * {@code FindingRepository.findClaim}, which cannot read those columns at all.
  */
 class AgenticRcaPromptTest {
 
     /**
-     * The six names the read-only cutover deleted, kept in step with {@code McpCapabilityGateTest}'s set of
-     * the same. Five were the triage/RCA tools (spend, and reports that now ride inline on the case that owns
-     * them) and one was the last write.
+     * The names the read-only cutover deleted, kept in step with {@code McpCapabilityGateTest}'s set of the same:
+     * the triage/RCA tools, the last write, and the grader readers.
      */
     private static final Set<String> REMOVED_TOOLS = Set.of(
             "propose_grader_edit",
@@ -47,15 +49,12 @@ class AgenticRcaPromptTest {
             "latest_triage",
             "list_rca_reports",
             "get_rca_report",
-            // Graders were removed entirely, so the registry no longer serves these two either.
             "list_graders",
             "get_grader");
 
     /**
-     * What the v2 surface added and the prompt has to point at, or the platform's own agent is left driving
-     * the pre-v2 catalogue: it can fetch a trace by id but never find one, and never sees the cases. {@code
-     * get_finding_evidence} is the load-bearing one now — the dossier no longer hydrates a single trace, so
-     * an agent that does not call it has read nothing.
+     * What the surface serves and the agent has to be pointed at. {@code get_finding_evidence} is the load-bearing
+     * one: the dossier hydrates no trace, so an agent that does not call it has read nothing.
      */
     private static final List<String> EXPECTED_TOOLS = List.of(
             "get_finding_evidence",
@@ -75,137 +74,233 @@ class AgenticRcaPromptTest {
             "query_search");
 
     /**
-     * Layer 2's vocabulary, in the words the columns and the ruling use. A prompt containing any of them
-     * has told the agent something about a pass it must not know ran.
+     * Layer 2's vocabulary, in the words the columns and the ruling use. A text containing any of them has told the
+     * agent something about a pass it must not know ran.
      */
-    private static final List<String> TRIAGE_VOCABULARY =
+    static final List<String> TRIAGE_VOCABULARY =
             List.of("triage", "triage_verdict", "triage_action", "triage_summary", "triage_citations", "layer 2");
 
-    @Test
-    void theMcpParagraphNamesNoToolTheSurfaceRemoved() {
-        String prompt = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 12, 40);
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[a-z_]+\\}");
 
-        for (String gone : REMOVED_TOOLS) {
-            assertFalse(
-                    prompt.contains(gone),
-                    "the prompt advertises " + gone + ", which the surface answers with `unknown tool` — the"
-                            + " agent plans a call and burns a turn on it");
-        }
+    private static String prompt(boolean repo, boolean baseline, boolean method) {
+        return AgenticRcaEngine.buildPrompt(report(), "fnd-1", repo, baseline, method, 12, "traces", 15);
     }
 
-    @Test
-    void theMcpParagraphNamesEveryReaderTheAgentNeeds() {
-        String prompt = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 12, 40);
-
-        for (String tool : EXPECTED_TOOLS) {
-            assertTrue(
-                    prompt.contains(tool), "the prompt never names " + tool + ", so the agent will not reach for it");
-        }
-        assertTrue(prompt.contains("READ-ONLY"), "the prompt should say the surface writes nothing");
-        // The finding id is what get_finding_evidence takes, and the window bounds are what make the
-        // query tools usable at all.
-        assertTrue(prompt.contains("fnd-1"), "the finding id is interpolated");
-        assertTrue(prompt.contains("2026-05-01") && prompt.contains("2026-05-08"), "window bounds are interpolated");
-    }
-
-    /** Each lane's prompt builder, by repo presence, and whether the lane attributes causes to code. */
-    static Stream<Arguments> builders() {
-        Function<Boolean, String> metric = repo -> AgenticRcaEngine.buildPrompt(report(), "fnd-1", repo, 12, 40);
-        Function<Boolean, String> frustration = repo -> AgenticRcaEngine.buildFrustrationPrompt(
-                report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES), "fnd-1", repo, 12, 12);
-        Function<Boolean, String> groundedness = repo -> AgenticRcaEngine.buildGroundednessPrompt(
-                report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES), "fnd-1", repo, 12);
-        return Stream.of(
-                Arguments.of("metric", metric, true),
-                Arguments.of("frustration", frustration, true),
-                Arguments.of("groundedness", groundedness, true));
-    }
-
-    /** The firewall, in the one place a leak would be invisible: the prompt text itself. */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("builders")
-    void thePromptNeverDisclosesThatATriagePassExists(
-            String lane, Function<Boolean, String> build, boolean attributes) {
-        for (boolean repoCloned : new boolean[] {true, false}) {
-            String prompt = build.apply(repoCloned).toLowerCase(Locale.ROOT);
-            for (String word : TRIAGE_VOCABULARY) {
-                assertFalse(
-                        prompt.contains(word),
-                        "the " + lane + " prompt says '" + word + "' — the agent must not learn that an earlier pass"
-                                + " ruled on this finding (repoCloned=" + repoCloned + ")");
+    /** Every combination of the three snippets Java chooses. */
+    static Stream<Arguments> runs() {
+        List<Arguments> all = new ArrayList<>();
+        for (boolean repo : new boolean[] {true, false}) {
+            for (boolean baseline : new boolean[] {true, false}) {
+                for (boolean method : new boolean[] {true, false}) {
+                    all.add(Arguments.of(repo, baseline, method));
+                }
             }
         }
+        return all.stream();
     }
 
-    /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread, not sent to ./repo/. */
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("builders")
-    void aRepolessRunIsToldTheCodeSideIsUnread(String lane, Function<Boolean, String> build, boolean attributes) {
-        String prompt = build.apply(false);
-
-        assertFalse(prompt.contains("git -C ./repo"), "no clone to run git on");
-        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
-        assertTrue(prompt.contains("get_finding_evidence"), "MCP is the run's only substrate either way");
-        if (attributes) {
-            assertTrue(prompt.contains("kind to `unknown`"), "attribution falls to unknown without a repo");
+    /** Every text the agent reads besides the dossier's own finding and numbers, by name. */
+    private static Map<String, String> everyAgentText() {
+        Map<String, String> texts = new LinkedHashMap<>();
+        runs().forEach(a -> {
+            Object[] f = a.get();
+            texts.put(
+                    "prompt repo=" + f[0] + " baseline=" + f[1] + " method=" + f[2],
+                    prompt((boolean) f[0], (boolean) f[1], (boolean) f[2]));
+        });
+        texts.put("tools.md", AgenticRcaEngine.TOOLS);
+        texts.put("response_schema.json", AgenticRcaEngine.JSON_SCHEMA);
+        for (String key : RcaMethodFilesTest.builtInKeys()) {
+            String method = AgenticRcaEngine.method(key);
+            if (method != null) texts.put("method.md for " + key, method);
         }
-    }
-
-    /** Thin evidence changes the instruction, not just the number: a rate over four traces is four traces. */
-    @Test
-    void aThinSideCapsConfidence() {
-        assertTrue(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 2, 40).contains("cap every cause"),
-                "a two-trace baseline must cap confidence");
-        assertFalse(
-                AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, 40, 40).contains("cap every cause"),
-                "a well-evidenced finding gets no cap");
+        return texts;
     }
 
     @Test
-    void aFewFrustratedSessionsCapConfidence() {
-        RcaReportRow r = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
-        assertTrue(
-                AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 3, 3).contains("cap every cause"));
-        assertFalse(AgenticRcaEngine.buildFrustrationPrompt(r, "fnd-1", true, 30, 30)
-                .contains("cap every cause"));
+    void theToolsFileNamesNoToolTheSurfaceRemoved() {
+        everyAgentText().forEach((name, text) -> {
+            for (String gone : REMOVED_TOOLS) {
+                assertFalse(
+                        text.contains(gone),
+                        name + " advertises " + gone + ", which the surface answers with `unknown tool` — the agent"
+                                + " plans a call and burns a turn on it");
+            }
+        });
     }
 
     @Test
-    void aFewFlaggedTracesCapConfidence() {
-        RcaReportRow r = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
-        assertTrue(AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 3).contains("cap every cause"));
-        assertFalse(
-                AgenticRcaEngine.buildGroundednessPrompt(r, "fnd-1", true, 30).contains("cap every cause"));
+    void theToolsFileNamesEveryReaderTheAgentNeeds() {
+        for (String tool : EXPECTED_TOOLS) {
+            assertTrue(
+                    AgenticRcaEngine.TOOLS.contains(tool),
+                    "tools.md never names " + tool + ", so the agent will not reach for it");
+        }
+        assertTrue(AgenticRcaEngine.TOOLS.contains("READ-ONLY"), "tools.md should say the surface writes nothing");
     }
 
-    /** The two resources the groundedness branch sends: a schema whose causes cite traces, and its own rules. */
+    /** The firewall, in the one place a leak would be invisible: the text the agent reads. */
     @Test
-    void theGroundednessResourcesArePresent() throws Exception {
-        JsonNode schema = new ObjectMapper().readTree(AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA);
-        JsonNode cause = schema.path("properties").path("causes").path("items");
-        List<String> required = new ArrayList<>();
-        cause.path("required").forEach(n -> required.add(n.asText()));
-        assertTrue(required.contains("evidence_trace_ids"), required.toString());
-        assertTrue(required.contains("affected_count"), required.toString());
-        assertFalse(cause.path("properties").has("evidence_session_ids"), "no session receipts");
-        assertFalse(AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA.contains("session"));
+    void nothingTheAgentReadsDisclosesThatATriagePassExists() {
+        everyAgentText().forEach((name, text) -> {
+            String lower = text.toLowerCase(Locale.ROOT);
+            for (String word : TRIAGE_VOCABULARY) {
+                assertFalse(
+                        lower.contains(word),
+                        name + " says '" + word + "' — the agent must not learn that an earlier pass ruled on this"
+                                + " finding");
+            }
+        });
+    }
+
+    /** What this run is about reaches the agent: the finding, its window, its size and the time it has. */
+    @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
+    @MethodSource("runs")
+    void thisRunIsFilledIn(boolean repo, boolean baseline, boolean method) {
+        String prompt = prompt(repo, baseline, method);
+
+        assertTrue(prompt.contains("`fnd-1`"), "the finding id is what get_finding_evidence takes");
+        assertTrue(prompt.contains("onset: 2026-05-04T00:00:00Z"), prompt);
+        assertTrue(prompt.contains("last seen: 2026-05-08T00:00:00Z"), prompt);
+        assertTrue(prompt.contains("flagged traces in the evidence: 12"), prompt);
+        assertTrue(prompt.contains("time budget: 15 minutes"), prompt);
+        assertTrue(prompt.contains("`dossier/tools.md`"), "tools.md is a first read");
+        assertTrue(prompt.contains("`dossier/evidence.md`"), "evidence.md is a first read");
+        assertFalse(prompt.contains("\n\n\n"), "a snippet left out leaves no blank gap");
+    }
+
+    /** The sandbox boot and the clone spend part of the hard timeout, so the agent is told less than all of it. */
+    @Test
+    void theStatedBudgetLeavesRoomBeforeTheHardTimeout() {
+        assertEquals(12, AgenticRcaEngine.timeBudgetMinutes(900_000));
+        assertEquals(1, AgenticRcaEngine.timeBudgetMinutes(30_000));
+    }
+
+    /**
+     * Java fills every placeholder but one: {@code {onset_commit}} is resolved by the sandbox after the clone, so it
+     * must survive into a prompt with a repo and never appear in one without.
+     */
+    @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
+    @MethodSource("runs")
+    void onlyTheOnsetCommitIsLeftForTheSandbox(boolean repo, boolean baseline, boolean method) {
+        Matcher m = PLACEHOLDER.matcher(prompt(repo, baseline, method));
+        List<String> left = new ArrayList<>();
+        while (m.find()) left.add(m.group());
+
+        assertEquals(repo ? List.of("{onset_commit}") : List.of(), left);
+    }
+
+    @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
+    @MethodSource("runs")
+    void theMethodLineAppearsOnlyWhenTheFileShips(boolean repo, boolean baseline, boolean method) {
+        String prompt = prompt(repo, baseline, method);
+
+        assertEquals(method, prompt.contains(AgenticRcaEngine.METHOD_LINE));
+        assertEquals(method, prompt.contains("dossier/method.md"), "no line points at a file that is not there");
+    }
+
+    /** {@code member} rows are not a comparison side; only the finding's own {@code baseline} rows are. */
+    @ParameterizedTest(name = "repo={0} baseline={1} method={2}")
+    @MethodSource("runs")
+    void theBaselineSnippetAppearsOnlyWithBaselineRows(boolean repo, boolean baseline, boolean method) {
+        String prompt = prompt(repo, baseline, method);
+
+        assertEquals(baseline, prompt.contains("are the traffic before the onset"));
+        assertTrue(prompt.contains("`member` rows are not\na comparison side"), "said whether or not there is one");
+    }
+
+    /** No repo is a lower ceiling, not a refusal: the agent is told the code side is unread and to attribute nothing. */
+    @Test
+    void aRepolessRunIsToldTheCodeSideIsUnread() {
+        String prompt = prompt(false, false, true);
+
+        assertTrue(prompt.contains("no repository connected"), "it must say why there is nothing to read");
+        assertTrue(prompt.contains("The\ncode side of this run is unread"), prompt);
+        assertTrue(prompt.contains("leave `attribution` null"), "nothing to attribute to");
+        assertFalse(prompt.contains("current HEAD"), "no clone to read");
+    }
+
+    /** HEAD may postdate the finding, so the agent is sent to the code live at the onset. */
+    @Test
+    void aRunWithARepoIsSentToTheCodeLiveAtTheOnset() {
+        String prompt = prompt(true, false, true);
+
+        assertTrue(prompt.contains("`./repo/` is a clone"), prompt);
+        assertTrue(prompt.contains("the code that matters is the code live at the onset"), prompt);
+        assertTrue(prompt.contains("The commit live\nat the onset is `{onset_commit}`"), prompt);
+        assertFalse(prompt.contains("no repository connected"), prompt);
+    }
+
+    /**
+     * The standard of proof alone decides confidence: a finding with two flagged rows gets the same instructions as
+     * one with forty, only the count differs.
+     */
+    @Test
+    void theFlaggedCountChangesTheNumberAndNothingElse() {
+        String few = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 2, "sessions", 15);
+        String many = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 40, "sessions", 15);
+
+        assertEquals(many, few.replace("flagged sessions in the evidence: 2", "flagged sessions in the evidence: 40"));
+    }
+
+    /** One schema for every classifier, with exactly the verdicts and confidence levels the decision allows. */
+    @Test
+    void theSchemaIsTheOneContract() throws Exception {
+        JsonNode schema = new ObjectMapper().readTree(AgenticRcaEngine.JSON_SCHEMA);
+        JsonNode props = schema.path("properties");
+        JsonNode cause = props.path("causes").path("items");
+
+        assertEquals(
+                List.of("causes_identified", "no_cause_found"),
+                texts(props.path("verdict").path("enum")));
+        assertEquals(
+                List.of("high", "medium"),
+                texts(cause.path("properties").path("confidence").path("enum")));
+        assertEquals(
+                List.of("change", "standing"),
+                texts(cause.path("properties").path("change").path("enum")));
+        assertEquals(
+                List.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other"),
+                texts(cause.path("properties").path("type").path("enum")));
+        assertEquals(4, props.path("causes").path("maxItems").asInt());
+        assertEquals(
+                List.of("summary", "verdict", "causes", "ruled_out", "detailed_report"),
+                texts(schema.path("required")));
+        assertEquals(
+                List.of(
+                        "title",
+                        "change",
+                        "type",
+                        "confidence",
+                        "what_happens",
+                        "how_it_caused_this",
+                        "next_step",
+                        "attribution",
+                        "evidence_trace_ids",
+                        "affected_count"),
+                texts(cause.path("required")));
+        assertEquals(
+                "string", props.path("ruled_out").path("items").path("type").asText(), "one sentence each");
+        assertFalse(props.has("not_checked"), "what was not checked goes in detailed_report");
+        assertFalse(props.has("checklist"), "there is no checklist");
+    }
+
+    private static List<String> texts(JsonNode array) {
+        List<String> out = new ArrayList<>();
+        array.forEach(n -> out.add(n.asText()));
+        return out;
     }
 
     private static RcaReportRow report() {
-        return report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
-    }
-
-    private static RcaReportRow report(String reportKind) {
         return new RcaReportRow(
                 "rpt-1",
                 "job-1",
                 "finding",
                 "fnd-1",
-                "answer_relevance on checkout",
+                "tool_error on search",
                 "cs-checkout",
-                "pass_rate",
-                reportKind,
+                BuiltInDetector.Kind.TOOL_ERROR,
+                RcaReportRow.ReportKind.METRIC_MOVEMENT,
                 "2026-05-01T00:00:00Z",
                 "2026-05-04T00:00:00Z",
                 "2026-05-08T00:00:00Z",

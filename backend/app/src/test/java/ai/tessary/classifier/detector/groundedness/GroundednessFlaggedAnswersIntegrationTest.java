@@ -4,6 +4,7 @@ package ai.tessary.classifier.detector.groundedness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -11,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import ai.tessary.auth.AuthFilter;
 import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceText;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
@@ -172,6 +175,20 @@ class GroundednessFlaggedAnswersIntegrationTest {
                         marks.get(1).path("start").asInt(),
                         marks.get(1).path("end").asInt()));
         assertEquals(0.992, stored.path("score").asDouble(), "the highest marked sentence");
+
+        // The agent door's read: the stored answer's sentences as text, an unstored answer's scores alone.
+        SpanRef storedRef = new SpanRef(trace, span);
+        JsonNode other = first.path("rows").get(1);
+        SpanRef unstoredRef =
+                new SpanRef(other.path("traceId").asText(), other.path("spanId").asText());
+        Map<SpanRef, List<FlaggedSentenceText>> sentences =
+                detail.flaggedSentences(finding, List.of(storedRef, unstoredRef));
+        assertEquals(
+                List.of(new FlaggedSentenceText(FIRST, 0.981), new FlaggedSentenceText(SECOND, 0.992)),
+                sentences.get(storedRef));
+        List<FlaggedSentenceText> unstored = Objects.requireNonNull(sentences.get(unstoredRef));
+        assertEquals(1, unstored.size());
+        assertNull(unstored.getFirst().text(), "no stored answer to cut the sentence from");
 
         JsonNode last = page(session, base + "?limit=2&cursor=" + (cited - 1));
         assertEquals(1, last.path("rows").size());

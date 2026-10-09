@@ -1,0 +1,1 @@
+- `dossier/method.md`: how this classifier measures, how to read its evidence, and its quirks.

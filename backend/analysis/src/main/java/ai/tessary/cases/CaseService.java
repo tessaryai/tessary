@@ -659,7 +659,7 @@ public class CaseService {
     }
 
     /**
-     * That report as the wire view (verdict, causes, ruled-out checklist, the agent's markdown), or null
+     * That report as the wire view (verdict, causes, what was ruled out, the agent's markdown), or null
      * while it is still running.
      *
      * <p><b>Running is the one state that stays a bare id.</b> A pending or claimed report is a shell: the

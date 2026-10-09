@@ -2,7 +2,8 @@
 /*
  * CasePage: the groundedness story's causes, rate and cause-filtered answers, the verbs that close a
  * case, the RCA run and its in-flight and failed states, the answer and the working behind it, the
- * failures a page at a time, and a frustration case's causes. The bugs worth catching: a verb sent for
+ * failures a page at a time, and a frustration case's causes. Reports in the older stored shape and in the
+ * current one both render. The bugs worth catching: a verb sent for
  * the wrong case or offered before there is a report to justify it, a run that can be pressed twice, a
  * failed run that reads as an empty one, and a cause's "Show" that filters nothing.
  */
@@ -25,6 +26,7 @@ import { ToastProvider } from "../../ui";
 import { CasePage } from "./CasePage";
 import { stamp } from "../classifiers/shared";
 import {
+  CURRENT_GROUNDEDNESS_REPORT,
   FLAGGED_ANSWER,
   GROUNDEDNESS_CASE_DETAIL,
   GROUNDEDNESS_DETAIL,
@@ -62,6 +64,7 @@ const api = vi.hoisted(() => ({
   unmuteCase: vi.fn(),
   absorbCase: vi.fn(),
   runCaseRca: vi.fn(),
+  rerunRca: vi.fn(),
 }));
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
@@ -98,6 +101,8 @@ const ANSWER_REPORT: RcaReport = {
     {
       title: "The serving model changed under the call site",
       confidence: "high",
+      change: null,
+      type: null,
       what_changed: "A new model version started serving this call site.",
       how_it_caused_this: "The new model takes longer on the same inputs.",
       next_step: "A real regression. Pin the previous model.",
@@ -109,6 +114,8 @@ const ANSWER_REPORT: RcaReport = {
     {
       title: "Customers started pasting whole order histories",
       confidence: "high",
+      change: null,
+      type: null,
       what_changed: "Inputs grew to include order histories.",
       how_it_caused_this: "Longer inputs take longer to read.",
       next_step: "Expected traffic. Nothing to fix.",
@@ -120,6 +127,8 @@ const ANSWER_REPORT: RcaReport = {
     {
       title: "Traffic moved to longer inputs",
       confidence: "low",
+      change: null,
+      type: null,
       what_changed: "Inputs grew.",
       how_it_caused_this: "Maybe slower.",
       next_step: "Compare input lengths on both sides.",
@@ -255,7 +264,8 @@ beforeEach(() => {
   api.getFrustratedSessions.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
-  for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca]) f.mockResolvedValue({});
+  for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca, api.rerunRca])
+    f.mockResolvedValue({});
 });
 
 function renderPage() {
@@ -453,7 +463,20 @@ describe("running RCA", () => {
 
     await waitFor(() => expect(api.runCaseRca).toHaveBeenCalledWith("case-1"));
     expect(button("Analyzing…").disabled).toBe(true);
-    expect(screen.getByText("Reading the evidence and bracketing the change point.")).toBeTruthy();
+    expect(screen.getByText("Reading the evidence and looking for the cause.")).toBeTruthy();
+  });
+
+  /** Catches "Re-run RCA" coalescing onto the finished report, so the press starts nothing. */
+  it("re-runs the case's report when one exists, instead of asking the case trigger again", async () => {
+    api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }));
+    api.getRcaReport.mockResolvedValue(ANSWER_REPORT);
+    renderPage();
+    await heading(BASE.case.title);
+
+    fireEvent.click(button("Re-run RCA"));
+
+    await waitFor(() => expect(api.rerunRca).toHaveBeenCalledWith("rca-1"));
+    expect(api.runCaseRca).not.toHaveBeenCalled();
   });
 
   it("asks a ranked case to run RCA before resolving it", async () => {
@@ -590,6 +613,39 @@ describe("the answer and the working behind it", () => {
     await heading(BASE.case.title);
 
     expect(screen.queryByText(/a model rollout/)).toBeNull();
+  });
+
+  /** Catches a current medium cause hidden as a lead, labels taken from the case type, and an internal id shown
+   *  beside a ruled-out sentence. */
+  it("cards a current report's medium cause as a cause, labels each from its change, and lists what was ruled out", async () => {
+    api.getCase.mockResolvedValue(
+      plainCase({ rca: { ...CURRENT_GROUNDEDNESS_REPORT, report_kind: "attribution" }, rca_report_id: "rca-1" }),
+    );
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText("The retriever still serves the old pricing and policy pages")).toBeTruthy();
+    expect(screen.getByText("The system prompt asks for a complete answer every time")).toBeTruthy();
+    expect(screen.queryByText("No cause proven")).toBeNull();
+    expect(screen.queryByText(CURRENT_GROUNDEDNESS_REPORT.summary!)).toBeNull();
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText("Medium")).toBeTruthy();
+    expect(screen.getByText("What changed")).toBeTruthy();
+    expect(screen.getByText("What the agent does")).toBeTruthy();
+    expect(screen.getByText("Why it changed")).toBeTruthy();
+    expect(screen.getByText("Why it happens")).toBeTruthy();
+    expect(screen.getAllByText("What to do")).toHaveLength(2);
+    expect(screen.queryByText("Why it might be")).toBeNull();
+    expect(screen.queryByText("To confirm")).toBeNull();
+    expect(screen.queryByText("What it means")).toBeNull();
+    expect(screen.getByText("Data")).toBeTruthy();
+    expect(screen.getByText("Prompt")).toBeTruthy();
+    expect(screen.getByText("Always give a complete answer.")).toBeTruthy();
+
+    expect(screen.getByText("2 explanations tested, 2 eliminated.")).toBeTruthy();
+    expect(screen.getByText("The serving model did not change during the window.")).toBeTruthy();
+    expect(screen.getAllByText("ruled out")).toHaveLength(2);
+    expect(screen.queryByText("ruled_out_1")).toBeNull();
   });
 });
 

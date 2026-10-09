@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,8 +46,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * concretely with {@code OpenApiSpecDriftTest}). The per-job throw in {@link AgenticRcaEngine#run}
  * remains the enforcement point for a blank URL.
  *
- * <p>{@link AgenticRcaEngine#run} is covered for the groundedness lane: it picks the prompt, the schema and
- * the parser by report kind, and nothing else checks that switch end to end.
+ * <p>{@link AgenticRcaEngine#run} is covered end to end with a recording sandbox: one prompt and one schema for
+ * every report kind, filled from the run's evidence and dossier, and the reply validated against this finding.
  */
 @ExtendWith(MockitoExtension.class)
 class AgenticRcaEngineTest {
@@ -126,26 +127,35 @@ class AgenticRcaEngineTest {
         };
     }
 
-    @Test
-    void aGroundednessRunUsesTheGroundednessPromptSchemaAndParser() {
+    /** Evidence with flagged traces and no baseline side. */
+    private static AgenticRcaEngine.Evidence traces(String... citable) {
+        return new AgenticRcaEngine.Evidence(Set.of(citable), Set.of(), false, citable.length, "traces");
+    }
+
+    /**
+     * Catches a run handed a prompt other than the one investigative prompt, or another schema: every report kind
+     * sends the same prompt, filled from the run's evidence, the dossier and the configured time budget.
+     */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                RcaReportRow.ReportKind.METRIC_MOVEMENT,
+                RcaReportRow.ReportKind.FRUSTRATION_CAUSES,
+                RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES
+            })
+    void everyReportKindGetsTheOnePromptAndSchema(String kind) {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl("https://tessary.test/");
-        RcaJobRow job = new RcaJobRow("job-1", "proj-1", "fnd-1", "finding", "fnd-1", "groundedness_rate", "user-1");
-        RcaReportRow report = groundednessReport();
+        props.getAgentic().setTimeoutMs(600_000);
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
-        // tr-1 is a flagged trace of this finding; a groundedness cause cites traces and no sessions, so the
-        // frustration parser would drop it and downgrade the verdict.
-        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"One document per answer\","
-                + "\"verdict\":\"causes_identified\",\"detailed_report\":\"## r\",\"checklist\":[],"
-                + "\"causes\":[{\"title\":\"Retrieves one document\",\"what_changed\":\"w\","
-                + "\"affected_count\":2,\"evidence_trace_ids\":[\"tr-1\"],"
-                + "\"attribution\":{\"kind\":\"code\",\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\","
-                + "\"excerpt\":\"top_k=1\"},\"next_step\":\"f\",\"confidence\":\"medium\"}]}");
-        AgenticRcaEngine engine = engine(props, sandbox);
-        Map<String, String> dossier = Map.of("finding.md", "# f");
+        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"s\",\"verdict\":\"no_cause_found\","
+                + "\"detailed_report\":\"## d\",\"ruled_out\":[],\"causes\":[]}");
+        RcaReportRow report = report(kind);
+        Map<String, String> dossier = Map.of("finding.md", "# f", AgenticRcaEngine.METHOD_FILE, "# m");
+        AgenticRcaEngine.Evidence evidence =
+                new AgenticRcaEngine.Evidence(Set.of("tr-1", "tb-1"), Set.of("s-1", "s-2"), true, 2, "sessions");
 
-        AgenticRcaEngine.Result result =
-                engine.run(job, report, "fnd-1", dossier, Set.of(), Set.of("tr-1", "tr-2"), Set.of(), Set.of());
+        AgenticRcaEngine.Result result = engine(props, sandbox).run(job(), report, "fnd-1", dossier, evidence);
 
         assertEquals(
                 List.of(new RcaSandbox.SandboxRequest(
@@ -153,13 +163,68 @@ class AgenticRcaEngineTest {
                         "fnd-1",
                         null,
                         null,
+                        null,
                         dossier,
-                        AgenticRcaEngine.buildGroundednessPrompt(report, "fnd-1", false, 2),
-                        AgenticRcaEngine.GROUNDEDNESS_JSON_SCHEMA,
+                        AgenticRcaEngine.buildPrompt(
+                                report,
+                                "fnd-1",
+                                false,
+                                true,
+                                true,
+                                2,
+                                "sessions",
+                                AgenticRcaEngine.timeBudgetMinutes(600_000)),
+                        AgenticRcaEngine.JSON_SCHEMA,
                         "https://tessary.test/mcp",
                         "tsk_plain",
                         "rpt-1")),
                 sandbox.requests);
+        assertEquals(
+                new AgenticRcaEngine.Result(
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false),
+                result);
+    }
+
+    /** No method file in the dossier (a user or regex classifier): the prompt does not point at one. */
+    @Test
+    void aDossierWithoutAMethodFileGetsAPromptWithoutTheMethodLine() {
+        RcaProperties props = new RcaProperties();
+        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
+        RecordingSandbox sandbox = new RecordingSandbox("{\"verdict\":\"no_cause_found\",\"causes\":[]}");
+        RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
+
+        engine(props, sandbox).run(job(), report, "fnd-1", Map.of("finding.md", "# f"), traces("tr-1"));
+
+        String prompt = sandbox.requests.get(0).prompt();
+        assertEquals(
+                AgenticRcaEngine.buildPrompt(
+                        report, "fnd-1", false, false, false, 1, "traces", AgenticRcaEngine.timeBudgetMinutes(900_000)),
+                prompt);
+        assertFalse(prompt.contains("method.md"), prompt);
+    }
+
+    /**
+     * Catches the parser reading the run with the wrong receipts or repo ceiling: the cause keeps only this finding's
+     * trace, and with no repo cloned its path and commit are cleared.
+     */
+    @Test
+    void theRunsCausesAreValidatedAgainstThisFindingsEvidence() {
+        RcaProperties props = new RcaProperties();
+        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
+        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"One document per answer\","
+                + "\"verdict\":\"causes_identified\",\"detailed_report\":\"## r\","
+                + "\"ruled_out\":[\"The model did not change.\"],"
+                + "\"causes\":[{\"title\":\"Retrieves one document\",\"change\":\"change\",\"type\":\"code\","
+                + "\"confidence\":\"medium\",\"what_happens\":\"w\",\"how_it_caused_this\":\"h\","
+                + "\"next_step\":\"f\",\"affected_count\":2,\"evidence_trace_ids\":[\"tr-1\",\"tr-9\"],"
+                + "\"attribution\":{\"path\":\"rag/retrieve.py\",\"commit\":\"abc123\",\"excerpt\":\"top_k=1\"}}]}");
+        RcaReportRow report = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
+
+        AgenticRcaEngine.Result result =
+                engine(props, sandbox).run(job(), report, "fnd-1", Map.of(), traces("tr-1", "tr-2"));
+
         assertEquals(
                 new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
@@ -167,87 +232,64 @@ class AgenticRcaEngineTest {
                         List.of(new RcaDtos.Cause(
                                 "Retrieves one document",
                                 "medium",
+                                "change",
+                                "code",
                                 "w",
-                                null,
+                                "h",
                                 "f",
-                                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                                new RcaDtos.Attribution(null, null, null, "top_k=1"),
                                 List.of("tr-1"),
                                 List.of(),
                                 2)),
-                        List.of(),
+                        List.of(RcaDtos.RuledOutCheck.ruledOut(1, "The model did not change.")),
                         "## r",
                         false),
                 result);
     }
 
     /**
-     * Catches the default (metric-movement) arm handing the agent another lane's prompt or schema, and a
-     * downgraded verdict that is only logged: the note must lead the report an engineer reads, and a reply
+     * Catches a downgraded verdict that is only logged: the note must lead the report an engineer reads, and a reply
      * with no {@code detailed_report} must fall back to its summary rather than render an empty page.
      */
     @Test
-    void aMetricMovementRunUsesTheDefaultPromptAndLeadsItsReportWithTheDowngrade() {
+    void aDowngradedVerdictLeadsTheReportAndAMissingReportFallsBackToTheSummary() {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl("https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
-        // behavior_change is comparative, the finding has a baseline side, and no cause cites it.
-        RecordingSandbox sandbox = new RecordingSandbox(
-                "{\"summary\":\"The flagged side changed\",\"verdict\":\"behavior_change\",\"checklist\":[]}");
-        AgenticRcaEngine engine = engine(props, sandbox);
+        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"The flagged side changed\","
+                + "\"verdict\":\"causes_identified\",\"causes\":[{\"title\":\"t\",\"confidence\":\"high\","
+                + "\"evidence_trace_ids\":[\"tr-9\"]}]}");
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
-        AgenticRcaEngine.Result result = engine.run(
-                job(), report, "fnd-1", Map.of(), Set.of("tb-1"), Set.of("tf-1", "tf-2"), Set.of(), Set.of());
+        AgenticRcaEngine.Result result =
+                engine(props, sandbox).run(job(), report, "fnd-1", Map.of(), traces("tf-1", "tf-2"));
 
-        RcaSandbox.SandboxRequest sent = sandbox.requests.get(0);
-        assertEquals(AgenticRcaEngine.buildPrompt(report, "fnd-1", false, 1, 2), sent.prompt());
-        assertEquals(AgenticRcaEngine.JSON_SCHEMA, sent.jsonSchema());
-        assertEquals(RcaReportRow.Verdict.INCONCLUSIVE, result.verdict());
+        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, result.verdict());
         assertEquals(List.of(), result.causes());
         assertTrue(result.detailedReport().startsWith("> **Verdict downgraded by the platform.**"));
         assertTrue(result.detailedReport().endsWith("\n\nThe flagged side changed"));
     }
 
-    /** Catches a frustration run handed the metric-movement prompt, schema or parser, which cites no sessions. */
-    @Test
-    void aFrustrationRunUsesTheFrustrationPromptSchemaAndParser() {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test");
-        when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
-        RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"s\",\"verdict\":\"no_cause_found\","
-                + "\"detailed_report\":\"## d\",\"checklist\":[],\"causes\":[]}");
-        AgenticRcaEngine engine = engine(props, sandbox);
-        RcaReportRow report = report(RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
-
-        AgenticRcaEngine.Result result =
-                engine.run(job(), report, "fnd-1", Map.of(), Set.of(), Set.of("tr-1"), Set.of("s-1", "s-2"), Set.of());
-
-        RcaSandbox.SandboxRequest sent = sandbox.requests.get(0);
-        assertEquals(AgenticRcaEngine.buildFrustrationPrompt(report, "fnd-1", false, 2, 1), sent.prompt());
-        assertEquals(AgenticRcaEngine.FRUSTRATION_JSON_SCHEMA, sent.jsonSchema());
-        assertEquals(
-                new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "s", List.of(), List.of(), "## d", false),
-                result);
-    }
-
     /**
-     * Catches a connected repo not reaching the sandbox (no clone URL, or not at its head), a repo whose token
-     * cannot be minted failing the run instead of running evidence-only, and a key revocation that fails
-     * throwing away a finished analysis.
+     * Catches a connected repo not reaching the sandbox (no clone URL, not at its head, or no onset to resolve the
+     * onset commit from), a repo whose token cannot be minted failing the run instead of running evidence-only, and a
+     * key revocation that fails throwing away a finished analysis.
      */
     @ParameterizedTest
     @CsvSource(
             nullValues = "NULL",
-            value = {"'Bearer ghs_1', https://x-access-token:ghs_1@github.com/acme/web.git, sha-1", "NULL, NULL, NULL"})
+            value = {
+                "'Bearer ghs_1', https://x-access-token:ghs_1@github.com/acme/web.git, sha-1, 2026-05-04T00:00:00Z",
+                "NULL, NULL, NULL, NULL"
+            })
     void aConnectedRepoIsHandedOverAtItsHeadAndAFailedRevocationDoesNotSinkTheRun(
-            String authHeader, String expectedCloneUrl, String expectedSha) {
+            String authHeader, String expectedCloneUrl, String expectedSha, String expectedOnset) {
         RcaProperties props = new RcaProperties();
         props.getAgentic().setMcpBaseUrl("https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         when(apiKeys.revoke("key-1", "user-1")).thenThrow(new IllegalStateException("audit write failed"));
         RecordingSandbox sandbox = new RecordingSandbox(
-                "{\"summary\":\"s\",\"verdict\":\"inconclusive\",\"detailed_report\":\"## r\",\"checklist\":[]}");
+                "{\"summary\":\"s\",\"verdict\":\"no_cause_found\",\"detailed_report\":\"## r\",\"ruled_out\":[]}");
         GitIntegrationRepository repo = new GitIntegrationRepository(mock(JdbcClient.class)) {
             @Override
             public Optional<GitIntegrationRow> findByProject(String projectId) {
@@ -261,13 +303,23 @@ class AgenticRcaEngineTest {
                 new AgenticRcaEngine(props, List.of(sandbox), repo, providers, apiKeys, new ObjectMapper());
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
-        AgenticRcaEngine.Result result =
-                engine.run(job(), report, "fnd-1", Map.of(), Set.of(), Set.of("tf-1"), Set.of(), Set.of());
+        AgenticRcaEngine.Result result = engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1"));
 
         RcaSandbox.SandboxRequest sent = sandbox.requests.get(0);
         assertEquals(expectedCloneUrl, sent.cloneUrl());
         assertEquals(expectedSha, sent.headSha());
-        assertEquals(AgenticRcaEngine.buildPrompt(report, "fnd-1", expectedCloneUrl != null, 0, 1), sent.prompt());
+        assertEquals(expectedOnset, sent.onsetAt());
+        assertEquals(
+                AgenticRcaEngine.buildPrompt(
+                        report,
+                        "fnd-1",
+                        expectedCloneUrl != null,
+                        false,
+                        false,
+                        1,
+                        "traces",
+                        AgenticRcaEngine.timeBudgetMinutes(900_000)),
+                sent.prompt());
         assertEquals(expectedCloneUrl != null, result.repoAvailable());
         assertEquals("## r", result.detailedReport());
     }
@@ -286,8 +338,7 @@ class AgenticRcaEngineTest {
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> engine.run(job(), report, "fnd-1", Map.of(), Set.of(), Set.of("tf-1"), Set.of(), Set.of()));
+                TessaryException.class, () -> engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1")));
 
         assertEquals(RcaError.NO_EVIDENCE_DOOR, e.error());
         assertEquals(List.of(), sandbox.requests);

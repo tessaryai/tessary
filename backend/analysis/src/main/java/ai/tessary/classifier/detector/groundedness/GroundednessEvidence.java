@@ -106,6 +106,14 @@ public final class GroundednessEvidence {
     public record FlaggedSentenceView(int start, int end, double score) {}
 
     /**
+     * One flagged sentence as text, for a reader that does not hold the answer it indexes into.
+     *
+     * @param text the sentence as it was scored; null once the answer aged out, or when its offsets no longer fall
+     *     inside the stored answer
+     */
+    public record FlaggedSentenceText(@Nullable String text, double score) {}
+
+    /**
      * One passage the answer was compared against.
      *
      * @param title the retrieved row's source or name; null while the evidence read carries none, which the page

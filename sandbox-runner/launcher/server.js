@@ -7,7 +7,7 @@
  * sandbox is ever reused across requests or tenants.
  *
  * Endpoints (Bearer-authed with SANDBOX_API_KEY):
- *   POST /rca      { clone_url?, head_sha?, files, prompt, json_schema, model, mcp, timeout_ms }
+ *   POST /rca      { clone_url?, head_sha?, onset_at?, files, prompt, json_schema, model, mcp, timeout_ms }
  *                                                    -> { raw: "<agent stdout>" }  agentic root-cause
  *                                                    analysis over the dossier + the platform's MCP
  *                                                    surface, plus ./repo/ when a clone_url is sent

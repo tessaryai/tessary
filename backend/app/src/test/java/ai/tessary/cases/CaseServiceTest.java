@@ -196,7 +196,7 @@ class CaseServiceTest {
         rcaReports.complete(
                 jobId,
                 JobRow.Status.DONE,
-                RcaReportRow.Verdict.MODEL_CHANGE,
+                RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                 "The judge model changed mid-window.",
                 null,
                 null,
@@ -210,7 +210,7 @@ class CaseServiceTest {
         RcaReportView report = finished.rca();
         assertNotNull(report, "a completed report belongs on the case page, whole");
         assertEquals(finished.rcaReportId(), report.id(), "the inlined report is the one the id names");
-        assertEquals(RcaReportRow.Verdict.MODEL_CHANGE, report.verdict());
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
         assertEquals("## Why\nThe provider rotated the default.", report.detailedReport());
     }
 

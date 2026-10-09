@@ -249,7 +249,7 @@ public final class CaseDtos {
      * @param rcaReportId the most recent RCA on this case's subject, if one has run. A report
      *     still running has an id here and nothing in {@code rca} yet, which is how a client
      *     knows to poll.
-     * @param rca that report in full — verdict, causes, the ruled-out checklist, and the
+     * @param rca that report in full — verdict, causes, what was ruled out, and the
      *     agent's write-up — inlined once finished, null while pending or when there is none.
      *     Inlined rather than left as a bare id: the report is the answer to "why is this case
      *     open," and pointing at it would cost a second round trip for the UI and a second gated

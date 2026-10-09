@@ -2653,7 +2653,7 @@ export interface components {
         Attribution: {
             commit: string | null;
             excerpt: string | null;
-            kind: string;
+            kind: string | null;
             path: string | null;
         };
         AuditLog: {
@@ -2900,12 +2900,14 @@ export interface components {
             /** Format: int32 */
             affected_count: number;
             attribution: components["schemas"]["Attribution"] | null;
+            change: string | null;
             confidence: string;
             evidence_session_ids: string[];
             evidence_trace_ids: string[];
             how_it_caused_this: string | null;
             next_step: string | null;
             title: string;
+            type: string | null;
             what_changed: string | null;
         };
         Chain: {
@@ -4095,7 +4097,7 @@ export interface components {
         RuledOutCheck: {
             assessment: string;
             check: string;
-            detail: string;
+            detail: string | null;
             measurement: string | null;
             passed: boolean;
             question: string | null;

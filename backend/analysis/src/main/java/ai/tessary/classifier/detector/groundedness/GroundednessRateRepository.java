@@ -3,14 +3,20 @@ package ai.tessary.classifier.detector.groundedness;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -129,6 +135,19 @@ public class GroundednessRateRepository {
                     WHERE r.id = :report AND r.project_id = e.project_id AND r.finding_id = e.finding_id
                       AND e.trace_id IN (SELECT jsonb_array_elements_text(
                               r.causes -> CAST(:cause AS int) -> 'evidence_trace_ids')))""";
+
+    /**
+     * What the detector wrote for each answer in a set of span refs: the newest detection row per span, the same
+     * row {@link #ANSWER_PAGE} reads, so both reads cite one set of flagged sentences.
+     */
+    private static final String DETECTION_EVIDENCE = """
+            SELECT DISTINCT ON (d.subject_trace_id, d.subject_span_id)
+                   d.subject_trace_id, d.subject_span_id, d.evidence::text AS evidence
+              FROM {detections} d
+             WHERE d.project_id = :pid AND d.classifier_id = :cid
+               AND d.subject_trace_id IN (:tids) AND d.subject_span_id IN (:sids)
+             ORDER BY d.subject_trace_id, d.subject_span_id, d.subject_started_at DESC NULLS LAST, d.id DESC
+            """;
 
     /** One RCA cause: the report that found it and its 0-based position in that report's causes. */
     public record CauseRef(String reportId, int index) {}
@@ -301,6 +320,32 @@ public class GroundednessRateRepository {
         }
         return new AnswerPage(rows, total[0]);
     }
+
+    /**
+     * The detector's evidence JSON for each answer in {@code spans} that {@code classifierId} scored. A span with
+     * no detection row, or a null evidence column, is absent from the map.
+     */
+    public Map<SpanRef, String> detectionEvidence(String projectId, String classifierId, Collection<SpanRef> spans) {
+        if (spans.isEmpty()) return Map.of();
+        String table = Objects.requireNonNull(detections.tableFor(BuiltInDetector.Kind.GROUNDEDNESS));
+        Set<SpanRef> wanted = new HashSet<>(spans);
+        List<DetectionEvidence> rows = jdbc.sql(DETECTION_EVIDENCE.replace("{detections}", table))
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("tids", wanted.stream().map(SpanRef::traceId).distinct().toList())
+                .param("sids", wanted.stream().map(SpanRef::spanId).distinct().toList())
+                .query((rs, n) -> new DetectionEvidence(
+                        new SpanRef(rs.getString("subject_trace_id"), rs.getString("subject_span_id")),
+                        rs.getString("evidence")))
+                .list();
+        Map<SpanRef, String> out = new HashMap<>();
+        for (DetectionEvidence row : rows) {
+            if (row.evidenceJson() != null && wanted.contains(row.ref())) out.put(row.ref(), row.evidenceJson());
+        }
+        return out;
+    }
+
+    private record DetectionEvidence(SpanRef ref, @Nullable String evidenceJson) {}
 
     private JdbcClient.StatementSpec spell(String sql, String projectId, String classifierId, String scorerVersion) {
         return jdbc.sql(sql).param("pid", projectId).param("cid", classifierId).param("scorerVersion", scorerVersion);

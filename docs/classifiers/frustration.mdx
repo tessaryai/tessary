@@ -103,12 +103,16 @@ A message cleared by a **False alarm** resolve is not marked and does not match 
 
 Select **Run RCA** on the case. Root-cause analysis reads every frustrated session the finding cites and, with a connected repository, your code. It returns one of two verdicts: **Causes identified** or **No cause found**.
 
-The case page cards each proven cause, one with high confidence. When no cause is proven, it says so, gives the summary, and shows the leads, each with its confidence: medium or low. Each cause shows:
+A cause can be something that changed, such as a commit or a prompt, or something the agent always does. Each cause is graded on its own: **High** when the analysis found the mechanism and sees its effect in the cited sessions, **Medium** when it shows one of the two. Anything less is not reported as a cause.
 
-- **What the agent did**, **Why users got frustrated**, and **What to do**. On a lead, the last two read **Why it might be** and **To confirm**.
+The case page cards every cause, high first. Each cause shows:
+
+- **What changed** or **What the agent does**, then **Why users got frustrated** and **What to do**.
 - How many sessions show it.
-- Where it comes from: a prompt, code, a tool, or the model, with the file, commit, and excerpt when one lines up.
+- The prompt, code, or tool line behind it, with the file, commit, and excerpt when one lines up.
 - The sessions and turns that show it. On the case, the **Show** link on a cause, such as **Show 12 sessions**, narrows the session list to that cause.
+
+**What else was checked** lists the candidate causes the analysis ruled out, each with its reason.
 
 [Root-cause analysis](/concepts/root-cause-analysis#on-a-frustration-case) covers how the report checks its own citations.
 

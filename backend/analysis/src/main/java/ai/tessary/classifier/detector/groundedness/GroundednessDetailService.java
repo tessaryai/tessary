@@ -4,6 +4,7 @@ package ai.tessary.classifier.detector.groundedness;
 import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerPage;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerView;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceText;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceView;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.RetrievedDocumentView;
@@ -17,7 +18,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -111,20 +114,59 @@ public class GroundednessDetailService {
     }
 
     /**
+     * The flagged sentences of each answer in {@code refs}, as text with its score, in the order the detector wrote
+     * them. Every ref is a key; one with no detection row left maps to no sentences.
+     */
+    public Map<SpanRef, List<FlaggedSentenceText>> flaggedSentences(FindingRow finding, Collection<SpanRef> refs) {
+        if (refs.isEmpty()) return Map.of();
+        Map<SpanRef, String> evidence = rates.detectionEvidence(finding.projectId(), finding.subjectId(), refs);
+        Map<SpanRef, String> answers = new HashMap<>();
+        if (!evidence.isEmpty()) {
+            for (SubstrateObservation o : substrate.observationsByIds(finding.projectId(), evidence.keySet())) {
+                String answer = o.outputText();
+                if (answer != null && !answer.isBlank()) {
+                    answers.put(new SpanRef(o.traceId(), o.observationId()), answer);
+                }
+            }
+        }
+        Map<SpanRef, List<FlaggedSentenceText>> out = new LinkedHashMap<>();
+        for (SpanRef ref : refs) {
+            String answer = answers.get(ref);
+            out.put(
+                    ref,
+                    sentences(parse(evidence.get(ref))).stream()
+                            .map(s -> new FlaggedSentenceText(cut(answer, s), s.score()))
+                            .toList());
+        }
+        return out;
+    }
+
+    private static @Nullable String cut(@Nullable String answer, FlaggedSentenceView s) {
+        if (answer == null || s.start() < 0 || s.end() > answer.length() || s.start() >= s.end()) return null;
+        return answer.substring(s.start(), s.end());
+    }
+
+    private static List<FlaggedSentenceView> sentences(JsonNode evidence) {
+        List<FlaggedSentenceView> sentences = new ArrayList<>();
+        for (JsonNode s : evidence.path("flagged_sentences")) {
+            sentences.add(new FlaggedSentenceView(
+                    s.path("start").asInt(0),
+                    s.path("end").asInt(0),
+                    s.path("unsupported").asDouble(0)));
+        }
+        return sentences;
+    }
+
+    /**
      * One answer. It is stored while its span's output is: an answer the inputs no longer score (its call site's
      * shape moved) is still shown, with the question and documents it can no longer be matched to left out.
      */
     private FlaggedAnswerView view(
             CitedAnswer a, @Nullable SubstrateObservation span, GroundednessInputs.@Nullable Inputs in) {
         JsonNode evidence = parse(a.evidenceJson());
-        List<FlaggedSentenceView> sentences = new ArrayList<>();
+        List<FlaggedSentenceView> sentences = sentences(evidence);
         Double score = null;
-        for (JsonNode s : evidence.path("flagged_sentences")) {
-            FlaggedSentenceView sentence = new FlaggedSentenceView(
-                    s.path("start").asInt(0),
-                    s.path("end").asInt(0),
-                    s.path("unsupported").asDouble(0));
-            sentences.add(sentence);
+        for (FlaggedSentenceView sentence : sentences) {
             if (score == null || sentence.score() > score) score = sentence.score();
         }
         if (score == null && evidence.path("unsupported").isNumber())
