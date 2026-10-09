@@ -388,7 +388,7 @@ public class FrustrationRateRepository {
 
     /**
      * {@link ConversationContext} for each of {@code traceIds}, keyed by trace id. The conversation key is
-     * {@code COALESCE(thread_id, session_id)}, and an earlier turn is one that reached {@code callSiteId}: the
+     * {@code session_id}, and an earlier turn is one that reached {@code callSiteId}: the
      * turns the classifier read, in event time so an upload that stored its turns out of order still reads
      * them in the order they happened.
      */
@@ -405,7 +405,7 @@ public class FrustrationRateRepository {
                                 SELECT t.id, t.started_at FROM trace t
                                  WHERE t.project_id = f.project_id
                                    AND t.parent_trace_id IS NULL
-                                   AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
+                                   AND t.session_id = f.session_id
                                    AND (t.started_at, t.id) < (f.started_at, f.id)
                                    AND EXISTS (SELECT 1 FROM span c
                                                 WHERE c.project_id = t.project_id AND c.trace_id = t.id

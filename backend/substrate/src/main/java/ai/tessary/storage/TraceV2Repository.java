@@ -725,9 +725,8 @@ public class TraceV2Repository {
     }
 
     /**
-     * A conversation's turns, oldest first. A conversation is {@code COALESCE(thread_id, session_id)} and a turn
-     * is a top-level trace: the key and grain the frustration classifier scores at. Served by
-     * {@code ix_trace_conversation}, which is partial on {@code parent_trace_id IS NULL}.
+     * A conversation's turns, oldest first. A conversation is a session and a turn is a top-level trace: the key
+     * and grain the frustration classifier scores at. Served by {@code ix_trace_session}.
      */
     public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
         return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
@@ -736,7 +735,7 @@ public class TraceV2Repository {
                         + " t.total_tokens, t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans,"
                         + " t.is_settled, t.input_preview, t.output_preview"
                         + " FROM trace t"
-                        + " WHERE t.project_id = :pid AND COALESCE(t.thread_id, t.session_id) = :cid"
+                        + " WHERE t.project_id = :pid AND t.session_id = :cid"
                         + " AND t.parent_trace_id IS NULL AND NOT t.is_deleted"
                         + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
                 .param("pid", projectId)

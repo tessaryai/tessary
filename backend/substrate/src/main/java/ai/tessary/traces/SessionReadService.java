@@ -284,9 +284,9 @@ public class SessionReadService {
     }
 
     /**
-     * One conversation's turns, oldest first, capped like {@link #detail}. A conversation is
-     * {@code COALESCE(thread_id, session_id)}, so it is a thread inside a session or a session's unthreaded
-     * turns, never a whole session; {@link #detail} answers that. Empty when no turn carries the key.
+     * One session's turns, oldest first, capped like {@link #detail}: its top-level traces whatever their
+     * {@code thread_id}, without the sub-agent traces and totals {@link #detail} carries. Empty when no turn
+     * carries the session.
      */
     public Optional<SessionDtos.ConversationDetail> conversation(String projectId, String conversationId) {
         List<TraceV2Repository.Summary> rows =

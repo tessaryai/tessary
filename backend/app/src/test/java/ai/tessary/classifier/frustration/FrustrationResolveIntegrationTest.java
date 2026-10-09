@@ -129,8 +129,7 @@ class FrustrationResolveIntegrationTest {
                 .toList();
         assertEquals(72, cited.size(), "every frustrated session since onset, past the fifty a page shows");
         String conversation = cited.get(0);
-        new SubstrateV2Fixtures(sessions, traces, spans, payloads)
-                .trace(pid, "tr-later", "sess-later", conversation, null, Instant.now());
+        new SubstrateV2Fixtures(sessions, traces, spans, payloads).trace(pid, "tr-later", conversation, Instant.now());
         flagOnAnotherCallSite(pid, signal, conversation);
         List<CallSiteTurn> later =
                 List.of(new CallSiteTurn("tr-later", "cs-chat"), new CallSiteTurn("tr-later", "cs-other"));

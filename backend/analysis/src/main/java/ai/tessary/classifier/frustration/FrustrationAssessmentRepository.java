@@ -24,7 +24,7 @@ public class FrustrationAssessmentRepository {
     /**
      * One assessment row.
      *
-     * @param conversationId {@code COALESCE(trace.thread_id, trace.session_id)}
+     * @param conversationId the turn's {@code trace.session_id}
      * @param frustrated whether the score exceeded the threshold when the turn was scored
      * @param requestJson the exact body sent; retention nulls it with the turn's span payload
      * @param responseJson the exact body received
@@ -51,7 +51,7 @@ public class FrustrationAssessmentRepository {
     /**
      * What a turn's trace says about it.
      *
-     * @param conversationId {@code COALESCE(thread_id, session_id)}; null for a trace in no conversation
+     * @param conversationId the trace's {@code session_id}; null for a trace in no session
      */
     public record TurnFacts(@Nullable String conversationId, Instant startedAt) {}
 
@@ -105,7 +105,7 @@ public class FrustrationAssessmentRepository {
     public Map<String, TurnFacts> turnFacts(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) return Map.of();
         List<Map.Entry<String, TurnFacts>> rows = jdbc.sql("""
-                        SELECT id, COALESCE(thread_id, session_id) AS conversation_id, started_at
+                        SELECT id, session_id AS conversation_id, started_at
                           FROM trace
                          WHERE project_id = :pid AND id IN (:traces)
                         """)

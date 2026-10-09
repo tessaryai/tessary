@@ -175,9 +175,8 @@ public final class SubstrateV2Fixtures {
     }
 
     /**
-     * A trace naming its session and {@code thread_id}; {@code COALESCE(thread_id, session_id)} is the conversation
-     * key. The first write of a trace id decides its correlation, so seed the trace before its spans when that
-     * matters.
+     * A trace naming its session and {@code thread_id}; the session is the conversation and the thread only a column.
+     * The first write of a trace id decides its correlation, so seed the trace before its spans when that matters.
      */
     public TraceV2Row trace(
             String projectId,

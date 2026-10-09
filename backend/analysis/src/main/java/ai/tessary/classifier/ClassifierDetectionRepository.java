@@ -17,9 +17,9 @@ import org.springframework.stereotype.Repository;
  * <p>The union's {@code classifier_id} column holds the classifier key, so the definition's id
  * and version come from a JOIN on {@code classifier_key = d.classifier_id}.
  *
- * <p>The session is the flagged trace's {@code session_id}, not the union's {@code subject_session_id}: Frustration
- * stores the conversation key, {@code COALESCE(thread_id, session_id)}, there, which names no {@code session} row
- * when the trace carries a thread.
+ * <p>The session is the flagged trace's {@code session_id}, not the union's {@code subject_session_id}: a
+ * Frustration row written before {@code 0034} holds the trace's thread id there, which names no {@code session}
+ * row.
  *
  * <p>Detection ids are their own id space: a stored link to an old verdict id resolves to
  * nothing.

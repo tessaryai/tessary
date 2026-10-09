@@ -9,7 +9,7 @@ The frustration classifier finds sessions where users get frustrated with your a
 
 - An OpenRouter or TypeSafe API key. You can paste it while turning the classifier on, or store it first under **Settings** then **Providers**. Tessary Cloud needs the same key, because its one-time model credit pays only for triage and root-cause analysis.
 - Traces whose spans carry user and assistant messages, tagged with a call site. Tag each model call on its own span, so the call that replies to the user has its own call site. See [Call sites](/concepts/call-sites).
-- Traces that carry a thread ID or a session ID, so messages from one session can be read together.
+- Traces that carry a session ID, so messages from one session can be read together. A trace with no session ID is not scored.
 
 ## Turn it on
 
@@ -56,7 +56,7 @@ A user message is scored only when the four messages before it are user, assista
 
 - A session's first two user messages are never scored.
 - A message whose previous assistant turn ended on a tool call with no text is not scored.
-- A session here is the messages on one call site that share a trace's thread ID, or its session ID when it has no thread. If one conversation reaches two call sites, it is two sessions, and each is scored and counted on its own.
+- A session here is the messages on one call site that share a session ID. A thread ID never joins two sessions. To read all of one user's messages as one conversation, send the same session ID for all of them. If one conversation reaches two call sites, it is two sessions, and each is scored and counted on its own.
 - Once one message in a session is flagged, the rest of that session is not scored.
 
 The classifier sweeps new traces continuously, so a message is scored shortly after it arrives.

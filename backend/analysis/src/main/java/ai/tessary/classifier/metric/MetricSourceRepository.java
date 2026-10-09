@@ -69,8 +69,7 @@ public class MetricSourceRepository {
      * so a null parent means exactly one thing: this span is the root.
      *
      * <p>{@code prior_turns} is the trace's rank within its conversation by event order, on the pinned {@code
-     * COALESCE(thread_id, session_id, id)} grain. A single-shot producer's trace is its own conversation and
-     * reports 0.
+     * COALESCE(session_id, id)} grain. A single-shot producer's trace is its own conversation and reports 0.
      *
      * <p>Exactly one row per trace in the page: the join to {@code span} is a LEFT LATERAL, so a
      * trace whose spans haven't landed yet is still accounted for rather than vanishing from the
@@ -98,8 +97,7 @@ public class MetricSourceRepository {
                                (SELECT count(*) FROM trace prior
                                  WHERE prior.project_id = tr.project_id
                                    AND prior.is_deleted IS NOT TRUE
-                                   AND COALESCE(prior.thread_id, prior.session_id, prior.id)
-                                       = COALESCE(tr.thread_id, tr.session_id, tr.id)
+                                   AND COALESCE(prior.session_id, prior.id) = COALESCE(tr.session_id, tr.id)
                                    AND (prior.started_at, prior.id) < (tr.started_at, tr.id)) AS prior_turns
                         FROM trace tr
                           LEFT JOIN LATERAL (

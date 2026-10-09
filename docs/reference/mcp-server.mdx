@@ -132,7 +132,7 @@ There is deliberately no server-side sampling mode. An agent that wants a stride
 | `get_span` | `trace_id` **and** `span_id` | none | One span with its full raw payload |
 | `list_sessions` | none | `limit`, `cursor` | Paged sessions, most recently active first, identity only |
 | `get_session` | `id` | none | The session, totals summed from its traces, and those traces oldest first, capped at 1,000 with `traces_truncated` saying so |
-| `get_conversation` | `id` | none | One conversation's turns (top-level traces) oldest first, capped at 1,000 with `traces_truncated` saying so. A conversation is a trace's `thread_id`, else its `session_id`, the key a frustration finding's session refs carry |
+| `get_conversation` | `id` | none | One conversation's turns (top-level traces) oldest first, capped at 1,000 with `traces_truncated` saying so. `id` is a session id: a conversation is a session, the key a frustration finding's session refs carry. A thread ID names no conversation |
 
 `get_span` needs both ids because a producer span id is unique only within its trace. A call with no `trace_id` returns a tool error naming the argument to add.
 

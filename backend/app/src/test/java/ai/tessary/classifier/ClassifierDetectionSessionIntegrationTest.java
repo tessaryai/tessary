@@ -27,9 +27,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * The session a detection names, which the Classifiers rail links to. Frustration stores the conversation key,
- * {@code COALESCE(trace.thread_id, trace.session_id)}, in {@code subject_session_id}, so a threaded turn's detection
- * must read its session off the flagged trace, or the rail links to a session page that does not exist.
+ * The session a detection names, which the Classifiers rail links to. A Frustration row written before {@code 0034}
+ * holds the trace's thread id in {@code subject_session_id}, so a threaded turn's detection must read its session off
+ * the flagged trace, or the rail links to a session page that does not exist.
  */
 @SpringBootTest
 class ClassifierDetectionSessionIntegrationTest {
@@ -118,7 +118,7 @@ class ClassifierDetectionSessionIntegrationTest {
                 .traceId();
     }
 
-    /** Writes the detection the way Frustration does, keyed on the conversation, and reads the rail's list. */
+    /** Writes the detection the way Frustration did before {@code 0034}, keyed on the thread, and reads the rail's list. */
     private List<ClassifierEventView> detectAndRead(String pid, String traceId) {
         ClassifierRow frustration =
                 ClassifierRows.byKey(signals, pid, "frustration").orElseThrow();
