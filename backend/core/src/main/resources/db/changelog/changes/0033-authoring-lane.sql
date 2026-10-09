@@ -1,6 +1,6 @@
 --liquibase formatted sql
 
---changeset evals:0032-authoring-lane
+--changeset evals:0033-authoring-lane
 -- Widens ck_project_model_setting_lane for the authoring lane, the third AGENT_VM lane: the model
 -- the coding agent runs when it writes a classifier from a description. Postgres has no ALTER
 -- CONSTRAINT for a CHECK's expression, so the old one is dropped and the widened one recreated
