@@ -50,6 +50,10 @@ public final class ClassifierMethodCard {
             Each call counts as an independent trial: parallel calls sharing one upstream failure each
             add their own evidence, so check the witness timestamps for simultaneity.
 
+            A tool's calls come from every call site that calls it, and each row carries its own
+            `callSiteId`. The pinned rate was fitted on the call-site mix of its own period, so a rate
+            that moved because that mix moved is the traffic changing, not the tool.
+
             **The claim's numbers** are in `get_finding` under `toolError`: `refRate` and `curRate`
             (fractions), `nRef`, `nCur`, `failuresCur`, `deltaPp`, `statistic` against `threshold`,
             `effectSize`, `direction`, `onsetAt`, and `patterns` (each failure signature with its reference and
@@ -115,7 +119,7 @@ public final class ClassifierMethodCard {
             - `baseline`: the pinned window's rows, on the `:pinned` arm only.
 
             A tool bucket spans every call site that calls the tool, and each row carries its own
-            `callSiteId`. On the `:previous` arm the reference period's traffic is not in the evidence but
+            `callSiteId`. The two sides can hold very different mixes of them. On the `:previous` arm the reference period's traffic is not in the evidence but
             is still in the store: `list_spans` and `list_traces` with a `range` on the reference period's
             own dates reach it, within retention.
 

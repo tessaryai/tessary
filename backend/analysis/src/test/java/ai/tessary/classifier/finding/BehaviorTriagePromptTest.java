@@ -60,6 +60,17 @@ class BehaviorTriagePromptTest {
 
     private static BehaviorTriageEngine engine(
             ObserverProperties observerProps, ClassifierDetectionWriteRepository detections) {
+        return engine(observerProps, detections, mock(FindingEvidenceRepository.class));
+    }
+
+    private static BehaviorTriageEngine engine(FindingEvidenceRepository evidence) {
+        return engine(new ObserverProperties(), mock(ClassifierDetectionWriteRepository.class), evidence);
+    }
+
+    private static BehaviorTriageEngine engine(
+            ObserverProperties observerProps,
+            ClassifierDetectionWriteRepository detections,
+            FindingEvidenceRepository evidence) {
         return new BehaviorTriageEngine(
                 List.of(),
                 new ClassifierProperties(),
@@ -68,7 +79,23 @@ class BehaviorTriagePromptTest {
                 mock(ProjectRepository.class),
                 mock(OrgMembershipRepository.class),
                 new ObjectMapper(),
-                detections);
+                detections,
+                evidence);
+    }
+
+    private static FindingEvidenceRepository evidenceOn(FindingEvidenceRepository.CallSiteCount... counts) {
+        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
+        when(evidence.countsByCallSite("proj-1", "fnd-1")).thenReturn(List.of(counts));
+        return evidence;
+    }
+
+    private static FindingEvidenceRepository.CallSiteCount rows(@Nullable String callSite, String role, long n) {
+        return new FindingEvidenceRepository.CallSiteCount(callSite, role, n);
+    }
+
+    private static String evidenceSections(BehaviorTriageEngine engine, FindingRow row) {
+        String md = findingMd(engine, row);
+        return md.substring(md.indexOf("## Evidence the detector recorded"));
     }
 
     private static FindingRow finding(
@@ -345,5 +372,114 @@ class BehaviorTriagePromptTest {
 
         assertFalse(prompt.contains("`dossier/method.md`"));
         assertTrue(prompt.contains("This detector has no method card; its rule is whatever its author configured."));
+    }
+
+    /**
+     * The audited {@code edit} slowdown: a tool bucket filed under {@code peter-drucker}, whose pinned window held 2 of
+     * that call site's calls against 48 now, while the reference was mostly {@code otto-von-bismarck}. The pooled
+     * 100-against-100 hid both facts, so the agent compared a 2-row reference and could not rule.
+     */
+    @Test
+    void aToolBucketSplitsItsEvidencePerCallSiteAndMarksTheSidesTooSmallToCompare() {
+        FindingRow row = finding(
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "bl-1:tool_duration:tool:edit:slower:pinned",
+                "peter-drucker",
+                "{\"bucket\": {\"key\": \"tool:edit\", \"kind\": \"tool\"}}",
+                "{\"member\": 75, \"baseline\": 74}");
+        FindingEvidenceRepository evidence = evidenceOn(
+                rows("otto-von-bismarck", FindingEvidenceRow.Role.BASELINE, 72),
+                rows("otto-von-bismarck", FindingEvidenceRow.Role.MEMBER, 27),
+                rows("peter-drucker", FindingEvidenceRow.Role.BASELINE, 2),
+                rows("peter-drucker", FindingEvidenceRow.Role.MEMBER, 48));
+
+        assertEquals("""
+                ## Evidence the detector recorded
+
+                - `exemplar`: 0 row(s)
+                - `member`: 75 row(s)
+                - `baseline`: 74 row(s)
+                - `witness`: 0 row(s)
+                - `changepoint`: 0 row(s)
+
+                These are the counts written when the finding opened. A group with fewer than 30 rows on a side is \
+                too small to compare.
+
+                ## Evidence by call site
+
+                The rows span 2 call sites, counted now, largest first. Each call site is its own group.
+
+                - `otto-von-bismarck`: `member` 27 (too small), `baseline` 72
+                - `peter-drucker`: `member` 48, `baseline` 2 (too small)
+                """, evidenceSections(engine(evidence), row));
+    }
+
+    /**
+     * The audited {@code hedwig} speedup: one call site, 100 rows a side. Nothing splits and nothing is too small, so
+     * the finding reads exactly as a single population.
+     */
+    @Test
+    void aSingleCallSiteFindingHasNoSplitAndNothingTooSmall() {
+        FindingRow row = finding(
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                "bl-2:turn_duration:hedwig:faster:pinned",
+                "hedwig",
+                "{\"bucket\": {\"key\": \"hedwig\", \"kind\": \"call_site\"}}",
+                "{\"member\": 100, \"baseline\": 100}");
+        FindingEvidenceRepository evidence = evidenceOn(
+                rows("hedwig", FindingEvidenceRow.Role.BASELINE, 100),
+                rows("hedwig", FindingEvidenceRow.Role.MEMBER, 100));
+
+        assertEquals("""
+                ## Evidence the detector recorded
+
+                - `exemplar`: 0 row(s)
+                - `member`: 100 row(s)
+                - `baseline`: 100 row(s)
+                - `witness`: 0 row(s)
+                - `changepoint`: 0 row(s)
+
+                These are the counts written when the finding opened. A group with fewer than 30 rows on a side is \
+                too small to compare.
+                """, evidenceSections(engine(evidence), row));
+    }
+
+    /**
+     * The audited {@code bash} error-rate drop: a tool bucket with no call site of its own. {@code finding.md} told the
+     * agent the producer tagged no call site at all, so it read 55k calls from many call sites as one population. A
+     * witness is never marked too small: it is the numerator, and its call site's {@code member} side carries the
+     * floor.
+     */
+    @Test
+    void anUnattributedToolBucketNamesItsCallSitesAndSplitsMembersAndWitnesses() {
+        FindingRow row = finding(
+                BuiltInDetector.Kind.TOOL_ERROR,
+                "tool_error_rate:tool:bash:down",
+                BehaviorSubstrateRepository.UNATTRIBUTED,
+                "{\"bucket\": {\"key\": \"tool:bash\", \"kind\": \"tool\"}}",
+                "{\"member\": 912, \"witness\": 31}");
+        FindingEvidenceRepository evidence = evidenceOn(
+                rows("otto-von-bismarck", FindingEvidenceRow.Role.MEMBER, 700),
+                rows("otto-von-bismarck", FindingEvidenceRow.Role.WITNESS, 28),
+                rows("peter-drucker", FindingEvidenceRow.Role.MEMBER, 200),
+                rows("peter-drucker", FindingEvidenceRow.Role.WITNESS, 2),
+                rows(null, FindingEvidenceRow.Role.MEMBER, 12),
+                rows(null, FindingEvidenceRow.Role.WITNESS, 1));
+
+        String md = findingMd(engine(evidence), row);
+
+        assertTrue(
+                md.contains("- call site: several. This finding is about one tool, and each evidence row carries its"
+                        + " own `callSiteId`.\n"),
+                md);
+        assertEquals("""
+                ## Evidence by call site
+
+                The rows span 3 call sites, counted now, largest first. Each call site is its own group.
+
+                - `otto-von-bismarck`: `member` 700, `witness` 28
+                - `peter-drucker`: `member` 200, `witness` 2
+                - no call site: `member` 12 (too small), `witness` 1
+                """, md.substring(md.indexOf("## Evidence by call site")));
     }
 }

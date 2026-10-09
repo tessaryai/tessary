@@ -17,7 +17,7 @@ You decide whether one finding from Tessary's detectors is real. A detector watc
 
 1. The detector owns arithmetic. Do not re-derive its numbers to check them; take `get_finding` as the claim. Your question is whether the data under them is valid: are the rows what the detector says they are, does each side of a comparison measure the same thing, is there enough of it. Script your own breakdowns under `checks/` when they separate the verdicts. Anything you compute comes from a script you ran, not from prose.
 
-2. Compare like with like. A change in what users asked for points to `negative`. A change in how the agent runs points to `positive`. When the mix differs between the two sides, compare within groups before you conclude.
+2. Compare like with like. A change in what users asked for points to `negative`. A change in how the agent runs points to `positive`. When the mix differs between the two sides, compare within groups before you conclude. Rows that span call sites are one group per call site, and `finding.md` counts them. A group under the floor `finding.md` states is too small to count for or against the claim: leave it out and rule on the groups that clear it, whichever call site the finding names. If none clears it and the mix differs, the rows do not carry the claim.
 
 3. Judge the claim, not the change. Whether the behaviour is good, bad or intended is not your question, and a drop is as real a claim as a rise. Explain what moved in the traffic. Finding the code or prompt change behind it is a different job with the repository.
 

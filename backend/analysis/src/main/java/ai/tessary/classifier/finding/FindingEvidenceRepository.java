@@ -498,6 +498,31 @@ public class FindingEvidenceRepository {
         return out;
     }
 
+    /** How many surviving refs of one role sit on one call site; a null call site is an untagged trace. */
+    public record CallSiteCount(@Nullable String callSiteId, String role, long count) {}
+
+    /**
+     * The finding's surviving refs counted per call site and role, resolving each ref's call site the way
+     * {@link #spanPage} does: the span's own for a step, the trace's for a whole run. Session refs carry no
+     * call site of their own and are left out.
+     */
+    public List<CallSiteCount> countsByCallSite(String projectId, String findingId) {
+        return jdbc.sql("SELECT CASE WHEN e.span_id IS NULL THEN t.call_site_id ELSE s.call_site_id END"
+                        + " AS call_site_id, e.role, count(*) AS n"
+                        + " FROM finding_evidence e"
+                        + " LEFT JOIN span s ON s.project_id = e.project_id AND s.trace_id = e.trace_id"
+                        + "   AND s.id = e.span_id"
+                        + " LEFT JOIN trace t ON t.project_id = e.project_id AND t.id = e.trace_id"
+                        + "   AND t.is_deleted = false"
+                        + " WHERE e.project_id = :pid AND e.finding_id = :fid AND e.session_id IS NULL"
+                        + " GROUP BY 1, 2 ORDER BY 1 NULLS LAST, 2")
+                .param("pid", projectId)
+                .param("fid", findingId)
+                .query((rs, n) ->
+                        new CallSiteCount(rs.getString("call_site_id"), rs.getString("role"), rs.getLong("n")))
+                .list();
+    }
+
     /**
      * The evidence sets of many findings at once, keyed by finding id, what a page of findings needs so
      * rendering a list is one query rather than one per row. Findings with no surviving evidence are

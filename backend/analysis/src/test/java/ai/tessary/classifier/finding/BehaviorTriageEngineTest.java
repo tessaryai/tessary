@@ -268,6 +268,7 @@ class BehaviorTriageEngineTest {
                 projects(),
                 memberships,
                 mapper,
-                mock(ClassifierDetectionWriteRepository.class));
+                mock(ClassifierDetectionWriteRepository.class),
+                mock(FindingEvidenceRepository.class));
     }
 }

@@ -220,6 +220,61 @@ class SharedFindingTableIntegrationTest {
         assertEquals("policy.answer", page.rows().get(0).callSiteId());
     }
 
+    /**
+     * The audited {@code peter-drucker} cost finding is turn grain: whole-run refs with no span, whose call site is
+     * the trace's. A step ref takes its own span's call site, and a session ref has none to count.
+     */
+    @Test
+    @DisplayName("per-call-site counts read a whole run's call site off its trace and a step's off its span")
+    void countsByCallSiteResolveEachRefAtItsOwnGrain() {
+        Project p = project("finding-evidence-by-call-site");
+        String findingId = firing(p, "gram-by-call-site");
+        for (String traceId : List.of("trace-run-now", "trace-run-then", "trace-tool")) {
+            jdbc.sql("""
+                    INSERT INTO trace (project_id, id, started_at, event_ts, call_site_id)
+                    VALUES (:pid, :tid, now(), now(), 'peter-drucker')
+                    """).param("pid", p.id()).param("tid", traceId).update();
+            insertRootSpan(p.id(), traceId, traceId + "-root", null, "turn", 1_000L);
+        }
+        jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name, call_site_id,"
+                        + " started_at, event_ts)"
+                        + " VALUES (:pid, 'trace-tool', 'span-edit', 'trace-tool-root', 'tool', 'edit',"
+                        + " 'otto-von-bismarck', now(), now())")
+                .param("pid", p.id())
+                .update();
+        String now = Instant.now().toString();
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(
+                        FindingEvidenceRepository.Ref.trace("trace-run-now"),
+                        FindingEvidenceRepository.Ref.span("trace-tool", "span-edit")),
+                now);
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.BASELINE,
+                List.of(FindingEvidenceRepository.Ref.trace("trace-run-then")),
+                now);
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.WITNESS,
+                List.of(FindingEvidenceRepository.Ref.session("session-1")),
+                now);
+
+        assertEquals(
+                List.of(
+                        new FindingEvidenceRepository.CallSiteCount(
+                                "otto-von-bismarck", FindingEvidenceRow.Role.MEMBER, 1),
+                        new FindingEvidenceRepository.CallSiteCount(
+                                "peter-drucker", FindingEvidenceRow.Role.BASELINE, 1),
+                        new FindingEvidenceRepository.CallSiteCount(
+                                "peter-drucker", FindingEvidenceRow.Role.MEMBER, 1)),
+                evidence.countsByCallSite(p.id(), findingId));
+    }
+
     /** Inserted directly: the fixtures build natural traces, and this needs several logical roots in one. */
     private void insertRootSpan(
             String projectId, String traceId, String spanId, @Nullable String parentId, String name, long latencyMs) {

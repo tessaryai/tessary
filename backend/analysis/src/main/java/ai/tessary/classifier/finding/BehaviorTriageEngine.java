@@ -4,6 +4,7 @@ package ai.tessary.classifier.finding;
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
+import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
@@ -26,11 +27,13 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,6 +92,7 @@ public class BehaviorTriageEngine {
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
     private final ClassifierDetectionWriteRepository detections;
+    private final FindingEvidenceRepository evidence;
 
     public BehaviorTriageEngine(
             List<TriageSandbox> sandboxList,
@@ -98,7 +102,8 @@ public class BehaviorTriageEngine {
             ProjectRepository projects,
             OrgMembershipRepository memberships,
             ObjectMapper mapper,
-            ClassifierDetectionWriteRepository detections) {
+            ClassifierDetectionWriteRepository detections,
+            FindingEvidenceRepository evidence) {
         Map<String, TriageSandbox> byKey = new HashMap<>();
         for (TriageSandbox s : sandboxList) byKey.put(s.key(), s);
         this.sandboxes = Map.copyOf(byKey);
@@ -109,6 +114,7 @@ public class BehaviorTriageEngine {
         this.memberships = memberships;
         this.mapper = mapper;
         this.detections = detections;
+        this.evidence = evidence;
     }
 
     /**
@@ -377,6 +383,7 @@ public class BehaviorTriageEngine {
                 .append('\n');
         windowLine(finding).ifPresent(sb::append);
         sb.append('\n').append(evidenceCountsSection(finding));
+        callSiteSplit(finding).ifPresent(split -> sb.append('\n').append(split));
         return sb.toString();
     }
 
@@ -406,16 +413,20 @@ public class BehaviorTriageEngine {
                 + window.path("closed_at").asText("?") + '\n');
     }
 
-    /** Which call site raised this, in the three shapes a finding's call site can take. */
+    /** Which call site raised this, in the shapes a finding's call site can take. */
     private static String callSiteLine(FindingRow finding) {
         String callSite = finding.callSiteId();
-        if (callSite == null || callSite.isBlank() || UNATTRIBUTED.equals(callSite)) {
+        boolean attributed = callSite != null && !callSite.isBlank() && !UNATTRIBUTED.equals(callSite);
+        if ("tool".equals(finding.payload().path("bucket").path("kind").asText(""))) {
+            return attributed
+                    ? "- call site: `" + callSite + "`, the largest of the call sites this tool bucket "
+                            + "spans. Each evidence row carries its own `callSiteId`.\n"
+                    : "- call site: several. This finding is about one tool, and each evidence row carries its "
+                            + "own `callSiteId`.\n";
+        }
+        if (!attributed) {
             return "- call site: none. The producer tagged no call site on these traces, so no declared "
                     + "spec exists for them.\n";
-        }
-        if ("tool".equals(finding.payload().path("bucket").path("kind").asText(""))) {
-            return "- call site: `" + callSite + "`, the largest of the call sites this tool bucket "
-                    + "spans. Each evidence row carries its own `callSiteId`.\n";
         }
         return "- call site: `" + callSite + "`\n";
     }
@@ -434,9 +445,66 @@ public class BehaviorTriageEngine {
                     .append(finding.evidenceCount(role))
                     .append(" row(s)\n");
         }
-        sb.append("\nThese are the counts written when the finding opened.\n");
+        sb.append("\nThese are the counts written when the finding opened. A group with fewer than ")
+                .append(MIN_ROWS_TO_COMPARE)
+                .append(" rows on a side is too small to compare.\n");
         return sb.toString();
     }
+
+    /** The least a side of any comparison holds before triage counts it: the drift detector's own floor. */
+    static final int MIN_ROWS_TO_COMPARE = MetricDriftConfig.MIN_SAMPLE_MIN;
+
+    /**
+     * The evidence counted per call site, when it spans more than one. A tool bucket pools every call site
+     * that calls the tool, and its reference can hold a different mix of them than its current side, so
+     * the pooled totals above can hide a call site with two reference rows behind one with seventy.
+     * Only {@code member} and {@code baseline} are marked: they are the sides compared, and a witness is
+     * read against its own call site's members.
+     */
+    private Optional<String> callSiteSplit(FindingRow finding) {
+        Map<String, Map<String, Long>> bySite = new LinkedHashMap<>();
+        Set<String> roles = new HashSet<>();
+        for (FindingEvidenceRepository.CallSiteCount c : evidence.countsByCallSite(finding.projectId(), finding.id())) {
+            String site = c.callSiteId() == null ? NO_CALL_SITE : c.callSiteId();
+            bySite.computeIfAbsent(site, k -> new HashMap<>()).put(c.role(), c.count());
+            roles.add(c.role());
+        }
+        if (bySite.size() < 2) return Optional.empty();
+        List<Map.Entry<String, Map<String, Long>>> sites = bySite.entrySet().stream()
+                .sorted(Comparator.comparingLong(
+                                (Map.Entry<String, Map<String, Long>> site) -> site.getValue().values().stream()
+                                        .mapToLong(Long::longValue)
+                                        .sum())
+                        .reversed()
+                        .thenComparing(Map.Entry::getKey))
+                .toList();
+        StringBuilder sb = new StringBuilder("## Evidence by call site\n\nThe rows span ")
+                .append(sites.size())
+                .append(" call sites, counted now, largest first. Each call site is its own group.\n\n");
+        for (Map.Entry<String, Map<String, Long>> site : sites) {
+            String name = site.getKey();
+            sb.append("- ")
+                    .append(NO_CALL_SITE.equals(name) ? "no call site" : "`" + name + "`")
+                    .append(": ");
+            Map<String, Long> counts = site.getValue();
+            String sep = "";
+            for (String role : FindingEvidenceRow.Role.ALL) {
+                if (!roles.contains(role)) continue;
+                long n = counts.getOrDefault(role, 0L);
+                sb.append(sep).append('`').append(role).append("` ").append(n);
+                if (COMPARED_SIDES.contains(role) && n < MIN_ROWS_TO_COMPARE) sb.append(" (too small)");
+                sep = ", ";
+            }
+            sb.append('\n');
+        }
+        return Optional.of(sb.toString());
+    }
+
+    /** The key untagged rows collect under; never a call site id, which is never empty. */
+    private static final String NO_CALL_SITE = "";
+
+    private static final Set<String> COMPARED_SIDES =
+            Set.of(FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.BASELINE);
 
     // ---- the user message ------------------------------------------------------------------------
 

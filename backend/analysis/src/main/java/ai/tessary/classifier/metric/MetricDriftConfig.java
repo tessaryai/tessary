@@ -148,7 +148,8 @@ public record MetricDriftConfig(
     // quarter compares against a reference nobody remembers deploying.
     private static final int WINDOW_MAX_HOURS_MIN = 1;
     private static final int WINDOW_MAX_HOURS_MAX = 2_160;
-    private static final int MIN_SAMPLE_MIN = 30;
+    /** The smallest window the detector can be set to compare, and so the least a side of any comparison needs. */
+    public static final int MIN_SAMPLE_MIN = 30;
     // 0.01 in log units is a ~1% shift. The eval's own silent case is 1.02x, so a floor under this would
     // fire on traffic the program has already decided is quiet; 3.0 is a 20x move, past which nothing
     // would ever be reported.
