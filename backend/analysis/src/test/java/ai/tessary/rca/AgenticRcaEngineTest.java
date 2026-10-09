@@ -165,7 +165,15 @@ class AgenticRcaEngineTest {
                         null,
                         null,
                         dossier,
-                        AgenticRcaEngine.buildPrompt(report, "fnd-1", false, true, true, 2, "sessions", 10),
+                        AgenticRcaEngine.buildPrompt(
+                                report,
+                                "fnd-1",
+                                false,
+                                true,
+                                true,
+                                2,
+                                "sessions",
+                                AgenticRcaEngine.timeBudgetMinutes(600_000)),
                         AgenticRcaEngine.JSON_SCHEMA,
                         "https://tessary.test/mcp",
                         "tsk_plain",
@@ -189,7 +197,10 @@ class AgenticRcaEngineTest {
         engine(props, sandbox).run(job(), report, "fnd-1", Map.of("finding.md", "# f"), traces("tr-1"));
 
         String prompt = sandbox.requests.get(0).prompt();
-        assertEquals(AgenticRcaEngine.buildPrompt(report, "fnd-1", false, false, false, 1, "traces", 15), prompt);
+        assertEquals(
+                AgenticRcaEngine.buildPrompt(
+                        report, "fnd-1", false, false, false, 1, "traces", AgenticRcaEngine.timeBudgetMinutes(900_000)),
+                prompt);
         assertFalse(prompt.contains("method.md"), prompt);
     }
 
@@ -299,7 +310,15 @@ class AgenticRcaEngineTest {
         assertEquals(expectedSha, sent.headSha());
         assertEquals(expectedOnset, sent.onsetAt());
         assertEquals(
-                AgenticRcaEngine.buildPrompt(report, "fnd-1", expectedCloneUrl != null, false, false, 1, "traces", 15),
+                AgenticRcaEngine.buildPrompt(
+                        report,
+                        "fnd-1",
+                        expectedCloneUrl != null,
+                        false,
+                        false,
+                        1,
+                        "traces",
+                        AgenticRcaEngine.timeBudgetMinutes(900_000)),
                 sent.prompt());
         assertEquals(expectedCloneUrl != null, result.repoAvailable());
         assertEquals("## r", result.detailedReport());

@@ -551,7 +551,8 @@ describe("the answer and the working behind it", () => {
     expect(screen.getByText("Medium")).toBeTruthy();
     expect(screen.getByText("What changed")).toBeTruthy();
     expect(screen.getByText("What the agent does")).toBeTruthy();
-    expect(screen.getAllByText("Why it changed")).toHaveLength(2);
+    expect(screen.getByText("Why it changed")).toBeTruthy();
+    expect(screen.getByText("Why it happens")).toBeTruthy();
     expect(screen.getAllByText("What to do")).toHaveLength(2);
     expect(screen.queryByText("Why it might be")).toBeNull();
     expect(screen.queryByText("To confirm")).toBeNull();

@@ -146,8 +146,12 @@ function whereLabel(kind: string | null): string {
       return "Tool";
     case "data":
       return "Data";
-    default:
+    case "code":
+    case "unknown":
+    case null:
       return "Code";
+    default:
+      return "Where";
   }
 }
 

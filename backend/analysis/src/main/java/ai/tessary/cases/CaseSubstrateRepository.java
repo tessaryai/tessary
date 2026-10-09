@@ -16,9 +16,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Feature-owned cross-read of the trace substrate for the case surface — the before/after exemplars on a
- * case page, and the coverage counts Triage's all-clear state cites. Same pattern
- * {@link ai.tessary.rca.RcaFacetRepository} uses for {@code span}, which the
- * {@code jdbc_client_only_in_repositories} ArchUnit rule allows.
+ * case page, and the coverage counts Triage's all-clear state cites. The
+ * {@code jdbc_client_only_in_repositories} ArchUnit rule allows it.
  *
  * <p><b>Hydration only: this repository no longer chooses which traces a case shows.</b> It used to
  * SAMPLE them — a detector's window is a population summarized into a sketch, the ids that made it up

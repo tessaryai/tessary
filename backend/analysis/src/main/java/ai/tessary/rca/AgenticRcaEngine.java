@@ -73,12 +73,8 @@ public class AgenticRcaEngine {
     static final String METHOD_FILE = "method.md";
     static final String TOOLS_FILE = "tools.md";
 
-    /**
-     * The {@code Read first} line for {@code dossier/method.md}. The one sentence of model-facing prose kept in
-     * Java: it appears only when the classifier has a method file, and the resource layout has no file for it.
-     */
-    static final String METHOD_LINE =
-            "- `dossier/method.md`: how this classifier measures, how to read its evidence, and its quirks.";
+    /** The {@code Read first} line for {@code dossier/method.md}, added only when the classifier has a method file. */
+    static final String METHOD_LINE = PromptCraft.text(RCA, "method_present.md").stripTrailing();
 
     /**
      * The RCA method file per built-in classifier, under {@code prompt-craft/rca/methods/}. The two drift
@@ -213,7 +209,7 @@ public class AgenticRcaEngine {
                 dossierFiles.containsKey(METHOD_FILE),
                 evidence.flaggedCount(),
                 evidence.grain(),
-                cfg.getTimeoutMs() / 60_000);
+                timeBudgetMinutes(cfg.getTimeoutMs()));
 
         // A short-lived project-scoped admin key, named after the job so the audit trail ties it to this
         // run. Revoked in the finally below — the key must not outlive the sandbox.
@@ -318,6 +314,12 @@ public class AgenticRcaEngine {
      * <p>{@code {onset_commit}} in the repo snippet is left in place: the sandbox resolves it after the clone,
      * from the {@code onset_at} this class sends beside the clone URL.
      */
+    /** The budget the agent is told: the sandbox boot and the clone spend part of the hard timeout, so
+     *  telling the agent the whole window would let it run into the kill and lose every cause it has. */
+    static long timeBudgetMinutes(long timeoutMs) {
+        return Math.max(1, timeoutMs * 4 / 5 / 60_000);
+    }
+
     static String buildPrompt(
             RcaReportRow report,
             String findingId,

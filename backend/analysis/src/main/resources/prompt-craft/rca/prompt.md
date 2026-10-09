@@ -11,7 +11,7 @@ agent, its code, its prompt, its tools or its data.
 
 - finding id: `{finding_id}`
 - onset: {onset}; last seen: {last_seen}
-- flagged: {flagged_count} {grain}
+- flagged {grain} in the evidence: {flagged_count}
 - time budget: {time_budget_minutes} minutes
 
 {repo}
@@ -50,8 +50,8 @@ Grade each cause on its own against the schema's definitions of `high` and `medi
 ## Report
 
 Cite only trace and session ids from this finding's evidence that you read; any other id is
-discarded. Every field except `detailed_report` is for a reader with no context: plain words,
-no ids, queries or statistics.
+discarded. Write every prose field except `detailed_report` for a reader with no context: plain
+words, no ids, queries or statistics.
 
 When the time budget runs short, return the causes you have at the confidence they earned, and
 say what you did not check.

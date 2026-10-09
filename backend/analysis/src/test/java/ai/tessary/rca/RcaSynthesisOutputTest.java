@@ -173,6 +173,50 @@ class RcaSynthesisOutputTest {
         assertEquals(List.of("Big high", "Small high", "Big medium", "Small medium"), titles(out));
     }
 
+    /** A surviving cause makes the verdict causes_identified whatever the agent wrote, and the report says so. */
+    @ParameterizedTest
+    @ValueSource(strings = {"no_cause_found", "inconclusive"})
+    void aSurvivingCauseCorrectsTheVerdictUpward(String verdict) {
+        RcaSynthesisOutput.Parsed out = parse(reply(verdict, cause("Asks twice", "medium", 1, "\"tr-1\"", "")));
+
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, out.verdict());
+        assertNotNull(out.verdictNote());
+        assertTrue(out.verdictNote().contains("corrected"), out.verdictNote());
+    }
+
+    /** `change` is what marks a cause as current-format, so a cause without a valid one, or a valid type, is dropped. */
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "\"change\":\"standing\",\"type\":\"prompt\",",
+                "\"change\":\"changed\",\"type\":\"prompt\",",
+                "\"type\":\"prompt\",",
+                "\"change\":\"change\",\"type\":\"vibes\",",
+                "\"change\":\"change\","
+            })
+    void aCauseWithoutAValidChangeAndTypeIsDropped(String labels) {
+        String valid = "\"change\":\"standing\",\"type\":\"prompt\",";
+        String unlabelled = cause("Unlabelled", "high", 1, "\"tr-1\"", "").replace(valid, labels);
+
+        RcaSynthesisOutput.Parsed out = parse(reply("causes_identified", unlabelled));
+
+        assertEquals(labels.equals(valid) ? List.of("Unlabelled") : List.of(), titles(out), labels);
+    }
+
+    /** The schema caps causes at four; the parser holds the line when a reply ignores it, keeping the top four. */
+    @Test
+    void atMostFourCausesAreKept() {
+        RcaSynthesisOutput.Parsed out = parse(reply(
+                "causes_identified",
+                cause("One", "high", 5, "\"tr-1\"", ""),
+                cause("Two", "high", 4, "\"tr-1\"", ""),
+                cause("Three", "medium", 3, "\"tr-2\"", ""),
+                cause("Four", "medium", 2, "\"tr-2\"", ""),
+                cause("Five", "medium", 1, "\"tr-3\"", "")));
+
+        assertEquals(List.of("One", "Two", "Three", "Four"), titles(out));
+    }
+
     @Test
     void aCauseExplainsAtLeastTheRowsItCites() {
         RcaSynthesisOutput.Parsed out = parse(reply(
@@ -200,13 +244,13 @@ class RcaSynthesisOutputTest {
     void anAttributionWithNothingInItIsNoAttribution() {
         String text = reply(
                 "causes_identified",
-                "{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],"
+                "{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],\"change\":\"change\",\"type\":\"code\","
                         + "\"attribution\":{\"path\":\" \",\"commit\":null,\"excerpt\":\"\"}}");
 
         assertNull(parse(text).causes().get(0).attribution());
         String withoutRepo = reply(
                 "causes_identified",
-                "{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],"
+                "{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],\"change\":\"change\",\"type\":\"code\","
                         + "\"attribution\":{\"path\":\"a.py\",\"commit\":\"abc\"}}");
         assertNull(
                 parseWithoutRepo(withoutRepo).causes().get(0).attribution(), "path and commit cleared, nothing left");
@@ -240,7 +284,7 @@ class RcaSynthesisOutputTest {
     void unexpectedFieldsAnywhereInTheTreeDoNotSinkTheRun() {
         String text = "{\"summary\":\"s\",\"verdict\":\"causes_identified\",\"detailed_report\":\"## r\","
                 + "\"confidence_overall\":\"high\",\"checklist\":[{\"check\":\"serving_model\"}],"
-                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],"
+                + "\"causes\":[{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],\"change\":\"change\",\"type\":\"code\","
                 + "\"supporting_commits\":[\"abc123\"],\"attribution\":{\"kind\":\"code\",\"path\":\"a.py\"}}]}";
 
         RcaSynthesisOutput.Parsed out = parse(text);
@@ -298,7 +342,7 @@ class RcaSynthesisOutputTest {
     void aSparseReplyDegradesFieldByField() {
         String reply = "{\"summary\":\"  \",\"verdict\":null,\"detailed_report\":\"  \",\"ruled_out\":null,"
                 + "\"causes\":[{\"title\":null,\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"]},"
-                + "{\"title\":\"Canary model\",\"confidence\":\"medium\",\"change\":\" \",\"type\":\"\","
+                + "{\"title\":\"Canary model\",\"confidence\":\"medium\",\"change\":\"standing\",\"type\":\"data\","
                 + "\"what_happens\":null,\"evidence_session_ids\":[\"s-1\"]}]}";
 
         RcaSynthesisOutput.Parsed out = parse(reply);
@@ -307,7 +351,17 @@ class RcaSynthesisOutputTest {
         assertNull(out.detailedReport());
         assertEquals(
                 List.of(new Cause(
-                        "Canary model", "medium", null, null, null, null, null, null, List.of(), List.of("s-1"), 1)),
+                        "Canary model",
+                        "medium",
+                        "standing",
+                        "data",
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of("s-1"),
+                        1)),
                 out.causes());
         assertEquals(List.of(), out.ruledOut());
     }

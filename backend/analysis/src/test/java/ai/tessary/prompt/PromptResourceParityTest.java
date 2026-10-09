@@ -34,6 +34,7 @@ class PromptResourceParityTest {
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_PRESENT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_ABSENT");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "BASELINE_PRESENT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "METHOD_LINE");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "TOOLS");
         constant(m, ai.tessary.rca.AgenticRcaEngine.class, "JSON_SCHEMA");
         for (String method : List.of(

@@ -252,9 +252,13 @@ public class FindingService {
      */
     public Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> flaggedSentences(
             String projectId, String findingId, Collection<SpanRef> refs) {
-        FindingRow finding = requireReachableFinding(projectId, findingId);
-        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Map.of();
-        return groundedness.flaggedSentences(finding, refs);
+        // Every classifier's witness page asks, and only groundedness has an answer: settle the kind on the
+        // one row read before paying for the flag-layer guard.
+        boolean groundednessFinding = findings.findById(projectId, findingId)
+                .map(f -> FindingRow.Cause.GROUNDEDNESS_RATE.equals(f.causeKind()))
+                .orElse(false);
+        if (!groundednessFinding) return Map.of();
+        return groundedness.flaggedSentences(requireReachableFinding(projectId, findingId), refs);
     }
 
     /**

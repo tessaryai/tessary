@@ -42,6 +42,15 @@ final class RcaSynthesisOutput {
 
     private static final Set<String> CONFIDENCES = Set.of(Cause.HIGH, Cause.MEDIUM);
 
+    // A stored cause's `change` is what tells the UI it is a new-format cause, so one without a valid
+    // value would render under the old rules: it is dropped, never stored half-formed.
+    private static final Set<String> CHANGES = Set.of("change", "standing");
+
+    private static final Set<String> TYPES =
+            Set.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other");
+
+    private static final int MAX_CAUSES = 4;
+
     private static final Comparator<Cause> HIGH_THEN_LARGEST = Comparator.<Cause>comparingInt(
                     c -> Cause.HIGH.equals(c.confidence()) ? 0 : 1)
             .thenComparing(Comparator.comparingInt(Cause::affectedCount).reversed());
@@ -103,12 +112,17 @@ final class RcaSynthesisOutput {
         List<Cause> causes = new ArrayList<>();
         int unreceipted = 0;
         int belowMedium = 0;
+        int unlabelled = 0;
         List<CauseBody> bodies = body.causes();
         for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
             String title = c.title();
             if (title == null || title.isBlank()) continue;
             if (c.confidence() == null || !CONFIDENCES.contains(c.confidence())) {
                 belowMedium++;
+                continue;
+            }
+            if (c.change() == null || !CHANGES.contains(c.change()) || c.type() == null || !TYPES.contains(c.type())) {
+                unlabelled++;
                 continue;
             }
             List<String> traces = kept(c.evidence_trace_ids(), citableTraceIds);
@@ -121,8 +135,8 @@ final class RcaSynthesisOutput {
             causes.add(new Cause(
                     title,
                     c.confidence(),
-                    blankToNull(c.change()),
-                    blankToNull(c.type()),
+                    c.change(),
+                    c.type(),
                     blankToNull(c.what_happens()),
                     blankToNull(c.how_it_caused_this()),
                     blankToNull(c.next_step()),
@@ -131,26 +145,37 @@ final class RcaSynthesisOutput {
                     sessions,
                     Math.max(claimed == null ? 0 : claimed, Math.max(traces.size(), sessions.size()))));
         }
-        if (unreceipted > 0 || belowMedium > 0) {
+        if (unreceipted > 0 || belowMedium > 0 || unlabelled > 0) {
             log.warn(
-                    "rca analysis project={} dropped {} cause(s) citing nothing of this finding and {} below medium",
+                    "rca analysis project={} dropped {} cause(s) citing nothing of this finding, {} below medium"
+                            + " and {} without a valid change or type",
                     projectId,
                     unreceipted,
-                    belowMedium);
+                    belowMedium,
+                    unlabelled);
         }
         // Stable, so the agent's own order breaks ties.
         causes.sort(HIGH_THEN_LARGEST);
+        if (causes.size() > MAX_CAUSES) {
+            log.warn("rca analysis project={} kept the first {} of {} causes", projectId, MAX_CAUSES, causes.size());
+            causes.subList(MAX_CAUSES, causes.size()).clear();
+        }
 
-        String verdict = RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(body.verdict())
-                ? RcaReportRow.Verdict.CAUSES_IDENTIFIED
-                : RcaReportRow.Verdict.NO_CAUSE_FOUND;
+        // The verdict is a function of what survived, in both directions.
+        boolean claimed = RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(body.verdict());
+        String verdict =
+                causes.isEmpty() ? RcaReportRow.Verdict.NO_CAUSE_FOUND : RcaReportRow.Verdict.CAUSES_IDENTIFIED;
         String verdictNote = null;
-        if (RcaReportRow.Verdict.CAUSES_IDENTIFIED.equals(verdict) && causes.isEmpty()) {
+        if (claimed && causes.isEmpty()) {
             verdictNote = "> **Verdict downgraded by the platform.** The analysis returned `causes_identified`,"
                     + " but no cause at high or medium confidence cited a trace or session from this finding's"
                     + " evidence, so none survived. Recorded as `no_cause_found`.";
             log.warn("rca analysis project={} downgraded verdict causes_identified -> no_cause_found", projectId);
-            verdict = RcaReportRow.Verdict.NO_CAUSE_FOUND;
+        } else if (!claimed && !causes.isEmpty()) {
+            verdictNote = "> **Verdict corrected by the platform.** The analysis did not return `causes_identified`,"
+                    + " but " + causes.size() + " cause(s) at high or medium confidence cited this finding's"
+                    + " evidence. Recorded as `causes_identified`.";
+            log.warn("rca analysis project={} corrected verdict {} -> causes_identified", projectId, body.verdict());
         }
 
         String bodyDetailed = body.detailed_report();

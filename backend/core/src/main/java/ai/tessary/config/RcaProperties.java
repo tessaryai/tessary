@@ -67,7 +67,7 @@ public class RcaProperties {
          * for triage.
          *
          * <p><b>Blank is a broken deployment, not a degraded mode.</b> The dossier carries the
-         * finding's claim, the detector's numbers and the measured checklist; every trace and span
+         * finding's claim and the detector's numbers; every trace and span
          * behind them is fetched through this door. A run without it can only paraphrase the detector,
          * so the engine refuses and the report stamps {@code failed}.
          */

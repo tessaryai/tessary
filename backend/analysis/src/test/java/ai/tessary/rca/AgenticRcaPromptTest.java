@@ -162,11 +162,18 @@ class AgenticRcaPromptTest {
         assertTrue(prompt.contains("`fnd-1`"), "the finding id is what get_finding_evidence takes");
         assertTrue(prompt.contains("onset: 2026-05-04T00:00:00Z"), prompt);
         assertTrue(prompt.contains("last seen: 2026-05-08T00:00:00Z"), prompt);
-        assertTrue(prompt.contains("flagged: 12 traces"), prompt);
+        assertTrue(prompt.contains("flagged traces in the evidence: 12"), prompt);
         assertTrue(prompt.contains("time budget: 15 minutes"), prompt);
         assertTrue(prompt.contains("`dossier/tools.md`"), "tools.md is a first read");
         assertTrue(prompt.contains("`dossier/evidence.json`"), "evidence.json is a first read");
         assertFalse(prompt.contains("\n\n\n"), "a snippet left out leaves no blank gap");
+    }
+
+    /** The sandbox boot and the clone spend part of the hard timeout, so the agent is told less than all of it. */
+    @Test
+    void theStatedBudgetLeavesRoomBeforeTheHardTimeout() {
+        assertEquals(12, AgenticRcaEngine.timeBudgetMinutes(900_000));
+        assertEquals(1, AgenticRcaEngine.timeBudgetMinutes(30_000));
     }
 
     /**
@@ -233,7 +240,7 @@ class AgenticRcaPromptTest {
         String few = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 2, "sessions", 15);
         String many = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 40, "sessions", 15);
 
-        assertEquals(many, few.replace("flagged: 2 sessions", "flagged: 40 sessions"));
+        assertEquals(many, few.replace("flagged sessions in the evidence: 2", "flagged sessions in the evidence: 40"));
     }
 
     /** One schema for every classifier, with exactly the verdicts and confidence levels the decision allows. */

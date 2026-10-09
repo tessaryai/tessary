@@ -92,9 +92,10 @@ export function shownAsCause(cause: Pick<RcaCause, "change" | "confidence">): bo
  */
 export function causeLabels(kind: CauseKind, cause: Pick<RcaCause, "change" | "confidence">): CauseLabels {
   if (isCurrentCause(cause)) {
+    const standing = cause.change === "standing";
     return {
-      change: cause.change === "standing" ? "What the agent does" : "What changed",
-      how: HOW[kind],
+      change: standing ? "What the agent does" : "What changed",
+      how: kind === "other" && standing ? "Why it happens" : HOW[kind],
       next: "What to do",
     };
   }
