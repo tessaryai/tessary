@@ -50,6 +50,9 @@ export function McpTokens() {
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [issued, setIssued] = useState<{ plaintext: string; name: string } | null>(null);
+  // Asked in the page, not with window.confirm(): a native dialog blocks the tab, and an automated
+  // browser dismisses it unseen, so the revoke never runs (#84).
+  const [toRevoke, setToRevoke] = useState<McpTokenView | null>(null);
   // The MCP config block is a text link, not a Button, so it drives the same confirmed/reset cycle itself.
   const copyConfig = useCopy();
 
@@ -151,11 +154,7 @@ export function McpTokens() {
               <TokenRow
                 key={t.id}
                 token={t}
-                onRevoke={() => {
-                  if (confirm(`Revoke "${t.name}"? Any client using it loses access immediately. This cannot be undone.`)) {
-                    revoke.mutate(t.id);
-                  }
-                }}
+                onRevoke={() => setToRevoke(t)}
                 revoking={revoke.isPending && revoke.variables === t.id}
               />
             ))}
@@ -193,6 +192,31 @@ export function McpTokens() {
           </div>
         </Section>
       )}
+
+      <Modal
+        open={toRevoke !== null}
+        onClose={() => setToRevoke(null)}
+        size="sm"
+        title={toRevoke && `Revoke "${toRevoke.name}"?`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setToRevoke(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                revoke.mutate(toRevoke!.id);
+                setToRevoke(null);
+              }}
+            >
+              Revoke token
+            </Button>
+          </>
+        }
+      >
+        <p className="text-small text-muted">Any client using it loses access immediately. You cannot undo this.</p>
+      </Modal>
 
       {/* New token: name → one-time reveal, in a single focused modal. */}
       <Modal
