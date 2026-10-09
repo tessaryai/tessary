@@ -47,6 +47,7 @@ A new non-LLM product span that should reach Langfuse **must** stamp
 |---|---|---|---|
 | `E2bRcaSandbox` | `agentic-rca` | `agentic-rca` | |
 | `E2bTriageSandbox` | `layer2-triage` | `layer2-triage` | The Layer-2 ruling, on `ModelLane.TRIAGE`. Metadata: `tessary.triage.finding_id`, which is also the ledger subject the run's spend is booked against, so a cost per ruling is a join rather than an estimate. There is no lane attribute: the repo-grounded lane is gone and every run now rules on the evidence, so recording it would stamp a constant. |
+| `E2bAgentRunSandbox` | `agent-run` | `agent-run` | The generic agent run (`agentrun/`), on whichever lane the caller named: `tessary.agentrun.lane` carries it, since this emitter is not one lane. Metadata: `tessary.agentrun.subject_kind` / `subject_id`, the ledger subject the run's spend is booked against. |
 | `AgentSpanTelemetry` | `agent.llm_request` | — | Per-turn child under agentic roots (carve-out) |
 | `JevDecisionClient` | `decision-call` | — | One hosted decision-model call. Sets `gen_ai.operation.name=decision`, so Alloy admits it. Metadata: `lane`, `provider` (the gateway), `project_id`. No message content on the span. |
 

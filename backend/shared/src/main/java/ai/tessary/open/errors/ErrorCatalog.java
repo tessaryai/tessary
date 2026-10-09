@@ -41,7 +41,8 @@ public class ErrorCatalog {
             CaseError.class,
             AuthError.class,
             DecisionError.class,
-            RetentionError.class);
+            RetentionError.class,
+            AgentRunError.class);
 
     private final List<Class<? extends ErrorCode>> registered;
 

@@ -117,6 +117,9 @@ class ProjectModelSettingsTest {
         var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
         assertEquals(SONNET, triage.modelKey(), "TRIAGE is exactly RCA's list, so it lands on the same default");
         assertTrue(triage.automatic());
+        var authoring = settings.resolve(PID, ModelLane.AUTHORING).orElseThrow();
+        assertEquals(SONNET, authoring.modelKey(), "AUTHORING shares RCA's list, so it lands on the same default");
+        assertTrue(authoring.automatic());
 
         configured(ModelProvider.GEMINI);
         assertEquals(
@@ -136,6 +139,10 @@ class ProjectModelSettingsTest {
                 PLATFORM_SONNET,
                 settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey(),
                 "TRIAGE shares RCA's order, so it lands on the platform provider too");
+        assertEquals(
+                PLATFORM_SONNET,
+                settings.resolve(PID, ModelLane.AUTHORING).orElseThrow().modelKey(),
+                "AUTHORING shares RCA's order, so it lands on the platform provider too");
     }
 
     @Test
@@ -181,7 +188,7 @@ class ProjectModelSettingsTest {
         // Whichever single key an org holds, both lanes resolve. allOf, not a hand-listed set, so a new ModelProvider
         // fails here until it has a launcher mode and a place on both lanes. TYPESAFE serves decision models only.
         Set<ModelProvider> reachable = EnumSet.complementOf(EnumSet.of(ModelProvider.TYPESAFE));
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE, ModelLane.AUTHORING)) {
             Set<ModelProvider> covered = LanePriority.of(lane).stream()
                     .map(LanePriority.ProviderOption::provider)
                     .collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(ModelProvider.class)));
@@ -194,7 +201,7 @@ class ProjectModelSettingsTest {
         assertEquals(
                 List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest"),
                 LanePriority.modelKeys(ModelLane.FRUSTRATION));
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE, ModelLane.AUTHORING)) {
             assertTrue(
                     LanePriority.forProvider(lane, ModelProvider.TYPESAFE).isEmpty(),
                     "TypeSafe serves no chat model, so " + lane + " never offers it");
@@ -250,7 +257,7 @@ class ProjectModelSettingsTest {
 
     @Test
     void aDecisionModelIsRefusedOnTheAgentLanes() {
-        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE)) {
+        for (ModelLane lane : List.of(ModelLane.RCA, ModelLane.TRIAGE, ModelLane.AUTHORING)) {
             for (String jev : List.of("TYPESAFE:jev-latest", "OPENROUTER:~typesafe/jev-latest")) {
                 TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, jev));
                 assertEquals(ModelConfigError.MODEL_NOT_OFFERED_FOR_LANE, ex.error(), lane + " " + jev);
@@ -308,6 +315,7 @@ class ProjectModelSettingsTest {
         "RCA, gpt-5.5",
         "RCA, amazon.nova-2-lite",
         "TRIAGE, amazon.nova-2-lite",
+        "AUTHORING, amazon.nova-2-lite",
         "RCA, NOPE:some-model",
         "RCA, GEMINI:no-such-model"
     })

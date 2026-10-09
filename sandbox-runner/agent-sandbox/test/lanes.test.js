@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * rca.js and triage.js as the launcher runs them: a real process over a real input.json, with
- * test/fixtures/fake-opencode on PATH as `opencode`. lane-exit.test.js covers how triage.js exits;
- * this covers what the two lanes do before and around runAgent: the optional clone and its
- * quarantine, the dossier and its traversal guard, the failure envelope, and the exit guard that
- * ends a run a leaked handle would otherwise keep alive.
+ * rca.js, triage.js and authoring.js as the launcher runs them: a real process over a real
+ * input.json, with test/fixtures/fake-opencode on PATH as `opencode`. lane-exit.test.js covers how
+ * triage.js exits; this covers what the lanes do before and around runAgent: the optional clone and
+ * its quarantine, the dossier and its traversal guard, the failure envelope, authoring's permission
+ * split and prose answer, and the exit guard that ends a run a leaked handle would otherwise keep
+ * alive.
  */
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -91,7 +92,50 @@ test('a failed RCA run still writes its spend for the launcher to book', async (
   assert.equal(envelope.usage.input_tokens, 20, 'both attempts\' input is counted');
 });
 
-for (const script of ['rca.js', 'triage.js']) {
+test('authoring.js checks out the requested commit, quarantines agent config, and may edit everywhere but the repo', async () => {
+  const repo = makeRepo();
+  const { result, workDir, configs } = await runLane('authoring.js', {
+    clone_url: `file://${repo.dir}`,
+    head_sha: repo.first,
+    files: { 'brief.md': 'find timeouts' },
+    system_prompt: 'You write classifiers.',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(typeof JSON.parse(result.stdout).raw, 'string');
+  const clone = path.join(workDir, 'repo');
+  assert.equal(execFileSync('git', ['-C', clone, 'rev-parse', 'HEAD']).toString().trim(), repo.first);
+  assert.equal(fs.existsSync(path.join(clone, 'AGENTS.md')), false, 'the repo\'s instructions are out of the agent\'s way');
+  assert.equal(fs.readFileSync(path.join(workDir, 'dossier', 'brief.md'), 'utf8'), 'find timeouts');
+  assert.deepEqual(
+    configs[0].permission.edit,
+    { '*': 'allow', [`${clone}/**`]: 'deny' },
+    'scratch files anywhere under the work dir, never a write into the customer\'s checkout',
+  );
+  assert.equal(configs[0].agent['tessary-triage'].prompt, 'You write classifiers.', 'the caller\'s system prompt replaces the default');
+});
+
+test('authoring.js without a clone_url still runs, with no repo', async () => {
+  const { result, workDir } = await runLane('authoring.js', { files: { 'brief.md': 'x' }, system_prompt: 'sys' });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(path.join(workDir, 'repo')), false);
+});
+
+test('authoring.js without a json_schema accepts a prose answer as the result', async () => {
+  const { result } = await runLane(
+    'authoring.js',
+    { files: {}, system_prompt: 'sys', json_schema: undefined },
+    { reply: 'The call site retries three times before giving up.' },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const envelope = JSON.parse(JSON.parse(result.stdout).raw);
+  assert.equal(envelope.result, 'The call site retries three times before giving up.');
+  assert.equal(envelope.structured_output, undefined, 'prose carries no structured half');
+});
+
+for (const script of ['rca.js', 'triage.js', 'authoring.js']) {
   test(`${script} refuses a dossier path that escapes its directory, before any agent starts`, async () => {
     const { result, workDir, configs } = await runLane(script, { files: { '../escaped.md': 'x' } });
 
@@ -103,7 +147,7 @@ for (const script of ['rca.js', 'triage.js']) {
 }
 
 describe('the exit guard', { concurrency: true }, () => {
-  for (const script of ['rca.js', 'triage.js']) {
+  for (const script of ['rca.js', 'triage.js', 'authoring.js']) {
     test(`${script} ends itself 5s after main() when a leaked handle holds the process open`, async () => {
       const { result } = await runLane(script, { files: {} }, { env: { NODE_OPTIONS: `--require ${LEAK}` } });
 

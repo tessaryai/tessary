@@ -125,13 +125,13 @@ instance role or the SDK's default credential chain — instead of the sealed ac
 before this field existed keeps failing closed with `MISSING_CREDENTIALS` rather than silently
 reaching for an ambient identity nobody asked it to use.
 
-**It does NOT cover RCA or TRIAGE.** Those lanes run the agent in an isolated sandbox launched by
+**It does NOT cover RCA, TRIAGE or AUTHORING.** Those lanes run the agent in an isolated sandbox launched by
 `sandbox-runner` — a fresh sibling Docker container by default, or an E2B microVM if the operator
 opts into `SANDBOX_BACKEND=e2b` — and neither backend has
 a way to assume your backend process's own AWS identity: every request carries its credential
 explicitly, with no ambient-identity relay for either of them, by design (adding one would be new
 scope no decision here authorizes). A Bedrock/mantle credential
-selected for an agentic (RCA/TRIAGE) lane **must** be `auth_mode=api_key`; an `iam_role`-mode
+selected for an agentic (RCA/TRIAGE/AUTHORING) lane **must** be `auth_mode=api_key`; an `iam_role`-mode
 credential resolved for one of those lanes fails closed with a typed error naming the reason
 (`ModelConfigError.AGENTIC_IAM_ROLE_UNSUPPORTED`) rather than silently falling back to something
 else.

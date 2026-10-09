@@ -41,7 +41,11 @@ import java.util.Optional;
  * fixed threshold, since a project running triage unattended, once per cause, is the one that pays
  * for that choice on every finding rather than once.
  *
- * <p><b>Every chat provider appears on both agent lanes. All ten of them.</b> That is the coverage
+ * <p><b>AUTHORING shares the same list.</b> It runs the same agent shape as RCA (a repository, the
+ * traces over MCP, one long tool loop) once per request a person presses, so there is no second
+ * ordering to maintain for it either.
+ *
+ * <p><b>Every chat provider appears on every agent lane. All ten of them.</b> That is the coverage
  * rule, and it is literal rather than qualified: whichever single chat key an org happens to hold,
  * both lanes resolve to something rather than to nothing. Most providers also carry a smaller
  * current-generation model alongside their flagship — not because either lane defaults to it, but
@@ -156,6 +160,7 @@ public final class LanePriority {
                 new ProviderOption(ModelProvider.PLATFORM, List.of(PLATFORM_SONNET_5_5), PLATFORM_SONNET_5_5));
         m.put(ModelLane.RCA, agentVmOrder);
         m.put(ModelLane.TRIAGE, agentVmOrder);
+        m.put(ModelLane.AUTHORING, agentVmOrder);
         m.put(
                 ModelLane.FRUSTRATION,
                 List.of(

@@ -9,7 +9,7 @@ as the Docker backend's agent image.
 - `template.ts` — the image definition (base image, `git`, the `opencode-ai` CLI +
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
-  through the SDK. Required by `rca.js` and `triage.js`.
+  through the SDK. Required by `rca.js`, `triage.js` and `authoring.js`.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
   `evidence.json`, `checklist.md`) → read-only agent run wired to the platform's MCP surface → emit
   verdict + summary + causes + the markdown investigation. It reads every trace it cites through MCP, so
@@ -21,6 +21,13 @@ as the Docker backend's agent image.
   production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
   under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
   computes what is mechanical rather than eyeballing it. (Node builtins only.)
+- `authoring.js` — the generic agent run behind the backend's `AgentRunService` (the `AUTHORING`
+  lane): materialize the caller's files under `dossier/`, clone the repository at the requested
+  commit when a `clone_url` is sent (quarantined like RCA's), run the agent under the caller's own
+  system prompt wired to the platform's MCP surface, and emit the schema-constrained answer, or
+  prose when no `json_schema` was sent. The repository is read-only (`edit` denied under `repo/`);
+  everywhere else under the work dir is writable, so the agent can draft a builder and run it with
+  `node`. (Node builtins only.)
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's

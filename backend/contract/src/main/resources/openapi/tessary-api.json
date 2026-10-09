@@ -6776,6 +6776,7 @@
             "enum" : [
               "rca",
               "triage",
+              "authoring",
               "frustration"
             ],
             "type" : "string"
@@ -8225,6 +8226,7 @@
             "enum" : [
               "rca",
               "triage",
+              "authoring",
               "frustration"
             ],
             "type" : "string"
