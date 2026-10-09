@@ -227,12 +227,13 @@ public class E2bRcaSandbox implements RcaSandbox {
             span.setAttribute("gen_ai.request.model", model(req.projectId()));
 
             ObjectNode body = mapper.createObjectNode();
-            // clone_url and mcp.token are secrets — sent to the launcher, never logged. Both clone
+            // clone_url and mcp.token are secrets — sent to the launcher, never logged. The clone
             // fields are OMITTED rather than sent null for a repo-less project: the sandbox script
             // branches on their presence.
             if (req.cloneUrl() != null && req.headSha() != null) {
                 body.put("clone_url", req.cloneUrl());
                 body.put("head_sha", req.headSha());
+                if (req.onsetAt() != null) body.put("onset_at", req.onsetAt());
             }
             ObjectNode files = body.putObject("files");
             req.files().forEach(files::put);

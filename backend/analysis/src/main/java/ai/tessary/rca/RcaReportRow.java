@@ -43,20 +43,17 @@ public record RcaReportRow(
         String createdAt,
         @Nullable String completedAt) {
 
-    /** {@code verdict} values — what the analysis concluded the movement was. */
+    /**
+     * {@code verdict} values code writes. Reports written before one prompt served every classifier also
+     * hold {@code definition_change}, {@code model_change}, {@code traffic_shift}, {@code behavior_change} and
+     * {@code inconclusive}; they are read as stored.
+     */
     public static final class Verdict {
         private Verdict() {}
 
-        public static final String DEFINITION_CHANGE = "definition_change";
-        public static final String MODEL_CHANGE = "model_change";
-        public static final String TRAFFIC_SHIFT = "traffic_shift";
-        public static final String BEHAVIOR_CHANGE = "behavior_change";
-        public static final String INCONCLUSIVE = "inconclusive";
-        /** A report that {@linkplain ReportKind#namesCauses names causes} and grouped the flagged sessions or
-         *  answers into at least one cause citing them. */
+        /** At least one cause reached medium confidence and cites this finding's evidence. */
         public static final String CAUSES_IDENTIFIED = "causes_identified";
-        /** A report that {@linkplain ReportKind#namesCauses names causes} and found no agent behaviour the
-         *  flagged sessions or answers share. */
+        /** No cause reached medium confidence. */
         public static final String NO_CAUSE_FOUND = "no_cause_found";
     }
 
@@ -79,8 +76,8 @@ public record RcaReportRow(
             return METRIC_MOVEMENT;
         }
 
-        /** True for the kinds that rank causes against a learned rate rather than explain a movement: no
-         *  baseline side and no two-sided checklist. */
+        /** True for the kinds measured as a rate against a learned one, whose report header reads as that
+         *  rate rather than as the classifier's asserted severity. */
         public static boolean namesCauses(String reportKind) {
             return FRUSTRATION_CAUSES.equals(reportKind) || GROUNDEDNESS_CAUSES.equals(reportKind);
         }

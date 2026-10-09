@@ -17,6 +17,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceText;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
@@ -598,5 +600,84 @@ class McpFindingToolsTest {
         String text = errorText(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"other-tenant\"}"));
 
         assertTrue(text.contains("other-tenant"), text);
+    }
+
+    private static EvidenceSpanView evidenceRow(String role, String traceId, @Nullable String spanId) {
+        return new EvidenceSpanView(
+                role, 0, "sess-1", traceId, spanId, "answer", "llm", "ok", null, null, "2026-02-03T10:00:00Z", 900L,
+                300L, 0.01, List.of("claude-haiku-5"), false, false, false, "rag-answer", "question", "answer", null,
+                null, null);
+    }
+
+    /**
+     * A groundedness witness span row carries the sentences the model flagged, as text with a score, so an agent
+     * reads what was flagged without a {@code get_span} per answer. Only the page's witness span refs are asked
+     * for: a trace-grain witness row and a member row are not answers.
+     */
+    @Test
+    void getFindingEvidence_groundednessWitnessSpanRowsCarryFlaggedSentences() throws Exception {
+        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-g", null, 100, null))
+                .thenReturn(new FindingEvidenceSpanPage(
+                        List.of(
+                                evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-1", null),
+                                evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-1", "span-1"),
+                                evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-2", "span-2"),
+                                evidenceRow(FindingEvidenceRow.Role.MEMBER, "trace-3", "span-3")),
+                        null,
+                        counts(1, 0),
+                        counts(1, 0)));
+        List<SpanRef> witnessSpans = List.of(new SpanRef("trace-1", "span-1"), new SpanRef("trace-2", "span-2"));
+        when(behaviorDrift.flaggedSentences(PROJECT_ID, "find-g", witnessSpans))
+                .thenReturn(Map.of(
+                        new SpanRef("trace-1", "span-1"),
+                        List.of(
+                                new FlaggedSentenceText("The refund window is 90 days.", 0.91),
+                                new FlaggedSentenceText(null, 0.62)),
+                        new SpanRef("trace-2", "span-2"),
+                        List.of()));
+
+        JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-g\"}"))
+                .get("rows");
+
+        verify(behaviorDrift).flaggedSentences(PROJECT_ID, "find-g", witnessSpans);
+        assertFalse(rows.get(0).has("flaggedSentences"), "a trace-grain witness row is not an answer");
+        JsonNode sentences = rows.get(1).get("flaggedSentences");
+        assertEquals(2, sentences.size());
+        assertEquals("The refund window is 90 days.", sentences.get(0).get("text").asText());
+        assertEquals(0.91, sentences.get(0).get("score").asDouble());
+        assertTrue(sentences.get(1).get("text").isNull(), "an aged-out answer keeps the score without the text");
+        assertEquals(0.62, sentences.get(1).get("score").asDouble());
+        assertEquals(0, rows.get(2).get("flaggedSentences").size(), "a witness answer with no sentence left");
+        assertFalse(rows.get(3).has("flaggedSentences"), "a member row is not a flagged answer");
+    }
+
+    /** Every other classifier's rows are unchanged: no key, and no sentence read when the page has no witness span. */
+    @Test
+    void getFindingEvidence_otherClassifiersRowsCarryNoFlaggedSentences() throws Exception {
+        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-1", null, 100, null))
+                .thenReturn(samplePage(null));
+
+        JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-1\"}"))
+                .get("rows");
+
+        verify(behaviorDrift, org.mockito.Mockito.never()).flaggedSentences(any(), any(), any());
+        rows.forEach(r -> assertFalse(r.has("flaggedSentences"), r.toString()));
+    }
+
+    /** A tool-error witness span is asked about, and the service's empty answer leaves its row unchanged. */
+    @Test
+    void getFindingEvidence_nonGroundednessWitnessSpanRowIsUnchanged() throws Exception {
+        when(behaviorDrift.findingEvidenceSpans(PROJECT_ID, "find-t", null, 100, null))
+                .thenReturn(new FindingEvidenceSpanPage(
+                        List.of(evidenceRow(FindingEvidenceRow.Role.WITNESS, "trace-1", "span-1")),
+                        null,
+                        counts(1, 0),
+                        counts(1, 0)));
+        when(behaviorDrift.flaggedSentences(eq(PROJECT_ID), eq("find-t"), any())).thenReturn(Map.of());
+
+        JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-t\"}"))
+                .get("rows");
+
+        assertFalse(rows.get(0).has("flaggedSentences"), rows.get(0).toString());
     }
 }

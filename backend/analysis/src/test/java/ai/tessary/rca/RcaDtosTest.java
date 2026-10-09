@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import ai.tessary.rca.RcaDtos.Attribution;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RcaReportView;
+import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -55,7 +56,7 @@ class RcaDtosTest {
                 MAPPER);
 
         assertEquals(
-                List.of(new Cause("New model", "high", "r", null, null, null, List.of("t1"), List.of(), 0)),
+                List.of(new Cause("New model", "high", null, null, "r", null, null, null, List.of("t1"), List.of(), 0)),
                 view.causes());
     }
 
@@ -83,6 +84,8 @@ class RcaDtosTest {
                 List.of(new Cause(
                         "Ignores the attachment",
                         "medium",
+                        null,
+                        null,
                         "w",
                         null,
                         "f",
@@ -91,6 +94,80 @@ class RcaDtosTest {
                         List.of("s-1"),
                         4)),
                 view.causes());
+    }
+
+    /**
+     * Catches a report written before one prompt served every classifier failing to read or losing data: its
+     * causes have {@code low} confidence and {@code attribution.kind} and no {@code change} or {@code type},
+     * and its {@code ruled_out} holds checklist entries assessed {@code contributing}, {@code explains} and
+     * {@code unknown}.
+     */
+    @Test
+    void anOldFormatReportReadsWithEveryCauseAndChecklistEntry() {
+        RcaReportView view = RcaReportView.of(
+                row(
+                        RcaReportRow.ReportKind.METRIC_MOVEMENT,
+                        "s",
+                        "[{\"check\":\"serving_model\",\"passed\":false,\"detail\":\"d1\","
+                                + "\"assessment\":\"contributing\",\"measurement\":\"m1\",\"question\":\"q1\"},"
+                                + "{\"check\":\"failing_cohort_shape\",\"passed\":false,\"detail\":\"d2\","
+                                + "\"assessment\":\"explains\",\"measurement\":\"m2\",\"question\":null},"
+                                + "{\"check\":\"traffic_mix\",\"passed\":false,\"detail\":\"d3\","
+                                + "\"assessment\":\"unknown\",\"measurement\":\"m3\"}]",
+                        null,
+                        "[{\"title\":\"New model\",\"confidence\":\"low\",\"what_changed\":\"w\","
+                                + "\"attribution\":{\"kind\":\"model\",\"path\":\"cfg.yaml\",\"commit\":\"abc\","
+                                + "\"excerpt\":null},\"evidence_trace_ids\":[\"t1\"],\"evidence_session_ids\":[],"
+                                + "\"affected_count\":3}]"),
+                MAPPER);
+
+        assertEquals(
+                List.of(new Cause(
+                        "New model",
+                        "low",
+                        null,
+                        null,
+                        "w",
+                        null,
+                        null,
+                        new Attribution("model", "cfg.yaml", "abc", null),
+                        List.of("t1"),
+                        List.of(),
+                        3)),
+                view.causes());
+        assertEquals(
+                List.of(
+                        new RuledOutCheck("serving_model", false, "d1", "contributing", "m1", "q1"),
+                        new RuledOutCheck("failing_cohort_shape", false, "d2", "explains", "m2", null),
+                        new RuledOutCheck("traffic_mix", false, "d3", "unknown", "m3", null)),
+                view.ruledOut());
+    }
+
+    /**
+     * Catches a current report losing what only it carries: a cause's {@code change} and {@code type}, an
+     * attribution with no {@code kind}, and a ruled-out sentence with no {@code detail}.
+     */
+    @Test
+    void aNewFormatReportReadsItsChangeTypeAndRuledOutSentences() {
+        RcaReportView view = RcaReportView.of(
+                row(
+                        RcaReportRow.ReportKind.FRUSTRATION_CAUSES,
+                        "s",
+                        "[{\"check\":\"ruled_out_1\",\"passed\":true,\"detail\":null,"
+                                + "\"assessment\":\"ruled_out\",\"measurement\":null,"
+                                + "\"question\":\"The model did not change.\"}]",
+                        null,
+                        "[{\"title\":\"Ignores the attachment\",\"confidence\":\"medium\",\"change\":\"standing\","
+                                + "\"type\":\"prompt\",\"what_changed\":\"w\",\"attribution\":{\"kind\":null,"
+                                + "\"path\":\"agent/prompt.md\",\"commit\":null,\"excerpt\":\"e\"},"
+                                + "\"evidence_trace_ids\":[],\"evidence_session_ids\":[\"s-1\"],\"affected_count\":2}]"),
+                MAPPER);
+
+        Cause cause = view.causes().get(0);
+        assertEquals("standing", cause.change());
+        assertEquals("prompt", cause.type());
+        assertEquals(new Attribution(null, "agent/prompt.md", null, "e"), cause.attribution());
+        assertEquals(List.of(RuledOutCheck.ruledOut(1, "The model did not change.")), view.ruledOut());
     }
 
     /** Catches an old groundedness cause counting the sessions it never had (always 0) instead of its traces. */
@@ -155,7 +232,7 @@ class RcaDtosTest {
                 0.02,
                 0.28,
                 "done",
-                RcaReportRow.Verdict.MODEL_CHANGE,
+                "model_change",
                 summary,
                 ruledOut,
                 hypotheses,

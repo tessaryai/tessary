@@ -12,6 +12,7 @@ import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerPage;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedAnswerView;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceText;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.RetrievedDocumentView;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository.AnswerPage;
@@ -61,6 +62,24 @@ class GroundednessDetailServiceTest {
 
         CitedPages() {
             super(mock(JdbcClient.class), mock(ClassifierDetectionWriteRepository.class));
+        }
+
+        final Map<SpanRef, String> detections = new HashMap<>();
+
+        CitedPages detected(String traceId, String spanId, String evidenceJson) {
+            detections.put(new SpanRef(traceId, spanId), evidenceJson);
+            return this;
+        }
+
+        @Override
+        public Map<SpanRef, String> detectionEvidence(
+                String projectId, String classifierId, Collection<SpanRef> spans) {
+            assertEquals(List.of(PROJECT, CLASSIFIER), List.of(projectId, classifierId));
+            Map<SpanRef, String> out = new HashMap<>();
+            for (SpanRef ref : spans) {
+                if (detections.containsKey(ref)) out.put(ref, detections.get(ref));
+            }
+            return out;
         }
 
         CitedPages with(@Nullable CauseRef cause, int limit, int offset, AnswerPage page) {
@@ -248,6 +267,38 @@ class GroundednessDetailServiceTest {
                         1,
                         null),
                 page);
+    }
+
+    /**
+     * The agent door's sentences: each flagged sentence cut from the answer as scored, in the detector's order. An
+     * aged-out answer and offsets past its end keep the score without text, and a span with no detection row left
+     * has no sentences.
+     */
+    @Test
+    void flaggedSentencesCutEachSentenceFromItsAnswer() {
+        int second = ANSWER.indexOf("It arrives");
+        CitedPages rates = new CitedPages()
+                .detected(
+                        "tr_1",
+                        "sp_1",
+                        "{\"flagged_sentences\":[{\"start\":" + second + ",\"end\":" + ANSWER.length()
+                                + ",\"unsupported\":0.99},{\"start\":0,\"end\":999,\"unsupported\":0.97}]}")
+                .detected("tr_2", "sp_2", "{\"flagged_sentences\":[{\"start\":0,\"end\":4,\"unsupported\":0.98}]}");
+        StoredSpans substrate = new StoredSpans().with(span("tr_1", "sp_1", QUESTION, ANSWER), DOCUMENTS);
+        SpanRef one = new SpanRef("tr_1", "sp_1");
+        SpanRef aged = new SpanRef("tr_2", "sp_2");
+        SpanRef gone = new SpanRef("tr_3", "sp_3");
+
+        Map<SpanRef, List<FlaggedSentenceText>> sentences =
+                service(rates, substrate).flaggedSentences(finding(payload()), List.of(one, aged, gone));
+
+        assertEquals(
+                List.of(
+                        new FlaggedSentenceText("It arrives within two business days by bank transfer.", 0.99),
+                        new FlaggedSentenceText(null, 0.97)),
+                sentences.get(one));
+        assertEquals(List.of(new FlaggedSentenceText(null, 0.98)), sentences.get(aged));
+        assertEquals(List.of(), sentences.get(gone));
     }
 
     private static SubstrateObservation span(String traceId, String spanId, String question, String answer) {

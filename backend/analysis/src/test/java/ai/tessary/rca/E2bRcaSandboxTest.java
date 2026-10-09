@@ -78,6 +78,7 @@ class E2bRcaSandboxTest {
                 "g1",
                 "https://x-access-token:tok@host/r.git",
                 "sha",
+                "2026-05-04T00:00:00Z",
                 Map.of("movement.md", "the movement"),
                 "investigate",
                 "{}",
@@ -131,6 +132,7 @@ class E2bRcaSandboxTest {
         assertEquals("{\"verdict\":\"behavior_change\"}", run.resultText());
         var body = MAPPER.readTree(posted.toString());
         assertEquals("sha", body.path("head_sha").asText());
+        assertEquals("2026-05-04T00:00:00Z", body.path("onset_at").asText());
         assertEquals("the movement", body.path("files").path("movement.md").asText());
         assertEquals("https://api.example/mcp", body.path("mcp").path("url").asText());
         assertEquals("tsy_a_secret", body.path("mcp").path("token").asText());
@@ -158,7 +160,8 @@ class E2bRcaSandboxTest {
         assertEquals(provider.name(), body.path("provider").asText());
     }
 
-    /** No git integration: the clone fields are omitted, not empty, because the script branches on their presence. */
+    /** No git integration: the clone fields and the onset are omitted, not empty, because the script branches on
+     *  their presence. */
     @Test
     void aRepolessRequestOmitsTheCloneFields() throws Exception {
         var body = postedBody(
@@ -166,6 +169,7 @@ class E2bRcaSandboxTest {
                 new RcaSandbox.SandboxRequest(
                         "proj",
                         "g1",
+                        null,
                         null,
                         null,
                         Map.of(),
@@ -177,6 +181,7 @@ class E2bRcaSandboxTest {
 
         assertTrue(body.path("clone_url").isMissingNode());
         assertTrue(body.path("head_sha").isMissingNode());
+        assertTrue(body.path("onset_at").isMissingNode());
         // The evidence door is the run's only substrate, so it is never optional.
         assertEquals("https://api.example/mcp", body.path("mcp").path("url").asText());
     }

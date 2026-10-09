@@ -3,6 +3,7 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
@@ -19,6 +20,7 @@ import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -242,6 +244,17 @@ public class FindingService {
         GroundednessRateRepository.CauseRef ref =
                 rcaReport == null || cause == null ? null : new GroundednessRateRepository.CauseRef(rcaReport, cause);
         return groundedness.page(finding, ref, limit, cursor);
+    }
+
+    /**
+     * The flagged sentences of the answers in {@code refs}, each as text with its score, for a {@code
+     * groundedness_rate} finding's witness span rows on the agent door. Any other finding has none.
+     */
+    public Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> flaggedSentences(
+            String projectId, String findingId, Collection<SpanRef> refs) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Map.of();
+        return groundedness.flaggedSentences(finding, refs);
     }
 
     /**

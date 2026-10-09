@@ -530,42 +530,30 @@ public class SampleProjectSeedListener {
         double postInputTokens = preInputTokens * 1.95;
 
         List<RuledOutCheck> ruledOut = List.of(
-                RuledOutCheck.assessed(
-                        "model_change",
-                        "Did the serving model or its price change?",
-                        RuledOutCheck.Assessment.RULED_OUT,
-                        "classify_intent ran gpt-4o-mini for the whole window, priced against the same"
-                                + " price-book version throughout — no model or rate change lines up with the"
-                                + " " + onsetDate + " step.",
-                        "model=gpt-4o-mini, unchanged"),
-                RuledOutCheck.assessed(
-                        "traffic_shift",
-                        "Did the traffic mix change?",
-                        RuledOutCheck.Assessment.RULED_OUT,
-                        "Call volume grew smoothly across the whole 14-day window (more traffic on recent"
-                                + " days, as expected for a live project) with no discontinuity at " + onsetDate
-                                + " — the cost step has no matching jump in call count.",
-                        "no volume discontinuity at onset"),
-                RuledOutCheck.assessed(
-                        "definition_change",
-                        "Did classify_intent's own prompt or config change?",
-                        RuledOutCheck.Assessment.RULED_OUT,
-                        "classify_intent's own prompt and configuration did not change. What did move: its"
-                                + " input tokens, from roughly " + Math.round(preInputTokens) + " to roughly "
-                                + Math.round(postInputTokens) + " per call, starting exactly at the same"
-                                + " point the cost did — a clue pointing upstream rather than at this call"
-                                + " site itself.",
-                        "input tokens ~" + Math.round(preInputTokens) + " -> ~" + Math.round(postInputTokens)));
+                RuledOutCheck.ruledOut(
+                        1,
+                        "The model and its price did not change: classify_intent ran gpt-4o-mini at the same rate"
+                                + " for the whole window."),
+                RuledOutCheck.ruledOut(
+                        2,
+                        "The traffic did not change: call volume grew smoothly, with no jump at " + onsetDate + "."),
+                RuledOutCheck.ruledOut(
+                        3,
+                        "classify_intent's own prompt and configuration did not change; only its input grew, from"
+                                + " about " + Math.round(preInputTokens) + " to about " + Math.round(postInputTokens)
+                                + " tokens per call."));
 
         List<Cause> causes = List.of(new Cause(
                 "The step before classify_intent started sending it the whole ticket thread",
                 Cause.HIGH,
+                "change",
+                "code",
                 "On " + onsetDate + ", assemble_ticket_context began including every earlier message in the"
                         + " ticket thread, not just the customer's latest one.",
                 "classify_intent reads that context as its input, so it now pays for about twice as many input"
                         + " tokens per call. Its own prompt and model did not change.",
-                "A real cost regression, not a traffic change. Send classify_intent only the latest message, or"
-                        + " cap the thread history assemble_ticket_context forwards.",
+                "Send classify_intent only the latest message, or cap the thread history"
+                        + " assemble_ticket_context forwards.",
                 null,
                 stat.sampleTraceIdsPost(),
                 List.of(),
@@ -588,7 +576,7 @@ public class SampleProjectSeedListener {
                 stat.meanPost(),
                 stat.meanPre(),
                 stat.meanPost() - stat.meanPre(),
-                RcaReportRow.Verdict.BEHAVIOR_CHANGE,
+                RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                 String.format(
                         Locale.ROOT,
                         "classify_intent costs %.2f× more per call since %s because the step before it started"
@@ -660,9 +648,9 @@ public class SampleProjectSeedListener {
                 + " to read what it was handed, and what it was handed got bigger.\n\n"
                 + "Representative traces from after the shift: " + traceCitations + ".\n\n"
                 + "### Verdict\n\n"
-                + "**Behavior change.** Fix belongs in `assemble_ticket_context`'s context-assembly logic —"
-                + " trim to the current message (or a bounded recent window) rather than the full thread"
-                + " history — not in `classify_intent`, which never changed.";
+                + "**Cause identified, high confidence.** The fix belongs in `assemble_ticket_context`'s"
+                + " context assembly: trim to the current message, or a bounded recent window, rather than the"
+                + " full thread history. `classify_intent` never changed.";
     }
 
     /**

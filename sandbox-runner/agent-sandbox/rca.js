@@ -5,7 +5,7 @@
  * or on the host in local mode, exactly like triage.js. The launcher injects the
  * agent auth and invokes:  node rca.js <input.json>
  *
- *   input.json : { clone_url?, head_sha?, files, prompt, json_schema, model,
+ *   input.json : { clone_url?, head_sha?, onset_at?, files, prompt, json_schema, model,
  *                  mcp: {url, token}, timeout_ms }
  *   stdout     : { raw: "<result envelope>", turns: [...], startMs }
  *
@@ -18,7 +18,8 @@
  *
  *   dossier/finding.md      the claim, its cause, its window, and the size of each evidence role
  *   dossier/evidence.json   the detector's own numbers, verbatim
- *   dossier/checklist.md    the structural measurements, unjudged
+ *   dossier/method.md       how the classifier measures, when it has a method file
+ *   dossier/tools.md        the MCP tools that reach the rows
  *
  * That is the whole dossier. NO hydrated traces and no per-side ledgers: this file used to
  * receive two directories of trace bodies that the backend chose before knowing the question,
@@ -33,8 +34,12 @@
  * but the production evidence is readable without it, and refusing the run would deny an
  * evidence-only project the investigation it can have.
  *
- * clone_url embeds a short-lived token and mcp.token is a live platform key: git runs
- * with stdio ignored and its errors are re-thrown WITHOUT the args; scrubToken also
+ * With a clone, the backend sends onset_at and leaves {onset_commit} in the prompt: only the
+ * clone knows which commit was live at the onset, so it is resolved here, after checkout, as the
+ * newest commit on HEAD's history committed before onset_at, or "unknown" when there is none.
+ *
+ * clone_url embeds a short-lived token and mcp.token is a live platform key: git's
+ * errors are re-thrown WITHOUT the args and with stderr scrubbed; scrubToken also
  * covers the tsy_* key shape, so neither secret can reach a log or this script's output.
  */
 const fs = require('node:fs');
@@ -55,13 +60,25 @@ function writeDossier(root, files) {
   }
 }
 
+function onsetCommit(onsetAt) {
+  if (!onsetAt) return 'unknown';
+  try {
+    return git(['-C', REPO, 'rev-list', '-1', `--before=${onsetAt}`, 'HEAD']) || 'unknown';
+  } catch (e) {
+    console.error(`onset commit unresolved: ${describeError(e)}`);
+    return 'unknown';
+  }
+}
+
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
+  let prompt = input.prompt;
   if (input.clone_url) {
     git(['clone', '--quiet', input.clone_url, REPO]);
     git(['-C', REPO, 'checkout', '--quiet', input.head_sha]);
     quarantineRepo();
+    prompt = prompt.split('{onset_commit}').join(onsetCommit(input.onset_at));
   }
 
   writeDossier(path.join(WORK, 'dossier'), input.files);
@@ -72,7 +89,7 @@ async function main() {
   try {
     run = await runAgent({
       model: input.model,
-      prompt: input.prompt,
+      prompt,
       // The backend sends the schema as a JSON string; the agent SDK wants the object.
       jsonSchema: JSON.parse(input.json_schema),
       mcp: input.mcp,

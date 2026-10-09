@@ -125,6 +125,8 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
     {
       title: "The retriever still serves the old pricing and policy pages",
       confidence: "high",
+      change: null,
+      type: null,
       what_changed: "Answered refund questions from pages that were replaced.",
       how_it_caused_this: "The replaced pages quote old prices, so the answers go beyond the current documents.",
       next_step: "Remove the old folders from the index sources and rebuild the index.",
@@ -136,6 +138,8 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
     {
       title: "The system prompt asks for a complete answer every time",
       confidence: "medium",
+      change: null,
+      type: null,
       what_changed: "Filled gaps with specific numbers.",
       how_it_caused_this: "Numbers the documents don't hold are flagged as unsupported.",
       next_step: "Tell the agent to say when the documents don't answer the question.",
@@ -143,6 +147,49 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
       evidence_session_ids: [],
       evidence_trace_ids: ["t-4", "t-5"],
       affected_count: 2,
+    },
+  ],
+};
+
+/**
+ * The same report as the current analysis writes it: every cause carries `change` and `type`, a medium
+ * cause is a cause, and `ruled_out` holds one plain sentence per candidate. `GROUNDEDNESS_REPORT` keeps the
+ * older shape, which stored reports still have.
+ */
+export const CURRENT_GROUNDEDNESS_REPORT: RcaReport = {
+  ...GROUNDEDNESS_REPORT,
+  summary: "Answers went unsupported because the index serves replaced pages and the prompt demands complete answers.",
+  causes: [
+    {
+      ...GROUNDEDNESS_REPORT.causes[0],
+      change: "change",
+      type: "data",
+      attribution: { kind: null, path: "support-agent/retrieval/index.yaml", commit: "a41c0de", excerpt: null },
+    },
+    {
+      ...GROUNDEDNESS_REPORT.causes[1],
+      change: "standing",
+      type: "prompt",
+      what_changed: "Fills gaps with specific numbers.",
+      attribution: { kind: null, path: "support-agent/system.md", commit: null, excerpt: "Always give a complete answer." },
+    },
+  ],
+  ruled_out: [
+    {
+      check: "ruled_out_1",
+      question: "The serving model did not change during the window.",
+      assessment: "ruled_out",
+      detail: null,
+      measurement: null,
+      passed: true,
+    },
+    {
+      check: "ruled_out_2",
+      question: "Question traffic stayed on the same topics before and after the onset.",
+      assessment: "ruled_out",
+      detail: null,
+      measurement: null,
+      passed: true,
     },
   ],
 };

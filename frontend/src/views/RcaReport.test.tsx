@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * RcaReport's causes: proven ones first on the case page's card, leads last under their own heading. A
- * groundedness cause counts flagged answers and links its traces; a frustration cause counts sessions and
- * links the sessions and their turns.
+ * RcaReport's causes: on an older report, proven ones first on the case page's card and leads last under their
+ * own heading; on a current one, every cause together with its confidence. A groundedness cause counts flagged
+ * answers and links its traces; a frustration cause counts sessions and links the sessions and their turns.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../test/render";
@@ -11,7 +11,7 @@ import type { RcaReport as RcaReportData } from "../api/types";
 import type { Me } from "../api/types-auth";
 import { AuthProvider } from "../auth/AuthContext";
 import { RcaReport } from "./RcaReport";
-import { GROUNDEDNESS_REPORT } from "../test/groundednessFixtures";
+import { CURRENT_GROUNDEDNESS_REPORT, GROUNDEDNESS_REPORT } from "../test/groundednessFixtures";
 
 const { me } = vi.hoisted(() => ({ me: vi.fn<() => Promise<Me>>() }));
 
@@ -99,6 +99,57 @@ describe("RcaReport", () => {
     expect(screen.getByText("To confirm")).toBeTruthy();
   });
 
+  /** Catches an older report's checklist losing its ids or reasoning once current reports drop them. */
+  it("shows an older report's checklist with each check's id and reasoning", async () => {
+    report = {
+      ...GROUNDEDNESS_REPORT,
+      ruled_out: [
+        {
+          check: "model_swap",
+          question: "Did the serving model change?",
+          assessment: "explains",
+          detail: "Model id changed.",
+          measurement: null,
+          passed: false,
+        },
+        { check: "grader_drift", question: null, assessment: "ruled_out", detail: "Grader unchanged.", measurement: null, passed: true },
+      ],
+    };
+    renderReport();
+
+    expect(await screen.findByText("Checklist")).toBeTruthy();
+    expect(screen.getByText("Did the serving model change?")).toBeTruthy();
+    expect(screen.getByText("model_swap")).toBeTruthy();
+    expect(screen.getByText("Model id changed.")).toBeTruthy();
+    expect(screen.getByText("grader_drift")).toBeTruthy();
+    expect(screen.getByLabelText("Explains the movement")).toBeTruthy();
+  });
+
+  /** Catches a current medium cause sent to the leads, and an internal id shown beside a ruled-out sentence. */
+  it("lists a current report's high and medium causes together, each with its confidence, and what was ruled out", async () => {
+    report = CURRENT_GROUNDEDNESS_REPORT;
+    renderReport();
+
+    const high = await screen.findByText("The retriever still serves the old pricing and policy pages");
+    const medium = screen.getByText("The system prompt asks for a complete answer every time");
+    const ruledOut = screen.getByText("What else was checked");
+    expect(screen.getByText("Causes")).toBeTruthy();
+    expect(screen.queryByText("Leads not proven")).toBeNull();
+    expect(high.compareDocumentPosition(medium) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(medium.compareDocumentPosition(ruledOut) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText("Medium")).toBeTruthy();
+    expect(screen.getByText("What changed")).toBeTruthy();
+    expect(screen.getByText("What the agent does")).toBeTruthy();
+    expect(screen.getAllByText("Why answers went unsupported")).toHaveLength(2);
+    expect(screen.queryByText("Why it might be")).toBeNull();
+
+    expect(screen.queryByText("Checklist")).toBeNull();
+    expect(screen.getByText("Question traffic stayed on the same topics before and after the onset.")).toBeTruthy();
+    expect(screen.getAllByLabelText("Ruled out")).toHaveLength(2);
+    expect(screen.queryByText("ruled_out_1")).toBeNull();
+  });
+
   it("counts a frustration report's causes in sessions and links the sessions and their turns", async () => {
     report = {
       ...GROUNDEDNESS_REPORT,
@@ -110,6 +161,8 @@ describe("RcaReport", () => {
         {
           title: "The agent repeats the same clarifying question",
           confidence: "high",
+          change: null,
+          type: null,
           what_changed: "Asked for the order number after the user gave it.",
           how_it_caused_this: "Users had to repeat themselves.",
           next_step: "Read the order number from the conversation before asking.",

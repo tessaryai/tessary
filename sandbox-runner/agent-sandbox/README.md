@@ -11,10 +11,12 @@ as the Docker backend's agent image.
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
   through the SDK. Required by `rca.js`, `triage.js` and `authoring.js`.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
-  `evidence.json`, `checklist.md`) → read-only agent run wired to the platform's MCP surface → emit
-  verdict + summary + causes + the markdown investigation. It reads every trace it cites through MCP, so
-  the door is required; the clone is OPTIONAL and adds `./repo/` for the projects that have an
-  integration. Read-only by permission rule: it may never edit the clone. (Node builtins only.)
+  `evidence.json`, `method.md` when the classifier has one, `tools.md`) → read-only agent run wired to
+  the platform's MCP surface → emit verdict + summary + causes + the markdown investigation. It reads
+  every trace it cites through MCP, so the door is required; the clone is OPTIONAL and adds `./repo/`
+  for the projects that have an integration. With a clone, it fills the prompt's `{onset_commit}` with
+  the newest commit before `onset_at`, or `unknown`. Read-only by permission rule: it may never edit
+  the clone. (Node builtins only.)
 - `triage.js` — the Layer-2 ruling: materialize the finding's two-file dossier (`finding.md`,
   `evidence.json`) → agent run wired to the platform's MCP surface → emit verdict + citations. The
   one script that never clones: triage audits a claim, and no repository says whether a claim about

@@ -2539,7 +2539,10 @@
             ]
           },
           "kind" : {
-            "type" : "string"
+            "type" : [
+              "string",
+              "null"
+            ]
           },
           "path" : {
             "type" : [
@@ -3837,6 +3840,12 @@
               }
             ]
           },
+          "change" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "confidence" : {
             "type" : "string"
           },
@@ -3867,6 +3876,12 @@
           "title" : {
             "type" : "string"
           },
+          "type" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
           "what_changed" : {
             "type" : [
               "string",
@@ -3877,12 +3892,14 @@
         "required" : [
           "affected_count",
           "attribution",
+          "change",
           "confidence",
           "evidence_session_ids",
           "evidence_trace_ids",
           "how_it_caused_this",
           "next_step",
           "title",
+          "type",
           "what_changed"
         ],
         "type" : "object"
@@ -8949,7 +8966,10 @@
             "type" : "string"
           },
           "detail" : {
-            "type" : "string"
+            "type" : [
+              "string",
+              "null"
+            ]
           },
           "measurement" : {
             "type" : [

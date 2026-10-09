@@ -6,6 +6,7 @@ import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
@@ -45,6 +46,7 @@ import ai.tessary.traces.SessionDtos;
 import ai.tessary.traces.SessionReadService;
 import ai.tessary.traces.TraceDtos;
 import ai.tessary.traces.TracePageCodec;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -727,7 +729,10 @@ public class McpToolRegistry {
                         + " that has not finished, is missing priced spans, or can still change. So compare,"
                         + " rank and pick rows from the page itself, and open only the ones you decided to open — the"
                         + " payloads are NOT here, and get_span (trace id plus span id) is where a body comes"
-                        + " from. Call it with count_only=true first: that returns the"
+                        + " from. A groundedness finding's witness span rows also carry flaggedSentences: each"
+                        + " sentence the model flagged in that answer, as {text, score}, with text null once the"
+                        + " answer aged out; the question, answer and documents are in the span body."
+                        + " Call it with count_only=true first: that returns the"
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
                         + " context on it. counts is what SURVIVES and can still be opened; recorded_counts is"
                         + " what the detector wrote at finding-open — counts below recorded means substrate aged"
@@ -916,14 +921,33 @@ public class McpToolRegistry {
             }
             BehaviorDtos.FindingEvidenceSpanPage page =
                     behaviorDrift.findingEvidenceSpans(projectId, findingId, role, pageSize, cursor);
+            List<SpanRef> witnessSpans = page.rows().stream()
+                    .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role())
+                            && r.traceId() != null
+                            && r.spanId() != null)
+                    .map(r -> new SpanRef(r.traceId(), r.spanId()))
+                    .toList();
+            Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> sentences = witnessSpans.isEmpty()
+                    ? Map.of()
+                    : behaviorDrift.flaggedSentences(projectId, findingId, witnessSpans);
             return new EvidenceSpanPage(
-                    page.rows().stream().map(EvidenceSpan::of).toList(),
+                    page.rows().stream()
+                            .map(r -> EvidenceSpan.of(r, witnessSentences(r, sentences)))
+                            .toList(),
                     page.nextCursor(),
                     page.counts(),
                     page.recordedCounts());
         } catch (TessaryException e) {
             throw toolError(e);
         }
+    }
+
+    private static @Nullable List<GroundednessEvidence.FlaggedSentenceText> witnessSentences(
+            BehaviorDtos.EvidenceSpanView row, Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> sentences) {
+        if (!FindingEvidenceRow.Role.WITNESS.equals(row.role()) || row.traceId() == null || row.spanId() == null) {
+            return null;
+        }
+        return sentences.get(new SpanRef(row.traceId(), row.spanId()));
     }
 
     /**
@@ -969,9 +993,15 @@ public class McpToolRegistry {
             /** The schema-violation message this row's own output failed with — already a plain message,
              *  never a credential, so kept alongside the measurements rather than dropped with the
              *  previews. Set only on a malformed-output finding's evidence. */
-            @Nullable String violation) {
+            @Nullable String violation,
+            /** Each sentence the model flagged in this answer, with its score. Set only on a groundedness
+             *  finding's witness span rows, and absent from every other row. */
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Nullable List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
 
-        static EvidenceSpan of(BehaviorDtos.EvidenceSpanView v) {
+        static EvidenceSpan of(
+                BehaviorDtos.EvidenceSpanView v,
+                @Nullable List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
             return new EvidenceSpan(
                     v.role(),
                     v.rank(),
@@ -994,7 +1024,8 @@ public class McpToolRegistry {
                     v.callSiteId(),
                     v.secretKey(),
                     v.storedAs(),
-                    v.violation());
+                    v.violation(),
+                    flaggedSentences);
         }
     }
 

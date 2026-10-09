@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
-import ai.tessary.classifier.catalog.ClassifierMethodCard;
-import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.DossierPayload;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -11,19 +9,15 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.rca.RcaChecklist.Measurement;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
-import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,10 +25,9 @@ import org.springframework.stereotype.Service;
 
 /**
  * The RCA pipeline, anchored on a FINDING: (1) read the finding's CLAIM — {@link FindingClaim}, which is
- * the claim and nothing anybody ruled about it; (2) dereference its {@code finding_evidence} rows into
- * two sides, the {@code baseline}-role references and the flagged ones; (3) measure the structural
- * checklist across them ({@link RcaChecklist} — grader versions, serving models, traffic mix, grading
- * health); (4) hand the claim, its numbers and that checklist to a sandboxed agent ({@link
+ * the claim and nothing anybody ruled about it; (2) read its {@code finding_evidence} rows for what the
+ * run may cite, whether there is a {@code baseline} side, and how many rows were flagged; (3) hand the
+ * claim, its numbers, the classifier's RCA method and the MCP tools to a sandboxed agent ({@link
  * AgenticRcaEngine}) which reads every row it cites through MCP, with the project repo cloned beside it
  * when there is one. The result is stamped onto the {@code rca_report} row.
  *
@@ -45,26 +38,15 @@ import org.springframework.stereotype.Service;
  * and its mistakes must not arrive here as premises — the failure to avoid is an RCA that confirms a
  * triage error in more words and with more authority. The enforcement is structural rather than
  * conventional: this class reads {@link FindingRepository#findClaim}, whose SELECT list has no
- * {@code triage_*} column in it, so there is no ruling in scope to leak. The prompt does not mention
- * that a triage pass exists either, because "an earlier pass thought this was real" is itself a prior.
- *
- * <p>The consequence is deliberate: "nothing happened here" is a supported RCA conclusion. RCA is the
- * only check on the gate Layer 2 keeps, and a run told the claim had already been validated could not
- * perform that check.
+ * {@code triage_*} column in it, so there is no ruling in scope to leak. The prompt says the finding is
+ * confirmed and never says by whom.
  *
  * <h2>Evidence by reference, not by copy</h2>
  *
- * <p>The dossier is what is finding-specific — the claim, the detector's own numbers, the measured
- * checklist — and the substrate is read on demand. It used to ship hydrated traces and an exhaustive
- * per-side verdict ledger, which meant this class chose the sample the agent reasoned over before
- * knowing the question, and capped it at whatever fitted. The evidence refs are uncapped at write time
- * precisely so that decision can be made at read time by whoever has to defend it: the agent pages
- * {@code get_finding_evidence}, reads what it chooses with {@code get_trace}, and states what it took.
- *
- * <p>Nothing here short-circuits. The checklist measures and never judges: the thresholds that used to
- * end the run early ("any grader-version delta is a redefinition", "no failing verdicts means
- * inconclusive") produced confident wrong answers on tracing and grading hiccups, so the judgment moved
- * to the agent, which can check the repo before committing to a cause.
+ * <p>The dossier is what is finding-specific — the claim and the detector's own numbers — and the
+ * substrate is read on demand. The evidence refs are uncapped at write time so the agent decides at
+ * read time what to open: it pages {@code get_finding_evidence}, reads what it chooses with
+ * {@code get_trace}, and states what it took.
  */
 @Service
 public class RcaAnalysisService {
@@ -73,26 +55,20 @@ public class RcaAnalysisService {
 
     private final FindingRepository findings;
     private final FindingEvidenceRepository evidence;
-    private final RcaChecklist checklist;
     private final RcaReportRepository reports;
     private final AgenticRcaEngine agenticEngine;
-    private final GroundednessDetailService groundedness;
     private final ObjectMapper mapper;
 
     public RcaAnalysisService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
-            RcaChecklist checklist,
             RcaReportRepository reports,
             AgenticRcaEngine agenticEngine,
-            GroundednessDetailService groundedness,
             ObjectMapper mapper) {
         this.findings = findings;
         this.evidence = evidence;
-        this.checklist = checklist;
         this.reports = reports;
         this.agenticEngine = agenticEngine;
-        this.groundedness = groundedness;
         this.mapper = mapper;
     }
 
@@ -102,72 +78,22 @@ public class RcaAnalysisService {
         FindingClaim finding = findings.findClaim(job.projectId(), job.findingId())
                 .orElseThrow(() -> new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId()));
 
-        // ---- 1. dereference the evidence into the two sides ------------------------------------
-        Sides sides = sides(job.projectId(), finding.id());
-        if (sides.flagged().isEmpty()
-                && sides.baseline().isEmpty()
-                && sides.sessions().isEmpty()) {
+        AgenticRcaEngine.Evidence ev = evidence(job.projectId(), finding.id());
+        if (ev.citableTraceIds().isEmpty() && ev.citableSessionIds().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, finding.id());
         }
 
-        // ---- 2. measure the structural checklist (no thresholds, no judgment) -------------------
-        // A frustration or groundedness finding has no baseline side, so serving_model, which compares two,
-        // has nothing to compare and is not measured rather than reported empty. failing_cohort_shape still
-        // reads the traces that fired.
-        boolean causes = RcaReportRow.ReportKind.namesCauses(report.reportKind());
-        List<Measurement> measurements = new ArrayList<>();
-        if (!causes) {
-            measurements.addAll(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
-        }
-        measurements.add(checklist.failingCohortShape(job.projectId(), new LinkedHashSet<>(sides.flagged())));
-
-        // Citable = every trace the finding cites, per side. The evidence rows ARE the citable set:
-        // there is nothing beyond them the agent could legitimately point at as this finding's evidence.
-        Set<String> baselineTraceIds = new LinkedHashSet<>(sides.baseline());
-        Set<String> flaggedTraceIds = new LinkedHashSet<>(sides.flagged());
-
-        // ---- 3. the sandboxed agent investigates -------------------------------------------------
-        Map<String, String> files = dossierFiles(report, finding, measurements);
-        AgenticRcaEngine.Result result = agenticEngine.run(
-                job,
-                report,
-                finding.id(),
-                files,
-                baselineTraceIds,
-                flaggedTraceIds,
-                new LinkedHashSet<>(sides.sessions()),
-                measuredChecks(measurements));
+        AgenticRcaEngine.Result result =
+                agenticEngine.run(job, report, finding.id(), dossierFiles(report, finding), ev);
         complete(
                 job,
                 result.verdict(),
                 result.summary(),
-                merge(measurements, result.checklist()),
+                result.ruledOut(),
                 result.causes(),
                 result.detailedReport(),
                 result.repoAvailable());
     }
-
-    /**
-     * The finding's evidence, split into the two sides the checklist measures across.
-     *
-     * <p>{@code baseline} is what the classifier compared against. {@code flagged} is what it is
-     * complaining about — and that is NOT simply "everything that is not baseline", which is what this
-     * used to be.
-     *
-     * <p><b>Why the distinction started to matter.</b> {@code tool_error} now writes both halves of its
-     * fraction: {@code member} is every call in the spell, healthy ones included, and {@code witness} is
-     * the failing subset. Lumping them together made {@code flagged} the DENOMINATOR — so
-     * {@code failingCohortShape}, a check whose entire job is to describe what the failures have in
-     * common, was handed the whole population and reported the shape of ordinary traffic. Every
-     * classifier that writes no {@code witness} is unaffected: for those, {@code member} IS the flagged
-     * population and the behaviour is exactly as before.
-     *
-     * <p>{@code sessions} holds the session-grain refs, which carry no trace id, on the same witness-first rule.
-     * Only Frustration writes them: {@code member} is every session its rate scored, and {@code witness} each
-     * frustrated one, cited beside the trace of the turn that fired in it. The witnesses are what RCA reads
-     * and may cite.
-     */
-    private record Sides(List<String> baseline, List<String> flagged, List<String> sessions) {}
 
     /**
      * Roles that name the flagged population when a classifier draws no narrower subset. {@code member}
@@ -178,14 +104,27 @@ public class RcaAnalysisService {
     private static final Set<String> FLAGGED_WHEN_NO_WITNESS = Set.of(
             FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.EXEMPLAR, FindingEvidenceRow.Role.CHANGEPOINT);
 
-    private Sides sides(String projectId, String findingId) {
+    /**
+     * What the run needs from the finding's evidence rows.
+     *
+     * <p>Every trace and session id in the evidence is citable, whatever its role. The flagged count is the
+     * narrowest set the classifier drew: {@code witness} rows where it wrote any, since a witness is a member
+     * the detector singled out (tool error's members are every call, its witnesses the failing ones), and the
+     * population roles otherwise. Session-grain refs (no trace id) are counted the same way; only frustration
+     * writes them, and its grain is sessions.
+     */
+    private AgenticRcaEngine.Evidence evidence(String projectId, String findingId) {
+        Set<String> traces = new LinkedHashSet<>();
+        Set<String> sessions = new LinkedHashSet<>();
         Set<String> baseline = new LinkedHashSet<>();
-        Set<String> witnesses = new LinkedHashSet<>();
-        Set<String> population = new LinkedHashSet<>();
+        Set<String> witnessTraces = new LinkedHashSet<>();
+        Set<String> populationTraces = new LinkedHashSet<>();
         Set<String> witnessSessions = new LinkedHashSet<>();
         Set<String> populationSessions = new LinkedHashSet<>();
         for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
-            if (row.traceId() == null && row.sessionId() != null) {
+            if (row.traceId() == null) {
+                if (row.sessionId() == null) continue;
+                sessions.add(row.sessionId());
                 if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
                     witnessSessions.add(row.sessionId());
                 } else if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
@@ -193,56 +132,34 @@ public class RcaAnalysisService {
                 }
                 continue;
             }
-            // Span-grain rows carry their trace id too, so nothing is dropped by keying on it here — but
-            // the precision IS lost, because the checklist's reads are all trace-scoped. A trace holding
-            // fifty calls of which one failed counts once, which is what "what do the failing traces have
-            // in common" wants; a per-call breakdown would need a different query shape than this asks for.
-            String traceId = row.traceId();
-            if (traceId == null) continue;
+            traces.add(row.traceId());
+            if (row.sessionId() != null) sessions.add(row.sessionId());
             if (FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
-                baseline.add(traceId);
+                baseline.add(row.traceId());
             } else if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
-                witnesses.add(traceId);
+                witnessTraces.add(row.traceId());
             } else if (FLAGGED_WHEN_NO_WITNESS.contains(row.role())) {
-                population.add(traceId);
+                populationTraces.add(row.traceId());
             }
         }
-        // The narrowest set the classifier drew. A witness is a member the detector singled out, so where
-        // both exist the witnesses are the claim and the members are what it was a fraction OF.
-        Set<String> flagged = witnesses.isEmpty() ? population : witnesses;
-        // Sessions the same way: a frustration finding's members are every session it scored, most of them calm.
-        Set<String> sessions = witnessSessions.isEmpty() ? populationSessions : witnessSessions;
-        // A trace cited on both sides is flagged: it is what the claim is about, and offering it as a
-        // baseline anchor as well would let the agent cite the same trace as both sides of a comparison.
-        baseline.removeAll(flagged);
-        return new Sides(List.copyOf(baseline), List.copyOf(flagged), List.copyOf(sessions));
-    }
-
-    /** Fold the agent's assessments back onto the measurements they judged, in measurement order —
-     *  a check the agent skipped still reaches the report, carrying its numbers and no verdict. */
-    private static List<RuledOutCheck> merge(List<Measurement> measurements, List<ChecklistAssessment> assessments) {
-        Map<String, ChecklistAssessment> byCheck = new LinkedHashMap<>();
-        for (ChecklistAssessment a : assessments) byCheck.put(a.check(), a);
-        List<RuledOutCheck> out = new ArrayList<>();
-        for (Measurement m : measurements) {
-            ChecklistAssessment a = byCheck.get(m.check());
-            out.add(
-                    a == null
-                            ? RuledOutCheck.unassessed(m.check(), m.finding())
-                            : RuledOutCheck.assessed(m.check(), a.question(), a.assessment(), a.detail(), m.finding()));
-        }
-        return out;
-    }
-
-    private static Set<String> measuredChecks(List<Measurement> measurements) {
-        return measurements.stream().map(Measurement::check).collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> flaggedTraces = witnessTraces.isEmpty() ? populationTraces : witnessTraces;
+        Set<String> flaggedSessions = witnessSessions.isEmpty() ? populationSessions : witnessSessions;
+        // A trace cited on both sides is flagged: it is what the claim is about, not a comparison anchor.
+        baseline.removeAll(flaggedTraces);
+        boolean sessionGrain = !flaggedSessions.isEmpty();
+        return new AgenticRcaEngine.Evidence(
+                traces,
+                sessions,
+                !baseline.isEmpty(),
+                sessionGrain ? flaggedSessions.size() : flaggedTraces.size(),
+                sessionGrain ? "sessions" : "traces");
     }
 
     private void complete(
             RcaJobRow job,
             String verdict,
             @Nullable String summary,
-            List<RuledOutCheck> checks,
+            List<RuledOutCheck> ruledOut,
             List<Cause> causes,
             @Nullable String detailedReport,
             boolean repoAvailable) {
@@ -251,7 +168,7 @@ public class RcaAnalysisService {
                 "done",
                 verdict,
                 summary,
-                writeJson(checks),
+                writeJson(ruledOut),
                 causes.isEmpty() ? null : writeJson(causes),
                 detailedReport,
                 repoAvailable);
@@ -269,20 +186,15 @@ public class RcaAnalysisService {
 
     /**
      * The dossier as sandbox files (relative path → content): the claim, the detector's own numbers
-     * verbatim, and the measured checklist. Files rather than one long prompt because an agent that can
-     * open, re-read and quote a file reasons over it better than one handed a wall of JSON — and the
-     * numbers stay verbatim instead of being paraphrased into prose on the way in.
+     * verbatim, the classifier's RCA method when it has one, and the MCP tools. Files rather than one long
+     * prompt because an agent that can open, re-read and quote a file reasons over it better than one
+     * handed a wall of JSON — and the numbers stay verbatim instead of being paraphrased into prose.
      *
      * <p>The layout is the contract {@link AgenticRcaEngine}'s prompt describes; change them together.
      */
-    private Map<String, String> dossierFiles(RcaReportRow report, FindingClaim finding, List<Measurement> checks) {
+    private Map<String, String> dossierFiles(RcaReportRow report, FindingClaim finding) {
         Map<String, String> files = new LinkedHashMap<>();
         files.put("finding.md", findingDoc(report, finding));
-        // How the classifier that wrote this claim works, and what each evidence role means for IT.
-        // Without it the agent reads one role vocabulary as though it meant the same thing everywhere,
-        // and an absent `baseline` — correct for three of the five detectors — reads as a lost write.
-        String method = ClassifierMethodCard.forClassifier(finding.classifierKey());
-        if (method != null) files.put("method.md", method);
         // A dedicated per-shape assembler when this classifier's payload matches one (see
         // ClassifierDossierAssembler's dispatch-by-shape note) — the same one BehaviorTriageEngine.
         // dossier() uses, so triage and RCA never disagree about what a classifier's evidence looks
@@ -298,20 +210,9 @@ public class RcaAnalysisService {
         if (payload != null && !payload.isBlank()) {
             files.put("evidence.json", payload);
         }
-        // A groundedness cause is found by reading a flagged sentence against its documents, so the answers
-        // themselves ride along, as the triage dossier's do; everything else is read through MCP.
-        if (RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES.equals(report.reportKind())) {
-            files.put(
-                    GroundednessAnswersFile.NAME,
-                    GroundednessAnswersFile.render(groundedness.page(
-                            finding.projectId(),
-                            finding.subjectId(),
-                            finding.id(),
-                            null,
-                            GroundednessAnswersFile.CAP,
-                            null)));
-        }
-        files.put("checklist.md", checklistDoc(checks));
+        String method = AgenticRcaEngine.method(finding.classifierKey());
+        if (method != null) files.put(AgenticRcaEngine.METHOD_FILE, method);
+        files.put(AgenticRcaEngine.TOOLS_FILE, AgenticRcaEngine.TOOLS);
         return files;
     }
 
@@ -369,21 +270,6 @@ public class RcaAnalysisService {
                 + " gives them again beside what still survives in the substrate; a live count BELOW these is"
                 + " retention, not a lost write. Refs whose role is `baseline` are the BEFORE side; every"
                 + " other role is what the detector flagged.\n");
-        return sb.toString();
-    }
-
-    /** {@code dossier/checklist.md} — the measurements the agent must assess, one section per check
-     *  id. The ids here are what its {@code checklist} output is matched against. */
-    private static String checklistDoc(List<Measurement> measurements) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# Checklist — measurements, not verdicts\n\n");
-        sb.append("Each section below is a structural cause the movement has to be read against. They are"
-                + " measured, NOT judged: no thresholds were applied, and none of them has been ruled in"
-                + " or out. Assess each one yourself and return exactly one entry per check id.\n");
-        for (Measurement m : measurements) {
-            sb.append("\n## ").append(m.check()).append('\n');
-            sb.append(m.finding()).append('\n');
-        }
         return sb.toString();
     }
 
