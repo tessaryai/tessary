@@ -87,11 +87,11 @@
     "ruled_out": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Each candidate you ruled out, as one plain sentence with the reason."
+      "description": "Each candidate the evidence disproved, as one plain sentence with the reason. A candidate you could not check is not ruled out: it goes under '## Not checked' in detailed_report."
     },
     "detailed_report": {
       "type": "string",
-      "description": "The investigation as markdown. Ends with '## Evidence audit' (a table of each claim to its trace id, session id, commit or query) and '## What would settle it'. When you stopped early, add '## Not checked' before them."
+      "description": "The investigation as markdown. Ends with '## Evidence audit' (a table of each claim to its trace id, session id, commit or query) and '## What would settle it'. Before them, '## Not checked' lists every candidate you could not check or did not reach."
     }
   },
   "required": ["summary", "verdict", "causes", "ruled_out", "detailed_report"]

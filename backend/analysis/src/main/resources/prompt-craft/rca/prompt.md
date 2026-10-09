@@ -44,7 +44,7 @@ Causes may overlap: one flagged row can belong to several.
 ## Grade
 
 Grade each cause on its own against the schema's definitions of `high` and `medium`. Below
-`medium` is not a cause; it is ruled out. Several causes may be `high`. When no cause reaches
+`medium` is not a cause. Several causes may be `high`. When no cause reaches
 `medium`, the verdict is `no_cause_found`, with what you ruled out. That is a full answer.
 
 ## Report
