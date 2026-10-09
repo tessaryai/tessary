@@ -479,7 +479,7 @@ public class McpToolRegistry {
                         + " ROLLUP columns (span_count, error_count, typed token buckets, costs, is_settled,"
                         + " unpriced_spans) and the stored input_preview/output_preview, NEVER the full payloads."
                         + " Filter by model, kind, call_site_id, status and a started_at range, or"
-                        + " keyword-match the trace name and previews with q. A null token or cost column means"
+                        + " search names, ids and span inputs and outputs with q. A null token or cost column means"
                         + " one of two different things and the row says which: is_settled=false is 'still"
                         + " receiving spans', settled-with-null is 'no span reported usage', and unpriced_spans >"
                         + " 0 means the total is real but incomplete. Pass a row's id to get_trace to read its"
@@ -515,8 +515,9 @@ public class McpToolRegistry {
                                                 "Optional inclusive upper bound (ISO-8601).")),
                                 Map.entry(
                                         "q",
-                                        strField("Optional. Case-insensitive match on the trace name and"
-                                                + " the stored previews — not the full payload text.")),
+                                        strField("Optional. Substring of the trace name, session, thread, user"
+                                                + " or id; or every word in one span's input or output, as a word"
+                                                + " prefix (whole for words under 3 letters).")),
                                 Map.entry("limit", limitField()),
                                 Map.entry("cursor", cursorField())),
                         List.of()),
@@ -1312,8 +1313,13 @@ public class McpToolRegistry {
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));
         // Over-fetch by one; the codec turns the extra row into next_cursor and drops it from the page.
-        List<TraceV2Repository.Summary> rows =
-                traces.list(projectId, query, null, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
+        List<TraceV2Repository.Summary> rows;
+        try {
+            rows = traces.list(
+                    projectId, query, null, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
         TracePageCodec.Page page = TracePageCodec.trim(rows, pageSize, null);
         List<String> ids =
                 page.rows().stream().map(TraceV2Repository.Summary::id).toList();

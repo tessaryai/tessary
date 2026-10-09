@@ -204,8 +204,9 @@ change as a deliberate trade at that point.
 
 ## 4. `span_payload`
 
-Raw payload, 1:1 with `span`. Read when a single span is opened, and by Global Search's
-full-text leg (`ix_span_payload_fts`) — the one list-shaped surface that does touch it.
+Raw payload, 1:1 with `span`. Read when a single span is opened, and by the two searches over
+payload words: the traces list's `q` and Global Search's full-text leg, both through
+`ix_span_payload_project_fts`. They are the only list-shaped surfaces that touch it.
 
 ```sql
 CREATE TABLE span_payload (
@@ -817,10 +818,11 @@ CREATE INDEX ix_span_uncorrelated      ON span (project_id, trace_id)
                                             AND correlation_state = 'pending';
 CREATE INDEX ix_span_name_trgm         ON span USING gin (name gin_trgm_ops);
 
--- span_payload
-CREATE INDEX ix_span_payload_fts       ON span_payload USING gin (to_tsvector('simple',
+-- span_payload (btree_gin puts the project beside the words; 0035 replaced ix_span_payload_fts, the same
+-- words without the project)
+CREATE INDEX ix_span_payload_project_fts ON span_payload USING gin (project_id, to_tsvector('simple',
                                           left(coalesce(input,''),100000) || ' ' ||
-                                          left(coalesce(output,''),100000)));  -- backs Global Search
+                                          left(coalesce(output,''),100000)));  -- traces search, Global Search
 
 -- trace: the primary list surface, plus the rollup queue
 CREATE INDEX ix_trace_project_started  ON trace (project_id, started_at DESC);

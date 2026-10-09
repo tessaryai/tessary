@@ -29,6 +29,8 @@ export function useSessionsIndex(filters: TraceFilters, epoch = 0, enabled = tru
       api.listSessions({ limit: PAGE_SIZE, cursor: pageParam ?? undefined, include: "totals", ...filterParams(filters) }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? null,
+    // A search the server stopped at its timeout would only run as long again, three more times.
+    retry: false,
     enabled,
   });
 }

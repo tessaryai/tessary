@@ -130,3 +130,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0034-conversation-is-session.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0035-span-payload-project-fts.sql
+      relativeToChangelogFile: false

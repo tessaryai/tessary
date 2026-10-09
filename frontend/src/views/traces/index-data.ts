@@ -74,6 +74,8 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
       api.listTraces({ limit: PAGE_SIZE, sort: "when", cursor: pageParam ?? undefined, ...filterParams(filters) }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? null,
+    // A search the server stopped at its timeout would only run as long again, three more times.
+    retry: false,
     enabled,
   });
 }
