@@ -301,6 +301,131 @@ class TraceSubstrateRepositoryTest {
                 "both ends of the time window are inclusive");
     }
 
+    /** {@code q} reads span inputs and outputs, not only the trace's own name and ids. */
+    @Test
+    void textFilterMatchesWordsInAnySpanInputOrOutput() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-content").project().id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String inChildInput = SubstrateV2Fixtures.traceId();
+        SpanRow root = fx.span(pid, inChildInput, SubstrateV2Fixtures.spanId(), null, "agent", t0, t0.plusSeconds(1));
+        SpanRow child =
+                fx.span(pid, inChildInput, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(1));
+        fx.payload(
+                child, "{\"content\":\"Is my laptop still under warranty?\"}", "{\"content\":\"Let me check.\"}", null);
+        String inOutput = SubstrateV2Fixtures.traceId();
+        fx.payload(
+                fx.llmSpan(pid, inOutput, t0.plusSeconds(1)),
+                "where is my package",
+                "{\"content\":\"Your tracking number is 1Z999.\"}",
+                null);
+        fx.payload(fx.llmSpan(pid, SubstrateV2Fixtures.traceId(), t0.plusSeconds(2)), "hello", "hi", null);
+
+        assertEquals(
+                List.of(inChildInput), ids(v2traces.list(pid, query(null, "WARRANTY"), null, 10, null, null, null)));
+        assertEquals(
+                List.of(inOutput), ids(v2traces.list(pid, query(null, "tracking number"), null, 10, null, null, null)));
+    }
+
+    /** A content word matches by prefix: a search need not spell out the whole word the payload used. */
+    @Test
+    void textFilterMatchesContentWordsByPrefix() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-prefix").project().id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String refunded = SubstrateV2Fixtures.traceId();
+        fx.payload(fx.llmSpan(pid, refunded, t0), "I was refunded twice for one warranty claim", "ok", null);
+
+        assertEquals(
+                List.of(refunded), ids(v2traces.list(pid, query(null, "refund warrant"), null, 10, null, null, null)));
+        assertEquals(
+                List.of(),
+                ids(v2traces.list(pid, query(null, "fund"), null, 10, null, null, null)),
+                "a prefix matches the start of a word, never its middle");
+    }
+
+    /** {@code %} and {@code _} in a search are the characters themselves, not LIKE wildcards. */
+    @Test
+    void textFilterTreatsPercentAndUnderscoreAsLiteralCharacters() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "v2-list-wildcards").project().id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String underscored = SubstrateV2Fixtures.traceId();
+        fx.namedTrace(pid, underscored, "user_1", t0);
+        fx.namedTrace(pid, SubstrateV2Fixtures.traceId(), "userA1", t0.plusSeconds(1));
+        fx.namedTrace(pid, SubstrateV2Fixtures.traceId(), "batch-1000", t0.plusSeconds(2));
+
+        assertEquals(List.of(underscored), ids(v2traces.list(pid, query(null, "user_1"), null, 10, null, null, null)));
+        assertEquals(List.of(), ids(v2traces.list(pid, query(null, "100%"), null, 10, null, null, null)));
+        assertEquals(List.of(), ids(v2traces.list(pid, query(null, "%%%"), null, 10, null, null, null)));
+    }
+
+    /** Grouping by session lists a session when one of its traces matches on span content. */
+    @Test
+    void sessionListMatchesASessionByItsTracesSpanContent() {
+        String pid = TenantFixture.bootstrap(tenants, "v2-sessions-content")
+                .project()
+                .id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String matching = SubstrateV2Fixtures.sessionId();
+        fx.spanSeed(pid)
+                .traceId(SubstrateV2Fixtures.traceId())
+                .sessionId(matching)
+                .at(t0)
+                .payload("Please renew my passport appointment", "Booked.")
+                .write();
+        fx.spanSeed(pid)
+                .traceId(SubstrateV2Fixtures.traceId())
+                .sessionId(SubstrateV2Fixtures.sessionId())
+                .at(t0.plusSeconds(1))
+                .payload("hello", "hi")
+                .write();
+
+        assertEquals(
+                List.of(matching),
+                sessions.listByProject(pid, query(null, "passport"), 10, null, null).stream()
+                        .map(SessionRow::id)
+                        .toList());
+    }
+
+    /** Content search reads live spans only: a deleted span's words do not list its trace. */
+    @Test
+    void textFilterIgnoresTheContentOfDeletedSpans() {
+        String pid = TenantFixture.bootstrap(tenants, "v2-list-deleted-span")
+                .project()
+                .id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow root = fx.llmSpan(pid, traceId, t0);
+        fx.payload(root, "hello", "hi", null);
+        SpanRow deleted = fx.span(pid, traceId, SubstrateV2Fixtures.spanId(), root.id(), "llm", t0, t0.plusSeconds(1));
+        fx.payload(deleted, "my passport number is on file", "ok", null);
+        jdbc.sql("UPDATE span SET is_deleted = true WHERE project_id = :pid AND trace_id = :tid AND id = :sid")
+                .param("pid", pid)
+                .param("tid", traceId)
+                .param("sid", deleted.id())
+                .update();
+
+        assertEquals(List.of(), ids(v2traces.list(pid, query(null, "passport"), null, 10, null, null, null)));
+    }
+
+    /** Content search is scoped to the caller's project: another project's span text never lists here. */
+    @Test
+    void textFilterNeverMatchesAnotherProjectsSpanContent() {
+        String mine = TenantFixture.bootstrap(tenants, "v2-list-content-mine")
+                .project()
+                .id();
+        String theirs = TenantFixture.bootstrap(tenants, "v2-list-content-theirs")
+                .project()
+                .id();
+        Instant t0 = Instant.parse("2026-08-12T08:00:00Z");
+        String sharedTraceId = SubstrateV2Fixtures.traceId();
+        fx.payload(fx.llmSpan(mine, sharedTraceId, t0), "hello", "hi", null);
+        fx.payload(fx.llmSpan(theirs, sharedTraceId, t0), "my passport number is on file", "ok", null);
+
+        assertEquals(List.of(), ids(v2traces.list(mine, query(null, "passport"), null, 10, null, null, null)));
+    }
+
     /**
      * The MCP trace tools' span reads: bounded, and scoped to the caller's project even when another holds the same
      * producer ids.

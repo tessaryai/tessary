@@ -549,6 +549,8 @@ function SessionGroupRows({
   const detail = useQuery({
     queryKey: ["session-detail-expand", api.base, session.id, filters],
     queryFn: () => api.getSession(session.id, filterParams(filters)),
+    // The same search as the list: one the server stopped at its timeout would only run as long again.
+    retry: false,
     enabled: expanded,
   });
   // Every trace of the session shows, for context; the ones the filters would not show are dimmed.

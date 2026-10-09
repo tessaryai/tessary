@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.search.GlobalSearchDtos.SearchHit;
+import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -131,8 +132,9 @@ class GlobalSearchServiceIntegrationTest {
     }
 
     /**
-     * The FTS leg must spell migration 0077's capped expression exactly, or no index matches and every payload is
-     * scanned. With non-bitmap paths off, a plan exists only if {@code ix_span_payload_fts} serves it.
+     * The FTS leg must spell the index's capped expression exactly, or no index matches and every payload is scanned.
+     * With non-bitmap paths off, a plan exists only if the project-first {@code ix_span_payload_project_fts} serves the
+     * leg's project-scoped predicate.
      */
     @Test
     @Transactional
@@ -140,21 +142,35 @@ class GlobalSearchServiceIntegrationTest {
         String pid =
                 TenantFixture.bootstrap(tenants, "search-fts-explain").project().id();
         seedSpan(pid, "chat", "the customer demanded a chargeback", "we declined");
+        // A project of one payload is cheaper to read through its primary key than through any word index, so the
+        // project gets the few hundred payloads a real one has before the plan is asked for.
+        jdbc.sql("""
+                        WITH t AS (
+                            INSERT INTO trace (project_id, id, started_at, event_ts)
+                            SELECT :pid, 'bulk-' || g, now(), now() FROM generate_series(1, 500) g RETURNING id),
+                        s AS (
+                            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+                            SELECT :pid, id, 'sp', 'llm', 'chat', now(), now() FROM t RETURNING trace_id)
+                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+                        SELECT :pid, trace_id, 'sp', 'where is my order', 'it ships today', now() FROM s
+                        """).param("pid", pid).update();
+        jdbc.sql("ANALYZE span_payload").update();
         jdbc.sql("SET LOCAL enable_seqscan = off").update();
         jdbc.sql("SET LOCAL enable_indexscan = off").update();
 
-        String plan = jdbc.sql("""
-                        EXPLAIN (FORMAT TEXT)
-                        SELECT trace_id FROM span_payload
-                        WHERE to_tsvector('simple',
-                                  left(coalesce(input, ''), 100000) || ' ' || left(coalesce(output, ''), 100000))
-                              @@ plainto_tsquery('simple', :q)
-                        """).param("q", "chargeback").query((rs, n) -> rs.getString(1)).list().stream()
+        String plan = jdbc
+                .sql("EXPLAIN (FORMAT TEXT) SELECT p.trace_id FROM span_payload p WHERE p.project_id = :pid" + " AND "
+                        + SpanPayloadRepository.PAYLOAD_TSVECTOR + " @@ plainto_tsquery('simple', :q)")
+                .param("pid", pid)
+                .param("q", "chargeback")
+                .query((rs, n) -> rs.getString(1))
+                .list()
+                .stream()
                 .collect(Collectors.joining("\n"));
 
         assertTrue(
-                plan.contains("ix_span_payload_fts") && plan.contains("Bitmap Index Scan"),
-                "the capped to_tsvector predicate must be served by ix_span_payload_fts, not a Seq Scan:\n" + plan);
+                plan.contains("Bitmap Index Scan on ix_span_payload_project_fts"),
+                "the capped to_tsvector predicate must be served by ix_span_payload_project_fts:\n" + plan);
     }
 
     /** The same, for the span-name trigram leg (ix_span_name_trgm, migration 0081). */

@@ -428,6 +428,16 @@ class McpSubstrateReadToolsTest {
         assertEquals("s-1", rows.get(0).get("span_id").asText());
     }
 
+    /** A search the repository stopped at its timeout is a clean tool error, not a {@code -32603}. */
+    @Test
+    void listTraces_searchTooBroadIsACleanToolError() throws Exception {
+        TessaryException tooBroad = new TessaryException(QueryError.SEARCH_TOO_BROAD);
+        when(traces.list(eq(PROJECT_ID), any(), any(), anyInt(), any(), any(), any()))
+                .thenThrow(tooBroad);
+
+        assertEquals(tooBroad.getMessage(), errorText(mcp.callTool("list_traces", "{\"q\":\"content\"}")));
+    }
+
     /** A query-layer rejection (bad mode, no vector index) is a clean tool error, not a {@code -32603}. */
     @Test
     void listSpans_queryLayerRejectionIsACleanToolError() throws Exception {
