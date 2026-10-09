@@ -268,8 +268,8 @@ public class RcaAnalysisService {
         }
         sb.append("\nThese are the counts written at finding-open. `get_finding_evidence(count_only=true)`"
                 + " gives them again beside what still survives in the substrate; a live count BELOW these is"
-                + " retention, not a lost write. Refs whose role is `baseline` are the BEFORE side; every"
-                + " other role is what the detector flagged.\n");
+                + " retention, not a lost write. Refs whose role is `baseline` are the BEFORE side;"
+                + " `method.md`, when present, says what each other role holds.\n");
         return sb.toString();
     }
 
