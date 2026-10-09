@@ -1,35 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The rules a chart card draws by, apart from React: the axis ticks, the headline and its delta, which cases get a
- * lane, the hover text, and which call site and tool the page opens on. Every expected value here comes from the
+ * The rules a chart card draws by, apart from React: the time axis and its ticks, the steps and where they join, the
+ * headline and its delta, which cases get a lane, the hover text, and which call site and tool the page opens on. Every expected value here comes from the
  * product brief or a hand calculation.
  */
 import { describe, expect, it } from "vitest";
-import type { ChartCard, ChartCaseSpan, ChartChip, ChartDay, ChartToolOption, ClassifierMenuItem } from "../../api/types";
+import type { ChartCard, ChartCaseSpan, ChartChip, ChartPoint, ChartToolOption, ClassifierMenuItem } from "../../api/types";
 import {
+  armingLine,
+  axisTitle,
   chipText,
   countBar,
-  dayTooltip,
   defaultCallSite,
   defaultTool,
   headlineOf,
   lanesOf,
   laneTooltip,
   menuStatus,
+  pointTooltip,
+  spanLabel,
+  type Step,
+  stepPaths,
+  timeAxis,
   toolGroups,
   utcDay,
   xTicks,
   yAxis,
 } from "./chartRules";
 
-/** `n` dense days ending on `last`, oldest first, as the server sends them. */
-function datesEnding(last: string, n: number): string[] {
-  const end = Date.parse(`${last}T00:00:00Z`);
-  return Array.from({ length: n }, (_, i) => new Date(end - (n - 1 - i) * 86_400_000).toISOString().slice(0, 10));
-}
+const HOUR = 3_600_000;
 
-const day = (date: string, d: Partial<ChartDay>): ChartDay => ({
-  date,
+/** A point from `start_at` to `end_at`, with only the fields its kind uses set. */
+const point = (start_at: string, end_at: string, d: Partial<ChartPoint>): ChartPoint => ({
+  start_at,
+  end_at,
+  open: false,
   checked: null,
   flagged: null,
   n: null,
@@ -37,6 +42,7 @@ const day = (date: string, d: Partial<ChartDay>): ChartDay => ({
   p95: null,
   count: null,
   total: null,
+  reached: null,
   ...d,
 });
 
@@ -52,7 +58,7 @@ function card(c: Partial<ChartCard>): ChartCard {
     headline: { value: null, delta: null },
     baseline: null,
     arming: null,
-    days: [],
+    points: [],
     cases: { open_cases: 0, spans: [] },
     ...c,
   };
@@ -93,19 +99,42 @@ describe("yAxis", () => {
   });
 });
 
+describe("timeAxis", () => {
+  // Bug: the axis ends at midnight, so today's points fall off the right edge; or it ends at the last point, so a quiet
+  // afternoon reads as no time passing.
+  it("runs from 00:00 UTC of the first day to the end of the current hour", () => {
+    const now = Date.parse("2026-10-08T14:20:00Z");
+    expect(timeAxis(card({}), "2026-10-02", now)).toEqual({
+      from: Date.parse("2026-10-02T00:00:00Z"),
+      to: Date.parse("2026-10-08T15:00:00Z"),
+    });
+  });
+
+  // Bug: a server clock ahead of the browser's pushes the newest step past the edge of the chart.
+  it("stretches to the last rate point, but not to a count card's unfinished bucket", () => {
+    const now = Date.parse("2026-10-08T14:20:00Z");
+    const late = point("2026-10-08T15:00:00Z", "2026-10-08T16:00:00Z", { checked: 10, flagged: 1, open: true });
+    expect(timeAxis(card({ points: [late] }), "2026-10-02", now).to).toBe(Date.parse("2026-10-08T16:00:00Z"));
+    const bucket = point("2026-10-08T12:00:00Z", "2026-10-08T18:00:00Z", { count: 0, total: 0, open: true });
+    expect(timeAxis(card({ kind: "count", unit: "count", points: [bucket] }), "2026-09-11", now).to).toBe(
+      Date.parse("2026-10-08T15:00:00Z"),
+    );
+  });
+});
+
 describe("xTicks", () => {
   // Bug: ticks counted forward from the first day, so the last tick misses today.
-  it("marks every week back from today on 28 days", () => {
-    expect(xTicks(datesEnding("2026-10-08", 28))).toEqual([
-      { index: 6, label: "Sep 17" },
-      { index: 13, label: "Sep 24" },
-      { index: 20, label: "Oct 1" },
-      { index: 27, label: "Oct 8" },
+  it("marks every week back from today on 28 days, at 00:00 UTC", () => {
+    expect(xTicks("2026-09-11", "2026-10-08")).toEqual([
+      { at: Date.parse("2026-09-17T00:00:00Z"), label: "Sep 17" },
+      { at: Date.parse("2026-09-24T00:00:00Z"), label: "Sep 24" },
+      { at: Date.parse("2026-10-01T00:00:00Z"), label: "Oct 1" },
+      { at: Date.parse("2026-10-08T00:00:00Z"), label: "Oct 8" },
     ]);
   });
 
-  it("marks every day on 7 days and every two weeks on 90", () => {
-    expect(xTicks(datesEnding("2026-10-08", 7)).map((t) => t.label)).toEqual([
+  it("marks every day on 7 days", () => {
+    expect(xTicks("2026-10-02", "2026-10-08").map((t) => t.label)).toEqual([
       "Oct 2",
       "Oct 3",
       "Oct 4",
@@ -114,15 +143,44 @@ describe("xTicks", () => {
       "Oct 7",
       "Oct 8",
     ]);
-    expect(xTicks(datesEnding("2026-10-08", 90))).toEqual([
-      { index: 5, label: "Jul 16" },
-      { index: 19, label: "Jul 30" },
-      { index: 33, label: "Aug 13" },
-      { index: 47, label: "Aug 27" },
-      { index: 61, label: "Sep 10" },
-      { index: 75, label: "Sep 24" },
-      { index: 89, label: "Oct 8" },
-    ]);
+  });
+});
+
+describe("stepPaths", () => {
+  // x in hours from the first step, y as the value, so each path reads as hours and values.
+  const T0 = Date.parse("2026-10-08T00:00:00Z");
+  const x = (t: number) => (t - T0) / HOUR;
+  const y = (v: number) => v;
+  const step = (fromH: number, toH: number, v: number, open = false): Step => ({
+    start: T0 + fromH * HOUR,
+    end: T0 + toH * HOUR,
+    v,
+    open,
+  });
+
+  // Bug: steps joined across a stretch with no data, drawing a level the hours in between never had.
+  it("joins a step that starts where the last one ended or within an hour of it, and leaves a longer gap open", () => {
+    expect(stepPaths([step(0, 2, 5), step(2, 4, 3)], x, y).solid).toBe("M0.0 5.0H2.0H2.0V3.0H4.0");
+    expect(stepPaths([step(0, 2, 5), step(3, 4, 3)], x, y).solid).toBe("M0.0 5.0H2.0H3.0V3.0H4.0");
+    expect(stepPaths([step(0, 2, 5), step(5, 6, 3)], x, y).solid).toBe("M0.0 5.0H2.0M5.0 3.0H6.0");
+  });
+
+  // Bug: the point still filling drawn like a settled one, so a half-hour of data reads as a final rate.
+  it("draws the open last step on its own, dashed, with its connector", () => {
+    expect(stepPaths([step(0, 2, 5), step(2, 3, 1, true)], x, y)).toEqual({
+      solid: "M0.0 5.0H2.0",
+      dashed: "M2.0 5.0H2.0V1.0H3.0",
+    });
+    expect(stepPaths([step(0, 2, 5), step(9, 10, 1, true)], x, y)).toEqual({ solid: "M0.0 5.0H2.0", dashed: "M9.0 1.0H10.0" });
+  });
+});
+
+describe("spanLabel", () => {
+  // Bug: the span printed in the browser's zone, or a point across midnight shown with one date.
+  it("prints a point's UTC hours, with both dates when it crosses midnight", () => {
+    expect(spanLabel("2026-10-07T14:00:00Z", "2026-10-07T16:00:00Z")).toBe("Oct 7, 14:00-16:00 UTC");
+    expect(spanLabel("2026-10-07T18:00:00Z", "2026-10-08T00:00:00Z")).toBe("Oct 7, 18:00-24:00 UTC");
+    expect(spanLabel("2026-10-07T22:00:00Z", "2026-10-08T02:00:00Z")).toBe("Oct 7, 22:00 to Oct 8, 02:00 UTC");
   });
 });
 
@@ -236,62 +294,124 @@ describe("laneTooltip", () => {
   });
 });
 
-describe("dayTooltip", () => {
-  // Bug: the day's rate against the wrong reference, or a percent change in place of points.
-  it("gives a rate day's share, its counts and its gap to the baseline", () => {
-    const c = card({ baseline: rateBaseline(0.042), days: [day("2026-10-08", { checked: 116, flagged: 8 })] });
-    expect(dayTooltip(c, 0)).toEqual(["Oct 8", "6.9% flagged", "8 of 116 conversations", "+2.7 pp against baseline"]);
+describe("pointTooltip", () => {
+  // Bug: the point's rate against the wrong reference, or a percent change in place of points.
+  it("gives a rate point's span, share, counts and gap to the baseline", () => {
+    const c = card({
+      baseline: rateBaseline(0.042),
+      points: [point("2026-10-08T09:00:00Z", "2026-10-08T12:00:00Z", { checked: 116, flagged: 8 })],
+    });
+    expect(pointTooltip(c, 0)).toEqual([
+      "Oct 8, 09:00-12:00 UTC",
+      "6.9% flagged",
+      "8 of 116 conversations",
+      "+2.7 pp against baseline",
+    ]);
   });
 
-  it("says there is no baseline while learning, and that nothing was checked on an empty day", () => {
+  // Bug: the last point, still filling, read as settled.
+  it("says the open point is still filling, and that there is no baseline while learning", () => {
     const c = card({
       learning: { learned: 34, needed: 100 },
-      days: [day("2026-10-07", { checked: 0, flagged: 0 }), day("2026-10-08", { checked: 40, flagged: 2 })],
+      points: [point("2026-10-08T12:00:00Z", "2026-10-08T15:00:00Z", { checked: 40, flagged: 2, open: true })],
     });
-    expect(dayTooltip(c, 0)).toEqual(["Oct 7", "No conversations checked"]);
-    expect(dayTooltip(c, 1)).toEqual(["Oct 8", "5.0% flagged", "2 of 40 conversations", "No baseline yet"]);
+    expect(pointTooltip(c, 0)).toEqual([
+      "Oct 8, 12:00-15:00 UTC, still filling",
+      "5.0% flagged",
+      "2 of 40 conversations",
+      "No baseline yet",
+    ]);
   });
 
-  // Bug: p50 and p95 swapped, or the baseline band read as one number.
-  it("gives a range day's slow and typical values and the baseline band", () => {
+  // Bug: p50 and p95 swapped, the baseline band read as one number, or no word of how many samples the point holds.
+  it("gives a range point's slow and typical values, its samples and the baseline band", () => {
     const c = card({
       classifier_key: "duration_drift",
       kind: "range",
       measure: "turn_duration",
       unit: "ms",
       baseline: rangeBaseline(4_100, 11_500),
-      days: [day("2026-10-01", { n: 240, p50: 6_100, p95: 16_000 })],
+      points: [point("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z", { n: 240, p50: 6_100, p95: 16_000 })],
     });
-    expect(dayTooltip(c, 0)).toEqual(["Oct 1", "Slow (p95) 16.0 s", "Typical (p50) 6.1 s", "Baseline 11.5 s and 4.1 s"]);
+    expect(pointTooltip(c, 0)).toEqual([
+      "Oct 1, 00:00-24:00 UTC",
+      "Slow (p95) 16.0 s",
+      "Typical (p50) 6.1 s",
+      "240 turns",
+      "Baseline 11.5 s and 4.1 s",
+    ]);
   });
 
   // Bug: "reached" judged on every detection of the call site rather than on what the arming bar counts.
-  it("says whether a count day reached the bar that opens a finding", () => {
+  it("says whether a count bucket's arming window reached the bar that opens a finding", () => {
     const arming = { threshold: 2, window_seconds: 86_400, basis: "event_count", confidence: "high" as const };
     const c = card({
       classifier_key: "secret_leak",
       kind: "count",
       unit: "count",
       arming,
-      days: [day("2026-10-06", { count: 2, total: 2 }), day("2026-10-07", { count: 1, total: 3 })],
+      points: [
+        point("2026-10-06T06:00:00Z", "2026-10-06T12:00:00Z", { count: 2, total: 2, reached: true }),
+        point("2026-10-07T06:00:00Z", "2026-10-07T12:00:00Z", { count: 1, total: 3, reached: false }),
+        point("2026-10-08T12:00:00Z", "2026-10-08T18:00:00Z", { count: 0, total: 0, reached: false, open: true }),
+      ],
     });
-    expect(dayTooltip(c, 0)).toEqual(["Oct 6", "2 detections", "Reached 2, opened a finding"]);
-    expect(dayTooltip(c, 1)).toEqual(["Oct 7", "3 detections", "1 counted toward a finding", "Below 2, no finding"]);
+    expect(pointTooltip(c, 0)).toEqual(["Oct 6, 06:00-12:00 UTC", "2 detections", "Reached 2 that day, opened a finding"]);
+    expect(pointTooltip(c, 1)).toEqual([
+      "Oct 7, 06:00-12:00 UTC",
+      "3 detections",
+      "1 counted toward a finding",
+      "Below 2 that day, no finding",
+    ]);
+    expect(pointTooltip(c, 2)[0]).toBe("Oct 8, 12:00-18:00 UTC, still filling");
+    expect(pointTooltip(card({ kind: "count", unit: "count", points: [point("2026-10-06T06:00:00Z", "2026-10-06T07:00:00Z", { count: 1, total: 1 })] }), 0)).toEqual([
+      "Oct 6, 06:00-07:00 UTC",
+      "1 detection",
+    ]);
   });
 });
 
 describe("countBar", () => {
   // Bug: bars drawn from what the arming bar counts, which is project-wide for a user classifier, so a call site's
   // bar stands taller than the detections its tooltip and headline report.
-  it("is as tall as the call site's detections, and bright only when the arming count reached the bar", () => {
-    const arming = { threshold: 2, window_seconds: 86_400, basis: "event_count", confidence: "any" as const };
-    const c = card({ classifier_key: "refund_promise", kind: "count", unit: "count", arming });
-    expect(countBar(c, day("2026-10-07", { count: 1, total: 3 }))).toEqual({ height: 3, reached: false });
-    expect(countBar(c, day("2026-10-08", { count: 5, total: 1 }))).toEqual({ height: 1, reached: true });
-    expect(countBar(card({ kind: "count", unit: "count" }), day("2026-10-08", { count: 4, total: 4 }))).toEqual({
+  it("is as tall as the call site's detections, and bright only when the arming window reached the bar", () => {
+    expect(countBar(point("2026-10-07T00:00:00Z", "2026-10-07T01:00:00Z", { count: 1, total: 3, reached: false }))).toEqual({
+      height: 3,
+      reached: false,
+    });
+    expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 5, total: 1, reached: true }))).toEqual({
+      height: 1,
+      reached: true,
+    });
+    expect(countBar(point("2026-10-08T00:00:00Z", "2026-10-08T01:00:00Z", { count: 4, total: 4 }))).toEqual({
       height: 4,
       reached: false,
     });
+  });
+});
+
+describe("armingLine and axisTitle", () => {
+  const bucket = (hours: number) => [point("2026-10-08T00:00:00Z", new Date(Date.parse("2026-10-08T00:00:00Z") + hours * HOUR).toISOString(), { total: 1 })];
+  const counting = (hours: number, window_seconds: number) =>
+    card({
+      kind: "count",
+      unit: "count",
+      arming: { threshold: 2, window_seconds, basis: "event_count", confidence: "high" },
+      points: bucket(hours),
+    });
+
+  // Bug: a daily threshold drawn over hourly bars, where no single bar can show whether the day reached it.
+  it("draws the threshold only when a bucket is as wide as the arming window", () => {
+    expect(armingLine(counting(1, 3_600))).toEqual({ threshold: 2, label: "2 in an hour opens a finding" });
+    expect(armingLine(counting(1, 86_400))).toBeNull();
+    expect(armingLine(counting(6, 86_400))).toBeNull();
+    expect(armingLine(card({ kind: "count", unit: "count", points: bucket(1) }))).toBeNull();
+  });
+
+  // Bug: "Detections per day" over hourly bars.
+  it("names a count card's bucket in its axis title", () => {
+    expect(axisTitle(counting(1, 86_400))).toBe("Detections per hour");
+    expect(axisTitle(counting(6, 86_400))).toBe("Detections per 6 hours");
   });
 });
 

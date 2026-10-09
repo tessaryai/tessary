@@ -10,8 +10,9 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ArmingView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.CaseSpan;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartCard;
-import ai.tessary.classifier.chart.ClassifierChartDtos.ChartDay;
+import ai.tessary.classifier.chart.ClassifierChartDtos.ChartPoint;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartsView;
+import ai.tessary.classifier.chart.ClassifierChartDtos.HeadlineView;
 import ai.tessary.classifier.chart.ClassifierChartRepository.ClassifierOnCallSite;
 import ai.tessary.classifier.chart.ClassifierChartRepository.CountRow;
 import ai.tessary.classifier.chart.ClassifierChartRepository.RangeRow;
@@ -23,6 +24,7 @@ import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.frustration.JevFrustrationQuestion;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorRepository;
@@ -45,10 +47,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,8 +60,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The chart series against Postgres: UTC days, the sweep cursor, a tool key's raw names, the root span's own
- * duration, priced turns only, the arming band and call site, and the case strip and selector counts.
+ * The chart series against Postgres: UTC hours, the sweep cursor, a tool key's raw names, the root span's own
+ * duration on the drift grid, priced turns only, the arming band, call site and window, and the case strip and
+ * selector counts.
  */
 @SpringBootTest
 class ClassifierChartRepositoryIntegrationTest {
@@ -163,19 +166,22 @@ class ClassifierChartRepositoryIntegrationTest {
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    /** A zoneless day cut reads the session's zone: far east of UTC, 23:30 UTC is already the next day. */
+    /**
+     * A zoneless hour cut reads the session's zone: in India, five and a half hours east of UTC, 23:30 UTC is 05:00
+     * local and would start its own hour.
+     */
     @Test
     @Transactional
-    void rateDay_bucketsInUtc() {
+    void rateHour_bucketsInUtc() {
         String pid = project("chart-utc", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, BuiltInDetector.Kind.FRUSTRATION);
         fixture.frustrationAssessment(
                 pid, signal, "t-late", "conv-late", "cs-a", Instant.parse("2026-10-05T23:30:00Z"), false, VERSION);
-        jdbc.sql("SET LOCAL TIME ZONE 'Pacific/Kiritimati'").update();
+        jdbc.sql("SET LOCAL TIME ZONE 'Asia/Kolkata'").update();
 
-        List<RateRow> days = charts.frustrationDays(pid, signal.id(), VERSION, "cs-a", FROM, FROM);
+        List<RateRow> hours = charts.frustrationHours(pid, signal.id(), VERSION, "cs-a", FROM, FROM);
 
-        assertEquals(List.of(new RateRow(LocalDate.parse("2026-10-05"), 1, 0)), days);
+        assertEquals(List.of(new RateRow(Instant.parse("2026-10-05T23:00:00Z"), 1, 0)), hours);
     }
 
     /**
@@ -200,9 +206,14 @@ class ClassifierChartRepositoryIntegrationTest {
 
         assertEquals(0.0, week.headline().value(), "conv-1 is a trial of Sep 30, before the headline's week");
         assertEquals(week.headline(), month.headline());
-        assertEquals(ChartDay.rate("2026-09-30", 1, 1), day(month, "2026-09-30"));
-        assertEquals(ChartDay.rate("2026-10-05", 1, 0), day(month, "2026-10-05"));
-        assertEquals(ChartDay.rate("2026-10-06", 0, 0), day(month, "2026-10-06"), "a later turn is not a new trial");
+        Instant oct5 = Instant.parse("2026-10-05T10:00:00Z");
+        assertEquals(
+                List.of(
+                        ChartPoint.rate(crossing, crossing.plusSeconds(3600), false, 1, 1),
+                        ChartPoint.rate(oct5, oct5.plusSeconds(3600), false, 1, 0)),
+                month.points(),
+                "Oct 5 would stretch the Sep 30 point past a day, so it starts its own; a later turn is not a trial;"
+                        + " Oct 5 is days before now, so no hour can still join it");
     }
 
     /** The sweep walks the ingest clock: a span stored after its cursor was never checked, whatever its start. */
@@ -217,9 +228,9 @@ class ClassifierChartRepositoryIntegrationTest {
         fx.ingestedAt(checked, Instant.parse("2026-10-02T00:00:00Z"));
         fx.ingestedAt(backfilled, Instant.parse("2026-10-07T00:00:00Z"));
 
-        List<RateRow> days = charts.malformedDays(pid, signal.id(), "cs-a", FROM, "2026-10-05T00:00:00Z");
+        List<RateRow> hours = charts.malformedHours(pid, signal.id(), "cs-a", FROM, "2026-10-05T00:00:00Z");
 
-        assertEquals(List.of(new RateRow(LocalDate.parse("2026-10-01"), 1, 0)), days);
+        assertEquals(List.of(new RateRow(Instant.parse("2026-10-01T10:00:00Z"), 1, 0)), hours);
     }
 
     /** A tool key folds names; matching it in SQL against one spelling drops the others' calls. */
@@ -236,7 +247,10 @@ class ClassifierChartRepositoryIntegrationTest {
 
         ChartCard card = card(service.charts(pid, null, "tool:search_orders", 7), BuiltInDetector.Kind.TOOL_ERROR);
 
-        assertEquals(ChartDay.rate("2026-10-06", 3, 1), day(card, "2026-10-06"));
+        assertEquals(
+                List.of(ChartPoint.rate(at, at.plusSeconds(3600), false, 3, 1)),
+                card.points(),
+                "more than a day before now, so it is no longer filling");
     }
 
     /** A child that ends after its root stretches {@code trace.latency_ms}; the turn is the root's own interval. */
@@ -255,11 +269,52 @@ class ClassifierChartRepositoryIntegrationTest {
         fx.rollup(pid, slow);
         turn(pid, "cs-a", at.plusSeconds(60), 2_000);
 
-        List<RangeRow> days = charts.turnDurationDays(pid, "cs-a", FROM);
+        List<RangeRow> hours = charts.turnDurationHours(pid, "cs-a", FROM, Grid.duration());
 
-        // percentile_cont over {1000, 2000}: p50 = 1500, p95 = 1000 + 0.95 * 1000. Over trace latency it would be 4850.
-        assertEquals(List.of(new RangeRow(LocalDate.parse("2026-10-06"), 2, 1_500.0, 1_950.0)), days);
+        // On the 1 ms, 5% grid, 1000 ms is bin floor(ln 1000 / ln 1.05) = 141 and 2000 ms is 155. Over trace latency
+        // the slow turn would read 5000 ms, bin 174.
+        assertEquals(Set.of(new RangeRow(at, 141, 1), new RangeRow(at, 155, 1)), Set.copyOf(hours));
+        // percentile_cont over {1000, 2000}: p95 = 1000 + 0.95 * 1000. The pooled headline stays exact.
         assertEquals(1_950.0, charts.turnDurationP95(pid, "cs-a", FROM));
+    }
+
+    /** {@code ln} of zero raises in Postgres, and a value past the grid has no bin of its own: both clamp. */
+    @Test
+    void turnDurationHours_clampZeroAndOverflowIntoTheEdgeBins() {
+        String pid = project("chart-turn-edges", Capability.DURATION_DRIFT);
+        Instant at = Instant.parse("2026-10-06T10:00:00Z");
+        turn(pid, "cs-a", at, 0);
+        turn(pid, "cs-a", at.plusSeconds(60), 10L * 3_600_000); // 1.05^320 ms is about 1.7 hours
+
+        List<RangeRow> hours = charts.turnDurationHours(pid, "cs-a", FROM, Grid.duration());
+
+        assertEquals(Set.of(new RangeRow(at, 0, 1), new RangeRow(at, 319, 1)), Set.copyOf(hours));
+    }
+
+    /**
+     * A tool span is binned on the same grid, 250 ms in bin floor(ln 250 / ln 1.05) = 113, and a classifier limited to
+     * other call sites reads none of it.
+     */
+    @Test
+    void toolDurationHours_binTheSpanOnTheGridWithinTheClassifiersCallSites() {
+        String pid = project("chart-tool-duration", Capability.DURATION_DRIFT);
+        Instant at = Instant.parse("2026-10-06T10:00:00Z");
+        String trace = turn(pid, "cs-a", at, 1_000);
+        fx.spanSeed(pid)
+                .traceId(trace)
+                .parentSpanId(rootOf(pid, trace))
+                .kind("tool")
+                .name("search")
+                .at(at)
+                .endedAt(at.plusMillis(250))
+                .write();
+        fx.rollup(pid, trace);
+
+        assertEquals(
+                List.of(new RangeRow(at, 113, 1)),
+                charts.toolDurationHours(pid, List.of("search"), null, FROM, Grid.duration()));
+        assertEquals(
+                List.of(), charts.toolDurationHours(pid, List.of("search"), List.of("cs-b"), FROM, Grid.duration()));
     }
 
     /** A turn with an unpriced span reports the price of the others and reads cheap; it is not a sample. */
@@ -271,9 +326,8 @@ class ClassifierChartRepositoryIntegrationTest {
         cost(turn(pid, "cs-a", at.plusSeconds(1), 100), "0.01", 1);
         cost(turn(pid, "cs-a", at.plusSeconds(2), 100), null, 0);
 
-        assertEquals(
-                List.of(new RangeRow(LocalDate.parse("2026-10-06"), 1, 0.02, 0.02)),
-                charts.costDays(pid, "cs-a", FROM));
+        // On the $0.00001, 5% grid, $0.02 is bin floor(ln 2000 / ln 1.05) = 155.
+        assertEquals(List.of(new RangeRow(at, 155, 1)), charts.costHours(pid, "cs-a", FROM, Grid.cost()));
     }
 
     /**
@@ -292,15 +346,40 @@ class ClassifierChartRepositoryIntegrationTest {
         leak(pid, signal, "cs-a", "aws", "low", "sess-3", at.plusSeconds(3));
         leak(pid, signal, "cs-b", "aws", "high", "sess-4", at.plusSeconds(4));
 
-        List<CountRow> days =
-                charts.countDays(BuiltInDetector.Kind.SECRET_LEAK, pid, signal.id(), "cs-a", FROM, true, "pattern");
+        List<CountRow> hours = charts.countBuckets(
+                BuiltInDetector.Kind.SECRET_LEAK, pid, signal.id(), "cs-a", FROM, 3600, true, "pattern");
 
-        assertEquals(List.of(new CountRow(LocalDate.parse("2026-10-06"), 2, 2, 4)), days);
+        assertEquals(List.of(new CountRow(Instant.parse("2026-10-06T10:00:00Z"), 2, 2, 4)), hours);
     }
 
     /**
-     * A user classifier's bar counts the whole project, so a call-site card counts what the bar counts: a day this
-     * call site saw one match but the project saw three reached a bar of two. The total stays the call site's own.
+     * A session seen in two hours is one session in their day: hourly distinct counts summed into the bar's window
+     * would read two and could mark a window reached that the bar never counted.
+     */
+    @Test
+    void countBuckets_countSessionsOncePerBucket() {
+        String pid = project("chart-count-grain", Capability.SECRET_LEAK);
+        ClassifierRow signal = fixture.builtIn(pid, BuiltInDetector.Kind.SECRET_LEAK);
+        leak(pid, signal, "cs-a", "aws", "high", "sess-1", Instant.parse("2026-10-06T10:00:00Z"));
+        leak(pid, signal, "cs-a", "aws", "high", "sess-1", Instant.parse("2026-10-06T11:30:00Z"));
+
+        List<CountRow> hours = charts.countBuckets(
+                BuiltInDetector.Kind.SECRET_LEAK, pid, signal.id(), "cs-a", FROM, 3600, true, "pattern");
+        List<CountRow> days = charts.countBuckets(
+                BuiltInDetector.Kind.SECRET_LEAK, pid, signal.id(), "cs-a", FROM, 86_400, true, "pattern");
+
+        assertEquals(
+                Set.of(
+                        new CountRow(Instant.parse("2026-10-06T10:00:00Z"), 1, 1, 1),
+                        new CountRow(Instant.parse("2026-10-06T11:00:00Z"), 1, 1, 1)),
+                Set.copyOf(hours));
+        assertEquals(List.of(new CountRow(Instant.parse("2026-10-06T00:00:00Z"), 2, 1, 2)), days);
+    }
+
+    /**
+     * A user classifier's bar counts the whole project, so a call-site card counts what the bar counts: an hour this
+     * call site saw one match but the project saw three, in a day that reached a bar of two. The total stays the call
+     * site's own, and every point of that day is reached.
      */
     @Test
     void userClassifierCount_isWhatItsWholeProjectBarCounts() {
@@ -321,10 +400,21 @@ class ClassifierChartRepositoryIntegrationTest {
         match(pid, refunds, "cs-b", at.plusSeconds(1));
         match(pid, refunds, "cs-b", at.plusSeconds(2));
 
-        ChartCard card = card(service.charts(pid, "cs-a", null, 7), "refund-words");
+        ChartCard week = card(service.charts(pid, "cs-a", null, 7), "refund-words");
+        ChartCard month = card(service.charts(pid, "cs-a", null, 28), "refund-words");
 
-        assertEquals(ChartDay.count("2026-10-06", 3, 1), day(card, "2026-10-06"));
-        assertEquals(new ArmingView(2, 86_400, "event_count", "any"), card.arming());
+        assertEquals(new ArmingView(2, 86_400, "event_count", "any"), week.arming());
+        Instant hour = Instant.parse("2026-10-06T10:00:00Z");
+        assertEquals(ChartPoint.count(hour, hour.plusSeconds(3600), false, 3, 1, true), point(week, hour));
+        Instant early = Instant.parse("2026-10-06T01:00:00Z");
+        assertEquals(ChartPoint.count(early, early.plusSeconds(3600), false, 0, 0, true), point(week, early));
+        Instant dayBefore = Instant.parse("2026-10-05T10:00:00Z");
+        assertEquals(
+                ChartPoint.count(dayBefore, dayBefore.plusSeconds(3600), false, 0, 0, false), point(week, dayBefore));
+        Instant sixHours = Instant.parse("2026-10-06T06:00:00Z");
+        assertEquals(
+                ChartPoint.count(sixHours, sixHours.plusSeconds(6 * 3600), false, 3, 1, true), point(month, sixHours));
+        assertEquals(new HeadlineView(1.0, null), week.headline());
     }
 
     /** A finding nobody opened a case for never draws a bar; nor does a case resolved before the range. */
@@ -458,11 +548,11 @@ class ClassifierChartRepositoryIntegrationTest {
                 .orElseThrow(() -> new AssertionError("no " + key + " card in " + view));
     }
 
-    private static ChartDay day(ChartCard card, String date) {
-        return card.days().stream()
-                .filter(d -> date.equals(d.date()))
+    private static ChartPoint point(ChartCard card, Instant start) {
+        return card.points().stream()
+                .filter(p -> start.toString().equals(p.startAt()))
                 .findFirst()
-                .orElseThrow();
+                .orElseThrow(() -> new AssertionError("no point at " + start + " in " + card.points()));
     }
 
     private void frustrationFlag(

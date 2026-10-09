@@ -32,7 +32,6 @@ import {
 const RANGES = [
   { value: "7", label: "7d" },
   { value: "28", label: "28d" },
-  { value: "90", label: "90d" },
 ] as const;
 
 type RangeValue = (typeof RANGES)[number]["value"];
@@ -213,7 +212,7 @@ function Charts({
           style={{ transitionDuration: "var(--duration-micro)" }}
         >
           {data.cards.map((c) => (
-            <ChartCard key={c.classifier_id + (c.measure ?? "")} card={c} basePath={basePath} />
+            <ChartCard key={c.classifier_id + (c.measure ?? "")} card={c} range={data} basePath={basePath} />
           ))}
         </div>
       )}

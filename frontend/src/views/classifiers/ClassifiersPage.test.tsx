@@ -57,7 +57,21 @@ const frustrationCard: ChartCard = {
   headline: { value: 0.072, delta: 0.03 },
   baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
   arming: null,
-  days: [{ date: "2026-10-08", checked: 100, flagged: 7, n: null, p50: null, p95: null, count: null, total: null }],
+  points: [
+    {
+      start_at: "2026-10-08T00:00:00Z",
+      end_at: "2026-10-08T09:00:00Z",
+      open: true,
+      checked: 100,
+      flagged: 7,
+      n: null,
+      p50: null,
+      p95: null,
+      count: null,
+      total: null,
+      reached: null,
+    },
+  ],
   cases: { open_cases: 0, spans: [] },
 };
 
@@ -211,9 +225,9 @@ describe("ClassifiersPage", () => {
     expect(within(site).queryByText(/Loading the last/)).toBeNull();
 
     api.getClassifierCharts.mockReturnValue(new Promise(() => {}));
-    fireEvent.click(screen.getByRole("button", { name: "90d" }));
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
 
-    expect(await within(site).findByText("Loading the last 90 days…")).toBeTruthy();
+    expect(await within(site).findByText("Loading the last 7 days…")).toBeTruthy();
     expect(within(site).getByRole("region", { name: "Frustration" })).toBeTruthy();
   });
 
@@ -244,6 +258,16 @@ describe("ClassifiersPage", () => {
     await waitFor(() => expect(api.getClassifierChartScopes).toHaveBeenCalledWith(7));
     await waitFor(() => expect(api.getClassifierCharts).toHaveBeenCalledWith({ callSiteId: "kb_answer.generate" }, 7));
     await waitFor(() => expect(api.getClassifierCharts).toHaveBeenCalledWith({ tool: "tool:search_orders" }, 7));
+  });
+
+  // Bug: a range the server refuses offered in the picker, so picking it fails every card on the page.
+  it("offers only the 7- and 28-day ranges", async () => {
+    renderPage();
+    await within(await callSiteSection()).findByRole("region", { name: "Frustration" });
+
+    const picker = screen.getByRole("group", { name: "Time range" });
+    expect(within(picker).getAllByRole("button").map((b) => b.textContent)).toEqual(["7d", "28d"]);
+    expect(within(picker).getByRole("button", { name: "28d" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   // Bug: with the catalog gone, a classifier's configure page is reachable only by typing its URL.

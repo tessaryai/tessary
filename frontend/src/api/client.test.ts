@@ -61,12 +61,12 @@ describe("the classifier chart reads", () => {
     vi.stubGlobal("fetch", fetchMock);
     const api = projectApi("acme", "default");
 
-    await api.getClassifierChartScopes(90);
+    await api.getClassifierChartScopes(28);
     await api.getClassifierCharts({ callSiteId: "support/agent" }, 7);
     await api.getClassifierCharts({ tool: "tool:search docs" }, 28);
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/orgs/acme/projects/default/classifiers/chart-scopes?days=90",
+      "/api/orgs/acme/projects/default/classifiers/chart-scopes?days=28",
       "/api/orgs/acme/projects/default/classifiers/charts?callSiteId=support%2Fagent&days=7",
       "/api/orgs/acme/projects/default/classifiers/charts?tool=tool%3Asearch+docs&days=28",
     ]);

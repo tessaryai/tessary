@@ -496,7 +496,7 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     /** The call sites and tools the Classifiers page can chart, and every classifier for its Configure menu. */
     getClassifierChartScopes: (days: ChartRange = 28) =>
       http<ChartScopes>(`${base}/classifiers/chart-scopes?days=${days}`),
-    /** Daily series for every classifier on one call site, or on one tool across call sites. */
+    /** The series for every classifier on one call site, or on one tool across call sites. */
     getClassifierCharts: (scope: ChartScope, days: ChartRange = 28) => {
       const q = new URLSearchParams(scope);
       q.set("days", String(days));

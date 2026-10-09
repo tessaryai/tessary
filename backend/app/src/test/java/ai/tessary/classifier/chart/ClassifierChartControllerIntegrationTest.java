@@ -9,20 +9,31 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
+import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.plan.Capability;
+import ai.tessary.storage.SessionRepository;
+import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import ai.tessary.testsupport.AuthEnforcedContext;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.RateClassifierFixture;
+import ai.tessary.testsupport.SubstrateV2Fixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -68,6 +79,21 @@ class ClassifierChartControllerIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    ClassifierRepository classifierRows;
+
+    @Autowired
+    SessionRepository sessions;
+
+    @Autowired
+    TraceV2Repository traces;
+
+    @Autowired
+    SpanRepository spans;
+
+    @Autowired
+    SpanPayloadRepository payloads;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
 
@@ -83,6 +109,70 @@ class ClassifierChartControllerIntegrationTest {
 
         assertError(me, "/charts?callSiteId=cs-a&days=30", 422, "CLASSIFIER.INVALID_CHART_DAYS");
         assertError(me, "/chart-scopes?days=30", 422, "CLASSIFIER.INVALID_CHART_DAYS");
+    }
+
+    /**
+     * 90 days is no longer a range: it is refused as any other is, 7 days still reads, and a request with no days
+     * reads 28.
+     */
+    @Test
+    void days90_is422InvalidChartDaysAnd7And28AreRead() throws Exception {
+        Signed me = signUp("chart-days-90@example.com");
+        declare(me.project().id(), "cs-a", null);
+
+        assertError(me, "/charts?callSiteId=cs-a&days=90", 422, "CLASSIFIER.INVALID_CHART_DAYS");
+        assertError(me, "/chart-scopes?days=90", 422, "CLASSIFIER.INVALID_CHART_DAYS");
+        assertEquals(7, data(me, "/charts?callSiteId=cs-a&days=7").path("days").asInt());
+        assertEquals(7, data(me, "/chart-scopes?days=7").path("days").asInt());
+        assertEquals(28, data(me, "/charts?callSiteId=cs-a").path("days").asInt());
+        assertEquals(28, data(me, "/chart-scopes").path("days").asInt());
+    }
+
+    /**
+     * A card draws points, not days: on 28 days a count card has a six-hour bucket from the range's first midnight to
+     * the bucket holding now, which is still filling. A count point sets only its own fields.
+     */
+    @Test
+    void charts_drawPointsFromTheRangeStart() throws Exception {
+        Signed me = signUp("chart-points@example.com");
+        String pid = me.project().id();
+        declare(pid, "cs-a", null);
+        ClassifierRow refunds = ClassifierRows.insertRow(
+                classifierRows,
+                pid,
+                "refund-words",
+                "Refund words",
+                BuiltInDetector.Kind.REGEX,
+                "{\"pattern\":\"refund\"}",
+                ClassifierRow.Mode.DISCOVERY,
+                true);
+        Instant matchedAt = Instant.now().minus(Duration.ofHours(1));
+        match(pid, refunds, "cs-a", matchedAt);
+
+        JsonNode charts = data(me, "/charts?callSiteId=cs-a&days=28");
+        JsonNode card = item(charts.path("cards"), "refund-words");
+        JsonNode points = card.path("points");
+
+        assertTrue(card.path("days").isMissingNode(), "no day series");
+        String fromDay = charts.path("from_day").asText();
+        JsonNode first = points.get(0);
+        assertEquals(fromDay + "T00:00:00Z", first.path("start_at").asText());
+        assertEquals(fromDay + "T06:00:00Z", first.path("end_at").asText());
+        assertFalse(first.path("open").asBoolean());
+        assertEquals(0, first.path("count").asLong(), "an empty bucket is a zero, not a gap");
+        assertTrue(points.get(points.size() - 1).path("open").asBoolean(), "the bucket holding now is still filling");
+        JsonNode matched = null;
+        for (JsonNode point : points) {
+            Instant start = Instant.parse(point.path("start_at").asText());
+            Instant end = Instant.parse(point.path("end_at").asText());
+            if (!matchedAt.isBefore(start) && matchedAt.isBefore(end)) matched = point;
+        }
+        JsonNode hit = Objects.requireNonNull(matched, "no point holds the match");
+        assertEquals(1, hit.path("count").asLong());
+        assertEquals(1, hit.path("total").asLong());
+        for (String unset : List.of("reached", "checked", "flagged", "n", "p50", "p95")) {
+            assertTrue(hit.path(unset).isNull() || hit.path(unset).isMissingNode(), unset);
+        }
     }
 
     @Test
@@ -274,6 +364,25 @@ class ClassifierChartControllerIntegrationTest {
             if (key.equals(n.path("classifier_key").asText())) return n;
         }
         throw new AssertionError("no " + key + " in " + list);
+    }
+
+    private void match(String pid, ClassifierRow signal, String callSite, Instant at) {
+        var span = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc)
+                .spanSeed(pid)
+                .callSiteId(callSite)
+                .at(at)
+                .write();
+        jdbc.sql("INSERT INTO user_classifier_detection (id, project_id, classifier_id, classifier_key,"
+                        + " subject_trace_id, subject_span_id, confidence, evidence, subject_started_at)"
+                        + " VALUES (:id, :pid, :cid, :key, :trace, :span, 'high', CAST('{}' AS jsonb), :at)")
+                .param("id", Ids.ulid())
+                .param("pid", pid)
+                .param("cid", signal.id())
+                .param("key", signal.classifierKey())
+                .param("trace", span.traceId())
+                .param("span", span.id())
+                .param("at", Timestamp.from(at))
+                .update();
     }
 
     private void declare(String pid, String callSite, @Nullable String schema) {

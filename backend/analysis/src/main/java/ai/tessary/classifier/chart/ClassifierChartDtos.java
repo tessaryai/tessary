@@ -2,6 +2,7 @@
 package ai.tessary.classifier.chart;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -91,7 +92,9 @@ public final class ClassifierChartDtos {
      * @param learning set while no baseline is learned; always null on a count card
      * @param baseline the learned reference; null while learning and on a count card
      * @param arming the count card's bar; null on other cards and when the row has no arming block
-     * @param days one entry per UTC day of the range, oldest first, the last one today
+     * @param points oldest first. A rate or range card has a point per stretch of hours that held trials or
+     *     samples, closed at {@link ChartSeries#POINT_TARGET} of them or {@link ChartSeries#POINT_MAX}; a count card
+     *     has one per fixed bucket of the range, empty ones included. Only the last may be open, still filling
      */
     public record ChartCard(
             @JsonProperty("classifier_id") String classifierId,
@@ -104,11 +107,11 @@ public final class ClassifierChartDtos {
             HeadlineView headline,
             @Nullable ChartBaseline baseline,
             @Nullable ArmingView arming,
-            List<ChartDay> days,
+            List<ChartPoint> points,
             CasesView cases) {
 
         public ChartCard {
-            days = List.copyOf(days);
+            points = List.copyOf(points);
         }
 
         public static final String RATE = "rate";
@@ -151,34 +154,45 @@ public final class ClassifierChartDtos {
             long threshold, @JsonProperty("window_seconds") long windowSeconds, String basis, String confidence) {}
 
     /**
-     * One UTC day. A rate card sets {@code checked} and {@code flagged}; a range card sets {@code n}, {@code p50} and
-     * {@code p95} (null on a day with no sample); a count card sets {@code count} and {@code total}. The others are
-     * null.
+     * One point of a card, over {@code [start_at, end_at)}: UTC instants on hour boundaries. A rate point sets {@code
+     * checked} and {@code flagged}; a range point sets {@code n}, {@code p50} and {@code p95}; a count point sets
+     * {@code count}, {@code total} and {@code reached}. The others are null.
      *
-     * @param count what the arming bar counts that day: the busiest facet on the call site for Secret Leak, the
+     * @param endAt the exclusive end of the point's last hour with data; a count point's bucket end
+     * @param open the point is still filling: a rate or range point that holds the current hour or that the current
+     *     hour could still join, or the count bucket that holds now
+     * @param count what the arming bar counts in the bucket: the busiest facet on the call site for Secret Leak, the
      *     whole project for a user classifier, every detection when the row has no bar
-     * @param total every detection on the call site that day
+     * @param total every detection on the call site in the bucket
+     * @param reached the bar's window holding the bucket reached its threshold; null when the row has no bar
      */
-    public record ChartDay(
-            String date,
+    public record ChartPoint(
+            @JsonProperty("start_at") String startAt,
+            @JsonProperty("end_at") String endAt,
+            boolean open,
             @Nullable Long checked,
             @Nullable Long flagged,
             @Nullable Long n,
             @Nullable Double p50,
             @Nullable Double p95,
             @Nullable Long count,
-            @Nullable Long total) {
+            @Nullable Long total,
+            @Nullable Boolean reached) {
 
-        public static ChartDay rate(String date, long checked, long flagged) {
-            return new ChartDay(date, checked, flagged, null, null, null, null, null);
+        public static ChartPoint rate(Instant start, Instant end, boolean open, long checked, long flagged) {
+            return new ChartPoint(
+                    start.toString(), end.toString(), open, checked, flagged, null, null, null, null, null, null);
         }
 
-        public static ChartDay range(String date, long n, @Nullable Double p50, @Nullable Double p95) {
-            return new ChartDay(date, null, null, n, p50, p95, null, null);
+        public static ChartPoint range(
+                Instant start, Instant end, boolean open, long n, @Nullable Double p50, @Nullable Double p95) {
+            return new ChartPoint(start.toString(), end.toString(), open, null, null, n, p50, p95, null, null, null);
         }
 
-        public static ChartDay count(String date, long count, long total) {
-            return new ChartDay(date, null, null, null, null, null, count, total);
+        public static ChartPoint count(
+                Instant start, Instant end, boolean open, long count, long total, @Nullable Boolean reached) {
+            return new ChartPoint(
+                    start.toString(), end.toString(), open, null, null, null, null, null, count, total, reached);
         }
     }
 
