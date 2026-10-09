@@ -97,14 +97,10 @@ public class FrustrationTuning {
         @Nullable String resetNote = reset == null ? null : reset.note();
         @Nullable ToolErrorRate baseline = state == null ? null : state.baseline();
         if (state == null || baseline == null) {
-            long learned = 0;
-            for (HourlyToolTally t : tallies) {
-                if (state == null || !state.fencedOff(t.bucket())) learned += t.calls();
-            }
             return new FrustrationCallSiteView(
                     callSite,
                     FrustrationCallSiteView.LEARNING,
-                    learned,
+                    CarriedState.learned(state, tallies),
                     null,
                     null,
                     null,

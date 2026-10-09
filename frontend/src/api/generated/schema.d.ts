@@ -596,6 +596,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/chart-scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierChartController_scopes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/charts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierChartController_charts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events": {
         parameters: {
             query?: never;
@@ -717,22 +749,6 @@ export interface paths {
         };
         get: operations["ClassifierController_eventsForClassifier"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_getFrustrationScope"];
-        put: operations["ClassifierController_setFrustrationScope"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2188,6 +2204,14 @@ export interface components {
             data?: components["schemas"]["ChannelView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseChartScopesView: {
+            data?: components["schemas"]["ChartScopesView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseChartsView: {
+            data?: components["schemas"]["ChartsView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseClassifierDailyVolumeView: {
             data?: components["schemas"]["ClassifierDailyVolumeView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2234,10 +2258,6 @@ export interface components {
         };
         ApiResponseFrustratedSessionPage: {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseFrustrationScopeView: {
-            data?: components["schemas"]["FrustrationScopeView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseFrustrationTuningView: {
@@ -2622,6 +2642,14 @@ export interface components {
             windowSeconds: number;
             windowStart: string | null;
         };
+        ArmingView: {
+            basis: string;
+            confidence: string;
+            /** Format: int64 */
+            threshold: number;
+            /** Format: int64 */
+            window_seconds: number;
+        };
         Attribution: {
             commit: string | null;
             excerpt: string | null;
@@ -2729,6 +2757,14 @@ export interface components {
             tools: components["schemas"]["ToolSpec"][];
             use_case: string | null;
         };
+        CallSiteOption: {
+            call_site_id: string;
+            learning: boolean;
+            /** Format: int32 */
+            open_cases: number;
+            /** Format: int64 */
+            turns: number;
+        };
         CapabilitiesView: {
             capabilities: {
                 [key: string]: boolean;
@@ -2791,6 +2827,17 @@ export interface components {
             triaged_at: string | null;
             verdict: string | null;
         };
+        CaseSpan: {
+            case_id: string;
+            case_reference: string;
+            case_state: string;
+            case_title: string;
+            disposition: string | null;
+            end_at: string | null;
+            finding_id: string;
+            resolution: string | null;
+            start_at: string;
+        };
         CaseView: {
             /** Format: double */
             baseline_value: number | null;
@@ -2827,6 +2874,11 @@ export interface components {
             subject_kind: string;
             subject_label: string;
             title: string;
+        };
+        CasesView: {
+            /** Format: int32 */
+            open_cases: number;
+            spans: components["schemas"]["CaseSpan"][];
         };
         CatalogEntry: {
             agentic: boolean;
@@ -2874,6 +2926,78 @@ export interface components {
             kind: string;
             name: string;
             updatedAt: string;
+        };
+        ChartBaseline: {
+            /** Format: int64 */
+            calls: number | null;
+            /** Format: int64 */
+            failures: number | null;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+            pinned: boolean | null;
+            /** Format: double */
+            rate: number | null;
+        };
+        ChartCard: {
+            arming: components["schemas"]["ArmingView"] | null;
+            baseline: components["schemas"]["ChartBaseline"] | null;
+            cases: components["schemas"]["CasesView"];
+            classifier_id: string;
+            classifier_key: string;
+            headline: components["schemas"]["HeadlineView"];
+            kind: string;
+            learning: components["schemas"]["LearningView"] | null;
+            measure: string | null;
+            name: string;
+            points: components["schemas"]["ChartPoint"][];
+            unit: string;
+        };
+        ChartChip: {
+            classifier_id: string;
+            classifier_key: string;
+            name: string;
+            reason: string | null;
+            since: string | null;
+            state: string;
+        };
+        ChartPoint: {
+            /** Format: int64 */
+            checked: number | null;
+            /** Format: int64 */
+            count: number | null;
+            end_at: string;
+            /** Format: int64 */
+            flagged: number | null;
+            /** Format: int64 */
+            n: number | null;
+            open: boolean;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+            reached: boolean | null;
+            start_at: string;
+            /** Format: int64 */
+            total: number | null;
+        };
+        ChartScopesView: {
+            call_sites: components["schemas"]["CallSiteOption"][];
+            classifiers: components["schemas"]["ClassifierMenuItem"][];
+            /** Format: int32 */
+            days: number;
+            tools: components["schemas"]["ToolOption"][];
+        };
+        ChartsView: {
+            cards: components["schemas"]["ChartCard"][];
+            chips: components["schemas"]["ChartChip"][];
+            /** Format: int32 */
+            days: number;
+            from_day: string;
+            scope: string;
+            scope_id: string;
+            to_day: string;
         };
         Citation: {
             path: string;
@@ -2926,6 +3050,17 @@ export interface components {
             max_attempts: number;
             next_attempt_at: string | null;
             status: string;
+        };
+        ClassifierMenuItem: {
+            all_call_sites: boolean;
+            /** Format: int32 */
+            call_site_count: number;
+            classifier_key: string;
+            covers: string;
+            id: string;
+            name: string;
+            status: string;
+            waiting_reason: string | null;
         };
         ClassifierMetricsView: {
             classifier_id: string;
@@ -3046,6 +3181,16 @@ export interface components {
             httpStatus: number | null;
             id: string;
             status: string;
+        };
+        DetectionLabel: {
+            classifier_id: string;
+            name: string;
+        };
+        DetectionMark: {
+            classifier_id: string;
+            name: string;
+            span_id: string | null;
+            trace_id: string;
         };
         Duration: {
             /** Format: int64 */
@@ -3292,9 +3437,6 @@ export interface components {
             rate: components["schemas"]["RateDetail"];
             scorerVersion: string | null;
         };
-        FrustrationScopeView: {
-            call_site_ids: string[];
-        };
         FrustrationTuningView: {
             /** Format: int64 */
             arl_target: number;
@@ -3361,6 +3503,12 @@ export interface components {
             id: "agent_vm" | "decision_calls";
             label: string;
             model_selectable: boolean;
+        };
+        HeadlineView: {
+            /** Format: double */
+            delta: number | null;
+            /** Format: double */
+            value: number | null;
         };
         /** @enum {unknown} */
         HttpStatus: "100 CONTINUE" | "101 SWITCHING_PROTOCOLS" | "102 PROCESSING" | "103 EARLY_HINTS" | "200 OK" | "201 CREATED" | "202 ACCEPTED" | "203 NON_AUTHORITATIVE_INFORMATION" | "204 NO_CONTENT" | "205 RESET_CONTENT" | "206 PARTIAL_CONTENT" | "207 MULTI_STATUS" | "208 ALREADY_REPORTED" | "226 IM_USED" | "300 MULTIPLE_CHOICES" | "301 MOVED_PERMANENTLY" | "302 FOUND" | "303 SEE_OTHER" | "304 NOT_MODIFIED" | "307 TEMPORARY_REDIRECT" | "308 PERMANENT_REDIRECT" | "400 BAD_REQUEST" | "401 UNAUTHORIZED" | "402 PAYMENT_REQUIRED" | "403 FORBIDDEN" | "404 NOT_FOUND" | "405 METHOD_NOT_ALLOWED" | "406 NOT_ACCEPTABLE" | "407 PROXY_AUTHENTICATION_REQUIRED" | "408 REQUEST_TIMEOUT" | "409 CONFLICT" | "410 GONE" | "411 LENGTH_REQUIRED" | "412 PRECONDITION_FAILED" | "413 CONTENT_TOO_LARGE" | "413 PAYLOAD_TOO_LARGE" | "414 URI_TOO_LONG" | "415 UNSUPPORTED_MEDIA_TYPE" | "416 REQUESTED_RANGE_NOT_SATISFIABLE" | "417 EXPECTATION_FAILED" | "418 I_AM_A_TEAPOT" | "421 MISDIRECTED_REQUEST" | "422 UNPROCESSABLE_CONTENT" | "422 UNPROCESSABLE_ENTITY" | "423 LOCKED" | "424 FAILED_DEPENDENCY" | "425 TOO_EARLY" | "426 UPGRADE_REQUIRED" | "428 PRECONDITION_REQUIRED" | "429 TOO_MANY_REQUESTS" | "431 REQUEST_HEADER_FIELDS_TOO_LARGE" | "451 UNAVAILABLE_FOR_LEGAL_REASONS" | "500 INTERNAL_SERVER_ERROR" | "501 NOT_IMPLEMENTED" | "502 BAD_GATEWAY" | "503 SERVICE_UNAVAILABLE" | "504 GATEWAY_TIMEOUT" | "505 HTTP_VERSION_NOT_SUPPORTED" | "506 VARIANT_ALSO_NEGOTIATES" | "507 INSUFFICIENT_STORAGE" | "508 LOOP_DETECTED" | "509 BANDWIDTH_LIMIT_EXCEEDED" | "510 NOT_EXTENDED" | "511 NETWORK_AUTHENTICATION_REQUIRED";
@@ -3441,6 +3589,12 @@ export interface components {
             id: "rca" | "triage" | "authoring" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
+        };
+        LearningView: {
+            /** Format: int64 */
+            learned: number;
+            /** Format: int64 */
+            needed: number;
         };
         LlmUsageCellView: {
             bucket_start: string;
@@ -4192,10 +4346,12 @@ export interface components {
             secure?: boolean;
         };
         SessionDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             /** Format: int64 */
             error_count: number | null;
             id: string;
             last_activity_at: string;
+            matched_trace_ids: string[] | null;
             /** Format: int64 */
             span_count: number | null;
             started_at: string;
@@ -4219,6 +4375,7 @@ export interface components {
             cache_write_tokens: number | null;
             /** Format: int32 */
             call_site_count: number | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             dominant_call_site_id: string | null;
             /** Format: int64 */
             error_count: number | null;
@@ -4261,9 +4418,6 @@ export interface components {
         };
         SetEnabledRequest: {
             enabled: boolean;
-        };
-        SetFrustrationScopeRequest: {
-            call_site_ids: string[];
         };
         SetLaneModelRequest: {
             model_key: string;
@@ -4501,6 +4655,15 @@ export interface components {
             /** Format: int64 */
             total_calls: number;
         };
+        ToolOption: {
+            callers: string[];
+            /** Format: int64 */
+            calls: number;
+            label: string;
+            /** Format: int32 */
+            open_cases: number;
+            tool_key: string;
+        };
         ToolSpec: {
             description: string | null;
             input_schema: components["schemas"]["JsonNode"] | null;
@@ -4508,6 +4671,7 @@ export interface components {
             source: string | null;
         };
         TraceDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             spans: components["schemas"]["SpanView"][];
             trace: components["schemas"]["TraceListItem"];
         };
@@ -4517,6 +4681,7 @@ export interface components {
             /** Format: int64 */
             cache_write_tokens: number | null;
             call_site_id: string | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             ended_at: string | null;
             /** Format: int32 */
             error_count: number | null;
@@ -6008,6 +6173,60 @@ export interface operations {
             };
         };
     };
+    ClassifierChartController_scopes: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseChartScopesView"];
+                };
+            };
+        };
+    };
+    ClassifierChartController_charts: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                callSiteId?: string;
+                tool?: string;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseChartsView"];
+                };
+            };
+        };
+    };
     ClassifierController_events: {
         parameters: {
             query: {
@@ -6220,62 +6439,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListClassifierEventView"];
-                };
-            };
-        };
-    };
-    ClassifierController_getFrustrationScope: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
-                };
-            };
-        };
-    };
-    ClassifierController_setFrustrationScope: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetFrustrationScopeRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFrustrationScopeView"];
                 };
             };
         };
@@ -7688,6 +7851,15 @@ export interface operations {
                 limit?: number;
                 cursor?: string;
                 include?: string;
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7713,6 +7885,15 @@ export interface operations {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7907,6 +8088,7 @@ export interface operations {
                 status?: string;
                 q?: string;
                 sort?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {

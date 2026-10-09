@@ -192,6 +192,34 @@ class SharedFindingTableIntegrationTest {
         assertTrue(row.staleTotals(), "is_settled is false");
     }
 
+    /**
+     * A drift finding is filed under the trace's call site, which falls back past an untagged root to the span that
+     * covers the model call. The whole-run row has to show that call site, not the untagged root's empty one.
+     */
+    @Test
+    @DisplayName("a whole-run row shows the trace's call site, not the untagged root span's")
+    void wholeRunEvidenceRowShowsTheTracesCallSite() {
+        Project p = project("finding-evidence-call-site");
+        String findingId = firing(p, "gram-call-site");
+        String traceId = "trace-untagged-root";
+
+        jdbc.sql("""
+                INSERT INTO trace (project_id, id, started_at, event_ts, call_site_id)
+                VALUES (:pid, :tid, now(), now(), 'policy.answer')
+                """).param("pid", p.id()).param("tid", traceId).update();
+        insertRootSpan(p.id(), traceId, "span-handler", null, "POST /chat", 4_000L);
+
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.trace(traceId)),
+                Instant.now().toString());
+
+        var page = behaviorDrift.findingEvidenceSpans(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, 100, null);
+        assertEquals("policy.answer", page.rows().get(0).callSiteId());
+    }
+
     /** Inserted directly: the fixtures build natural traces, and this needs several logical roots in one. */
     private void insertRootSpan(
             String projectId, String traceId, String spanId, @Nullable String parentId, String name, long latencyMs) {

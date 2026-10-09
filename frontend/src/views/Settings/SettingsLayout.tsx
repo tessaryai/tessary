@@ -10,7 +10,7 @@
  * Import bundle lives under Data & ingestion, and Appearance and Features under Organization.
  * Observer schedule left Settings (2026-07): check cadence is edited in place on the Observer status
  * line. Signal tuning left too: it lives in the
- * Classifiers detail rails now — one home per concept, and the old routes redirect there.
+ * classifier configure pages now — one home per concept, and the old routes redirect there.
  */
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTenant } from "../../tenant/TenantContext";

@@ -31,7 +31,8 @@ import org.springframework.stereotype.Component;
  * tick forever; anonymous traffic is a large and permanent population, so as soon as it outgrew the batch
  * limit the spans that DID have a session waiting for them would stop being selected at all. Marking them
  * {@code correlation_state = 'none'} once their trace settles is what keeps the queue drainable — the same
- * device, for the same reason, as {@code path_state = 'orphan'}.
+ * device, for the same reason, as {@code path_state = 'orphan'}. Its one exit is a later batch that gives the
+ * trace its session, which ingest copies down itself ({@link SpanRepository#adoptTraceSession}).
  *
  * <h2>The kill switch</h2>
  *

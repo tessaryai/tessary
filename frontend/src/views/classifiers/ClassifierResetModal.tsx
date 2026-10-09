@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import type { Classifier } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, Input, Modal, useToast } from "../../ui";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
 import { GROUNDEDNESS_DETECTOR } from "./groundedness";
@@ -28,7 +29,8 @@ export function ClassifierResetModal({ classifier, onClose }: { classifier: Clas
   const resetM = useMutation({
     mutationFn: () => api.resetClassifier(classifier.id),
     onSuccess: () => {
-      for (const key of ["classifiers", "classifier-health", "classifier-volume", "behavior-findings"]) {
+      invalidateClassifierReads(qc, api.base);
+      for (const key of ["classifier-health", "classifier-volume", "behavior-findings"]) {
         void qc.invalidateQueries({ queryKey: [key, api.base] });
       }
       void qc.invalidateQueries({ queryKey: ["classifier-events", api.base, classifier.id] });

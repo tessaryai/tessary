@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Classifier } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { Button, ErrorNote, Input, LoadingRow, useToast } from "../../ui";
+import { invalidateClassifierReads } from "./classifierReads";
 
 /** The two detectors {@code MetricDriftConfig} actually governs: the classifiers this form applies to. */
 export const METRIC_DRIFT_DETECTORS: ReadonlySet<string> = new Set(["cost_drift", "duration_drift"]);
@@ -57,6 +58,8 @@ export function TuningSection({ classifier }: { classifier: Classifier }) {
       api.setClassifierTuning(classifier.id, body),
     onSuccess: (result) => {
       qc.setQueryData(["classifier-tuning", api.base, classifier.id], result);
+      // Min samples is what a drift chart's learning meter counts up to.
+      invalidateClassifierReads(qc, api.base);
       setForm(fromTuning(result));
       toast.success("Tuning saved", "It applies from the next window this classifier closes.");
     },

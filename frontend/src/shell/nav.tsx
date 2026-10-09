@@ -63,7 +63,10 @@ export type NavItem = {
    * (sheets/ask-palette.md), e.g. `was "Pipeline"`. Distinct from `keywords`, which only match.
    */
   alias?: string;
-  /** Routes that should also light this item up in the sidebar (e.g. detail pages). */
+  /**
+   * Routes that should also light this item up in the sidebar (e.g. detail pages). A route named here wins over
+   * another item whose own route it sits under.
+   */
   match?: string[];
   /** "live" (default) renders in the sidebar; "reserved" is a roadmap-only palette slot. */
   state?: SurfaceState;
@@ -84,10 +87,11 @@ export type NavGroup = { label: string; items: NavItem[] };
 export const TRIAGE_NAV: NavItem = {
   id: "triage",
   label: "Triage",
-  description: "Open cases, worst first.",
-  keywords: ["cases", "inbox", "home", "overview", "worklist", "triage"],
+  description: "Open cases, worst first, and the findings that are not a case yet.",
+  keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
   alias: 'was "Overview"',
-  match: ["cases"],
+  // A finding page lives under classifiers/, but Triage lists findings and the page's breadcrumb leads back here.
+  match: ["cases", "classifiers/findings"],
   icon: Inbox,
 };
 
@@ -109,11 +113,12 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "classifiers",
         label: "Classifiers",
-        description: "The checks watching production traffic, and the findings they create.",
+        description: "What each classifier detects, charted per call site and per tool.",
         keywords: [
           "signals",
           "detections",
-          "findings",
+          "charts",
+          "configure",
           "drift",
           "behavior drift",
           "behavior",

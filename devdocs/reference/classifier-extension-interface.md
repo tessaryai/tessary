@@ -131,8 +131,7 @@ public record SweepOutcome(int scanned, int fired) {}
 list, null for every call site, and `ClassifierRow.runsOn` is the test. The worker filters what an
 observation- or turn-grain detector is sent, but it cannot see inside a sweep, so a sweep that ignores
 the list runs on every call site and nothing fails. `MetricDriftSweep` filters its samples; `tool_error`
-does not read the list yet, so `ClassifierService#setCallSiteIds` refuses one for it. Frustration is refused
-too: it picks its call sites in `frustration_scope`, where an empty list means score nothing.
+does not read the list yet, so `ClassifierService#setCallSiteIds` refuses one for it.
 
 `SweepContext` carries the two records every sweep already took as its two arguments and nothing
 else — no repositories, no catalog, no worker, no clock. An implementation injects the collaborators

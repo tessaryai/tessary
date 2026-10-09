@@ -54,7 +54,7 @@ export function MalformedHeader({
     : null;
   return (
     <PageHeader
-      breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+      breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
       kicker={
         <span className="flex flex-wrap items-center gap-2">
           <span className="text-muted">{finding.detector ? detectorLabel(finding.detector) : "Finding"}</span>

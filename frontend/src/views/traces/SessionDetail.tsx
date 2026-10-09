@@ -13,6 +13,7 @@ import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
+import { namesBy } from "./detection-marker";
 import { RawJsonView } from "./detail-json";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
@@ -26,6 +27,9 @@ export function SessionDetail() {
   const spansQ = useSessionSpans(sessionId);
   const detail = q.data;
   const traces = detail?.traces ?? [];
+  const detections = detail?.detections ?? [];
+  const marksByTrace = namesBy(detections, "trace_id");
+  const marksBySpan = namesBy(detections, "span_id");
   const spansByTrace = useSpansByTrace(spansQ.data?.spans);
 
   const patch = (kv: Record<string, string | null>) => {
@@ -70,15 +74,26 @@ export function SessionDetail() {
           />
 
           <div className="flex items-center gap-2.5 mt-1.5 mx-0 mb-4.5">
-            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} json />
+            <ViewSegment view={view} onChange={(v) => patch({ view: v === "conversation" ? null : v })} />
           </div>
 
           <TraceMedia>
             {view === "conversation" && (
-              <SessionConversationView traces={traces} spansByTrace={spansByTrace} focusId={focusId} />
+              <SessionConversationView
+                traces={traces}
+                spansByTrace={spansByTrace}
+                focusId={focusId}
+                marksByTrace={marksByTrace}
+              />
             )}
             {view === "tree" && (
-              <SessionTreeView traces={traces} spansByTrace={spansByTrace} focusId={focusId} onSelect={select} />
+              <SessionTreeView
+                traces={traces}
+                spansByTrace={spansByTrace}
+                focusId={focusId}
+                onSelect={select}
+                marksBySpan={marksBySpan}
+              />
             )}
             {view === "timeline" && (
               <SessionTimelineView
@@ -86,6 +101,7 @@ export function SessionDetail() {
                 spansByTrace={spansByTrace}
                 focusId={focusId}
                 onSelect={select}
+                marksBySpan={marksBySpan}
               />
             )}
             {view === "json" &&

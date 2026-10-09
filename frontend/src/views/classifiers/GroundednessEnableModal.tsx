@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle } from "lucide-react";
 import type { GroundednessMode } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, LoadingRow, Modal, SegmentedControl, Spinner, cn } from "../../ui";
 import { PromptBlock } from "../components/PromptBlock";
 import {
@@ -73,7 +74,7 @@ export function GroundednessEnableModal({
   const enableM = useMutation({
     mutationFn: () => api.setClassifierEnabled(classifierId, true),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["classifiers", api.base] });
+      invalidateClassifierReads(qc, api.base);
       void qc.invalidateQueries({ queryKey: statusKey });
       onEnabled();
     },

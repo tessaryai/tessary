@@ -1,88 +1,72 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Classifiers: the findings, and what triage made of each one.
+ * Classifiers: what each classifier sees, charted per call site and per tool.
  *
- * <h2>Why there are no queues here any more</h2>
- * There used to be two: "Needs a decision" for anything nothing had ruled on, and "Needs review" for
- * anything a Layer-2 run returned `unclear` on. Both asked a person to be the fallback for a machine —
- * the first for one that had not run, the second for one that ran and shrugged — and between them they
- * grew without bound, because nothing about a finding sitting in either of them made it more decidable
- * tomorrow than it was today. That is the queue this whole redesign exists to remove.
- *
- * What replaced them: every finding that opens gets exactly one triage run, and that run ends in
- * exactly one of two acts. `positive` opens or joins a case and the finding stays open; `negative`
- * CLOSES the finding outright. A ruling freezes the row — the same cause firing again files a FRESH
- * finding rather than reopening this one, so there is no re-open to wait on. So this page is a record
- * of what has been decided, not a pile of what has not.
- *
- * <h2>Open findings only</h2>
- * Pending, in flight, or sound and now a case, counted in the heading. Each row's Triage cell says
- * which, so the heading carries no rollup of its own. Closed findings are left off until the page has
- * an open/closed filter. `status` and `triage_action` agree by construction now — a ruling sets both
- * in the same write — so the split reads `isClosedByTriage`: it is closing that decides, not the bare
- * fact of the status word.
- *
- * <h2>The title is the classifier's own sentence</h2>
- * There is deliberately no "reading" column restating the shift. Each detector writes its finding's
- * title itself and puts its own numbers in it ("search_docs is failing 3.1% of the time, up from
- * 0.4%"), because the detectors do not measure comparable things and a shared column would have to
- * flatten them into one that fits none. See {@link BehaviorFindingView#title} on the server.
+ * The Call site section charts every classifier that is on for one call site; the Tool section charts Tool Errors
+ * and tool-call Duration Drift for one tool across every call site, because the server keys those two on the tool,
+ * not on the call site. One range drives both. A classifier with nothing to chart is named in a chip with the
+ * reason, so a missing card never reads as a missing classifier. The open findings live on Triage, and each
+ * classifier's switch and settings live on its configure page, which the Configure menu lists.
  */
-import { useMemo } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
-import type { BehaviorFinding } from "../../api/types";
+import type { ChartRange, ChartToolOption, ClassifierCharts } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import {
-  ErrorNote,
-  LoadingRow,
-  PageHeader,
-  Section,
-  Table,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-} from "../../ui";
-import {
-  CONTAINER,
-  ago,
-  detectorLabel,
-  enabledDetectors,
-  isClosedByTriage,
-  triageState,
-} from "./shared";
+import { EmptyState, ErrorNote, LoadingRow, PageHeader, Section, SegmentedControl, cn } from "../../ui";
+import { CONTAINER } from "./shared";
 import { FrustrationBanner } from "./FrustrationBanner";
 import { FRUSTRATION_DETECTOR } from "./FrustrationEnableModal";
+import { ChartCard } from "./ChartCard";
+import { ConfigureMenu, ScopePicker } from "./ChartPickers";
+import {
+  callSiteMeta,
+  callersText,
+  chipText,
+  defaultCallSite,
+  defaultTool,
+  rankCallSites,
+  toolGroups,
+  toolMeta,
+} from "./chartRules";
+
+const RANGES = [
+  { value: "7", label: "7d" },
+  { value: "28", label: "28d" },
+] as const;
+
+type RangeValue = (typeof RANGES)[number]["value"];
 
 export function ClassifiersPage() {
-  const { api } = useTenant();
-  const navigate = useNavigate();
+  const { api, orgSlug, projectSlug } = useTenant();
+  const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
+  const [days, setDays] = useState<ChartRange>(28);
+  const [pickedCallSite, setPickedCallSite] = useState<string | null>(null);
+  const [pickedTool, setPickedTool] = useState<string | null>(null);
 
   const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
+  const frustration = classifiersQ.data?.find((c) => c.detector === FRUSTRATION_DETECTOR);
 
-  /**
-   * The raw Layer-1 stream, ungated.
-   *
-   * <p>One call, where there used to be two. The second fetched the Layer-2-confirmed set so the page
-   * could SUBTRACT it and show only what was outstanding; nothing is outstanding now, because every
-   * finding carries its own ruling and the page's job is to show it. `include: "all"` is what makes a
-   * closed finding visible at all — the default gate returns only what triage found sound.
-   */
-  const allQ = useQuery({
-    queryKey: ["behavior-findings", api.base, "all"],
-    queryFn: () => api.listBehaviorFindings(),
+  const scopesQ = useQuery({
+    queryKey: ["classifier-chart-scopes", api.base, days],
+    queryFn: () => api.getClassifierChartScopes(days),
+    placeholderData: (prev) => prev,
   });
+  const callSites = scopesQ.data?.call_sites ?? [];
+  const tools = scopesQ.data?.tools ?? [];
 
-  const classifiers = classifiersQ.data ?? [];
-  const enabled = enabledDetectors(classifiers);
-  const frustration = classifiers.find((c) => c.detector === FRUSTRATION_DETECTOR);
+  const callSite = callSites.some((c) => c.call_site_id === pickedCallSite) ? pickedCallSite : defaultCallSite(callSites);
+  const tool = tools.some((t) => t.tool_key === pickedTool) ? pickedTool : defaultTool(tools, callSite);
+  const toolOption = tools.find((t) => t.tool_key === tool) ?? null;
 
-  const live = useMemo(
-    () => (allQ.data?.findings ?? []).filter((f) => !isClosedByTriage(f)),
-    [allQ.data],
-  );
+  const siteQ = useCharts("call_site", callSite, days);
+  const toolQ = useCharts("tool", tool, days);
+
+  const pickCallSite = (id: string) => {
+    setPickedCallSite(id);
+    setPickedTool(null);
+  };
+
+  const noTraffic = scopesQ.data != null && callSites.length === 0 && tools.length === 0;
 
   return (
     <div style={CONTAINER}>
@@ -90,142 +74,157 @@ export function ClassifiersPage() {
         kicker="Monitor"
         title="Classifiers"
         actions={
-          <Link
-            to="detectors"
-            className="inline-flex items-center h-[30px] px-3 rounded-control border border-border-strong text-small text-muted hover:text-fg transition-colors"
-            style={{ transitionDuration: "var(--duration-micro)" }}
-          >
-            {classifiersQ.isSuccess
-              ? `Catalog · ${enabled.length} of ${classifiers.length} on`
-              : "Catalog"}
-          </Link>
+          <>
+            <SegmentedControl<RangeValue>
+              ariaLabel="Time range"
+              value={String(days) as RangeValue}
+              onChange={(v) => setDays(Number(v) as ChartRange)}
+              options={[...RANGES]}
+            />
+            <ConfigureMenu classifiers={scopesQ.data?.classifiers} error={scopesQ.error} basePath={basePath} />
+          </>
         }
       />
 
       {frustration && <FrustrationBanner classifier={frustration} />}
+      {scopesQ.isLoading && <LoadingRow />}
+      {scopesQ.isError && <ErrorNote error={scopesQ.error} />}
 
-      {allQ.isLoading && <LoadingRow />}
-      {allQ.isError && <ErrorNote error={allQ.error} />}
-      {/*
-        * The catalog only fills the header's count, but a failure to read it still has to say so:
-        * silently falling back to `classifiers = []` would render "0 of 0 on" — a claim that nothing
-        * is watching production, which is the opposite of "we could not find out". Hence the
-        * `isSuccess` guard on the label above, and this note.
-        */}
-      {classifiersQ.isError && <ErrorNote error={classifiersQ.error} />}
-
-      {allQ.data && live.length === 0 && (
-        <p className="text-body text-subtle" style={{ maxWidth: 520 }}>
-          No findings. A classifier creates a finding when a whole population moves, not when one trace
-          looks odd, so an empty page is the healthy state.
-        </p>
+      {noTraffic && (
+        <EmptyState
+          title="No traffic yet"
+          body="Each call site and each tool gets its charts here once traces arrive."
+        />
       )}
 
-      {live.length > 0 && (
-        <Section title="Open" count={live.length}>
-          <FindingTable findings={live} onOpen={(id) => navigate(findingPath(id))} />
-        </Section>
+      {scopesQ.data && !noTraffic && (
+        <>
+          <Section
+            title="Call site"
+            actions={
+              callSite && (
+                <ScopePicker
+                  label="Call site"
+                  listLabel="Call sites"
+                  searchLabel="Search call sites"
+                  value={callSite}
+                  selected={callSite}
+                  onPick={pickCallSite}
+                  groups={[{ options: rankCallSites(callSites).map((c) => ({ id: c.call_site_id, name: c.call_site_id, meta: callSiteMeta(c) })) }]}
+                />
+              )
+            }
+          >
+            {callSites.length === 0 ? (
+              <p className="text-body text-muted">No call sites yet.</p>
+            ) : (
+              <Charts query={siteQ} id={callSite} label={callSite} days={days} basePath={basePath} empty="Nothing to chart for this call site in this range." />
+            )}
+          </Section>
+
+          <div className="border-t border-border pt-8">
+            <Section
+              title="Tool"
+              subtitle={toolOption ? callersText(toolOption) : undefined}
+              actions={
+                toolOption && (
+                  <ScopePicker
+                    label="Tool"
+                    listLabel="Tools"
+                    value={toolOption.label}
+                    selected={tool}
+                    onPick={setPickedTool}
+                    groups={toolGroups(tools, callSite).map((g) => ({
+                      label: g.label,
+                      options: g.tools.map((t: ChartToolOption) => ({ id: t.tool_key, name: t.label, meta: toolMeta(t) })),
+                    }))}
+                  />
+                )
+              }
+            >
+              {tools.length === 0 ? (
+                <p className="text-body text-muted">No tool was called in this range.</p>
+              ) : (
+                <Charts query={toolQ} id={tool} label={toolOption?.label ?? tool} days={days} basePath={basePath} empty="Nothing to chart for this tool in this range." />
+              )}
+            </Section>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-function findingPath(id: string): string {
-  return `findings/${encodeURIComponent(id)}`;
+/**
+ * The cards for one scope. While a new range or a new scope reads, the old cards stay where they are, so the page does
+ * not empty and refill. A new range keeps them as they are, with a line saying the range is loading. A new scope fades
+ * them and names the scope that is loading, so one call site's charts never read as another's.
+ */
+function useCharts(scope: "call_site" | "tool", id: string | null, days: ChartRange) {
+  const { api } = useTenant();
+  return useQuery({
+    queryKey: ["classifier-charts", api.base, scope, id, days],
+    queryFn: () => api.getClassifierCharts(scope === "tool" ? { tool: id! } : { callSiteId: id! }, days),
+    enabled: id != null,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === scope ? prev : undefined),
+  });
 }
 
-/**
- * One row per cause, one line each.
- *
- * <p>Fixed row height is the point: a list is read by scanning down it, and rows that breathe
- * differently depending on how long a title happens to be cannot be scanned at all. A title too long
- * for its column truncates rather than wrapping: the whole sentence is one click away, on a page that
- * has room for it.
- *
- * <p>The triage column carries a verdict where the old queues carried a section heading, which is the
- * whole shape of the change: the ruling is now a fact about the row rather than the bucket it landed
- * in, so a page holding four different rulings reads as one list.
- */
-function FindingTable({
-  findings,
-  onOpen,
+function Charts({
+  query,
+  id,
+  label,
+  days,
+  basePath,
+  empty,
 }: {
-  findings: BehaviorFinding[];
-  onOpen: (id: string) => void;
+  query: ReturnType<typeof useCharts>;
+  id: string | null;
+  label: string | null;
+  days: ChartRange;
+  basePath: string;
+  empty: string;
 }) {
-  return (
-    <Table>
-      <THead>
-        <TR>
-          <TH>Finding</TH>
-          <TH style={{ width: 150 }}>Classifier</TH>
-          <TH style={{ width: 160 }}>Triage</TH>
-          <TH style={{ width: 120 }}>First seen</TH>
-          <TH style={{ width: 32 }} />
-        </TR>
-      </THead>
-      <TBody>
-        {findings.map((f) => (
-          <TR key={f.id} interactive onClick={() => onOpen(f.id)}>
-            <TD className="text-fg truncate" style={{ maxWidth: 0 }} title={f.title}>
-              {f.title}
-            </TD>
-            <TD className="text-muted truncate">{f.detector ? detectorLabel(f.detector) : "–"}</TD>
-            <TD>
-              <TriageCell finding={f} />
-            </TD>
-            <TD className="text-subtle whitespace-nowrap" title={new Date(f.firstSeenAt).toLocaleString()}>
-              {ago(f.firstSeenAt)}
-            </TD>
-            <TD className="text-subtle">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path
-                  d="M4 2.5 7.5 6 4 9.5"
-                  stroke="currentColor"
-                  strokeWidth="1.25"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+  if (query.isLoading) return <LoadingRow />;
+  if (query.isError) return <ErrorNote error={query.error} />;
+  const data: ClassifierCharts | undefined = query.data;
+  if (!data) return null;
+  const stale = query.isPlaceholderData;
+  const otherScope = stale && data.scope_id !== id;
+  const reading = stale && (
+    <LoadingRow className="mb-3" label={otherScope ? `Loading ${label}…` : `Loading the last ${days} days…`} />
   );
-}
-
-/**
- * The ruling, and for a sound one the case it opened.
- *
- * <p>The link stops the row click rather than riding on it, because they go to two different places
- * that a reader means differently: the row is "show me the evidence", the link is "take me to the
- * work". Only `positive` ever gets one — nothing else opened a case to link to.
- */
-function TriageCell({ finding }: { finding: BehaviorFinding }) {
-  const state = triageState(finding);
-  const caseId = finding.caseId;
-  const tone =
-    state.tone === "positive"
-      ? "text-fg"
-      : state.tone === "closed"
-        ? "text-subtle"
-        : state.tone === "failed"
-          ? "text-error"
-          : "text-muted";
+  if (data.cards.length === 0 && data.chips.length === 0) {
+    return (
+      <>
+        {reading}
+        <p className="text-body text-muted">{empty}</p>
+      </>
+    );
+  }
   return (
-    <span className={`${tone} whitespace-nowrap`}>
-      {state.label}
-      {state.tone === "positive" && caseId && (
-        <>
-          {" · "}
-          <Link
-            to={`../cases/${encodeURIComponent(caseId)}`}
-            onClick={(e) => e.stopPropagation()}
-            className="text-link hover:text-link-hover">
-            Open case
-          </Link>
-        </>
+    <>
+      {reading}
+      {data.cards.length > 0 && (
+        <div
+          aria-busy={stale}
+          className={cn("grid grid-cols-1 lg:grid-cols-2 gap-4 transition-opacity", otherScope && "opacity-40 pointer-events-none")}
+          style={{ transitionDuration: "var(--duration-micro)" }}
+        >
+          {data.cards.map((c) => (
+            <ChartCard key={c.classifier_id + (c.measure ?? "")} card={c} range={data} basePath={basePath} />
+          ))}
+        </div>
       )}
-    </span>
+      {data.chips.length > 0 && (
+        <ul className="flex flex-wrap gap-2 mt-4">
+          {data.chips.map((chip) => (
+            <li key={chip.classifier_id} className="rounded-pill bg-surface border border-border px-2.5 py-0.5 text-small text-muted">
+              {chipText(chip)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

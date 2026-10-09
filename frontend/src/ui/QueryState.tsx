@@ -14,12 +14,12 @@ import { cn } from "./cn";
  * {@link TableSkeleton} for a data-dense table's loading frame.
  */
 
-/** Inline "Loading…" line — spinner + muted text, polite to screen readers. */
-export function LoadingRow() {
+/** Inline "Loading…" line — spinner + muted text, polite to screen readers. `label` says what is loading. */
+export function LoadingRow({ label = "Loading…", className }: { label?: string; className?: string }) {
   return (
-    <div role="status" aria-live="polite" className="flex items-center gap-2 text-small text-muted">
+    <div role="status" aria-live="polite" className={cn("flex items-center gap-2 text-small text-muted", className)}>
       <Spinner size="sm" />
-      <span>Loading…</span>
+      <span>{label}</span>
     </div>
   );
 }

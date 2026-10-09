@@ -178,6 +178,7 @@ describe("TraceRail", () => {
   const detail: TraceDetailView = {
     trace: TRACE_A,
     spans: [span({ id: "a-root", trace_id: "tr-a", kind: "agent", name: "turn one", input: j([{ role: "user", content: "first question" }]) })],
+    detections: [],
   };
 
   it("renders nothing without a trace, and the trace's views with one", async () => {
@@ -203,6 +204,20 @@ describe("TraceRail", () => {
     expect(screen.queryByRole("tab")).toBeNull();
   });
 
+  it("shows the trace as the API sent it in JSON", async () => {
+    api.getTrace.mockResolvedValue(detail);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderRoute(<TraceRail traceId="tr-a" onClose={() => {}} />);
+
+    await screen.findByText("first question");
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(j([{ role: "user", content: "first question" }]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify(detail, null, 2));
+  });
+
   it("shows the read's error", async () => {
     api.getTrace.mockRejectedValue(new Error("rail read failed"));
     renderRoute(<TraceRail traceId="tr-a" onClose={() => {}} />);
@@ -226,6 +241,19 @@ describe("SessionRail", () => {
     open.mockRestore();
   });
 
+  it("shows the session and its spans as the API sent them in JSON", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderRoute(<SessionRail sessionId="sess-1" onClose={() => {}} />);
+
+    await screen.findByText("second question");
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand all" }));
+    expect(screen.getByText(j([{ role: "user", content: "second question" }]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ session: session(), spans: spans() }, null, 2));
+  });
+
   it("waits on both reads, and shows either one's error", async () => {
     api.getSessionSpans.mockImplementation(pending);
     renderRoute(<SessionRail sessionId="sess-1" onClose={() => {}} />);
@@ -239,5 +267,19 @@ describe("SessionRail", () => {
 
     renderRoute(<SessionRail sessionId={null} onClose={() => {}} />);
     expect(screen.queryByRole("tab")).toBeNull();
+  });
+});
+
+describe("detections", () => {
+  it("marks the turn a classifier flagged, in its own trace only", async () => {
+    api.getSession.mockResolvedValue(
+      session({ detections: [{ classifier_id: "cls-fr", name: "Frustration", trace_id: "tr-b", span_id: "b-llm" }] }),
+    );
+    renderSession();
+
+    const second = await screen.findByText("second question");
+    const marker = screen.getByText("Frustration");
+    expect(screen.getAllByText("Frustration")).toHaveLength(1);
+    expect(second.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

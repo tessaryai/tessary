@@ -34,6 +34,7 @@ export function traceItem(over: Partial<TraceListItemView> = {}): TraceListItemV
     thread_id: null,
     user_id: null,
     unpriced_spans: 0,
+    detected_by: [],
     ...over,
   };
 }

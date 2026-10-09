@@ -504,6 +504,48 @@
         ],
         "type" : "object"
       },
+      "ApiResponseChartScopesView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ChartScopesView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
+      "ApiResponseChartsView" : {
+        "properties" : {
+          "data" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ChartsView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "meta" : {
+            "$ref" : "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required" : [
+          "meta"
+        ],
+        "type" : "object"
+      },
       "ApiResponseClassifierDailyVolumeView" : {
         "properties" : {
           "data" : {
@@ -741,27 +783,6 @@
             "anyOf" : [
               {
                 "$ref" : "#/components/schemas/FrustratedSessionPage"
-              },
-              {
-                "type" : "null"
-              }
-            ]
-          },
-          "meta" : {
-            "$ref" : "#/components/schemas/ResponseMeta"
-          }
-        },
-        "required" : [
-          "meta"
-        ],
-        "type" : "object"
-      },
-      "ApiResponseFrustrationScopeView" : {
-        "properties" : {
-          "data" : {
-            "anyOf" : [
-              {
-                "$ref" : "#/components/schemas/FrustrationScopeView"
               },
               {
                 "type" : "null"
@@ -2478,6 +2499,31 @@
         ],
         "type" : "object"
       },
+      "ArmingView" : {
+        "properties" : {
+          "basis" : {
+            "type" : "string"
+          },
+          "confidence" : {
+            "type" : "string"
+          },
+          "threshold" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "window_seconds" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "basis",
+          "confidence",
+          "threshold",
+          "window_seconds"
+        ],
+        "type" : "object"
+      },
       "Attribution" : {
         "properties" : {
           "commit" : {
@@ -3077,6 +3123,31 @@
         ],
         "type" : "object"
       },
+      "CallSiteOption" : {
+        "properties" : {
+          "call_site_id" : {
+            "type" : "string"
+          },
+          "learning" : {
+            "type" : "boolean"
+          },
+          "open_cases" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "turns" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "call_site_id",
+          "learning",
+          "open_cases",
+          "turns"
+        ],
+        "type" : "object"
+      },
       "CapabilitiesView" : {
         "properties" : {
           "capabilities" : {
@@ -3420,6 +3491,58 @@
         ],
         "type" : "object"
       },
+      "CaseSpan" : {
+        "properties" : {
+          "case_id" : {
+            "type" : "string"
+          },
+          "case_reference" : {
+            "type" : "string"
+          },
+          "case_state" : {
+            "type" : "string"
+          },
+          "case_title" : {
+            "type" : "string"
+          },
+          "disposition" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "end_at" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "finding_id" : {
+            "type" : "string"
+          },
+          "resolution" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "start_at" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "case_id",
+          "case_reference",
+          "case_state",
+          "case_title",
+          "disposition",
+          "end_at",
+          "finding_id",
+          "resolution",
+          "start_at"
+        ],
+        "type" : "object"
+      },
       "CaseView" : {
         "properties" : {
           "baseline_value" : {
@@ -3594,6 +3717,25 @@
           "subject_kind",
           "subject_label",
           "title"
+        ],
+        "type" : "object"
+      },
+      "CasesView" : {
+        "properties" : {
+          "open_cases" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "spans" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CaseSpan"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "open_cases",
+          "spans"
         ],
         "type" : "object"
       },
@@ -3824,6 +3966,336 @@
           "kind",
           "name",
           "updatedAt"
+        ],
+        "type" : "object"
+      },
+      "ChartBaseline" : {
+        "properties" : {
+          "calls" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "failures" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "p50" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "p95" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "pinned" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
+          "rate" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "calls",
+          "failures",
+          "p50",
+          "p95",
+          "pinned",
+          "rate"
+        ],
+        "type" : "object"
+      },
+      "ChartCard" : {
+        "properties" : {
+          "arming" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ArmingView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "baseline" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ChartBaseline"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "cases" : {
+            "$ref" : "#/components/schemas/CasesView"
+          },
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "classifier_key" : {
+            "type" : "string"
+          },
+          "headline" : {
+            "$ref" : "#/components/schemas/HeadlineView"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "learning" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/LearningView"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "measure" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "points" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ChartPoint"
+            },
+            "type" : "array"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "arming",
+          "baseline",
+          "cases",
+          "classifier_id",
+          "classifier_key",
+          "headline",
+          "kind",
+          "learning",
+          "measure",
+          "name",
+          "points",
+          "unit"
+        ],
+        "type" : "object"
+      },
+      "ChartChip" : {
+        "properties" : {
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "classifier_key" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "since" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "state" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "classifier_id",
+          "classifier_key",
+          "name",
+          "reason",
+          "since",
+          "state"
+        ],
+        "type" : "object"
+      },
+      "ChartPoint" : {
+        "properties" : {
+          "checked" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "count" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "end_at" : {
+            "type" : "string"
+          },
+          "flagged" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "n" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "open" : {
+            "type" : "boolean"
+          },
+          "p50" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "p95" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "reached" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
+          "start_at" : {
+            "type" : "string"
+          },
+          "total" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "checked",
+          "count",
+          "end_at",
+          "flagged",
+          "n",
+          "open",
+          "p50",
+          "p95",
+          "reached",
+          "start_at",
+          "total"
+        ],
+        "type" : "object"
+      },
+      "ChartScopesView" : {
+        "properties" : {
+          "call_sites" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CallSiteOption"
+            },
+            "type" : "array"
+          },
+          "classifiers" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ClassifierMenuItem"
+            },
+            "type" : "array"
+          },
+          "days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "tools" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ToolOption"
+            },
+            "type" : "array"
+          }
+        },
+        "required" : [
+          "call_sites",
+          "classifiers",
+          "days",
+          "tools"
+        ],
+        "type" : "object"
+      },
+      "ChartsView" : {
+        "properties" : {
+          "cards" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ChartCard"
+            },
+            "type" : "array"
+          },
+          "chips" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ChartChip"
+            },
+            "type" : "array"
+          },
+          "days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "from_day" : {
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          },
+          "scope_id" : {
+            "type" : "string"
+          },
+          "to_day" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "cards",
+          "chips",
+          "days",
+          "from_day",
+          "scope",
+          "scope_id",
+          "to_day"
         ],
         "type" : "object"
       },
@@ -4069,6 +4541,49 @@
           "max_attempts",
           "next_attempt_at",
           "status"
+        ],
+        "type" : "object"
+      },
+      "ClassifierMenuItem" : {
+        "properties" : {
+          "all_call_sites" : {
+            "type" : "boolean"
+          },
+          "call_site_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "classifier_key" : {
+            "type" : "string"
+          },
+          "covers" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "waiting_reason" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "all_call_sites",
+          "call_site_count",
+          "classifier_key",
+          "covers",
+          "id",
+          "name",
+          "status",
+          "waiting_reason"
         ],
         "type" : "object"
       },
@@ -4526,6 +5041,47 @@
           "httpStatus",
           "id",
           "status"
+        ],
+        "type" : "object"
+      },
+      "DetectionLabel" : {
+        "properties" : {
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "classifier_id",
+          "name"
+        ],
+        "type" : "object"
+      },
+      "DetectionMark" : {
+        "properties" : {
+          "classifier_id" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "span_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "trace_id" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "classifier_id",
+          "name",
+          "span_id",
+          "trace_id"
         ],
         "type" : "object"
       },
@@ -5580,20 +6136,6 @@
         ],
         "type" : "object"
       },
-      "FrustrationScopeView" : {
-        "properties" : {
-          "call_site_ids" : {
-            "items" : {
-              "type" : "string"
-            },
-            "type" : "array"
-          }
-        },
-        "required" : [
-          "call_site_ids"
-        ],
-        "type" : "object"
-      },
       "FrustrationTuningView" : {
         "properties" : {
           "arl_target" : {
@@ -5846,6 +6388,29 @@
           "id",
           "label",
           "model_selectable"
+        ],
+        "type" : "object"
+      },
+      "HeadlineView" : {
+        "properties" : {
+          "delta" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "value" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "delta",
+          "value"
         ],
         "type" : "object"
       },
@@ -6234,6 +6799,23 @@
           "id",
           "label",
           "provider_options"
+        ],
+        "type" : "object"
+      },
+      "LearningView" : {
+        "properties" : {
+          "learned" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "needed" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "required" : [
+          "learned",
+          "needed"
         ],
         "type" : "object"
       },
@@ -9255,6 +9837,12 @@
       },
       "SessionDetail" : {
         "properties" : {
+          "detections" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionMark"
+            },
+            "type" : "array"
+          },
           "error_count" : {
             "format" : "int64",
             "type" : [
@@ -9267,6 +9855,15 @@
           },
           "last_activity_at" : {
             "type" : "string"
+          },
+          "matched_trace_ids" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : [
+              "array",
+              "null"
+            ]
           },
           "span_count" : {
             "format" : "int64",
@@ -9323,9 +9920,11 @@
           }
         },
         "required" : [
+          "detections",
           "error_count",
           "id",
           "last_activity_at",
+          "matched_trace_ids",
           "span_count",
           "started_at",
           "total_cost",
@@ -9361,6 +9960,12 @@
               "integer",
               "null"
             ]
+          },
+          "detected_by" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionLabel"
+            },
+            "type" : "array"
           },
           "dominant_call_site_id" : {
             "type" : [
@@ -9481,6 +10086,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "call_site_count",
+          "detected_by",
           "dominant_call_site_id",
           "error_count",
           "first_input_preview",
@@ -9567,23 +10173,6 @@
         },
         "required" : [
           "enabled"
-        ],
-        "type" : "object"
-      },
-      "SetFrustrationScopeRequest" : {
-        "properties" : {
-          "call_site_ids" : {
-            "items" : {
-              "minLength" : 1,
-              "type" : "string"
-            },
-            "maxItems" : 200,
-            "minItems" : 0,
-            "type" : "array"
-          }
-        },
-        "required" : [
-          "call_site_ids"
         ],
         "type" : "object"
       },
@@ -10625,6 +11214,38 @@
         ],
         "type" : "object"
       },
+      "ToolOption" : {
+        "properties" : {
+          "callers" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "calls" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "open_cases" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "tool_key" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "callers",
+          "calls",
+          "label",
+          "open_cases",
+          "tool_key"
+        ],
+        "type" : "object"
+      },
       "ToolSpec" : {
         "properties" : {
           "description" : {
@@ -10663,6 +11284,12 @@
       },
       "TraceDetail" : {
         "properties" : {
+          "detections" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionMark"
+            },
+            "type" : "array"
+          },
           "spans" : {
             "items" : {
               "$ref" : "#/components/schemas/SpanView"
@@ -10674,6 +11301,7 @@
           }
         },
         "required" : [
+          "detections",
           "spans",
           "trace"
         ],
@@ -10700,6 +11328,12 @@
               "string",
               "null"
             ]
+          },
+          "detected_by" : {
+            "items" : {
+              "$ref" : "#/components/schemas/DetectionLabel"
+            },
+            "type" : "array"
           },
           "ended_at" : {
             "type" : [
@@ -10837,6 +11471,7 @@
           "cache_read_tokens",
           "cache_write_tokens",
           "call_site_id",
+          "detected_by",
           "ended_at",
           "error_count",
           "id",
@@ -13930,6 +14565,134 @@
         ]
       }
     },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/chart-scopes" : {
+      "get" : {
+        "operationId" : "ClassifierChartController_scopes",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "days",
+            "required" : false,
+            "schema" : {
+              "default" : 28,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseChartScopesView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-chart-controller"
+        ]
+      }
+    },
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/charts" : {
+      "get" : {
+        "operationId" : "ClassifierChartController_charts",
+        "parameters" : [
+          {
+            "in" : "query",
+            "name" : "ctx",
+            "required" : true,
+            "schema" : {
+              "$ref" : "#/components/schemas/TenantContext"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "orgSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "path",
+            "name" : "projectSlug",
+            "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "callSiteId",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "tool",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "days",
+            "required" : false,
+            "schema" : {
+              "default" : 28,
+              "format" : "int32",
+              "type" : "integer"
+            }
+          }
+        ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiResponseChartsView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "tags" : [
+          "classifier-chart-controller"
+        ]
+      }
+    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events" : {
       "get" : {
         "operationId" : "ClassifierController_events",
@@ -14375,122 +15138,6 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ApiResponseListClassifierEventView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "classifier-controller"
-        ]
-      }
-    },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-scope" : {
-      "get" : {
-        "operationId" : "ClassifierController_getFrustrationScope",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "classifier-controller"
-        ]
-      },
-      "put" : {
-        "operationId" : "ClassifierController_setFrustrationScope",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/SetFrustrationScopeRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseFrustrationScopeView"
                 }
               }
             },
@@ -17471,6 +18118,78 @@
             "schema" : {
               "type" : "string"
             }
+          },
+          {
+            "in" : "query",
+            "name" : "model",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "kind",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "callSite",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "fromTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "toTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "status",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "q",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
           }
         ],
         "responses" : {
@@ -17522,6 +18241,78 @@
             "in" : "path",
             "name" : "sessionId",
             "required" : true,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "model",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "kind",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "callSite",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "hasCallSite",
+            "required" : false,
+            "schema" : {
+              "type" : "boolean"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "fromTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "toTimestamp",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "status",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "q",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
+            "required" : false,
             "schema" : {
               "type" : "string"
             }
@@ -17962,6 +18753,14 @@
           {
             "in" : "query",
             "name" : "sort",
+            "required" : false,
+            "schema" : {
+              "type" : "string"
+            }
+          },
+          {
+            "in" : "query",
+            "name" : "detectedBy",
             "required" : false,
             "schema" : {
               "type" : "string"

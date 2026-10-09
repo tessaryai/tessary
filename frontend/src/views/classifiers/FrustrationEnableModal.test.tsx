@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
+import { chartReadsStale, seedChartReads } from "../../test/chartReads";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ModelSettingsResponse, ProviderCredentialListResponse } from "../../api/types";
 import { FrustrationEnableModal } from "./FrustrationEnableModal";
@@ -104,6 +105,23 @@ function renderModal(onEnabled = vi.fn()) {
 }
 
 describe("FrustrationEnableModal", () => {
+  // Bug: Frustration enabled here still reads "Off" in the Configure menu on Classifiers until the staleTime ends.
+  it("marks the Classifiers charts and menu stale once it enables", async () => {
+    getModelSettings.mockResolvedValue(SETTINGS);
+    listProviderCredentials.mockResolvedValue({ credentials: [credential("OPENROUTER")] });
+    const onEnabled = vi.fn();
+    const { queryClient } = renderRoute(
+      <FrustrationEnableModal classifierId="clf-1" onClose={vi.fn()} onEnabled={onEnabled} />,
+    );
+    seedChartReads(queryClient);
+
+    await screen.findByLabelText(/OpenRouter/);
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(onEnabled).toHaveBeenCalled());
+    await waitFor(() => expect(chartReadsStale(queryClient)).toEqual([true, true]));
+  });
+
   it("asks for the key of an unconfigured provider, then saves it, sets the lane and enables, in order", async () => {
     getModelSettings.mockResolvedValue(SETTINGS);
     listProviderCredentials.mockResolvedValue({ credentials: [] });

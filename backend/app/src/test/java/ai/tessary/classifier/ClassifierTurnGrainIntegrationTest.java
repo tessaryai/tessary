@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
-import ai.tessary.classifier.frustration.FrustrationScopeRepository;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
@@ -77,9 +76,6 @@ class ClassifierTurnGrainIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
-    @Autowired
-    FrustrationScopeRepository scopes;
-
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -89,6 +85,11 @@ class ClassifierTurnGrainIntegrationTest {
 
     /** Frustration seeds disabled (it spends provider credit), so each test grants it and turns it on. */
     private String bootstrapGranted(String testName) {
+        return bootstrapGranted(testName, List.of(REPLY));
+    }
+
+    /** As {@link #bootstrapGranted(String)}, limited to {@code callSiteIds}, or on every call site with null. */
+    private String bootstrapGranted(String testName, @Nullable List<String> callSiteIds) {
         String pid = TenantFixture.bootstrap(
                         tenants, testName, org -> capabilities.grant(org.id(), Capability.FRUSTRATION))
                 .project()
@@ -96,7 +97,8 @@ class ClassifierTurnGrainIntegrationTest {
         service.seedBuiltIns(pid);
         String id =
                 ClassifierRows.byKey(signals, pid, "frustration").orElseThrow().id();
-        scopes.replace(pid, id, List.of(REPLY));
+        // Straight to the row: the service refuses a call site no trace has reached yet.
+        if (callSiteIds != null) signals.setCallSiteIds(pid, id, callSiteIds);
         service.setEnabled(pid, id, true);
         return pid;
     }
@@ -138,6 +140,22 @@ class ClassifierTurnGrainIntegrationTest {
                 reply.spanId(),
                 flaggedSpan(pid, turnTraceId),
                 "the reply's first call, not the router, the memory pass or the reply's later call");
+    }
+
+    /** With no list, Frustration runs on every call site, like every other classifier, so nothing has to be picked. */
+    @Test
+    void withNoListATurnIsScored() {
+        String pid = bootstrapGranted("turn-grain-every", null);
+        Instant now = Instant.now();
+
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        ClassifierConversations.seedPreamble(fx, pid, sessionId, now.toString());
+        SpanRef turn = seedSpan(pid, SubstrateV2Fixtures.traceId(), sessionId, null, REPLY, "llm", "chat", now);
+
+        List<ClassifierEventView> events = sweepUntilDetected(pid);
+
+        assertEquals(1, events.size());
+        assertEquals(turn.traceId(), events.get(0).subjectId());
     }
 
     @Test

@@ -56,7 +56,9 @@ public final class SessionDtos {
             // The session bracketed as one interaction: what started it, what it most recently produced.
             // Not an aggregate — the first trace's own input and the last trace's own output, verbatim.
             @JsonProperty("first_input_preview") @Nullable String firstInputPreview,
-            @JsonProperty("last_output_preview") @Nullable String lastOutputPreview) {}
+            @JsonProperty("last_output_preview") @Nullable String lastOutputPreview,
+            // The classifiers that flagged any of this session's traces.
+            @JsonProperty("detected_by") List<TraceDtos.DetectionLabel> detectedBy) {}
 
     /** A page of sessions, most recently active first, plus the cursor for the next (older) page. */
     public record SessionsPage(
@@ -83,7 +85,11 @@ public final class SessionDtos {
             @JsonProperty("total_cost") @Nullable BigDecimal totalCost,
             @JsonProperty("unpriced_spans") @Nullable Long unpricedSpans,
             @JsonProperty("traces_truncated") boolean tracesTruncated,
-            List<TraceDtos.TraceListItem> traces) {}
+            List<TraceDtos.TraceListItem> traces,
+            // Each span a classifier flagged in these traces, so the views can mark where it occurred.
+            List<TraceDtos.DetectionMark> detections,
+            // The traces that pass the caller's filters, oldest first; null when the caller set none.
+            @JsonProperty("matched_trace_ids") @Nullable List<String> matchedTraceIds) {}
 
     /**
      * One conversation's turns, the grain the frustration classifier scores and RCA cites. Carries no totals,

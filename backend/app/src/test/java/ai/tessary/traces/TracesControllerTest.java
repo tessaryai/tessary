@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierService;
+import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
@@ -17,12 +20,14 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -70,6 +75,12 @@ class TracesControllerTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    ClassifierService classifierService;
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -113,7 +124,7 @@ class TracesControllerTest {
         fx.rollup(t.pid(), traceId, t0, null, true);
 
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(1, page.traces().size());
         var item = page.traces().get(0);
         assertEquals(traceId, item.id(), "the producer's trace id, not a surrogate");
@@ -181,7 +192,8 @@ class TracesControllerTest {
         fx.rollup(t.pid(), unpriced, t0, null, true);
 
         var byId = ok(controller.list(
-                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null))
+                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null,
+                        null))
                 .traces()
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(TraceDtos.TraceListItem::id, i -> i));
@@ -211,7 +223,7 @@ class TracesControllerTest {
         // The v1 cursor: [occurred_at, id] in a PreviewCursor envelope, no version tag.
         String legacy = ai.tessary.ingest.PreviewCursor.encode(t0 + "\u001f" + Ids.ulid(), 0);
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(traceId),
                 page.traces().stream().map(TraceDtos.TraceListItem::id).toList(),
@@ -222,7 +234,7 @@ class TracesControllerTest {
                 1,
                 ok(controller.list(
                                 t.ctx(), t.org(), t.proj(), null, garbage, null, null, null, null, null, null, null,
-                                null, null))
+                                null, null, null))
                         .traces()
                         .size(),
                 "and a garbled one does the same rather than 500");
@@ -239,7 +251,7 @@ class TracesControllerTest {
         fx.trace(t.pid(), newer, t0.plusSeconds(60));
 
         var first = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.traces().stream().map(TraceDtos.TraceListItem::id).toList());
@@ -251,6 +263,7 @@ class TracesControllerTest {
                 t.proj(),
                 1,
                 first.nextCursor(),
+                null,
                 null,
                 null,
                 null,
@@ -372,6 +385,111 @@ class TracesControllerTest {
         assertNull(view.attributes(), "the attribute bag is not an object to show");
         assertEquals("in", view.input(), "the rest of the payload still renders");
         assertTrue(view.payloadAvailable());
+    }
+
+    @Test
+    @DisplayName(
+            "Detected by keeps a trace Frustration flagged, drops one a false alarm cleared, and names the classifier")
+    void detectedByKeepsFlaggedTracesDropsClearedOnesAndNamesTheClassifier() {
+        Tenant t = frustrationTenant("traces-detected-by");
+        ClassifierRow frustration = frustrationClassifier(t.pid());
+        Instant t0 = Instant.parse("2026-06-21T12:00:00Z");
+        String flagged = SubstrateV2Fixtures.traceId();
+        String cleared = SubstrateV2Fixtures.traceId();
+        String plain = SubstrateV2Fixtures.traceId();
+        fx.trace(t.pid(), flagged, t0);
+        fx.trace(t.pid(), cleared, t0.plusSeconds(10));
+        fx.trace(t.pid(), plain, t0.plusSeconds(20));
+        flag(t.pid(), frustration.id(), flagged, "span-flagged", null);
+        flag(t.pid(), frustration.id(), cleared, "span-cleared", "2026-06-22T09:00:00Z");
+
+        var label = new TraceDtos.DetectionLabel(frustration.id(), frustration.name());
+        var all = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
+        assertEquals(
+                List.of(List.of(), List.of(), List.of(label)),
+                all.traces().stream().map(TraceDtos.TraceListItem::detectedBy).toList(),
+                "newest first: only the uncleared flag names its classifier");
+
+        var byClassifier = ok(controller.list(
+                t.ctx(),
+                t.org(),
+                t.proj(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(flagged),
+                byClassifier.traces().stream().map(TraceDtos.TraceListItem::id).toList());
+
+        var anyDetection = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, "any"));
+        assertEquals(
+                List.of(flagged),
+                anyDetection.traces().stream().map(TraceDtos.TraceListItem::id).toList());
+    }
+
+    @Test
+    @DisplayName("a trace's detail names the span Frustration scored, and nothing once a false alarm cleared it")
+    void traceDetailNamesTheFlaggedSpan() {
+        Tenant t = frustrationTenant("trace-detail-detections");
+        ClassifierRow frustration = frustrationClassifier(t.pid());
+        Instant t0 = Instant.parse("2026-06-21T13:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow scored = fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        String clearedTrace = SubstrateV2Fixtures.traceId();
+        SpanRow clearedSpan =
+                fx.span(t.pid(), clearedTrace, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        flag(t.pid(), frustration.id(), traceId, scored.id(), null);
+        flag(t.pid(), frustration.id(), clearedTrace, clearedSpan.id(), "2026-06-22T09:00:00Z");
+
+        assertEquals(
+                List.of(new TraceDtos.DetectionMark(frustration.id(), frustration.name(), traceId, scored.id())),
+                ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId)).detections());
+        assertEquals(
+                List.of(),
+                ok(controller.detail(t.ctx(), t.org(), t.proj(), clearedTrace)).detections());
+    }
+
+    private Tenant frustrationTenant(String slug) {
+        var fix = TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.FRUSTRATION));
+        return new Tenant(
+                new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null),
+                fix.org().slug(),
+                fix.project().slug(),
+                fix.project().id());
+    }
+
+    private ClassifierRow frustrationClassifier(String pid) {
+        classifierService.seedBuiltIns(pid);
+        return classifierService.list(pid).stream()
+                .filter(c -> c.classifierKey().equals("frustration"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void flag(String pid, String classifierId, String traceId, String spanId, @Nullable String clearedAt) {
+        jdbc.sql("INSERT INTO frustration_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " subject_span_id, severity, confidence, evidence, cleared_at)"
+                        + " VALUES (:id, :pid, :cid, 'frustration', :trace, :trace, :span, 'warn', 'high',"
+                        + " CAST('{\"score\":0.71}' AS jsonb), :cleared)")
+                .param("id", Ids.ulid())
+                .param("pid", pid)
+                .param("cid", classifierId)
+                .param("trace", traceId)
+                .param("span", spanId)
+                .param("cleared", clearedAt)
+                .update();
     }
 
     private static <T> T ok(ai.tessary.web.ApiResponse<T> response) {

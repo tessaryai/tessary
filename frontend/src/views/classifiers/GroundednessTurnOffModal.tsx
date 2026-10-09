@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import type { GroundednessMode } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
+import { invalidateClassifierReads } from "./classifierReads";
 import { Button, ErrorNote, Modal } from "../../ui";
 import { groundednessStatusKey } from "./groundedness";
 
@@ -25,7 +26,7 @@ export function GroundednessTurnOffModal({
   const offM = useMutation({
     mutationFn: () => api.setClassifierEnabled(classifierId, false),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["classifiers", api.base] });
+      invalidateClassifierReads(qc, api.base);
       void qc.invalidateQueries({ queryKey: groundednessStatusKey(api.base, classifierId) });
       onClose();
     },

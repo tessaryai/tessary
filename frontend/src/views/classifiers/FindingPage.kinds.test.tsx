@@ -91,6 +91,16 @@ const renderPage = () =>
 const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
 
 describe("a finding with no figure", () => {
+  // Bug: the breadcrumb leads to Classifiers, which charts and lists no findings, not back to Triage, which does.
+  it("leads back to Triage from its breadcrumb", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "The agent loops on refunds" });
+
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Triage" }));
+
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/triage");
+  });
+
   it("names itself, says there is nothing to plot, and runs triage on this finding", async () => {
     api.getBehaviorFinding.mockResolvedValueOnce(plain()).mockResolvedValue(plain({ triageStatus: "in_flight" }));
     renderPage();
@@ -351,6 +361,16 @@ describe("a frustration finding", () => {
 
 describe("FindingPage, groundedness", () => {
   beforeEach(() => api.getBehaviorFinding.mockResolvedValue(GROUNDEDNESS_FINDING_DETAIL));
+
+  // Bug: a story header keeps its own breadcrumb, so it can still lead to Classifiers after the generic one moved.
+  it("leads back to Triage from the story's breadcrumb", async () => {
+    renderPage();
+    await screen.findByText("Answers on support-agent became less grounded");
+
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Triage" }));
+
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/triage");
+  });
 
   it("tells the rate and shows the flagged answers instead of the evidence table", async () => {
     renderPage();

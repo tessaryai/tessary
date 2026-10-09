@@ -35,8 +35,15 @@ export function Sidebar() {
   const { collapsed, toggle } = useSidebarCollapsed();
   const { triage, groups } = useNavigation();
 
+  const items = [triage, ...groups.flatMap((g) => g.items)];
   const renderItem = (item: NavItem, badge?: number) => (
-    <NavLinkRow key={item.id} item={item} badge={badge} collapsed={collapsed} />
+    <NavLinkRow
+      key={item.id}
+      item={item}
+      claimedElsewhere={items.filter((other) => other.id !== item.id).flatMap((other) => other.match ?? [])}
+      badge={badge}
+      collapsed={collapsed}
+    />
   );
 
   return (
@@ -295,10 +302,13 @@ function SwitcherAction({ label, onClick }: { label: string; onClick: () => void
  */
 function NavLinkRow({
   item,
+  claimedElsewhere = [],
   badge,
   collapsed,
 }: {
   item: NavItem;
+  /** Other rows' `match` routes: a path under this row's route that another row claims lights that row instead. */
+  claimedElsewhere?: string[];
   /** Triage only: the open-case count. The app's only nav count. */
   badge?: number;
   collapsed?: boolean;
@@ -308,10 +318,10 @@ function NavLinkRow({
   const location = useLocation();
   const projectBase = `/orgs/${orgSlug}/projects/${projectSlug}/`;
   const href = `${projectBase}${item.id}`;
-  const active =
-    location.pathname === href ||
-    location.pathname.startsWith(href + "/") ||
-    (item.match?.some((m) => location.pathname.startsWith(projectBase + m)) ?? false);
+  const under = (routes: string[] | undefined) =>
+    routes?.some((m) => location.pathname.startsWith(projectBase + m)) ?? false;
+  const own = location.pathname === href || location.pathname.startsWith(href + "/");
+  const active = (own && !under(claimedElsewhere)) || under(item.match);
   const hasBadge = badge != null && badge > 0;
 
   return (

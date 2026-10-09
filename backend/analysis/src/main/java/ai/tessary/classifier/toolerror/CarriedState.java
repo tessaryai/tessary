@@ -2,7 +2,9 @@
 package ai.tessary.classifier.toolerror;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
+import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import java.time.Instant;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -80,6 +82,18 @@ public record CarriedState(
      */
     public boolean fencedOff(String bucket) {
         return resetAt != null && Instant.parse(bucket).isBefore(Instant.parse(resetAt));
+    }
+
+    /**
+     * The calls a key has learned from while it has no reference: every tally in {@code tallies}, less the hours a
+     * human reset fenced off. {@code state} is null for a key that has never swept.
+     */
+    public static long learned(@Nullable CarriedState state, List<HourlyToolTally> tallies) {
+        long learned = 0;
+        for (HourlyToolTally t : tallies) {
+            if (state == null || !state.fencedOff(t.bucket())) learned += t.calls();
+        }
+        return learned;
     }
 
     /**
