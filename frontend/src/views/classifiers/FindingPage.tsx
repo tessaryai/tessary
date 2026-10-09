@@ -19,7 +19,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, triageState } from "./shared";
+import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, stamp, triageState } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
@@ -386,7 +386,7 @@ export function FindingPage() {
     const bucket = sh.bucketKey !== f.callSiteId ? sh.bucketKey : null;
     const window =
       sh.windowOpenedAt && sh.windowClosedAt
-        ? `${new Date(sh.windowOpenedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${new Date(sh.windowClosedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`
+        ? `${stamp(sh.windowOpenedAt)} → ${stamp(sh.windowClosedAt)}`
         : null;
     return (
       <PageHeader
