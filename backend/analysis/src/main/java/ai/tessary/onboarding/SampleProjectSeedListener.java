@@ -535,8 +535,7 @@ public class SampleProjectSeedListener {
                         "The model and its price did not change: classify_intent ran gpt-4o-mini at the same rate"
                                 + " for the whole window."),
                 RuledOutCheck.ruledOut(
-                        2,
-                        "The traffic did not change: call volume grew smoothly, with no jump at " + onsetDate + "."),
+                        2, "The traffic did not change: call volume grew smoothly, with no jump at " + onsetDate + "."),
                 RuledOutCheck.ruledOut(
                         3,
                         "classify_intent's own prompt and configuration did not change; only its input grew, from"

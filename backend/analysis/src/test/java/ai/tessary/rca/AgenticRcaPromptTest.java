@@ -244,15 +244,21 @@ class AgenticRcaPromptTest {
         JsonNode cause = props.path("causes").path("items");
 
         assertEquals(
-                List.of("causes_identified", "no_cause_found"), texts(props.path("verdict").path("enum")));
-        assertEquals(List.of("high", "medium"), texts(cause.path("properties").path("confidence").path("enum")));
-        assertEquals(List.of("change", "standing"), texts(cause.path("properties").path("change").path("enum")));
+                List.of("causes_identified", "no_cause_found"),
+                texts(props.path("verdict").path("enum")));
+        assertEquals(
+                List.of("high", "medium"),
+                texts(cause.path("properties").path("confidence").path("enum")));
+        assertEquals(
+                List.of("change", "standing"),
+                texts(cause.path("properties").path("change").path("enum")));
         assertEquals(
                 List.of("code", "prompt", "tool", "model", "traffic", "upstream", "data", "other"),
                 texts(cause.path("properties").path("type").path("enum")));
         assertEquals(4, props.path("causes").path("maxItems").asInt());
         assertEquals(
-                List.of("summary", "verdict", "causes", "ruled_out", "detailed_report"), texts(schema.path("required")));
+                List.of("summary", "verdict", "causes", "ruled_out", "detailed_report"),
+                texts(schema.path("required")));
         assertEquals(
                 List.of(
                         "title",
@@ -266,7 +272,8 @@ class AgenticRcaPromptTest {
                         "evidence_trace_ids",
                         "affected_count"),
                 texts(cause.path("required")));
-        assertEquals("string", props.path("ruled_out").path("items").path("type").asText(), "one sentence each");
+        assertEquals(
+                "string", props.path("ruled_out").path("items").path("type").asText(), "one sentence each");
         assertFalse(props.has("not_checked"), "what was not checked goes in detailed_report");
         assertFalse(props.has("checklist"), "there is no checklist");
     }

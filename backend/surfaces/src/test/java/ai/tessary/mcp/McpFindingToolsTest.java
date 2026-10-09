@@ -604,9 +604,30 @@ class McpFindingToolsTest {
 
     private static EvidenceSpanView evidenceRow(String role, String traceId, @Nullable String spanId) {
         return new EvidenceSpanView(
-                role, 0, "sess-1", traceId, spanId, "answer", "llm", "ok", null, null, "2026-02-03T10:00:00Z", 900L,
-                300L, 0.01, List.of("claude-haiku-5"), false, false, false, "rag-answer", "question", "answer", null,
-                null, null);
+                role,
+                0,
+                "sess-1",
+                traceId,
+                spanId,
+                "answer",
+                "llm",
+                "ok",
+                null,
+                null,
+                "2026-02-03T10:00:00Z",
+                900L,
+                300L,
+                0.01,
+                List.of("claude-haiku-5"),
+                false,
+                false,
+                false,
+                "rag-answer",
+                "question",
+                "answer",
+                null,
+                null,
+                null);
     }
 
     /**
@@ -643,7 +664,8 @@ class McpFindingToolsTest {
         assertFalse(rows.get(0).has("flaggedSentences"), "a trace-grain witness row is not an answer");
         JsonNode sentences = rows.get(1).get("flaggedSentences");
         assertEquals(2, sentences.size());
-        assertEquals("The refund window is 90 days.", sentences.get(0).get("text").asText());
+        assertEquals(
+                "The refund window is 90 days.", sentences.get(0).get("text").asText());
         assertEquals(0.91, sentences.get(0).get("score").asDouble());
         assertTrue(sentences.get(1).get("text").isNull(), "an aged-out answer keeps the score without the text");
         assertEquals(0.62, sentences.get(1).get("score").asDouble());
@@ -673,7 +695,8 @@ class McpFindingToolsTest {
                         null,
                         counts(1, 0),
                         counts(1, 0)));
-        when(behaviorDrift.flaggedSentences(eq(PROJECT_ID), eq("find-t"), any())).thenReturn(Map.of());
+        when(behaviorDrift.flaggedSentences(eq(PROJECT_ID), eq("find-t"), any()))
+                .thenReturn(Map.of());
 
         JsonNode rows = structured(mcp.callTool("get_finding_evidence", "{\"finding_id\":\"find-t\"}"))
                 .get("rows");

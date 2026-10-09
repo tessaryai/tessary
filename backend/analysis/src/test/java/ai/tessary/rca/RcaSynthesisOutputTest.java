@@ -99,7 +99,8 @@ class RcaSynthesisOutputTest {
     /** Session grain: a cause citing only sessions is receipted. */
     @Test
     void aCauseCitingOnlySessionsSurvives() {
-        RcaSynthesisOutput.Parsed out = parse(reply("causes_identified", cause("Sessions", "medium", 1, "", "\"s-1\"")));
+        RcaSynthesisOutput.Parsed out =
+                parse(reply("causes_identified", cause("Sessions", "medium", 1, "", "\"s-1\"")));
 
         assertEquals(List.of("Sessions"), titles(out));
     }
@@ -138,8 +139,10 @@ class RcaSynthesisOutputTest {
 
     @Test
     void causesIdentifiedWithNoSurvivingCauseIsDowngradedToNoCauseFound() {
-        RcaSynthesisOutput.Parsed out =
-                parse(reply("causes_identified", cause("Invented", "high", 5, "\"tr-9\"", ""), cause("Low", "low", 1, "\"tr-1\"", "")));
+        RcaSynthesisOutput.Parsed out = parse(reply(
+                "causes_identified",
+                cause("Invented", "high", 5, "\"tr-9\"", ""),
+                cause("Low", "low", 1, "\"tr-1\"", "")));
 
         assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict());
         assertTrue(out.causes().isEmpty());
@@ -205,7 +208,8 @@ class RcaSynthesisOutputTest {
                 "causes_identified",
                 "{\"title\":\"t\",\"confidence\":\"high\",\"evidence_trace_ids\":[\"tr-1\"],"
                         + "\"attribution\":{\"path\":\"a.py\",\"commit\":\"abc\"}}");
-        assertNull(parseWithoutRepo(withoutRepo).causes().get(0).attribution(), "path and commit cleared, nothing left");
+        assertNull(
+                parseWithoutRepo(withoutRepo).causes().get(0).attribution(), "path and commit cleared, nothing left");
     }
 
     /** Each ruled-out sentence is stored as one entry the "What else was checked" list reads, with no internal id shown. */
@@ -314,7 +318,8 @@ class RcaSynthesisOutputTest {
      */
     @Test
     void aBlankSummaryWithNoCauseIsNoSummaryRatherThanTheReply() {
-        assertNull(parse("{\"summary\":\"\",\"verdict\":\"no_cause_found\",\"causes\":[]}").summary());
+        assertNull(parse("{\"summary\":\"\",\"verdict\":\"no_cause_found\",\"causes\":[]}")
+                .summary());
         assertNull(parse("{\"verdict\":\"no_cause_found\"}").summary());
     }
 }

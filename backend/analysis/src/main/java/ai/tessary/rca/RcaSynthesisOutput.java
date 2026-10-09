@@ -68,7 +68,10 @@ final class RcaSynthesisOutput {
             @Nullable List<String> evidence_session_ids,
             @Nullable Integer affected_count) {}
 
-    record AttributionBody(@Nullable String path, @Nullable String commit, @Nullable String excerpt) {}
+    record AttributionBody(
+            @Nullable String path,
+            @Nullable String commit,
+            @Nullable String excerpt) {}
 
     /** A validated run result. {@code summary} is null when the agent wrote none and no cause survived;
      *  {@code detailedReport} is null when the agent ignored its schema; {@code verdictNote} is non-null when

@@ -997,8 +997,8 @@ public class McpToolRegistry {
             @Nullable String violation,
             /** Each sentence the model flagged in this answer, with its score. Set only on a groundedness
              *  finding's witness span rows, and absent from every other row. */
-            @JsonInclude(JsonInclude.Include.NON_NULL)
-            @Nullable List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable
+            List<GroundednessEvidence.FlaggedSentenceText> flaggedSentences) {
 
         static EvidenceSpan of(
                 BehaviorDtos.EvidenceSpanView v,

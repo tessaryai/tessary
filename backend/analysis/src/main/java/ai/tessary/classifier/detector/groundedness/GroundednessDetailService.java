@@ -150,7 +150,9 @@ public class GroundednessDetailService {
         List<FlaggedSentenceView> sentences = new ArrayList<>();
         for (JsonNode s : evidence.path("flagged_sentences")) {
             sentences.add(new FlaggedSentenceView(
-                    s.path("start").asInt(0), s.path("end").asInt(0), s.path("unsupported").asDouble(0)));
+                    s.path("start").asInt(0),
+                    s.path("end").asInt(0),
+                    s.path("unsupported").asDouble(0)));
         }
         return sentences;
     }

@@ -148,10 +148,13 @@ class McpCaseToolsTest {
         assertEquals("Model swap on 2026-08-14", cause.get("title").asText());
         assertEquals("change", cause.get("change").asText());
         assertEquals("model", cause.get("type").asText());
-        assertEquals("The provider rotated the default.", cause.get("what_changed").asText());
+        assertEquals(
+                "The provider rotated the default.", cause.get("what_changed").asText());
         assertFalse(rca.has("hypotheses"), "every case type answers in causes now");
         JsonNode ruledOut = rca.get("ruled_out").get(0);
-        assertEquals("The traffic mix held flat through the window.", ruledOut.get("question").asText());
+        assertEquals(
+                "The traffic mix held flat through the window.",
+                ruledOut.get("question").asText());
         assertEquals("ruled_out_1", ruledOut.get("check").asText());
         assertTrue(ruledOut.get("passed").asBoolean());
     }

@@ -181,11 +181,7 @@ public class AgenticRcaEngine {
     }
 
     public Result run(
-            RcaJobRow job,
-            RcaReportRow report,
-            String findingId,
-            Map<String, String> dossierFiles,
-            Evidence evidence) {
+            RcaJobRow job, RcaReportRow report, String findingId, Map<String, String> dossierFiles, Evidence evidence) {
         Agentic cfg = props.getAgentic();
         String mcpBase = cfg.getMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
@@ -335,9 +331,7 @@ public class AgenticRcaEngine {
         prompt = baselinePresent
                 ? prompt.replace("{baseline}", BASELINE_PRESENT.stripTrailing())
                 : prompt.replace("{baseline}\n\n", "");
-        prompt = methodPresent
-                ? prompt.replace("{method_line}", METHOD_LINE)
-                : prompt.replace("{method_line}\n", "");
+        prompt = methodPresent ? prompt.replace("{method_line}", METHOD_LINE) : prompt.replace("{method_line}\n", "");
         return prompt.replace("{finding_id}", findingId)
                 .replace("{onset}", report.windowSplit())
                 .replace("{last_seen}", report.windowTo())

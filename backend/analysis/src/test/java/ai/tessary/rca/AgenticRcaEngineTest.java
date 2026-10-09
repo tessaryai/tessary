@@ -319,8 +319,7 @@ class AgenticRcaEngineTest {
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1")));
+                TessaryException.class, () -> engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1")));
 
         assertEquals(RcaError.NO_EVIDENCE_DOOR, e.error());
         assertEquals(List.of(), sandbox.requests);

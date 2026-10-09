@@ -179,7 +179,8 @@ class GroundednessFlaggedAnswersIntegrationTest {
         // The agent door's read: the stored answer's sentences as text, an unstored answer's scores alone.
         SpanRef storedRef = new SpanRef(trace, span);
         JsonNode other = first.path("rows").get(1);
-        SpanRef unstoredRef = new SpanRef(other.path("traceId").asText(), other.path("spanId").asText());
+        SpanRef unstoredRef =
+                new SpanRef(other.path("traceId").asText(), other.path("spanId").asText());
         Map<SpanRef, List<FlaggedSentenceText>> sentences =
                 detail.flaggedSentences(finding, List.of(storedRef, unstoredRef));
         assertEquals(
