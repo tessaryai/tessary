@@ -26,7 +26,7 @@ public class ClassifierChartController {
         this.resolver = resolver;
     }
 
-    /** Every call site and tool the selectors offer, and every classifier the Configure menu lists. 7, 28 or 90 days. */
+    /** Every call site and tool the selectors offer, and every classifier the Configure menu lists. 7 or 28 days. */
     @GetMapping("/chart-scopes")
     public ApiResponse<ChartScopesView> scopes(
             TenantContext ctx,
@@ -39,7 +39,8 @@ public class ClassifierChartController {
 
     /**
      * The cards and chips of one call site ({@code callSiteId}) or one tool ({@code tool}, a Tool Errors key such
-     * as {@code tool:search_orders}); exactly one of the two. 7, 28 or 90 days, each a UTC date, the last one today.
+     * as {@code tool:search_orders}); exactly one of the two. 7 or 28 UTC days, the last one today, drawn as points
+     * built from hourly data.
      */
     @GetMapping("/charts")
     public ApiResponse<ChartsView> charts(

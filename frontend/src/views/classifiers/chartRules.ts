@@ -2,8 +2,8 @@
 /*
  * The rules a chart card on the Classifiers page draws by, apart from React.
  *
- * The wire carries raw units (rates as fractions, durations in milliseconds, cost in dollars) and dates as UTC days,
- * so every word and number a reader sees is made here. A rate's change is in percentage points, never a percent
+ * The wire carries raw units (rates as fractions, durations in milliseconds, cost in dollars) and times as UTC
+ * instants, so every word and number a reader sees is made here. A rate's change is in percentage points, never a percent
  * change (see rateStory.tsx), and a change is "worse" when the value rose: every measure charted here is
  * lower-is-better.
  */
@@ -12,7 +12,7 @@ import type {
   ChartCard,
   ChartCaseSpan,
   ChartChip,
-  ChartDay,
+  ChartPoint,
   ChartToolOption,
   ClassifierMenuItem,
 } from "../../api/types";
@@ -20,6 +20,9 @@ import { PROVIDER_PAUSES } from "./shared";
 
 /** The rows a card's case strip has. When more cases ran than fit, the last row says "+N more" instead. */
 export const MAX_LANES = 3;
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
 
 export type AxisUnit = "percent" | "seconds" | "usd" | "count";
 
@@ -75,12 +78,51 @@ export function utcDay(iso: string): string {
   return new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/** The day ticks of a range, counted back from today: each day for 7 days, each week for 28, every two weeks for 90. */
-export function xTicks(dates: string[]): { index: number; label: string }[] {
-  const gap = dates.length <= 7 ? 1 : dates.length <= 28 ? 7 : 14;
-  const ticks: { index: number; label: string }[] = [];
-  for (let i = dates.length - 1; i >= 0; i -= gap) ticks.unshift({ index: i, label: utcDay(dates[i]) });
+/**
+ * A card's time axis in epoch milliseconds: from 00:00 UTC of the range's first day to the end of the current hour.
+ * It stretches to the last rate or range point when the server's clock runs ahead of the browser's. A count card's
+ * open bucket can end hours past now, so its bar is cut at the axis end instead.
+ */
+export function timeAxis(card: ChartCard, fromDay: string, now: number): { from: number; to: number } {
+  const from = Date.parse(`${fromDay}T00:00:00Z`);
+  let to = Math.floor(now / HOUR_MS) * HOUR_MS + HOUR_MS;
+  if (card.kind !== "count") for (const p of card.points) to = Math.max(to, Date.parse(p.end_at));
+  return { from, to };
+}
+
+/** The day ticks of a range at 00:00 UTC, counted back from the last day: each day for 7 days, each week for 28. */
+export function xTicks(fromDay: string, toDay: string): { at: number; label: string }[] {
+  const from = Date.parse(`${fromDay}T00:00:00Z`);
+  const last = Date.parse(`${toDay}T00:00:00Z`);
+  const gap = (last - from) / DAY_MS < 7 ? DAY_MS : 7 * DAY_MS;
+  const ticks: { at: number; label: string }[] = [];
+  for (let at = last; at >= from; at -= gap) ticks.unshift({ at, label: utcDay(new Date(at).toISOString()) });
   return ticks;
+}
+
+/** One rate or range point as drawn: a level held from `start` to `end`, in epoch milliseconds. */
+export type Step = { start: number; end: number; v: number; open: boolean };
+
+/**
+ * The SVG paths of a step series: each step a horizontal segment, joined to the one before by a vertical at its start
+ * only when it starts within an hour of where that one ended, else left apart. The open step, the last one, goes in
+ * `dashed` with its connector so it reads as still filling.
+ */
+export function stepPaths(steps: Step[], x: (t: number) => number, y: (v: number) => number): { solid: string; dashed: string } {
+  let solid = "";
+  let dashed = "";
+  const at = (t: number, v: number) => `${x(t).toFixed(1)} ${y(v).toFixed(1)}`;
+  steps.forEach((s, i) => {
+    const prev = steps[i - 1];
+    const joined = prev != null && s.start - prev.end <= HOUR_MS;
+    let d = "";
+    if (joined && s.open) d += `M${at(prev.end, prev.v)}`;
+    d += joined ? `H${x(s.start).toFixed(1)}V${y(s.v).toFixed(1)}` : `M${at(s.start, s.v)}`;
+    d += `H${x(s.end).toFixed(1)}`;
+    if (s.open) dashed += d;
+    else solid += d;
+  });
+  return { solid, dashed };
 }
 
 /** A rate fraction as a percent with one decimal; a non-zero rate too small for that reads "<0.1%". */
@@ -153,19 +195,36 @@ const RATE_WORDS: Record<string, { verb: string; noun: string; title: string }> 
 const RATE_DEFAULT = { verb: "flagged", noun: "checks", title: "% flagged" };
 
 /** A range card's measure: the slow-end word, the population, and the axis title. */
-const RANGE_WORDS: Record<string, { high: string; noun: string; label: string; title: string }> = {
-  turn_duration: { high: "Slow", noun: "turns", label: "slow turns (p95)", title: "Seconds per turn" },
-  tool_duration: { high: "Slow", noun: "calls", label: "slow calls (p95)", title: "Seconds per call" },
-  cost: { high: "Expensive", noun: "turns", label: "expensive turns (p95)", title: "Cost per turn, USD" },
+const RANGE_WORDS: Record<string, { high: string; one: string; noun: string; label: string; title: string }> = {
+  turn_duration: { high: "Slow", one: "turn", noun: "turns", label: "slow turns (p95)", title: "Seconds per turn" },
+  tool_duration: { high: "Slow", one: "call", noun: "calls", label: "slow calls (p95)", title: "Seconds per call" },
+  cost: { high: "Expensive", one: "turn", noun: "turns", label: "expensive turns (p95)", title: "Cost per turn, USD" },
 };
-const RANGE_DEFAULT = { high: "High", noun: "samples", label: "high end (p95)", title: "Per sample" };
+const RANGE_DEFAULT = { high: "High", one: "sample", noun: "samples", label: "high end (p95)", title: "Per sample" };
 
 const rateWords = (card: ChartCard) => RATE_WORDS[card.classifier_key] ?? RATE_DEFAULT;
 const rangeWords = (card: ChartCard) => RANGE_WORDS[card.measure ?? ""] ?? RANGE_DEFAULT;
 
+/** A stretch of time as words: per "6 hours", "in an hour", "that day". */
+function lengthWords(ms: number): { per: string; within: string; that: string } {
+  const hours = ms / HOUR_MS;
+  if (hours === 1) return { per: "hour", within: "an hour", that: "hour" };
+  if (hours === 24) return { per: "day", within: "a day", that: "day" };
+  return { per: `${hours} hours`, within: `${hours} hours`, that: `${hours}-hour window` };
+}
+
+/** The width of a count card's buckets in milliseconds: every one is the same. */
+function bucketMs(card: ChartCard): number | null {
+  const p = card.points[0];
+  return p ? Date.parse(p.end_at) - Date.parse(p.start_at) : null;
+}
+
 /** The y-axis title above a card's chart. */
 export function axisTitle(card: ChartCard): string {
-  if (card.kind === "count") return "Detections per day";
+  if (card.kind === "count") {
+    const ms = bucketMs(card);
+    return ms ? `Detections per ${lengthWords(ms).per}` : "Detections";
+  }
   if (card.kind === "range") return rangeWords(card).title;
   return rateWords(card).title;
 }
@@ -227,53 +286,72 @@ export function laneTooltip(span: ChartCaseSpan): string[] {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
-/** Whether a count card draws its "N in a day opens a finding" line: only for a one-day arming window. */
-export function dailyArming(card: ChartCard): number | null {
-  return card.arming && card.arming.window_seconds === 86_400 ? card.arming.threshold : null;
+/**
+ * The threshold of a count card's "N in a day opens a finding" line, and its words. A bar can carry the line only when
+ * it is as wide as the arming window; otherwise the bright bars alone say which windows reached it.
+ */
+export function armingLine(card: ChartCard): { threshold: number; label: string } | null {
+  const ms = bucketMs(card);
+  if (!card.arming || ms !== card.arming.window_seconds * 1000) return null;
+  return { threshold: card.arming.threshold, label: `${card.arming.threshold} in ${lengthWords(ms).within} opens a finding` };
 }
 
 /**
- * One day's bar on a count card. Its height is this call site's detections, the number the headline sums and the
- * tooltip reads. It is bright when what the arming bar counts reached the threshold; for a user classifier that
+ * One bucket's bar on a count card. Its height is this call site's detections (total, not count), the number the
+ * headline sums and the tooltip reads, so a user classifier's card never draws other call sites' detections. It is
+ * bright when what the arming bar counts reached the threshold in the window holding it; for a user classifier that
  * count is project-wide, so a short bar can be the one that opened a finding.
  */
-export function countBar(card: ChartCard, d: ChartDay): { height: number; reached: boolean } {
-  const height = d.total ?? 0;
-  const bar = dailyArming(card);
-  return { height, reached: bar != null && (d.count ?? height) >= bar };
+export function countBar(p: ChartPoint): { height: number; reached: boolean } {
+  return { height: p.total ?? 0, reached: p.reached === true };
 }
 
-/** The hover text for one day of a card: the date first, then the day's numbers by card kind. */
-export function dayTooltip(card: ChartCard, index: number): string[] {
-  const d = card.days[index];
-  const date = utcDay(d.date);
+const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+
+/** A point's stretch of UTC time: "Oct 7, 14:00-16:00 UTC", or both dates when it crosses midnight. */
+export function spanLabel(startAt: string, endAt: string): string {
+  const start = Date.parse(startAt);
+  const end = Date.parse(endAt);
+  const day = utcDay(startAt);
+  if (utcDay(new Date(end - 1).toISOString()) === day) {
+    return `${day}, ${hhmm(start)}-${end % DAY_MS === 0 ? "24:00" : hhmm(end)} UTC`;
+  }
+  return `${day}, ${hhmm(start)} to ${utcDay(endAt)}, ${hhmm(end)} UTC`;
+}
+
+/** The hover text for one point of a card: its time span first, then its numbers by card kind. */
+export function pointTooltip(card: ChartCard, index: number): string[] {
+  const p = card.points[index];
+  const when = `${spanLabel(p.start_at, p.end_at)}${p.open ? ", still filling" : ""}`;
   if (card.kind === "count") {
-    const total = d.total ?? 0;
-    const count = d.count ?? total;
-    const lines = [date, plural(total, "detection", "detections")];
-    const bar = dailyArming(card);
-    if (bar == null) return lines;
+    const total = p.total ?? 0;
+    const count = p.count ?? total;
+    const lines = [when, plural(total, "detection", "detections")];
+    if (!card.arming || p.reached == null) return lines;
     if (count !== total) lines.push(`${count.toLocaleString("en-US")} counted toward a finding`);
-    lines.push(count >= bar ? `Reached ${bar}, opened a finding` : `Below ${bar}, no finding`);
+    const { threshold, window_seconds } = card.arming;
+    const that = lengthWords(window_seconds * 1000).that;
+    lines.push(p.reached ? `Reached ${threshold} that ${that}, opened a finding` : `Below ${threshold} that ${that}, no finding`);
     return lines;
   }
   if (card.kind === "range") {
     const words = rangeWords(card);
-    if (!d.n || d.p50 == null || d.p95 == null) return [date, `No ${words.noun}`];
+    if (!p.n || p.p50 == null || p.p95 == null) return [when, `No ${words.noun}`];
     const b = card.baseline;
     return [
-      date,
-      `${words.high} (p95) ${formatValue(card, d.p95)}`,
-      `Typical (p50) ${formatValue(card, d.p50)}`,
+      when,
+      `${words.high} (p95) ${formatValue(card, p.p95)}`,
+      `Typical (p50) ${formatValue(card, p.p50)}`,
+      plural(p.n, words.one, words.noun),
       b?.p50 != null && b.p95 != null
         ? `Baseline ${formatValue(card, b.p95)} and ${formatValue(card, b.p50)}`
         : "No baseline yet",
     ];
   }
   const words = rateWords(card);
-  const checked = d.checked ?? 0;
-  const flagged = d.flagged ?? 0;
-  if (checked === 0) return [date, `No ${words.noun} checked`];
+  const checked = p.checked ?? 0;
+  const flagged = p.flagged ?? 0;
+  if (checked === 0) return [when, `No ${words.noun} checked`];
   const rate = flagged / checked;
   const base = card.baseline?.rate;
   let against = "No baseline yet";
@@ -283,7 +361,7 @@ export function dayTooltip(card: ChartCard, index: number): string[] {
     against = text === "0.0" ? "Same as baseline" : `${pp > 0 ? "+" : MINUS}${text} pp against baseline`;
   }
   return [
-    date,
+    when,
     `${percent(rate)} ${words.verb}`,
     `${flagged.toLocaleString("en-US")} of ${checked.toLocaleString("en-US")} ${words.noun}`,
     against,

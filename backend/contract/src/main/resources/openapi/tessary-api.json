@@ -4054,12 +4054,6 @@
           "classifier_key" : {
             "type" : "string"
           },
-          "days" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ChartDay"
-            },
-            "type" : "array"
-          },
           "headline" : {
             "$ref" : "#/components/schemas/HeadlineView"
           },
@@ -4085,6 +4079,12 @@
           "name" : {
             "type" : "string"
           },
+          "points" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ChartPoint"
+            },
+            "type" : "array"
+          },
           "unit" : {
             "type" : "string"
           }
@@ -4095,12 +4095,12 @@
           "cases",
           "classifier_id",
           "classifier_key",
-          "days",
           "headline",
           "kind",
           "learning",
           "measure",
           "name",
+          "points",
           "unit"
         ],
         "type" : "object"
@@ -4142,7 +4142,7 @@
         ],
         "type" : "object"
       },
-      "ChartDay" : {
+      "ChartPoint" : {
         "properties" : {
           "checked" : {
             "format" : "int64",
@@ -4158,7 +4158,7 @@
               "null"
             ]
           },
-          "date" : {
+          "end_at" : {
             "type" : "string"
           },
           "flagged" : {
@@ -4175,6 +4175,9 @@
               "null"
             ]
           },
+          "open" : {
+            "type" : "boolean"
+          },
           "p50" : {
             "format" : "double",
             "type" : [
@@ -4189,6 +4192,15 @@
               "null"
             ]
           },
+          "reached" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
+          "start_at" : {
+            "type" : "string"
+          },
           "total" : {
             "format" : "int64",
             "type" : [
@@ -4200,11 +4212,14 @@
         "required" : [
           "checked",
           "count",
-          "date",
+          "end_at",
           "flagged",
           "n",
+          "open",
           "p50",
           "p95",
+          "reached",
+          "start_at",
           "total"
         ],
         "type" : "object"

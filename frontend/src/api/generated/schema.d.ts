@@ -2946,12 +2946,12 @@ export interface components {
             cases: components["schemas"]["CasesView"];
             classifier_id: string;
             classifier_key: string;
-            days: components["schemas"]["ChartDay"][];
             headline: components["schemas"]["HeadlineView"];
             kind: string;
             learning: components["schemas"]["LearningView"] | null;
             measure: string | null;
             name: string;
+            points: components["schemas"]["ChartPoint"][];
             unit: string;
         };
         ChartChip: {
@@ -2962,20 +2962,23 @@ export interface components {
             since: string | null;
             state: string;
         };
-        ChartDay: {
+        ChartPoint: {
             /** Format: int64 */
             checked: number | null;
             /** Format: int64 */
             count: number | null;
-            date: string;
+            end_at: string;
             /** Format: int64 */
             flagged: number | null;
             /** Format: int64 */
             n: number | null;
+            open: boolean;
             /** Format: double */
             p50: number | null;
             /** Format: double */
             p95: number | null;
+            reached: boolean | null;
+            start_at: string;
             /** Format: int64 */
             total: number | null;
         };

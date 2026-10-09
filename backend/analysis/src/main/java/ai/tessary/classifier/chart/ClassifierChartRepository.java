@@ -7,6 +7,7 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.chart.ClassifierChartDtos.CaseSpan;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.metric.MetricBaselineRow;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.toolerror.ToolFailure;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -25,9 +26,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The daily series behind the Classifiers page charts, its case strips and its selectors. Every day is a UTC date,
- * cut with {@code AT TIME ZONE 'UTC'}: the hourly reads the detectors replay truncate without a zone and are not
- * reused here.
+ * The hourly series behind the Classifiers page charts, its case strips and its selectors. Every hour is cut with
+ * {@code date_trunc('hour', x, 'UTC')}: the hourly reads the detectors replay truncate without a zone, which in a
+ * session zone off UTC by a half hour is not a UTC hour, and are not reused here. The last-day reads stay UTC dates.
  */
 @Repository
 public class ClassifierChartRepository {
@@ -73,6 +74,11 @@ public class ClassifierChartRepository {
                AND tr.started_at >= :from
             """;
 
+    private static final String HOUR_OF_TURN = "date_trunc('hour', tr.started_at, 'UTC')";
+
+    /** The start of the {@code :grain}-second bucket a detection falls in, as the arming bar cuts its windows. */
+    private static final String GRAIN = "(floor(extract(epoch FROM d.subject_started_at) / :grain)::bigint * :grain)";
+
     private static final String TURN_MS = "EXTRACT(EPOCH FROM (root.ended_at - root.started_at))::float8 * 1000";
 
     private static final String TURN_ENDED = " AND root.ended_at IS NOT NULL AND root.ended_at >= root.started_at";
@@ -105,24 +111,20 @@ public class ClassifierChartRepository {
             + " WHEN s.ended_at IS NOT NULL AND s.ended_at >= s.started_at"
             + " THEN EXTRACT(EPOCH FROM (s.ended_at - s.started_at))::float8 * 1000 END";
 
-    /** One rate day: trials checked and flagged. */
-    public record RateRow(LocalDate day, long checked, long flagged) {}
+    /** One rate hour: trials checked and flagged. */
+    public record RateRow(Instant hour, long checked, long flagged) {}
 
-    /** One range day: samples and their median and 95th percentile. */
-    public record RangeRow(
-            LocalDate day,
-            long n,
-            @Nullable Double p50,
-            @Nullable Double p95) {}
+    /** One range hour's samples in one bin of the card's grid. */
+    public record RangeRow(Instant hour, int bin, long n) {}
 
     /**
-     * One count day.
+     * One count bucket: a window of a fixed number of seconds counted from the epoch, as the arming bar cuts its own.
      *
-     * @param events detections the bar's band and scope admit
-     * @param sessions distinct sessions among them
+     * @param events detections the bar's band and scope admit, in the busiest facet
+     * @param sessions distinct sessions among them, in the busiest facet
      * @param total every detection on the call site
      */
-    public record CountRow(LocalDate day, long events, long sessions, long total) {}
+    public record CountRow(Instant start, long events, long sessions, long total) {}
 
     /** Whose findings a card's case strip shows. */
     public sealed interface CaseScope {}
@@ -147,11 +149,11 @@ public class ClassifierChartRepository {
     // ---- rate cards ---------------------------------------------------------------------------------
 
     /**
-     * Frustration sessions on {@code callSite} per UTC day of their first scored turn. Sessions are grouped from
-     * {@code groupFrom}, before the range, so a session that began before {@code from} keeps its own first day and
-     * every range reads the same trials; only sessions whose first day is at or after {@code from} are returned.
+     * Frustration sessions on {@code callSite} per UTC hour of their first scored turn. Sessions are grouped from
+     * {@code groupFrom}, before the range, so a session that began before {@code from} keeps its own first hour and
+     * every range reads the same trials; only sessions whose first turn is at or after {@code from} are returned.
      */
-    public List<RateRow> frustrationDays(
+    public List<RateRow> frustrationHours(
             String projectId,
             String classifierId,
             String scorerVersion,
@@ -169,7 +171,7 @@ public class ClassifierChartRepository {
                              AND a.scorer_version = :scorerVersion AND a.turn_started_at >= :groupFrom
                              AND COALESCE(a.call_site_id, '') = :callSite
                            GROUP BY a.conversation_id)
-                        SELECT (c.first_scored_at AT TIME ZONE 'UTC')::date AS day,
+                        SELECT date_trunc('hour', c.first_scored_at, 'UTC') AS hour,
                                COUNT(*) AS checked,
                                COUNT(*) FILTER (WHERE c.any_flag AND EXISTS (
                                    SELECT 1 FROM {detections} d
@@ -202,11 +204,11 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Groundedness traces on {@code callSite} per UTC day of their first scored answer, grouped from {@code
-     * groupFrom} as {@link #frustrationDays} groups sessions. A trace is flagged while one of its flagged answers
+     * Groundedness traces on {@code callSite} per UTC hour of their first scored answer, grouped from {@code
+     * groupFrom} as {@link #frustrationHours} groups sessions. A trace is flagged while one of its flagged answers
      * has an uncleared detection.
      */
-    public List<RateRow> groundednessDays(
+    public List<RateRow> groundednessHours(
             String projectId,
             String classifierId,
             String scorerVersion,
@@ -229,7 +231,7 @@ public class ClassifierChartRepository {
                              AND a.scorer_version = :scorerVersion AND a.call_site_id = :callSite
                              AND a.observation_started_at >= :groupFrom
                            GROUP BY a.subject_trace_id)
-                        SELECT (t.first_scored_at AT TIME ZONE 'UTC')::date AS day,
+                        SELECT date_trunc('hour', t.first_scored_at, 'UTC') AS hour,
                                COUNT(*) AS checked,
                                COUNT(*) FILTER (WHERE t.failed) AS flagged
                           FROM tr t
@@ -269,14 +271,14 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Malformed Output's checked and failed outputs on {@code callSite} per UTC day. A span counts once the sweep
+     * Malformed Output's checked and failed outputs on {@code callSite} per UTC hour. A span counts once the sweep
      * has stored past it: {@code created_at} before the cursor, the ingest clock the sweep walks, so a backfilled
      * span the sweep has not reached is not a pass.
      */
-    public List<RateRow> malformedDays(
+    public List<RateRow> malformedHours(
             String projectId, String classifierId, String callSite, Instant from, String checkedBefore) {
         return jdbc.sql("""
-                        SELECT (s.started_at AT TIME ZONE 'UTC')::date AS day,
+                        SELECT date_trunc('hour', s.started_at, 'UTC') AS hour,
                                COUNT(*) AS checked,
                                COUNT(d.id) AS flagged
                           FROM span s
@@ -324,12 +326,12 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Tool calls and failed ones per UTC day, for the raw {@code tool_call.name} values of one tool key. The names
+     * Tool calls and failed ones per UTC hour, for the raw {@code tool_call.name} values of one tool key. The names
      * come from {@code ToolErrorRepository#namesByToolKey}: a key is a normalization and never matches a name.
      */
-    public List<RateRow> toolErrorDays(String projectId, Collection<String> names, Instant from) {
+    public List<RateRow> toolErrorHours(String projectId, Collection<String> names, Instant from) {
         if (names.isEmpty()) return List.of();
-        return jdbc.sql("SELECT (tc.started_at AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS checked,"
+        return jdbc.sql("SELECT date_trunc('hour', tc.started_at, 'UTC') AS hour, COUNT(*) AS checked,"
                         + " COUNT(*) FILTER (WHERE " + ToolFailure.SQL_PREDICATE + ") AS flagged"
                         + " FROM tool_call tc " + TOOL_SPAN_JOIN + TOOL_CALLS_WHERE
                         + " AND tc.started_at >= :from"
@@ -374,18 +376,17 @@ public class ClassifierChartRepository {
     // ---- range cards --------------------------------------------------------------------------------
 
     /**
-     * Turn duration on {@code callSite} per UTC day: the root span's own interval in ms, never {@code
-     * trace.latency_ms}, which a child that outlives the root stretches.
+     * Turn duration on {@code callSite} per UTC hour and bin of {@code grid}: the root span's own interval in ms,
+     * never {@code trace.latency_ms}, which a child that outlives the root stretches.
      */
-    public List<RangeRow> turnDurationDays(String projectId, String callSite, Instant from) {
-        return rangeDays(
-                "SELECT (tr.started_at AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS n,"
-                        + " percentile_cont(0.5) WITHIN GROUP (ORDER BY " + TURN_MS + ") AS p50,"
-                        + " percentile_cont(0.95) WITHIN GROUP (ORDER BY " + TURN_MS + ") AS p95"
-                        + " FROM trace tr " + ROOT_LATERAL + TURNS_WHERE + TURN_ENDED + " GROUP BY 1",
+    public List<RangeRow> turnDurationHours(String projectId, String callSite, Instant from, Grid grid) {
+        return histogram(
+                "SELECT " + HOUR_OF_TURN + " AS hour, " + TURN_MS + " AS v FROM trace tr " + ROOT_LATERAL + TURNS_WHERE
+                        + TURN_ENDED,
                 projectId,
                 callSite,
-                from);
+                from,
+                grid);
     }
 
     /** The 95th percentile of every turn on {@code callSite} since {@code from}, pooled: the headline. */
@@ -398,16 +399,17 @@ public class ClassifierChartRepository {
                 from);
     }
 
-    /** Cost per turn on {@code callSite} per UTC day, in USD, over turns whose every span was priced. */
-    public List<RangeRow> costDays(String projectId, String callSite, Instant from) {
-        return rangeDays(
-                "SELECT (tr.started_at AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS n,"
-                        + " percentile_cont(0.5) WITHIN GROUP (ORDER BY tr.total_cost::float8) AS p50,"
-                        + " percentile_cont(0.95) WITHIN GROUP (ORDER BY tr.total_cost::float8) AS p95"
-                        + " FROM trace tr " + TURNS_WHERE + PRICED + " GROUP BY 1",
+    /**
+     * Cost per turn on {@code callSite} per UTC hour and bin of {@code grid}, in USD, over turns whose every span was
+     * priced.
+     */
+    public List<RangeRow> costHours(String projectId, String callSite, Instant from, Grid grid) {
+        return histogram(
+                "SELECT " + HOUR_OF_TURN + " AS hour, tr.total_cost::float8 AS v FROM trace tr " + TURNS_WHERE + PRICED,
                 projectId,
                 callSite,
-                from);
+                from,
+                grid);
     }
 
     /** The pooled 95th percentile cost per turn on {@code callSite} since {@code from}. */
@@ -435,16 +437,15 @@ public class ClassifierChartRepository {
                 .single();
     }
 
-    private List<RangeRow> rangeDays(String sql, String projectId, String callSite, Instant from) {
-        return jdbc.sql(sql)
-                .param("pid", projectId)
-                .param("callSite", callSite)
-                .param("from", at(from))
-                .query((rs, n) -> new RangeRow(
-                        rs.getObject("day", LocalDate.class),
-                        rs.getLong("n"),
-                        nullableDouble(rs, "p50"),
-                        nullableDouble(rs, "p95")))
+    private List<RangeRow> histogram(String hourAndValue, String projectId, String callSite, Instant from, Grid grid) {
+        return grid(
+                        jdbc.sql("SELECT x.hour, " + bin("x.v") + " AS bin, COUNT(*) AS n FROM (" + hourAndValue
+                                        + ") x GROUP BY 1, 2")
+                                .param("pid", projectId)
+                                .param("callSite", callSite)
+                                .param("from", at(from)),
+                        grid)
+                .query((rs, n) -> rangeRow(rs))
                 .list();
     }
 
@@ -472,26 +473,28 @@ public class ClassifierChartRepository {
     }
 
     /**
-     * Tool span duration per UTC day, in ms, for the names of one tool key: the span's own latency, else its
-     * interval. {@code callSiteIds} limits it to traces of those call sites when the classifier is limited.
+     * Tool span duration per UTC hour and bin of {@code grid}, in ms, for the names of one tool key: the span's own
+     * latency, else its interval. {@code callSiteIds} limits it to traces of those call sites when the classifier is
+     * limited.
      */
-    public List<RangeRow> toolDurationDays(
-            String projectId, Collection<String> names, @Nullable Collection<String> callSiteIds, Instant from) {
+    public List<RangeRow> toolDurationHours(
+            String projectId,
+            Collection<String> names,
+            @Nullable Collection<String> callSiteIds,
+            Instant from,
+            Grid grid) {
         if (names.isEmpty()) return List.of();
-        return toolDuration(
-                        "SELECT (s.started_at AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS n,"
-                                + " percentile_cont(0.5) WITHIN GROUP (ORDER BY ms) AS p50,"
-                                + " percentile_cont(0.95) WITHIN GROUP (ORDER BY ms) AS p95",
-                        " GROUP BY 1",
-                        projectId,
-                        names,
-                        callSiteIds,
-                        from)
-                .query((rs, n) -> new RangeRow(
-                        rs.getObject("day", LocalDate.class),
-                        rs.getLong("n"),
-                        nullableDouble(rs, "p50"),
-                        nullableDouble(rs, "p95")))
+        return grid(
+                        toolDuration(
+                                "SELECT date_trunc('hour', s.started_at, 'UTC') AS hour, " + bin("s.ms")
+                                        + " AS bin, COUNT(*) AS n",
+                                " GROUP BY 1, 2",
+                                projectId,
+                                names,
+                                callSiteIds,
+                                from),
+                        grid)
+                .query((rs, n) -> rangeRow(rs))
                 .list();
     }
 
@@ -551,25 +554,27 @@ public class ClassifierChartRepository {
     // ---- count cards --------------------------------------------------------------------------------
 
     /**
-     * Detections of a per-span classifier on {@code callSite} per UTC day of the span. {@code events} and {@code
-     * sessions} are counted in the HIGH band when {@code highOnly}. With {@code facet} set (Secret Leak), they are
-     * the busiest value of that evidence member that day, because the bar counts each facet on its own.
+     * Detections of a per-span classifier on {@code callSite} per {@code grainSeconds} bucket of the span, cut from
+     * the epoch as the arming bar cuts its windows. {@code events} and {@code sessions} are counted in the HIGH band
+     * when {@code highOnly}. With {@code facet} set (Secret Leak), they are the busiest value of that evidence member
+     * in the bucket, because the bar counts each facet on its own. Distinct sessions do not add across buckets, so a
+     * caller reads each grain it needs.
      */
-    public List<CountRow> countDays(
+    public List<CountRow> countBuckets(
             String detectorKind,
             String projectId,
             String classifierId,
             String callSite,
             Instant from,
+            long grainSeconds,
             boolean highOnly,
             @Nullable String facet) {
         String table = Objects.requireNonNull(detections.tableFor(detectorKind));
         String band = highOnly ? "(d.confidence = 'high' OR d.confidence IS NULL)" : "TRUE";
         String facetColumn = facet == null ? "''" : "d.evidence ->> :facet";
-        JdbcClient.StatementSpec spec = jdbc.sql(
-                        """
+        JdbcClient.StatementSpec spec = jdbc.sql("""
                         WITH f AS (
-                          SELECT (d.subject_started_at AT TIME ZONE 'UTC')::date AS day, {facet} AS facet,
+                          SELECT {grain} AS bucket_start, {facet} AS facet,
                                  COUNT(*) FILTER (WHERE {band}) AS events,
                                  COUNT(DISTINCT d.subject_session_id) FILTER (WHERE {band}) AS sessions,
                                  COUNT(*) AS total
@@ -579,32 +584,35 @@ public class ClassifierChartRepository {
                            WHERE d.project_id = :pid AND d.classifier_id = :cid
                              AND d.subject_started_at >= :from AND s.call_site_id = :callSite
                            GROUP BY 1, 2)
-                        SELECT day, MAX(events) AS events, MAX(sessions) AS sessions, SUM(total) AS total
-                          FROM f GROUP BY day
-                        """.replace("{table}", table).replace("{band}", band).replace("{facet}", facetColumn))
+                        SELECT bucket_start, MAX(events) AS events, MAX(sessions) AS sessions, SUM(total) AS total
+                          FROM f GROUP BY bucket_start
+                        """.replace("{table}", table)
+                        .replace("{band}", band)
+                        .replace("{facet}", facetColumn)
+                        .replace("{grain}", GRAIN))
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("callSite", callSite)
-                .param("from", at(from));
+                .param("from", at(from))
+                .param("grain", grainSeconds);
         if (facet != null) spec = spec.param("facet", facet);
-        return spec.query((rs, n) -> new CountRow(
-                        rs.getObject("day", LocalDate.class),
-                        rs.getLong("events"),
-                        rs.getLong("sessions"),
-                        rs.getLong("total")))
-                .list();
+        return spec.query((rs, n) -> countRow(rs, rs.getLong("total"))).list();
     }
 
     /**
-     * A whole-project classifier's detections per UTC day, every call site and none: what its bar counts. Read
-     * beside {@link #countDays}, whose {@code total} stays the call site's own.
+     * A whole-project classifier's detections per {@code grainSeconds} bucket, every call site and none: what its
+     * bar counts. Read beside {@link #countBuckets}, whose {@code total} stays the call site's own.
      */
-    public Map<LocalDate, CountRow> projectCountDays(
-            String detectorKind, String projectId, String classifierId, Instant from, boolean highOnly) {
+    public List<CountRow> projectCountBuckets(
+            String detectorKind,
+            String projectId,
+            String classifierId,
+            Instant from,
+            long grainSeconds,
+            boolean highOnly) {
         String table = Objects.requireNonNull(detections.tableFor(detectorKind));
         String band = highOnly ? " AND (d.confidence = 'high' OR d.confidence IS NULL)" : "";
-        Map<LocalDate, CountRow> out = new HashMap<>();
-        jdbc.sql("SELECT (d.subject_started_at AT TIME ZONE 'UTC')::date AS day, COUNT(*) AS events,"
+        return jdbc.sql("SELECT " + GRAIN + " AS bucket_start, COUNT(*) AS events,"
                         + " COUNT(DISTINCT d.subject_session_id) AS sessions"
                         + " FROM " + table + " d"
                         + " WHERE d.project_id = :pid AND d.classifier_id = :cid AND d.subject_started_at >= :from"
@@ -612,11 +620,9 @@ public class ClassifierChartRepository {
                 .param("pid", projectId)
                 .param("cid", classifierId)
                 .param("from", at(from))
-                .query((rs, n) -> new CountRow(
-                        rs.getObject("day", LocalDate.class), rs.getLong("events"), rs.getLong("sessions"), 0))
-                .list()
-                .forEach(r -> out.put(r.day(), r));
-        return out;
+                .param("grain", grainSeconds)
+                .query((rs, n) -> countRow(rs, 0))
+                .list();
     }
 
     /** The last UTC day before {@code before} with a detection on {@code callSite}. */
@@ -776,7 +782,34 @@ public class ClassifierChartRepository {
     // ---- helpers ------------------------------------------------------------------------------------
 
     private static RateRow rateRow(ResultSet rs) throws SQLException {
-        return new RateRow(rs.getObject("day", LocalDate.class), rs.getLong("checked"), rs.getLong("flagged"));
+        return new RateRow(hour(rs), rs.getLong("checked"), rs.getLong("flagged"));
+    }
+
+    private static RangeRow rangeRow(ResultSet rs) throws SQLException {
+        return new RangeRow(hour(rs), rs.getInt("bin"), rs.getLong("n"));
+    }
+
+    private static CountRow countRow(ResultSet rs, long total) throws SQLException {
+        return new CountRow(
+                Instant.ofEpochSecond(rs.getLong("bucket_start")), rs.getLong("events"), rs.getLong("sessions"), total);
+    }
+
+    private static Instant hour(ResultSet rs) throws SQLException {
+        return rs.getObject("hour", OffsetDateTime.class).toInstant();
+    }
+
+    /**
+     * The 0-based bin of {@code value} on the grid the {@code :logLo}, {@code :logHi} and {@code :bins} parameters
+     * lay out. A value outside the grid is clamped into the first or last bin, and one at or below zero, which has no
+     * log, is the first.
+     */
+    private static String bin(String value) {
+        return "CASE WHEN " + value + " <= 0 THEN 0 ELSE GREATEST(0, LEAST(CAST(:bins AS int) - 1, width_bucket(ln("
+                + value + "), CAST(:logLo AS float8), CAST(:logHi AS float8), CAST(:bins AS int)) - 1)) END";
+    }
+
+    private static JdbcClient.StatementSpec grid(JdbcClient.StatementSpec spec, Grid grid) {
+        return spec.param("logLo", grid.logLo()).param("logHi", grid.logHi()).param("bins", grid.bins());
     }
 
     private static @Nullable Double nullableDouble(ResultSet rs, String column) throws SQLException {

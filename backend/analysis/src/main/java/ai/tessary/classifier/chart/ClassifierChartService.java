@@ -13,7 +13,7 @@ import ai.tessary.classifier.chart.ClassifierChartDtos.CasesView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartBaseline;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartCard;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartChip;
-import ai.tessary.classifier.chart.ClassifierChartDtos.ChartDay;
+import ai.tessary.classifier.chart.ClassifierChartDtos.ChartPoint;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartScopesView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartsView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ClassifierMenuItem;
@@ -41,6 +41,7 @@ import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricBaselineRow.BucketKind;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricDriftConfig;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorBuckets;
@@ -66,7 +67,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -82,7 +82,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * The Classifiers page charts: which classifiers have a card for a call site or a tool, each card's daily series,
+ * The Classifiers page charts: which classifiers have a card for a call site or a tool, each card's points,
  * headline, baseline and case strip, and the selectors and menu that choose between them. Reads only; every series
  * comes from tables the detectors already keep.
  */
@@ -128,7 +128,7 @@ public class ClassifierChartService {
 
     /**
      * How far before the range a session or trace is grouped from, so one that began before the range keeps its
-     * own first day and every range reads the same trials.
+     * own first hour and every range reads the same trials.
      */
     private static final Duration TRIAL_LOOKBACK = Duration.ofDays(28);
 
@@ -222,8 +222,8 @@ public class ClassifierChartService {
 
     // ---- the range ----------------------------------------------------------------------------------
 
-    /** The UTC days a request covers. */
-    private record Range(int days, LocalDate today, LocalDate from) {
+    /** The UTC days a request covers, and the instant it is read at. */
+    private record Range(int days, LocalDate today, LocalDate from, Instant now) {
 
         Instant fromAt() {
             return from.atStartOfDay(ZoneOffset.UTC).toInstant();
@@ -248,8 +248,9 @@ public class ClassifierChartService {
         if (!ChartSeries.RANGES.contains(days)) {
             throw new TessaryException(ClassifierError.INVALID_CHART_DAYS, days);
         }
-        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
-        return new Range(days, today, ChartSeries.fromDay(today, days));
+        Instant now = clock.instant();
+        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        return new Range(days, today, ChartSeries.fromDay(today, days), now);
     }
 
     // ---- what one request knows about the project's classifiers -------------------------------------
@@ -524,7 +525,7 @@ public class ClassifierChartService {
         }
         Built built = build.get();
         ChartCard card = built.card();
-        if (card.learning() == null && !ChartSeries.hasData(card.kind(), card.days())) {
+        if (card.learning() == null && !ChartSeries.hasData(card.kind(), card.points())) {
             LocalDate since = built.lastDay().apply(from).orElse(null);
             chips.add(new ChartChip(
                     row.id(), row.classifierKey(), row.name(), "quiet", null, since == null ? null : since.toString()));
@@ -558,8 +559,8 @@ public class ClassifierChartService {
                 : GroundednessConfig.of(mapper, row.configJson()).scorerVersion();
         Range r = p.range;
         List<RateRow> rows = frustration
-                ? charts.frustrationDays(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt())
-                : charts.groundednessDays(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt());
+                ? charts.frustrationHours(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt())
+                : charts.groundednessHours(p.id, row.id(), scorerVersion, cs, r.groupFrom(), r.fromAt());
         ChartBaseline baseline =
                 ChartSeries.rateBaseline(p.states(row.detector()).get(cs), null, ChartSeries.minBaseline(row, mapper));
         LearningView learning = baseline != null
@@ -590,7 +591,7 @@ public class ClassifierChartService {
                 .map(ClassifierJobRow::cursorAt)
                 .orElse(null);
         List<RateRow> rows =
-                cursor == null ? List.of() : charts.malformedDays(p.id, row.id(), cs, p.range.fromAt(), cursor);
+                cursor == null ? List.of() : charts.malformedHours(p.id, row.id(), cs, p.range.fromAt(), cursor);
         ChartBaseline baseline =
                 ChartSeries.rateBaseline(p.states(row.detector()).get(cs), null, ChartSeries.minBaseline(row, mapper));
         LearningView learning = baseline != null
@@ -612,7 +613,7 @@ public class ClassifierChartService {
     private Built toolErrorCard(Reads p, ClassifierRow row, String key) {
         Instant started = Instant.now();
         List<String> names = toolErrors.namesByToolKey(p.id, p.range.fromAt()).getOrDefault(key, List.of());
-        List<RateRow> rows = charts.toolErrorDays(p.id, names, p.range.fromAt());
+        List<RateRow> rows = charts.toolErrorHours(p.id, names, p.range.fromAt());
         ChartBaseline baseline = ChartSeries.rateBaseline(
                 p.states(row.detector()).get(key), p.references().get(key), ChartSeries.minBaseline(row, mapper));
         LearningView learning = baseline != null
@@ -653,9 +654,6 @@ public class ClassifierChartService {
             @Nullable LearningView learning,
             CaseScope scope,
             Reads p) {
-        Map<LocalDate, ChartDay> byDay = new HashMap<>();
-        for (RateRow r : rows) byDay.put(r.day(), ChartDay.rate(r.day().toString(), r.checked(), r.flagged()));
-        List<ChartDay> days = ChartSeries.dense(p.range.from(), p.range.today(), byDay, ChartSeries::emptyRate);
         return new ChartCard(
                 row.id(),
                 row.classifierKey(),
@@ -664,10 +662,10 @@ public class ClassifierChartService {
                 null,
                 "fraction",
                 learning,
-                ChartSeries.rateHeadline(days, baseline),
+                ChartSeries.rateHeadline(rows, p.range.headFrom(), baseline),
                 baseline,
                 null,
-                days,
+                ChartSeries.ratePoints(p.range.fromAt(), p.range.now(), rows),
                 cases(p, scope));
     }
 
@@ -682,15 +680,17 @@ public class ClassifierChartService {
         String measure = callSiteMeasure(row);
         boolean cost = Measure.COST.equals(measure);
         Range r = p.range;
-        List<RangeRow> rows =
-                cost ? charts.costDays(p.id, cs, r.fromAt()) : charts.turnDurationDays(p.id, cs, r.fromAt());
+        Grid grid = ChartSeries.grid(MetricDriftConfig.of(mapper, row.configJson()), measure);
+        List<RangeRow> rows = cost
+                ? charts.costHours(p.id, cs, r.fromAt(), grid)
+                : charts.turnDurationHours(p.id, cs, r.fromAt(), grid);
         Double pooled = cost ? charts.costP95(p.id, cs, r.headFrom()) : charts.turnDurationP95(p.id, cs, r.headFrom());
         DriftReference ref = driftReference(p, row, measure, BucketKind.CALL_SITE, cs);
         ChartCard card = rangeCard(
                 row,
                 measure,
                 cost ? "usd" : "ms",
-                rows,
+                ChartSeries.rangePoints(r.fromAt(), r.now(), grid, rows),
                 pooled,
                 ref,
                 new DriftBucket(measure, BucketKind.CALL_SITE, cs),
@@ -704,14 +704,15 @@ public class ClassifierChartService {
         Range r = p.range;
         List<String> names = toolSpanNames(p, key, r.fromAt());
         List<String> scope = row.callSiteIds();
-        List<RangeRow> rows = charts.toolDurationDays(p.id, names, scope, r.fromAt());
+        Grid grid = ChartSeries.grid(MetricDriftConfig.of(mapper, row.configJson()), Measure.TOOL_DURATION);
+        List<RangeRow> rows = charts.toolDurationHours(p.id, names, scope, r.fromAt(), grid);
         Double pooled = charts.toolDurationP95(p.id, names, scope, r.headFrom());
         DriftReference ref = driftReference(p, row, Measure.TOOL_DURATION, BucketKind.TOOL, key);
         ChartCard card = rangeCard(
                 row,
                 Measure.TOOL_DURATION,
                 "ms",
-                rows,
+                ChartSeries.rangePoints(r.fromAt(), r.now(), grid, rows),
                 pooled,
                 ref,
                 new DriftBucket(Measure.TOOL_DURATION, BucketKind.TOOL, key),
@@ -766,14 +767,11 @@ public class ClassifierChartService {
             ClassifierRow row,
             String measure,
             String unit,
-            List<RangeRow> rows,
+            List<ChartPoint> points,
             @Nullable Double pooledP95,
             DriftReference ref,
             CaseScope scope,
             Reads p) {
-        Map<LocalDate, ChartDay> byDay = new HashMap<>();
-        for (RangeRow r : rows) byDay.put(r.day(), ChartDay.range(r.day().toString(), r.n(), r.p50(), r.p95()));
-        List<ChartDay> days = ChartSeries.dense(p.range.from(), p.range.today(), byDay, ChartSeries::emptyRange);
         return new ChartCard(
                 row.id(),
                 row.classifierKey(),
@@ -785,16 +783,17 @@ public class ClassifierChartService {
                 ChartSeries.rangeHeadline(pooledP95, ref.baseline()),
                 ref.baseline(),
                 null,
-                days,
+                points,
                 cases(p, scope));
     }
 
     // ---- count cards --------------------------------------------------------------------------------
 
     /**
-     * Secret Leak and user classifiers. Each day's {@code count} is what the arming bar counts: the busiest facet on
-     * this call site for a faceted bar, the whole project for a whole-project one. {@code total} stays this call
-     * site's detections.
+     * Secret Leak and user classifiers, one point per fixed bucket. Each point's {@code count} is what the arming bar
+     * counts: the busiest facet on this call site for a faceted bar, the whole project for a whole-project one.
+     * {@code total} stays this call site's detections. {@code reached} reads the bar's own windows, counted at their
+     * own width, since distinct sessions do not add up across buckets.
      */
     private Built countCard(Reads p, ClassifierRow row, String cs) {
         Instant started = Instant.now();
@@ -802,28 +801,25 @@ public class ClassifierChartService {
         boolean highOnly = arming != null && arming.highOnly(row);
         String facet = ClassifierArming.facetKey(row.detector());
         Instant from = p.range.fromAt();
-        List<CountRow> rows = charts.countDays(row.detector(), p.id, row.id(), cs, from, highOnly, facet);
-        Map<LocalDate, CountRow> mine = new HashMap<>();
-        for (CountRow r : rows) mine.put(r.day(), r);
-        Map<LocalDate, CountRow> counted = arming == null || facet != null
-                ? mine
-                : charts.projectCountDays(row.detector(), p.id, row.id(), from, highOnly);
-        Set<LocalDate> dates = new LinkedHashSet<>(mine.keySet());
-        dates.addAll(counted.keySet());
-        Map<LocalDate, ChartDay> byDay = new HashMap<>();
-        for (LocalDate d : dates) {
-            CountRow own = mine.get(d);
-            CountRow bar = counted.get(d);
-            byDay.put(
-                    d,
-                    ChartSeries.countDay(
-                            d.toString(),
-                            bar == null ? 0 : bar.events(),
-                            bar == null ? 0 : bar.sessions(),
-                            own == null ? 0 : own.total(),
-                            arming));
+        Duration bucket = ChartSeries.countWidth(p.range.days());
+        long width = bucket.toSeconds();
+        List<CountRow> own = charts.countBuckets(row.detector(), p.id, row.id(), cs, from, width, highOnly, facet);
+        List<CountRow> bar = null;
+        List<CountRow> windows = List.of();
+        if (arming != null) {
+            bar = facet != null
+                    ? own
+                    : charts.projectCountBuckets(row.detector(), p.id, row.id(), from, width, highOnly);
+            long win = arming.windowSeconds();
+            Instant windowFrom = ChartSeries.windowStart(from, arming);
+            if (win == width && windowFrom.equals(from)) {
+                windows = bar;
+            } else if (facet != null) {
+                windows = charts.countBuckets(row.detector(), p.id, row.id(), cs, windowFrom, win, highOnly, facet);
+            } else {
+                windows = charts.projectCountBuckets(row.detector(), p.id, row.id(), windowFrom, win, highOnly);
+            }
         }
-        List<ChartDay> days = ChartSeries.dense(p.range.from(), p.range.today(), byDay, ChartSeries::emptyCount);
         ChartCard card = new ChartCard(
                 row.id(),
                 row.classifierKey(),
@@ -832,12 +828,12 @@ public class ClassifierChartService {
                 null,
                 "count",
                 null,
-                ChartSeries.countHeadline(days),
+                ChartSeries.countHeadline(own, p.range.headFrom()),
                 null,
                 ChartSeries.armingView(arming, row),
-                days,
+                ChartSeries.countPoints(from, p.range.now(), bucket, own, bar, windows, arming),
                 cases(p, new ClassifierOnCallSite(row.classifierKey(), cs)));
-        logRead(p, row, "call_site", rows.size(), started);
+        logRead(p, row, "call_site", own.size(), started);
         return new Built(card, before -> charts.countLastDay(row.detector(), p.id, row.id(), cs, before));
     }
 
@@ -854,9 +850,7 @@ public class ClassifierChartService {
 
     private static void logRead(Reads p, ClassifierRow row, String scope, int rows, Instant started) {
         StructuredLog.info(log, Markers.OPS, "classifier.chart.read")
-                .message(
-                        "read %d day row(s) of %s for a %d-day %s chart",
-                        rows, row.classifierKey(), p.range.days(), scope)
+                .message("read %d row(s) of %s for a %d-day %s chart", rows, row.classifierKey(), p.range.days(), scope)
                 .field("project", p.id)
                 .field("card", row.classifierKey())
                 .field("scope", scope)

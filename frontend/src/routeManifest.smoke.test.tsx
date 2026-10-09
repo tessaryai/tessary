@@ -28,6 +28,9 @@ import { ApiError } from "./api/types";
 import type {
   BehaviorFindingDetail,
   CaseDetail,
+  ChartCard,
+  ChartPoint,
+  ClassifierCharts,
   EvidenceSpanPage,
   MalformedOutputDetail,
   MalformedOutputPage,
@@ -611,16 +614,38 @@ const CONFIGURE_PAGE_READS: Record<string, () => Promise<unknown>> = {
   listClassifierCallSites: EMPTY,
 };
 
-/** One day of a chart, with only the fields its kind uses set. */
-function chartDay(date: string, d: Partial<components["schemas"]["ChartDay"]>): components["schemas"]["ChartDay"] {
-  return { date, checked: null, flagged: null, n: null, p50: null, p95: null, count: null, total: null, ...d };
+/** One point of a chart, with only the fields its kind uses set. */
+function chartPoint(start: number, hours: number, d: Partial<ChartPoint>): ChartPoint {
+  return {
+    start_at: new Date(start).toISOString(),
+    end_at: new Date(start + hours * 3_600_000).toISOString(),
+    open: false,
+    checked: null,
+    flagged: null,
+    n: null,
+    p50: null,
+    p95: null,
+    count: null,
+    total: null,
+    reached: null,
+    ...d,
+  };
 }
 
-const CHART_DATES = Array.from({ length: 28 }, (_, i) =>
-  new Date(Date.parse("2026-09-11T00:00:00Z") + i * 86_400_000).toISOString().slice(0, 10),
-);
+const CHART_FROM = Date.parse("2026-09-11T00:00:00Z");
+const CHART_DAYS = 28;
+/** One point a day, the last one still filling. */
+const dailyPoints = (d: (i: number) => Partial<ChartPoint>) =>
+  Array.from({ length: CHART_DAYS }, (_, i) =>
+    chartPoint(CHART_FROM + i * 86_400_000, 24, { open: i === CHART_DAYS - 1, ...d(i) }),
+  );
+/** Every 6-hour bucket of the range, as a 28-day count card carries them. */
+const sixHourPoints = (d: (i: number) => Partial<ChartPoint>) =>
+  Array.from({ length: CHART_DAYS * 4 }, (_, i) =>
+    chartPoint(CHART_FROM + i * 6 * 3_600_000, 6, { open: i === CHART_DAYS * 4 - 1, ...d(i) }),
+  );
 
-const chartCard = (c: Partial<components["schemas"]["ChartCard"]>): components["schemas"]["ChartCard"] => ({
+const chartCard = (c: Partial<ChartCard>): ChartCard => ({
   classifier_id: "c",
   classifier_key: "frustration",
   name: "Frustration",
@@ -631,7 +656,7 @@ const chartCard = (c: Partial<components["schemas"]["ChartCard"]>): components["
   headline: { value: null, delta: null },
   baseline: null,
   arming: null,
-  days: [],
+  points: [],
   cases: { open_cases: 0, spans: [] },
   ...c,
 });
@@ -655,12 +680,12 @@ const CHART_SCOPES: components["schemas"]["ChartScopesView"] = {
   ],
 };
 
-const chartsView = (scope: string, scopeId: string, cards: components["schemas"]["ChartCard"][]): components["schemas"]["ChartsView"] => ({
+const chartsView = (scope: "call_site" | "tool", scopeId: string, cards: ChartCard[]): ClassifierCharts => ({
   scope,
   scope_id: scopeId,
-  days: 28,
-  from_day: CHART_DATES[0],
-  to_day: CHART_DATES[27],
+  days: CHART_DAYS,
+  from_day: "2026-09-11",
+  to_day: "2026-10-08",
   cards,
   chips: [{ classifier_id: "c-malformed", classifier_key: "malformed_output", name: "Malformed Output", state: "waiting", reason: "no_schema", since: null }],
 });
@@ -670,7 +695,7 @@ const CALL_SITE_CHARTS = chartsView("call_site", "extract.order", [
     classifier_id: "c-frustration",
     headline: { value: 0.072, delta: 0.03 },
     baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
-    days: CHART_DATES.map((date, i) => chartDay(date, { checked: i === 3 ? 0 : 100, flagged: i % 9 })),
+    points: dailyPoints((i) => ({ checked: i === 3 ? 0 : 100, flagged: i % 9 })),
     cases: {
       open_cases: 1,
       spans: [
@@ -697,7 +722,7 @@ const CALL_SITE_CHARTS = chartsView("call_site", "extract.order", [
     unit: "ms",
     learning: { learned: 34, needed: 100 },
     headline: { value: 16_500, delta: null },
-    days: CHART_DATES.map((date, i) => chartDay(date, i < 20 ? { n: 0 } : { n: 40, p50: 4_000 + i * 10, p95: 11_000 + i * 50 })),
+    points: dailyPoints((i) => (i < 20 ? { n: 0 } : { n: 40, p50: 4_000 + i * 10, p95: 11_000 + i * 50 })),
   }),
   chartCard({
     classifier_id: "c-secret",
@@ -707,12 +732,12 @@ const CALL_SITE_CHARTS = chartsView("call_site", "extract.order", [
     unit: "count",
     headline: { value: 3, delta: null },
     arming: { threshold: 1, window_seconds: 86_400, basis: "event_count", confidence: "high" },
-    days: CHART_DATES.map((date, i) => chartDay(date, { count: i === 20 ? 2 : 0, total: i === 20 ? 3 : 0 })),
+    points: sixHourPoints((i) => ({ count: i === 80 ? 2 : 0, total: i === 80 ? 3 : 0, reached: i >= 80 && i < 84 })),
   }),
 ]);
 
 const TOOL_CHARTS = chartsView("tool", "tool:search_orders", [
-  chartCard({ classifier_id: "c-tool", classifier_key: "tool_error", name: "Tool Errors", days: CHART_DATES.map((date) => chartDay(date, { checked: 30, flagged: 1 })) }),
+  chartCard({ classifier_id: "c-tool", classifier_key: "tool_error", name: "Tool Errors", points: dailyPoints(() => ({ checked: 30, flagged: 1 })) }),
 ]);
 
 /** One detail route on a real payload: its manifest entry, the reads it answers, and the heading it must draw. */

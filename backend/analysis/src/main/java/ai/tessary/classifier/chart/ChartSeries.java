@@ -5,11 +5,16 @@ import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ArmingView;
 import ai.tessary.classifier.chart.ClassifierChartDtos.ChartBaseline;
-import ai.tessary.classifier.chart.ClassifierChartDtos.ChartDay;
+import ai.tessary.classifier.chart.ClassifierChartDtos.ChartPoint;
 import ai.tessary.classifier.chart.ClassifierChartDtos.HeadlineView;
+import ai.tessary.classifier.chart.ClassifierChartRepository.CountRow;
+import ai.tessary.classifier.chart.ClassifierChartRepository.RangeRow;
+import ai.tessary.classifier.chart.ClassifierChartRepository.RateRow;
 import ai.tessary.classifier.detector.groundedness.GroundednessConfig;
 import ai.tessary.classifier.frustration.FrustrationConfig;
 import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
+import ai.tessary.classifier.metric.MetricDriftConfig;
+import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorConfig;
 import ai.tessary.classifier.toolerror.ToolErrorDetector;
@@ -17,64 +22,246 @@ import ai.tessary.classifier.toolerror.ToolErrorRate;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository.AcceptedReference;
 import ai.tessary.classifier.worker.ClassifierArming;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.function.BinaryOperator;
+import java.util.function.ToLongFunction;
 import org.jspecify.annotations.Nullable;
 
-/** The pure rules behind a chart card: the dense day axis, the headline, the baseline and whether a classifier is on. */
+/** The pure rules behind a chart card: its points, the headline, the baseline and whether a classifier is on. */
 final class ChartSeries {
 
     private ChartSeries() {}
 
     /** The ranges the page offers. */
-    static final Set<Integer> RANGES = Set.of(7, 28, 90);
+    static final Set<Integer> RANGES = Set.of(7, 28);
 
     /** The headline always covers the last seven UTC days, whatever the range. */
     static final int HEADLINE_DAYS = 7;
+
+    /**
+     * A rate or range point closes once it holds this many trials or samples, or before it would span more than
+     * {@link #POINT_MAX}. Both mirror the metric-drift window (500 samples or one day), so a busy call site draws
+     * several points a day and a quiet one about one.
+     */
+    static final long POINT_TARGET = 500;
+
+    static final Duration POINT_MAX = Duration.ofHours(24);
+
+    private static final Duration HOUR = Duration.ofHours(1);
 
     /** The first day of a {@code days}-long range ending {@code today}. */
     static LocalDate fromDay(LocalDate today, int days) {
         return today.minusDays(days - 1L);
     }
 
-    /** One entry per day from {@code from} to {@code today}, oldest first; a day with no row gets {@code empty}. */
-    static List<ChartDay> dense(
-            LocalDate from, LocalDate today, Map<LocalDate, ChartDay> rows, Function<String, ChartDay> empty) {
-        List<ChartDay> out = new ArrayList<>();
-        for (LocalDate d = from; !d.isAfter(today); d = d.plusDays(1)) {
-            ChartDay row = rows.get(d);
-            out.add(row != null ? row : empty.apply(d.toString()));
+    /** A count card's fixed bucket: an hour on 7 days, six hours (from 00, 06, 12 and 18 UTC) on 28. */
+    static Duration countWidth(int days) {
+        return days == 7 ? HOUR : Duration.ofHours(6);
+    }
+
+    // ---- the merge rule -----------------------------------------------------------------------------
+
+    /** One merged stretch of hours, {@code [start, end)}, and whether it is still filling. */
+    record Window<T>(Instant start, Instant end, T tally, boolean open) {}
+
+    /**
+     * Merges the hours from {@code from} to the hour holding {@code now} into points. An hour with no items neither
+     * starts a point nor moves its end. An hour that would stretch the open point past {@link #POINT_MAX} closes it
+     * first; a point that reaches {@link #POINT_TARGET} items closes after the hour that took it there. A point is
+     * open while it can still change: it holds the current hour, or it is the last one and the current hour could
+     * still join it.
+     */
+    static <T> List<Window<T>> merge(
+            Instant from, Instant now, Map<Instant, T> hours, ToLongFunction<T> items, BinaryOperator<T> plus) {
+        Instant last = now.truncatedTo(ChronoUnit.HOURS);
+        List<Window<T>> out = new ArrayList<>();
+        Instant start = null;
+        Instant end = null;
+        T tally = null;
+        for (Instant hour = from; !hour.isAfter(last); hour = hour.plus(HOUR)) {
+            T t = hours.get(hour);
+            if (t == null || items.applyAsLong(t) == 0) continue;
+            Instant hourEnd = hour.plus(HOUR);
+            if (start != null && Duration.between(start, hourEnd).compareTo(POINT_MAX) > 0) {
+                out.add(new Window<>(start, Objects.requireNonNull(end), Objects.requireNonNull(tally), false));
+                start = null;
+            }
+            if (start == null) {
+                start = hour;
+                tally = t;
+            } else {
+                tally = plus.apply(Objects.requireNonNull(tally), t);
+            }
+            end = hourEnd;
+            if (items.applyAsLong(tally) >= POINT_TARGET) {
+                out.add(new Window<>(start, end, tally, end.isAfter(last)));
+                start = null;
+            }
+        }
+        if (start != null) {
+            boolean open = Duration.between(start, last.plus(HOUR)).compareTo(POINT_MAX) <= 0;
+            out.add(new Window<>(start, Objects.requireNonNull(end), Objects.requireNonNull(tally), open));
         }
         return out;
     }
 
-    static ChartDay emptyRate(String date) {
-        return ChartDay.rate(date, 0, 0);
+    private record Trials(long checked, long flagged) {
+
+        Trials plus(Trials o) {
+            return new Trials(checked + o.checked, flagged + o.flagged);
+        }
     }
 
-    static ChartDay emptyRange(String date) {
-        return ChartDay.range(date, 0, null, null);
+    /** A rate card's points from its hourly rows. */
+    static List<ChartPoint> ratePoints(Instant from, Instant now, List<RateRow> rows) {
+        Map<Instant, Trials> hours = new HashMap<>();
+        for (RateRow r : rows) hours.merge(r.hour(), new Trials(r.checked(), r.flagged()), Trials::plus);
+        return merge(from, now, hours, Trials::checked, Trials::plus).stream()
+                .map(w -> ChartPoint.rate(
+                        w.start(),
+                        w.end(),
+                        w.open(),
+                        w.tally().checked(),
+                        w.tally().flagged()))
+                .toList();
     }
 
-    static ChartDay emptyCount(String date) {
-        return ChartDay.count(date, 0, 0);
+    /** A range card's points from its hourly histogram rows: the samples per bin of {@code grid}. */
+    static List<ChartPoint> rangePoints(Instant from, Instant now, Grid grid, List<RangeRow> rows) {
+        Map<Instant, SortedMap<Integer, Long>> hours = new HashMap<>();
+        for (RangeRow r : rows) {
+            hours.computeIfAbsent(r.hour(), h -> new TreeMap<>()).merge(r.bin(), r.n(), Long::sum);
+        }
+        return merge(from, now, hours, ChartSeries::samples, ChartSeries::plusBins).stream()
+                .map(w -> ChartPoint.range(
+                        w.start(),
+                        w.end(),
+                        w.open(),
+                        samples(w.tally()),
+                        quantile(grid, w.tally(), 0.5),
+                        quantile(grid, w.tally(), 0.95)))
+                .toList();
     }
 
-    private static List<ChartDay> lastWeek(List<ChartDay> days) {
-        return days.subList(Math.max(0, days.size() - HEADLINE_DAYS), days.size());
+    private static long samples(SortedMap<Integer, Long> bins) {
+        long n = 0;
+        for (long c : bins.values()) n += c;
+        return n;
     }
 
-    /** Flagged over checked, pooled over the last seven days; null when nothing was checked. */
-    static HeadlineView rateHeadline(List<ChartDay> days, @Nullable ChartBaseline baseline) {
+    private static SortedMap<Integer, Long> plusBins(SortedMap<Integer, Long> a, SortedMap<Integer, Long> b) {
+        SortedMap<Integer, Long> out = new TreeMap<>(a);
+        b.forEach((bin, n) -> out.merge(bin, n, Long::sum));
+        return out;
+    }
+
+    /**
+     * The {@code q} quantile of samples counted per bin of {@code grid}, interpolated inside its bin in log space as
+     * {@code MetricHistogram#quantile} does; null with no sample.
+     */
+    static @Nullable Double quantile(Grid grid, SortedMap<Integer, Long> bins, double q) {
+        long n = samples(bins);
+        if (n == 0) return null;
+        double rank = q * n;
+        long below = 0;
+        for (Map.Entry<Integer, Long> e : bins.entrySet()) {
+            long c = e.getValue();
+            if (c == 0) continue;
+            if (rank <= below + c) {
+                double within = (rank - below) / c;
+                return Math.exp(grid.logLo() + (e.getKey() + within) * grid.slotWidthLog());
+            }
+            below += c;
+        }
+        return Math.exp(grid.logHi());
+    }
+
+    // ---- count points -------------------------------------------------------------------------------
+
+    /**
+     * One count point per {@code width} bucket from {@code from} to the bucket holding {@code now}, empty ones
+     * included. Without a bar every detection counts and nothing is reached. With one, {@code count} is the bar's
+     * count in the bucket, and {@code reached} says whether a window of the bar overlapping it held the threshold.
+     *
+     * @param own the call site's detections per bucket: the total
+     * @param bar what the bar counts per bucket: the busiest facet, or the whole project; ignored without a bar
+     * @param windows what the bar counts per window of the bar
+     */
+    static List<ChartPoint> countPoints(
+            Instant from,
+            Instant now,
+            Duration width,
+            List<CountRow> own,
+            @Nullable List<CountRow> bar,
+            List<CountRow> windows,
+            ClassifierArming.@Nullable Config arming) {
+        Map<Instant, Long> totals = new HashMap<>();
+        for (CountRow r : own) totals.merge(r.start(), r.total(), Long::sum);
+        Map<Instant, Long> counted = arming == null || bar == null ? Map.of() : barCounts(bar, arming);
+        Map<Instant, Long> perWindow = arming == null ? Map.of() : barCounts(windows, arming);
+        List<ChartPoint> out = new ArrayList<>();
+        for (Instant start = from; !start.isAfter(now); start = start.plus(width)) {
+            Instant end = start.plus(width);
+            boolean open = now.isBefore(end);
+            long total = totals.getOrDefault(start, 0L);
+            if (arming == null) {
+                out.add(ChartPoint.count(start, end, open, total, total, null));
+            } else {
+                out.add(ChartPoint.count(
+                        start,
+                        end,
+                        open,
+                        counted.getOrDefault(start, 0L),
+                        total,
+                        reached(start, end, arming, perWindow)));
+            }
+        }
+        return out;
+    }
+
+    private static Map<Instant, Long> barCounts(List<CountRow> rows, ClassifierArming.Config arming) {
+        Map<Instant, Long> out = new HashMap<>();
+        for (CountRow r : rows) out.merge(r.start(), arming.bySession() ? r.sessions() : r.events(), Long::sum);
+        return out;
+    }
+
+    /** Whether a window of the bar that overlaps {@code [start, end)} reached the threshold. */
+    private static boolean reached(
+            Instant start, Instant end, ClassifierArming.Config arming, Map<Instant, Long> perWindow) {
+        long win = arming.windowSeconds();
+        for (long w = Math.floorDiv(start.getEpochSecond(), win) * win; w < end.getEpochSecond(); w += win) {
+            if (perWindow.getOrDefault(Instant.ofEpochSecond(w), 0L) >= arming.threshold()) return true;
+        }
+        return false;
+    }
+
+    /** Where a count read must start so the bar's first window is whole: the start of the window holding {@code from}. */
+    static Instant windowStart(Instant from, ClassifierArming.Config arming) {
+        long win = arming.windowSeconds();
+        return Instant.ofEpochSecond(Math.floorDiv(from.getEpochSecond(), win) * win);
+    }
+
+    // ---- headlines ----------------------------------------------------------------------------------
+
+    /** Flagged over checked, pooled over the hours since {@code headFrom}; null when nothing was checked. */
+    static HeadlineView rateHeadline(List<RateRow> rows, Instant headFrom, @Nullable ChartBaseline baseline) {
         long checked = 0;
         long flagged = 0;
-        for (ChartDay d : lastWeek(days)) {
-            checked += nz(d.checked());
-            flagged += nz(d.flagged());
+        for (RateRow r : rows) {
+            if (r.hour().isBefore(headFrom)) continue;
+            checked += r.checked();
+            flagged += r.flagged();
         }
         if (checked == 0) return new HeadlineView(null, null);
         double value = (double) flagged / checked;
@@ -90,28 +277,42 @@ final class ChartSeries {
     }
 
     /**
-     * Every detection on the scope over the last seven days: the sum of {@code total}, not of what the bar counts. The
+     * Every detection on the scope since {@code headFrom}: the sum of {@code total}, not of what the bar counts. The
      * bar can count the whole project (a user classifier) or one pattern in its band (Secret Leak). A count has no
      * baseline, so no delta.
      */
-    static HeadlineView countHeadline(List<ChartDay> days) {
+    static HeadlineView countHeadline(List<CountRow> own, Instant headFrom) {
         long count = 0;
-        for (ChartDay d : lastWeek(days)) count += nz(d.total());
+        for (CountRow r : own) {
+            if (!r.start().isBefore(headFrom)) count += r.total();
+        }
         return new HeadlineView((double) count, null);
     }
 
     /** Whether the range holds anything to draw: a checked trial, a sample or a detection. */
-    static boolean hasData(String kind, List<ChartDay> days) {
-        for (ChartDay d : days) {
+    static boolean hasData(String kind, List<ChartPoint> points) {
+        for (ChartPoint p : points) {
             long n =
                     switch (kind) {
-                        case ClassifierChartDtos.ChartCard.RATE -> nz(d.checked());
-                        case ClassifierChartDtos.ChartCard.RANGE -> nz(d.n());
-                        default -> nz(d.total());
+                        case ClassifierChartDtos.ChartCard.RATE -> nz(p.checked());
+                        case ClassifierChartDtos.ChartCard.RANGE -> nz(p.n());
+                        default -> nz(p.total());
                     };
             if (n > 0) return true;
         }
         return false;
+    }
+
+    /**
+     * The grid a range card bins {@code measure} on: the one the row's drift config sketches it on, so the chart
+     * bins as the detector does.
+     */
+    static Grid grid(MetricDriftConfig config, String measure) {
+        return config.measured().stream()
+                .filter(m -> measure.equals(m.measure()))
+                .findFirst()
+                .map(MetricDriftConfig.Measured::grid)
+                .orElse(Measure.COST.equals(measure) ? Grid.cost() : Grid.duration());
     }
 
     /**
@@ -139,19 +340,6 @@ final class ChartSeries {
                 GroundednessConfig.of(mapper, row.configJson()).engine().minBaselineCalls();
             default -> ToolErrorConfig.of(mapper, row.configJson()).minBaselineCalls();
         };
-    }
-
-    /**
-     * One count day as the arming bar sees it. With no bar, every detection counts.
-     *
-     * @param events detections the bar's band and scope admit that day
-     * @param sessions distinct sessions among them
-     * @param total every detection on the call site that day
-     */
-    static ChartDay countDay(
-            String date, long events, long sessions, long total, ClassifierArming.@Nullable Config arming) {
-        if (arming == null) return ChartDay.count(date, total, total);
-        return ChartDay.count(date, arming.bySession() ? sessions : events, total);
     }
 
     /** The bar as the card shows it, with the band resolved against the row's mode. */
