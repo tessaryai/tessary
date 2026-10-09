@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -31,7 +32,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * Recomputes a project's tool-error findings and writes them down. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5 and §6.
+ * {@code devdocs/concepts/tool-error.md} §5 and §6.
  *
  * <p>One pass is: read the hourly aggregate, replay it, and upsert one finding per tool currently in a
  * spell. There is no cursor, no watermark and no transaction spanning passes, because nothing carries
@@ -53,7 +54,7 @@ public class ToolErrorService {
      * How far back a replay reads. Long enough to hold a reference plus a spell, short enough that the
      * aggregate stays a cheap read; the same 28 days {@code TrendService} replays for grader pass rate.
      *
-     * <p>PROGRAM.md §5.3 records the limit this imposes. Anchored to the project's newest tool-call
+     * <p>tool-error.md §5.3 records the limit this imposes. Anchored to the project's newest tool-call
      * event ({@link ToolErrorRepository#newestEventAt}), not to wall-clock now: a backfill whose traffic
      * is all months old still gets a window that contains it, where {@code now - 28d} would read nothing
      * but the empty months since.
@@ -319,14 +320,13 @@ public class ToolErrorService {
             String projectId, Spell spell, ToolErrorConfig config, Instant from, String now, List<String> toolNames) {
         // The finding's own event clock: the hour the detector last folded into this spell, not the
         // moment this sweep happened to run. last_seen_at, the quiet test and the evidence window all
-        // measure from here, so a backfill replays on the traffic's timeline instead of the sweep's.
-        // Falls back to wall clock only in the unreachable case a firing spell carries no watermark —
-        // see Spell#lastBucket.
-        String eventAt = spell.lastBucket() != null ? spell.lastBucket() : now;
+        // measure from here, so a backfill replays on the traffic's timeline instead of the sweep's. A
+        // firing spell always carries one — see Spell#lastBucket.
+        String eventAt = Objects.requireNonNull(spell.lastBucket());
         Instant until = Instant.parse(eventAt).plus(Duration.ofHours(1));
         String quietBefore = Instant.parse(eventAt).minus(QUIET_WINDOW).toString();
 
-        Failures failing = patternsFor(projectId, spell, config, from, until, toolNames);
+        Failures failing = patternsFor(projectId, spell, config, until, toolNames);
         String evidence = ToolErrorEvidence.toJson(
                 spell.toolKey(),
                 spell.decision(),
@@ -360,7 +360,7 @@ public class ToolErrorService {
      * Both are enumerated in full: a cap here would be a sample with an undeclared selection rule.
      *
      * <p><b>No baseline.</b> A CUSUM has one reference and it is a fitted rate, not a window of rows
-     * (PROGRAM.md §4.6). Enumerating the traffic before onset would assert a two-window comparison this
+     * (tool-error.md §4.6). Enumerating the traffic before onset would assert a two-window comparison this
      * detector never made.
      *
      * <p><b>No exemplar.</b> Naming one trace as the entry point biases the run that reads it; the
@@ -377,19 +377,8 @@ public class ToolErrorService {
      */
     private void recordPopulation(
             String projectId, String findingId, Spell spell, List<String> toolNames, Instant until, String now) {
-        Instant onset = parseInstant(spell.onsetBucket());
-        // Skipped rather than widened to the replay horizon: refs to traffic from before the spell would
-        // enumerate a population the claim is not about. Unreachable while an alarm implies an arm above
-        // zero, which implies a bracketed onset.
-        if (onset == null) {
-            StructuredLog.warn(log, Markers.OPS, "toolerror.evidence.no-onset")
-                    .message("skipped evidence for %s — the spell has no bracketed onset", spell.toolKey())
-                    .field("project", projectId)
-                    .field("finding", findingId)
-                    .field("tool", spell.toolKey())
-                    .log();
-            return;
-        }
+        // An alarm implies an arm above zero, which implies a bracketed onset.
+        Instant onset = Instant.parse(Objects.requireNonNull(spell.onsetBucket()));
         record(
                 projectId,
                 findingId,
@@ -413,15 +402,6 @@ public class ToolErrorService {
         evidenceRefs.record(projectId, findingId, role, refs, now);
     }
 
-    private static @Nullable Instant parseInstant(@Nullable String value) {
-        if (value == null) return null;
-        try {
-            return Instant.parse(value);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     /**
      * What one alarming tool's failing calls were: the ranked patterns, and the traces they happened in.
      *
@@ -432,7 +412,7 @@ public class ToolErrorService {
     private record Failures(List<ToolErrorRate.Pattern> patterns, List<String> traceIds) {}
 
     /**
-     * The failure patterns behind one alarming tool, ranked by what changed, and the traces to point at.
+     * The failure patterns behind one alarming tool, largest first, and the traces to point at.
      *
      * <p>Read only for a tool that has already alarmed, that is what makes inspecting the result payload
      * affordable at all, and only over the observed side, since the reference side's raw rows are not
@@ -447,13 +427,8 @@ public class ToolErrorService {
      *     traffic outside the spell it is describing.
      */
     private Failures patternsFor(
-            String projectId,
-            Spell spell,
-            ToolErrorConfig config,
-            Instant from,
-            Instant until,
-            List<String> toolNames) {
-        Instant since = spell.onsetBucket() == null ? from : parseOr(spell.onsetBucket(), from);
+            String projectId, Spell spell, ToolErrorConfig config, Instant until, List<String> toolNames) {
+        Instant since = Instant.parse(Objects.requireNonNull(spell.onsetBucket()));
         ToolErrorRate observed = new ToolErrorRate();
         List<String> traces = new ArrayList<>();
         for (RawFailure f : repo.failuresFor(projectId, toolNames, since, until, SIGNATURE_SAMPLE)) {
@@ -468,8 +443,7 @@ public class ToolErrorService {
                 traces.add(traceId);
             }
         }
-        return new Failures(
-                ToolErrorRate.ranked(new ToolErrorRate(), observed, config.maxPatterns()), List.copyOf(traces));
+        return new Failures(ToolErrorRate.ranked(observed, config.maxPatterns()), List.copyOf(traces));
     }
 
     private @Nullable JsonNode parseJson(@Nullable String json) {
@@ -478,14 +452,6 @@ public class ToolErrorService {
             return mapper.readTree(json);
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    private static Instant parseOr(String value, Instant fallback) {
-        try {
-            return Instant.parse(value);
-        } catch (Exception e) {
-            return fallback;
         }
     }
 }

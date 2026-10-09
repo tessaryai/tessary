@@ -87,57 +87,6 @@ public class FindingRepository {
             @Nullable String escalatedAt) {}
 
     /**
-     * Record {@code traceDelta} firings against a behaviour-drift cause, creating the OPEN finding if
-     * this is the first.
-     *
-     * <p>The payload is first-write-wins, exactly as the exemplar used to be: it carries the native
-     * cause vocabulary and the verdict the exemplar was judged under, and re-pointing that on every
-     * later firing would make the evidence under an escalation unstable.
-     */
-    public Recorded recordFiring(
-            String id,
-            String projectId,
-            String profileId,
-            String causeKind,
-            String causeKey,
-            String workflowKey,
-            long traceDelta,
-            @Nullable String exemplarVerdictId,
-            @Nullable String sinceVersionId,
-            String callSiteId,
-            String now) {
-        String payload = payloadJson(nativeVocabulary(causeKind, workflowKey, causeKey, exemplarVerdictId));
-        Recorded outcome = jdbc.sql("""
-            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                 subject_label, call_site_id, status, onset_at, last_seen_at,
-                                 sample_count, payload, since_version_id, created_at, updated_at)
-            VALUES (:id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                    'open', :now, :now, :delta, CAST(:payload AS jsonb), :versionId, :now, :now)
-            ON CONFLICT (project_id, classifier_key, cause_key)
-                WHERE status = 'open' AND triage_verdict IS NULL DO UPDATE SET
-                sample_count = finding.sample_count + EXCLUDED.sample_count,
-                last_seen_at = EXCLUDED.last_seen_at,
-                updated_at = EXCLUDED.updated_at
-            RETURNING id, sample_count, escalated_at
-            """)
-                .param("id", id)
-                .param("pid", projectId)
-                .param("classifier", "behavior_drift")
-                .param("causeKey", CauseKey.behaviorDrift(profileId, causeKind, causeKey, workflowKey))
-                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
-                .param("subjectId", profileId)
-                .param("subjectLabel", causeKey)
-                .param("callSiteId", callSiteId)
-                .param("delta", traceDelta)
-                .param("payload", payload)
-                .param("versionId", sinceVersionId)
-                .param("now", now)
-                .query((rs, n) -> recorded(rs))
-                .single();
-        return created(id, outcome);
-    }
-
-    /**
      * Record a closed window's shift against a metric-drift cause.
      *
      * <p><b>{@code sampleDelta} is a sample count, not a trace label.</b> Nothing here labelled a trace
@@ -170,8 +119,7 @@ public class FindingRepository {
             String eventAt,
             String quietBefore,
             String now) {
-        String payload =
-                mergeVocabulary(evidenceJson, nativeVocabulary("distribution_shift", "__global__", causeKey, null));
+        String payload = mergeVocabulary(evidenceJson, nativeVocabulary("distribution_shift", "__global__", causeKey));
         Recorded outcome = jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  call_site_id, status, onset_at, last_seen_at, sample_count, payload,
@@ -215,7 +163,7 @@ public class FindingRepository {
      * Record the current state of a recomputed cause — the tool-error path, and the only write here
      * that ASSIGNS its counts rather than accumulating them.
      *
-     * <p>That difference is the whole of {@code classifiers/tool_error/PROGRAM.md} §5.1. There is no
+     * <p>That difference is the whole of {@code devdocs/concepts/tool-error.md} §5.1. There is no
      * sweep behind a rate_shift: the numbers are recomputed from an hourly aggregate on every read, so
      * an accumulating count would measure how often the recompute ran rather than how often the tool
      * failed. Run this a hundred times on unchanged traffic and the row is identical every time, which
@@ -300,7 +248,7 @@ public class FindingRepository {
             String eventAt,
             String quietBefore,
             String now) {
-        String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey, null));
+        String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey));
         return jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
                                  subject_label, call_site_id, status, onset_at, last_seen_at,
@@ -347,6 +295,56 @@ public class FindingRepository {
                 .optional()
                 .map(outcome -> created(id, outcome))
                 .orElse(null);
+    }
+
+    /**
+     * The newest open finding of a cause that is already ruled positive, or empty. For a detector that rules its
+     * own findings when it files them (Frustration), this is the spell it filed last: {@code ux_finding_live}
+     * never holds such a row, so the conflict target cannot find it.
+     */
+    public Optional<FindingRow> findOpenByCause(String projectId, String classifierKey, String causeKey) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding"
+                        + " WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey"
+                        + "   AND status = 'open' AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"
+                        + " ORDER BY created_at DESC, id DESC LIMIT 1")
+                .param("pid", projectId)
+                .param("classifier", classifierKey)
+                .param("causeKey", causeKey)
+                .query((rs, n) -> map(rs))
+                .optional();
+    }
+
+    /**
+     * Refresh what a ruled, still-open finding observed: its count, its clock and its payload, and nothing about
+     * the ruling. For a spell that keeps running after its finding was ruled at filing, so a reader sees today's
+     * numbers rather than the ones it was filed with.
+     *
+     * <p>The payload is merged over the stored one, so the native vocabulary {@link #recordRecomputedRate}
+     * wrote survives. {@code last_seen_at} only moves forward, compared as instants for the reason
+     * {@link #armedUpsert} gives.
+     *
+     * @return 1 when the finding was refreshed, 0 when it is closed or was never ruled
+     */
+    public int refreshRuledObservation(
+            String projectId, String findingId, long observedCount, String payloadJson, String eventAt, String now) {
+        return jdbc.sql("""
+                UPDATE finding
+                   SET sample_count = :count,
+                       payload = COALESCE(payload, '{}'::jsonb) || CAST(:payload AS jsonb),
+                       last_seen_at = CASE
+                           WHEN last_seen_at IS NULL
+                                OR CAST(:eventAt AS timestamptz) > CAST(last_seen_at AS timestamptz)
+                           THEN :eventAt ELSE last_seen_at END,
+                       updated_at = :now
+                 WHERE project_id = :pid AND id = :id AND status = 'open' AND triage_verdict IS NOT NULL
+                """)
+                .param("count", observedCount)
+                .param("payload", payloadJson)
+                .param("eventAt", eventAt)
+                .param("now", now)
+                .param("pid", projectId)
+                .param("id", findingId)
+                .update();
     }
 
     /**
@@ -675,13 +673,17 @@ public class FindingRepository {
                 == 1;
     }
 
-    /** Close one finding directly — no ruling, no human decision. Returns 0 when it was already closed. */
-    public int close(String projectId, String findingId, String now) {
+    /**
+     * Close every open finding of one classifier that has no ruling yet. A ruled finding is a decision a
+     * person or Layer 2 made, and a positive one backs a case, so those stay as they are.
+     */
+    public int closeUnruled(String projectId, String classifierKey, String now) {
         return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
-                        + " WHERE project_id = :pid AND id = :id AND " + LIVE)
+                        + " WHERE project_id = :pid AND classifier_key = :key AND " + LIVE
+                        + " AND triage_verdict IS NULL")
                 .param("now", now)
                 .param("pid", projectId)
-                .param("id", findingId)
+                .param("key", classifierKey)
                 .update();
     }
 
@@ -695,24 +697,6 @@ public class FindingRepository {
                 .param("now", now)
                 .param("pid", projectId)
                 .param("caseId", caseId)
-                .update();
-    }
-
-    /**
-     * Close every open behaviour-drift finding whose cause is the graduated gram — its alerts must stop
-     * by themselves. Matched on the profile subject plus the classifier's own key inside the payload,
-     * because the scoped {@code cause_key} folds the cause kind in and a graduation is about the gram
-     * whichever kind fired on it. Not a ruling: no verdict, no case, just a settled cause.
-     */
-    public int closeForNativeCause(String projectId, String profileId, String nativeCauseKey) {
-        return jdbc.sql("UPDATE finding SET status = 'closed', updated_at = :now"
-                        + " WHERE project_id = :pid AND subject_kind = :subjectKind AND subject_id = :profileId"
-                        + "   AND payload ->> 'native_cause_key' = :cause AND " + LIVE)
-                .param("now", java.time.Instant.now().toString())
-                .param("pid", projectId)
-                .param("subjectKind", FindingRow.SubjectKind.BEHAVIOR_PROFILE)
-                .param("profileId", profileId)
-                .param("cause", nativeCauseKey)
                 .update();
     }
 
@@ -836,13 +820,11 @@ public class FindingRepository {
      * recorded stops being readable. Built as a literal rather than through Jackson because the values
      * are ids and enum words, and a JSON writer here would be a dependency for four string members.
      */
-    private static Map<String, String> nativeVocabulary(
-            String causeKind, String workflowKey, String nativeCauseKey, @Nullable String exemplarVerdictId) {
+    private static Map<String, String> nativeVocabulary(String causeKind, String workflowKey, String nativeCauseKey) {
         Map<String, String> out = new LinkedHashMap<>();
         out.put("cause_kind", causeKind);
         out.put("workflow_key", workflowKey);
         out.put("native_cause_key", nativeCauseKey);
-        if (exemplarVerdictId != null) out.put("exemplar_verdict_id", exemplarVerdictId);
         return out;
     }
 

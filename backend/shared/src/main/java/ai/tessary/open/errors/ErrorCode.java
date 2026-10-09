@@ -27,8 +27,7 @@ public interface ErrorCode {
 
     default String domain() {
         String simple = declaringClass().getSimpleName();
-        if (simple.endsWith("Errors")) simple = simple.substring(0, simple.length() - 6);
-        else if (simple.endsWith("Error")) simple = simple.substring(0, simple.length() - 5);
+        if (simple.endsWith("Error")) simple = simple.substring(0, simple.length() - 5);
         return simple.replaceAll("([A-Z]+)([A-Z][a-z])", "$1_$2")
                 .replaceAll("([a-z\\d])([A-Z])", "$1_$2")
                 .toUpperCase(Locale.ROOT);

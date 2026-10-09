@@ -55,15 +55,13 @@ public class ProjectPurgeRepository {
      * Delete at most {@code limit} rows of one table for one project, returning how many went.
      *
      * <p>The table name is interpolated because a table name cannot be a bind parameter. It is never a
-     * caller's string: the only values reaching it are the literals in {@link #TABLES}, and
-     * {@link #assertKnown} refuses anything else rather than trusting that to stay true. The project id
-     * is bound normally.
+     * caller's string: the only values reaching it are the literals in {@link #TABLES}, which
+     * {@code ProjectPurgeWorker} iterates. The project id is bound normally.
      *
      * <p>{@code trace} is special-cased to {@link #deleteTraceLeafBatch} — see its javadoc for why a bare
      * {@code ctid IN (... LIMIT n)} is unsafe for that one table.
      */
     public int deleteBatch(String table, String projectId, int limit) {
-        assertKnown(table);
         if ("trace".equals(table)) {
             return deleteTraceLeafBatch(projectId, limit);
         }
@@ -107,11 +105,5 @@ public class ProjectPurgeRepository {
                       LIMIT :n
                  )
                 """).param("pid", projectId).param("n", limit).update();
-    }
-
-    private static void assertKnown(String table) {
-        if (!TABLES.contains(table)) {
-            throw new IllegalArgumentException("not a purge table: " + table);
-        }
     }
 }

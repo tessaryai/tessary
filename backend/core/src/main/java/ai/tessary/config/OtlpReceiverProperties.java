@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
  * async write path ({@code SubstrateWriter} → {@code SpanBatchWriter}).
  *
  * <p>Mirrors the per-prefix split used by {@link SubstrateProperties} (the receiver feeds it);
- * defaults live here in code (no yaml entries needed), like {@link IngestProperties}.
+ * defaults live here in code (no yaml entries needed).
  *
  * <p><b>Always on.</b> OTLP ingest is a core feature, not an opt-in: the HTTP {@code POST /v1/traces}
  * front door always serves. It is not an open endpoint — every push must carry a valid write-scoped

@@ -97,7 +97,6 @@ function RecentRouteTracker() {
     const base = `/orgs/${orgSlug}/projects/${projectSlug}/`;
     if (!location.pathname.startsWith(base)) return;
     const segment = location.pathname.slice(base.length).split("/")[0];
-    if (!segment) return;
     const surface = LIVE_NAV.find((n) => n.id === segment);
     if (surface) pushRecent(orgSlug, projectSlug, { path: `${base}${surface.id}`, label: surface.label });
   }, [location.pathname, orgSlug, projectSlug]);

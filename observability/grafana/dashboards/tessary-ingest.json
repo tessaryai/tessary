@@ -358,7 +358,7 @@
     },
     {
       "type": "stat",
-      "title": "classify-service: decommissionable?",
+      "title": "groundedness encoder: in use?",
       "gridPos": {
         "h": 7,
         "w": 6,
@@ -384,7 +384,7 @@
           ]
         }
       },
-      "description": "Launch requirement J1. Counts projects with an ENABLED encoder-backed classifier whose org also holds the capability. Only scale the ECS task to zero at 0 — the two encoder classifiers do not fail loudly when the service goes, they just stop producing, which reads like a quiet week.",
+      "description": "Launch requirement J1. Counts projects with an ENABLED encoder-backed classifier whose org also holds the capability. Only stop the groundedness model server at 0 — the encoder classifier does not fail loudly when the server goes, it just stops producing, which reads like a quiet week.",
       "fieldConfig": {
         "defaults": {
           "thresholds": {

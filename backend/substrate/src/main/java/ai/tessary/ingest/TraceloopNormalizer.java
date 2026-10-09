@@ -32,14 +32,6 @@ public final class TraceloopNormalizer {
 
     private TraceloopNormalizer() {}
 
-    /** True when the attribute map carries any Traceloop framework-span signal we know how to normalize. */
-    public static boolean isTraceloop(@Nullable Map<String, ? extends @Nullable Object> attrs) {
-        if (attrs == null) {
-            return false;
-        }
-        return attrs.containsKey(SPAN_KIND) || attrs.containsKey(ENTITY_INPUT) || attrs.containsKey(ENTITY_OUTPUT);
-    }
-
     /**
      * Map a {@code traceloop.span.kind} value to the canonical {@code gen_ai.operation.name}. {@code task}
      * (a coordinated sub-step) has no gen_ai registry value; it maps to {@code invoke_workflow}, the closest
@@ -59,19 +51,16 @@ public final class TraceloopNormalizer {
     }
 
     /** The framework step's generic input payload, as a string; {@code null} when absent. */
-    public static @Nullable String input(@Nullable Map<String, ? extends @Nullable Object> attrs) {
+    public static @Nullable String input(Map<String, ? extends @Nullable Object> attrs) {
         return value(attrs, ENTITY_INPUT);
     }
 
     /** The framework step's generic output payload, as a string; {@code null} when absent. */
-    public static @Nullable String output(@Nullable Map<String, ? extends @Nullable Object> attrs) {
+    public static @Nullable String output(Map<String, ? extends @Nullable Object> attrs) {
         return value(attrs, ENTITY_OUTPUT);
     }
 
-    private static @Nullable String value(@Nullable Map<String, ? extends @Nullable Object> attrs, String key) {
-        if (attrs == null) {
-            return null;
-        }
+    private static @Nullable String value(Map<String, ? extends @Nullable Object> attrs, String key) {
         Object v = attrs.get(key);
         return v == null ? null : v.toString();
     }

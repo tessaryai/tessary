@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.util.RawValue;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -93,15 +94,6 @@ public final class MetricControl {
         return new MetricControl(List.of());
     }
 
-    public boolean isEmpty() {
-        return days.isEmpty();
-    }
-
-    /** The days held, oldest first. Exposed for the sweep's logging and for tests. */
-    public List<Day> days() {
-        return days;
-    }
-
     /**
      * The newest day held, or null on an empty ring: the most recent complete summary of where
      * this bucket sits.
@@ -142,11 +134,7 @@ public final class MetricControl {
      *     to what retention keeps, never push the cutoff forward and evict a day more recent than itself.
      */
     public MetricControl fold(
-            Grid grid,
-            String day,
-            MetricSketch measure,
-            @Nullable MetricWorkload workload,
-            @Nullable MetricTokens tokens) {
+            Grid grid, String day, MetricSketch measure, MetricWorkload workload, MetricTokens tokens) {
         Map<String, Day> byDay = new LinkedHashMap<>();
         for (Day d : days) {
             byDay.put(d.day(), d);
@@ -154,8 +142,8 @@ public final class MetricControl {
 
         Day existing = byDay.get(day);
         MetricSketch mergedMeasure = measure.copy();
-        MetricWorkload mergedWorkload = workload == null ? null : workload.copy();
-        MetricTokens mergedTokens = tokens == null ? null : tokens.copy();
+        MetricWorkload mergedWorkload = workload.copy();
+        MetricTokens mergedTokens = tokens.copy();
         if (existing != null) {
             // A slot on a dead grid (hist_bins edited under a live project) is discarded rather than
             // merged, exactly as MetricWorkload.fromJson treats one: it can never line up with the samples
@@ -163,29 +151,17 @@ public final class MetricControl {
             MetricSketch prior = readSketch(existing.sketchJson(), grid);
             if (prior != null) mergedMeasure.merge(prior);
             MetricWorkload priorWorkload = readWorkload(existing.workloadJson(), grid);
-            if (priorWorkload != null) {
-                if (mergedWorkload == null) {
-                    mergedWorkload = priorWorkload;
-                } else {
-                    mergedWorkload.merge(priorWorkload);
-                }
-            }
+            if (priorWorkload != null) mergedWorkload.merge(priorWorkload);
             MetricTokens priorTokens = readTokens(existing.tokensJson(), grid);
-            if (priorTokens != null) {
-                if (mergedTokens == null) {
-                    mergedTokens = priorTokens;
-                } else {
-                    mergedTokens.merge(priorTokens);
-                }
-            }
+            if (priorTokens != null) mergedTokens.merge(priorTokens);
         }
         byDay.put(
                 day,
                 new Day(
                         day,
                         mergedMeasure.toJson(),
-                        mergedWorkload == null || mergedWorkload.isEmpty() ? null : mergedWorkload.toJson(),
-                        mergedTokens == null || mergedTokens.isEmpty() ? null : mergedTokens.toJson()));
+                        mergedWorkload.isEmpty() ? null : mergedWorkload.toJson(),
+                        mergedTokens.isEmpty() ? null : mergedTokens.toJson()));
 
         // The anchor is the newest day now held, INCLUDING the one just folded in — never wall-clock now.
         // A backfill folding in a day from a month ago leaves the anchor exactly where it was and so
@@ -268,7 +244,7 @@ public final class MetricControl {
      *     {@link #resolve} returns null for anyway.
      */
     public record Resolved(
-            MetricSketch measure,
+            MetricReading measure,
             @Nullable MetricWorkload workload,
             @Nullable MetricTokens tokens,
             int daysUsed,
@@ -282,12 +258,7 @@ public final class MetricControl {
      * full 1.0, neither special-cased.
      */
     private static double weightOf(String day, String eventDay) {
-        long age;
-        try {
-            age = ChronoUnit.DAYS.between(LocalDate.parse(day), LocalDate.parse(eventDay));
-        } catch (RuntimeException e) {
-            return 0.0;
-        }
+        long age = ChronoUnit.DAYS.between(LocalDate.parse(day), LocalDate.parse(eventDay));
         if (age < 0 || age > RETAIN_DAYS) return 0.0;
         return Math.pow(2.0, -age / HALF_LIFE_DAYS);
     }
@@ -334,13 +305,9 @@ public final class MetricControl {
         for (Day d : days) {
             ObjectNode node = arr.addObject();
             node.put("d", d.day());
-            try {
-                node.set("m", MetricHistogram.JSON.readTree(d.sketchJson()));
-                if (d.workloadJson() != null) node.set("w", MetricHistogram.JSON.readTree(d.workloadJson()));
-                if (d.tokensJson() != null) node.set("t", MetricHistogram.JSON.readTree(d.tokensJson()));
-            } catch (JsonProcessingException e) {
-                throw new IllegalStateException("metric control day produced unreadable json", e);
-            }
+            node.putRawValue("m", new RawValue(d.sketchJson()));
+            if (d.workloadJson() != null) node.putRawValue("w", new RawValue(d.workloadJson()));
+            if (d.tokensJson() != null) node.putRawValue("t", new RawValue(d.tokensJson()));
         }
         return root.toString();
     }
@@ -379,19 +346,18 @@ public final class MetricControl {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * A read-only {@link MetricSketch} over fractionally-weighted bin mass: what the day slots resolve
+     * A read-only {@link MetricReading} over fractionally-weighted bin mass: what the day slots resolve
      * to, and the only sketch in this package whose bins are not integer counts.
      *
      * <p>Separate from {@link MetricHistogram} rather than a widening of it. Making the histogram's bins
      * doubles would change the shape of every persisted sketch in the table to serve one reader, and the
      * exactness of an integer merge is the property the rest of the design leans on hardest.
      */
-    static final class Weighted implements MetricSketch {
+    static final class Weighted implements MetricReading {
 
         private final Grid grid;
         private final double[] bins;
         private double underflow;
-        private double overflow;
 
         /** Total weighted mass: {@code Σ nᵢ·dᵢ}. The denominator of every proportion below. */
         private double mass;
@@ -408,13 +374,9 @@ public final class MetricControl {
 
         /** Fold one day's exact sketch in at weight {@code w}. */
         void fold(MetricSketch other, double w) {
-            if (!(other instanceof MetricHistogram h)) {
-                throw new IllegalArgumentException("metric control folds histograms, not "
-                        + other.getClass().getSimpleName());
-            }
+            MetricHistogram h = (MetricHistogram) other;
             h.foldScaledInto(bins, w);
             underflow += w * h.underflow();
-            overflow += w * h.overflow();
             mass += w * h.count();
             massSq += w * w * h.count();
             clampedSumLog += w * h.meanLog() * h.count();
@@ -438,31 +400,6 @@ public final class MetricControl {
         @Override
         public double meanLog() {
             return mass == 0 ? 0.0 : clampedSumLog / mass;
-        }
-
-        /** Both moments off the bin midpoints, for the reason {@link MetricHistogram#stdDevLog} gives. */
-        @Override
-        public double stdDevLog() {
-            if (mass <= 0 || count() < 2) return 0.0;
-            double lo = grid.logLo();
-            double hi = grid.logHi();
-            double width = grid.slotWidthLog();
-            double sum = underflow * lo + overflow * hi;
-            for (int i = 0; i < bins.length; i++) {
-                if (bins[i] != 0) sum += bins[i] * (lo + (i + 0.5) * width);
-            }
-            double mean = sum / mass;
-
-            double sumSq = underflow * sq(lo - mean) + overflow * sq(hi - mean);
-            for (int i = 0; i < bins.length; i++) {
-                if (bins[i] == 0) continue;
-                sumSq += bins[i] * sq(lo + (i + 0.5) * width - mean);
-            }
-            return Math.sqrt(sumSq / mass);
-        }
-
-        private static double sq(double v) {
-            return v * v;
         }
 
         @Override
@@ -504,34 +441,6 @@ public final class MetricControl {
         @Override
         public double slotWidthLog() {
             return grid.slotWidthLog();
-        }
-
-        /** No writes: the ring is the accumulator and this is the view of it a comparison reads. */
-        @Override
-        public void add(double logValue) {
-            throw new UnsupportedOperationException("a metric control is resolved from its ring, not added to");
-        }
-
-        @Override
-        public void merge(MetricSketch other) {
-            throw new UnsupportedOperationException("a metric control is resolved from its ring, not merged into");
-        }
-
-        /** Itself: with no mutator on this class, an independent copy and this instance are the same thing. */
-        @Override
-        public MetricSketch copy() {
-            return this;
-        }
-
-        /**
-         * Never persisted. {@code metric_baseline.control_json} holds the ring, the exact per-day
-         * sketches, precisely so that a late verdict can retroactively drop a day; storing this view
-         * instead would bake today's weights and today's exclusions into the table.
-         */
-        @Override
-        public String toJson() {
-            throw new UnsupportedOperationException(
-                    "a metric control persists as its ring (MetricControl.toJson), never as a resolved view");
         }
     }
 }

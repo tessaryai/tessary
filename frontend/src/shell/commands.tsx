@@ -13,14 +13,12 @@
  * sources and the filter below are untouched.
  *
  * The palette offers nothing the org cannot reach (segment F4). The caller passes the CAPABILITY-
- * FILTERED IA in `ctx.nav` / `ctx.settings` rather than reading nav.tsx directly, and a search hit
- * whose entity type belongs to a gated surface is dropped by `searchHitToCommand`.
+ * FILTERED IA in `ctx.nav` / `ctx.settings` rather than reading nav.tsx directly.
  */
 import type { ReactNode } from "react";
 import type { SearchHit, SearchHitType } from "../api/types";
 import { SETTINGS_ICON } from "./nav";
 import type { NavItem, SettingsSection } from "./nav";
-import type { CapabilityWire } from "../api/types-auth";
 import type { RecentEntry } from "./recents";
 
 export type CommandGroup = "Results" | "Recent" | "Navigation" | "Settings" | "Actions" | "Coming soon";
@@ -36,8 +34,6 @@ export type Command = {
   keywords?: string[];
   /** Right-aligned dim old-name alias (one release only), e.g. `was "Pipeline"`. */
   alias?: string;
-  /** Right-aligned shortcut hint (e.g. "⌘J"). */
-  shortcut?: string;
   /** Reserved/coming-soon commands are listed but not actionable. */
   disabled?: boolean;
   /** What running the command does. Omitted for disabled commands. */
@@ -157,29 +153,15 @@ export function buildCommands(ctx: CommandContext): Command[] {
  * Per-hit-type display label + the detail route (relative to the project base) a result navigates to.
  * This is the SINGLE home for the entity→route mapping (the backend emits only the `type` discriminant),
  * so adding a searchable entity is a one-line change here, never a cross-file switch that can rot when the
- * IA shifts. Routes mirror App.tsx. The ⌘K contract limits the index to surfaces, cases and trace ids.
+ * IA shifts. Routes mirror App.tsx. The backend index covers trace ids only.
  */
-const HIT_ROUTING: Record<
-  SearchHitType,
-  { typeLabel: string; path: (id: string) => string; capability?: CapabilityWire }
-> = {
-  case: { typeLabel: "Case", path: (id) => `cases/${id}` },
+const HIT_ROUTING: Record<SearchHitType, { typeLabel: string; path: (id: string) => string }> = {
   trace: { typeLabel: "Trace", path: (id) => `traces/${id}` },
 };
 
 /**
- * Whether a search hit's detail route is reachable by this org (segment F4). The index is not
- * capability-aware, so the palette drops a hit rather than offering a row that redirects straight
- * back to Triage.
- */
-export function hitIsReachable(hit: SearchHit, isEnabled: (c: CapabilityWire) => boolean): boolean {
-  const capability = HIT_ROUTING[hit.type as SearchHitType]?.capability;
-  return capability == null || isEnabled(capability);
-}
-
-/**
  * Map one server search hit to a palette `Command`. The hint line carries the entity type (and snippet
- * when present) so a user can tell a grader hit from a trace hit at a glance. `navigate` + `projectBase`
+ * when present) so a user can tell what kind of entity a hit is at a glance. `navigate` + `projectBase`
  * are the same inputs `buildCommands` uses, so a result jumps to the right tenant-scoped detail route.
  */
 export function searchHitToCommand(
@@ -188,8 +170,7 @@ export function searchHitToCommand(
   projectBase: string,
 ): Command {
   const hitType = hit.type as SearchHitType;
-  // Defensive: the wire type is a bare string, so an unknown hit type degrades to Triage.
-  const route = HIT_ROUTING[hitType] ?? { typeLabel: hit.type, path: () => "triage" };
+  const route = HIT_ROUTING[hitType];
   const hint = hit.snippet ? `${route.typeLabel} · ${hit.snippet}` : route.typeLabel;
   return {
     id: `result:${hit.type}:${hit.id}`,

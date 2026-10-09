@@ -1,7 +1,7 @@
 # sandbox-runner
 
-Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`) and Layer-2 triage
-(`/triage`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
+Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`), Layer-2 triage
+(`/triage`) and the generic agent run behind the authoring lane (`/authoring`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
 HTTP and the sidecar owns the sandbox lifecycle — one request, one fresh sandbox, torn down after.
 
 ## What this was, and why the name changed
@@ -19,6 +19,7 @@ from the platform, and with it five of the seven routes this service served:
 | `/analyze` | the git observer's drift analysis | gone with the observer |
 | **`/rca`** | agentic root-cause analysis | **survives** |
 | **`/triage`** | Layer-2 ruling on a classifier finding | **survives** |
+| **`/authoring`** | a generic agent run over caller-supplied files, the repo and the traces | **added 2026-10** |
 
 Three whole subtrees went with them: `lambda/` (the AWS Lambda grading executor and the shared
 `harness.js`), `template/` (the air-gapped E2B grader sandbox), and the `grade.js` / `lint.js` /
@@ -37,7 +38,7 @@ E2B; nothing in this tree can delete it.
 ## Layout
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below.
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, the shared `agent-stream.js`
+- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the shared `agent-stream.js`
   OpenCode runner, and TWO INDEPENDENTLY MAINTAINED RECIPES for one runtime — `template.ts` (the E2B
   template, published by `build.ts`) and `Dockerfile` (the published agent image the Docker backend
   spawns). Change one, change the other.
@@ -58,6 +59,10 @@ narrower.
   AGENT_POSTURE hands it the provider credentials `agentEnvs()` derives and puts the container on the
   sandbox bridge network. `E2B_API_KEY` stays in the launcher and is never sent to the backend or
   into a sandbox.
+  - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
+    no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
+    `x-api-key` outside the microVM. The agent gets a placeholder, and that run's egress is limited
+    to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value
@@ -82,11 +87,11 @@ secret, in two jobs either side of the commit point:
 | job | writes | undone by |
 |---|---|---|
 | `build-agent-template` | `<version>` and `recipe-<hash>` — and **only builds if the recipe changed** | `cleanup` |
-| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs seven checks through it | n/a |
+| `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs four checks through it | n/a |
 | `finalize` | moves `latest` and `default` onto that build | nothing (this is the commit point) |
 
-`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the three agent scripts, the
-validator wrapper, the five `contract/` files, and the cpu/memory pair. A build already carrying
+`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the four agent scripts, and
+the cpu/memory pair. A build already carrying
 this release's hash gets the version tag assigned to it and no rebuild happens. Asking E2B which
 recipes it already holds is self-correcting where a `git diff` against the previous tag is not: after
 a release whose template build failed, the source is unchanged at the next attempt, so a diff would
@@ -169,7 +174,7 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   (`getent group docker`).
 - **Agent image:** `sandbox-runner/agent-sandbox/Dockerfile` — a plain OCI build mirroring
   `template.ts`'s E2B recipe 1:1 (same base install steps, same pinned `opencode-ai` version),
-  built from the **repo root** as context (it needs `contract/` alongside its own directory).
+  built from the **repo root** as context (its COPY paths carry the full `sandbox-runner/agent-sandbox/` prefix).
   Published (as `agent-sandbox-<version>`) by `.github/workflows/release.yml` to Docker Hub
   (primary) and GHCR (mirror), alongside backend/frontend/sandbox-runner, when a human dispatches
   it — every workflow trigger in this repo is currently `workflow_dispatch`-only.

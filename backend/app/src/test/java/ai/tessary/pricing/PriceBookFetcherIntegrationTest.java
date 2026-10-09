@@ -81,7 +81,7 @@ class PriceBookFetcherIntegrationTest {
 
     private String inForce() {
         return books.currentBooks().stream()
-                .filter(b -> b.source().equals(PriceBook.SOURCE_LITELLM))
+                .filter(b -> b.version().startsWith(PriceBook.SOURCE_LITELLM + "-"))
                 .findFirst()
                 .orElseThrow()
                 .version();

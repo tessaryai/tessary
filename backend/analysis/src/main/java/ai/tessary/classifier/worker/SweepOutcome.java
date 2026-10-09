@@ -16,8 +16,4 @@ package ai.tessary.classifier.worker;
  * @param fired findings written or bumped this pass. Never one per scanned unit: the fitting tier's
  *     whole point is that many units produce one finding.
  */
-public record SweepOutcome(int scanned, int fired) {
-
-    /** A pass that read nothing and wrote nothing — a disabled config, an empty page, a missing bundle. */
-    public static final SweepOutcome EMPTY = new SweepOutcome(0, 0);
-}
+public record SweepOutcome(int scanned, int fired) {}

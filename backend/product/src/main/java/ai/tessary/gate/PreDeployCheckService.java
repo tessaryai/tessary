@@ -24,9 +24,8 @@ import org.springframework.stereotype.Service;
  * The production-signal → pre-deploy loop. Closes the loop: when a
  * NEW production signal is discovered (the {@code ClassifierWorker} sweep writes a fresh detection {@code verdict}
  * with {@code source='automatic'}), this service registers a durable, surface-scoped
- * {@link PreDeployCheckRow} so a FUTURE PR touching those
- * surfaces is checked pre-merge — via the existing risk routing / risk forecast read path,
- * which unions {@link #activeSurfaces} into the change's resolved surfaces.
+ * {@link PreDeployCheckRow} naming the surfaces a FUTURE PR touching them should be checked
+ * against pre-merge.
  *
  * <h2>Signal → surface mapping (honest, not fabricated)</h2>
  * A signal carries no learned failure mode today: its {@code verdict} node has no {@code grader}
@@ -57,7 +56,7 @@ public class PreDeployCheckService {
         this.mapper = mapper;
     }
 
-    /** Whether the loop is active (gates both the write trigger and the read-side union). */
+    /** Whether the loop is active (gates the write trigger). */
     public boolean isEnabled() {
         return props.isEnabled();
     }
@@ -127,11 +126,6 @@ public class PreDeployCheckService {
                     e.getMessage());
         }
         return out;
-    }
-
-    /** The DISTINCT active-check surfaces for the project — unioned into a future PR's forecast. */
-    public List<String> activeSurfaces(String projectId) {
-        return checks.activeSurfaces(projectId);
     }
 
     /** Every registered check for the project (the list read surface), newest first. */

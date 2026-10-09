@@ -3,16 +3,13 @@
 **What a classifier is, as a plug-in.** The platform's launch promise is that the classifier
 interface stays open, we charge for the classifiers we build, and anyone can write and run their own
 on the open interface. This page is that interface written down: the ports a classifier attaches
-through, how one is packaged and discovered, what happens when it is absent, and how the three paid
-classifiers with an actual Java extraction map onto it. (A fourth paid classifier, frustration, has
-no extraction to map — it rides the always-open, generic `EncoderDetector` and is paid only in that
-its trained weights are withheld; see `CapabilityService` for the full four-classifier capability
-picture, and §8 below for why this count is three, not four.)
+through, how one is packaged and discovered, and what happens when it is absent. (Frustration and
+groundedness, once paid, are open: their detectors, tables and rate tests all ship in this tree.)
 
 This is implemented far enough to sever the engine's compile-time dependency on the
 paid classifiers, and is used end to end. The seam was later extended a second
 time: `BuiltInDetector` (observation/turn grain) gained a Spring-discovered path of its own,
-`DetectorSupplier`, alongside the in-tree manifest — see §2 and §9.
+`DetectorSupplier`, alongside the in-tree manifest — see §2 and §8.
 
 ---
 
@@ -34,35 +31,33 @@ enforce this would be a different decision, tracked separately.
 
 ---
 
-## 2. The seam is six ports, five of which already shipped
+## 2. The seam is four ports
 
 A classifier is not one interface. It is a set of small ports it may implement as many or as few of
-as it needs, each keyed on the open `BuiltInDetector.Kind` constants. **Five of the six are discovered
+as it needs, each keyed on the open `BuiltInDetector.Kind` constants. **Three of the four are discovered
 by Spring collection injection outright. `BuiltInDetector` is hybrid**: its CATALOG
 ENTRY — name, description, capability, grain, config — is still in-tree-manifest-only, but the
-detector object itself can now ALSO be supplied from off the classpath, through a new sixth-port
+detector object itself can now ALSO be supplied from off the classpath, through a
 sibling, `DetectorSupplier`. The `Registered by` column below says which is which, and the difference
-decides what an out-of-tree jar can actually contribute — see §9.
+decides what an out-of-tree jar can actually contribute — see §8.
 
 | Port | Package | Grain | Registered by | What an implementation does |
 |---|---|---|---|---|
 | `BuiltInDetector` | `classifier/catalog/` | observation, turn | in-tree manifest, **or** Spring `ObjectProvider<DetectorSupplier>` (generic, unguarded, see below) | Score one span (or a batch of them). Pure: no database, no clock, no writes. |
 | `ClassifierSweep` | `classifier/worker/` | trace, window | Spring, `ObjectProvider` | Run one leased pass over a larger unit and write findings. Stateful. |
 | `TriageSource` | `classifier/finding/` | — | Spring, `List` | Serve this classifier's findings into the shared read surface and triage queue. `@Order`-ranked. |
-| `CauseResolver` | `classifier/finding/` | — | Spring, `ObjectProvider` | Apply the classifier-specific half of a human's correction. |
-| `ClassifierDebugContributor` | `classifier/debug/` | — | Spring, `ObjectProvider` | Contribute this classifier's fitted state to the debug rail. |
 | `DetectionTable` | `detection/` (`backend/shared`) | span, trace | Spring, `ObjectProvider`, folded by `DetectionTableRegistry` (`toUnmodifiableMap`, duplicate kind fails boot) | Name the table this classifier's fired detections land in and the grain (`span`/`trace`) its rows carry. Replaces the old `classifier_detection_v` view's hard-coded six-table list; a kind with no registered table takes one `writesDetections`-gated WARN from `ClassifierWorker` and scores nothing rather than throwing. |
 
-`ProfileSource` used to be a sixth port here, serving `/behavior/profiles`. That route later moved
+`ProfileSource` used to be a port here, serving `/behavior/profiles`. That route later moved
 into the behaviour-drift classifier's own module — it is now an internal wiring detail of that one
-paid classifier, not a cross-boundary extension point, so it is not in this table. See §8.
+paid classifier, not a cross-boundary extension point, so it is not in this table.
 
-The last three have their contract stated once, in
+`TriageSource` has its contract stated once, in
 `backend/analysis/src/main/java/ai/tessary/classifier/finding/package-info.java`. This page does
-not restate those four rules in different words; it extends them to the write side. Read that file
+not restate those three rules in different words; it extends them to the write side. Read that file
 first.
 
-**A sixth seam exists and is deliberately not public.** `TrajectoryDetector` — the trace-grain
+**One more seam exists and is deliberately not public.** `TrajectoryDetector` — the trace-grain
 detector interface — lives inside the behaviour-drift module, where its only implementation already sat.
 It went paid with the classifier that defined it. An extension that wants trace-grain judgement
 implements `ClassifierSweep` and does its own scoring; it does not get behaviour drift's fitting
@@ -82,10 +77,16 @@ two hardcoded instances, and `detectorFor` read only that map. `DetectorSupplier
 (`classifier/catalog/DetectorSupplier.java`) changed that: any `@Component` implementing it — a small,
 `Deps`-taking factory shaped exactly like `ClassifierModelModule.DetectorFactory` — is discovered by
 Spring `ObjectProvider` collection injection and folded into the SAME detector map `MODULES`'
-factories populate, keyed by whatever `kind()` the detector it builds reports. Groundedness is the
-worked example: its catalog entry stays in-tree (`detectorFactory: null`), and
-the groundedness classifier's own `GroundednessAutoConfiguration` supplies the real `GroundednessDetector`
-through this seam.
+factories populate, keyed by whatever `kind()` the detector it builds reports. Groundedness WAS the
+worked example — its catalog entry sat in-tree with `detectorFactory: null` and the paid
+`GroundednessAutoConfiguration` supplied the real `GroundednessDetector` through this seam — until
+2026-09-21, when the model went public and the detector moved in-tree
+(`classifier/detector/groundedness/`). Two shipped manifest entries still have a null factory,
+`frustration` and `groundedness`, and both are open: each detector needs something the catalog's
+shared `Deps` do not carry (its own repositories, and for frustration the decision client), so each
+arrives through an in-tree
+`DetectorSupplier` (`FrustrationDetectorSupplier`, `GroundednessDetectorSupplier`). The seam is
+proven by `ClassifierModelModuleCatalogTest`'s two discovery tests.
 
 **What still constrains it, and it is sharp enough to be a live trap, not a footnote.**
 `BuiltInClassifierCatalog#builtIns()` and `ClassifierService`'s seeding both still read only the
@@ -96,7 +97,7 @@ never dispatched to, because nothing seeds a row for it, no capability gates it,
 defaults an undeclared kind to `Grain.OBSERVATION` with no sweep or catalog entry behind it. That is
 the EXACT failure mode this section used to call impossible ("it fails silently") — it is now a live
 possibility instead, and an extension author supplying a detector for a kind of their own still hits
-hard stop 3 in §9 below: a new catalog entry is closed to an outsider, only a detector for an EXISTING
+hard stop 3 in §8 below: a new catalog entry is closed to an outsider, only a detector for an EXISTING
 in-tree kind can be supplied this way. `DetectorSupplier` also fails loud on a duplicate kind, the same
 invariant `ClassifierSweepRegistry` already enforces for `ClassifierSweep` — two sources (in-tree or
 discovered, in any combination) claiming one kind throws `IllegalStateException` at construction
@@ -106,7 +107,7 @@ Trace or window judgement of your own still goes through `ClassifierSweep` only;
 detector SUPPLY is now real, and observation/turn-grain catalog AUTHORSHIP (a brand-new kind, name,
 capability and config `MODULES` has never declared) is still in-tree work, per hard stop 3.
 
-**`ClassifierSweep` — trace and window grain.** The fitting tier: behaviour drift, SOP conformance,
+**`ClassifierSweep` — trace and window grain.** The fitting tier:
 duration drift, cost drift, tool errors. These carry `detectorFactory == null` and no
 `BuiltInDetector` at all, because their unit of judgement is larger than a span and their state is
 per-project and fitted rather than shipped. Previously this tier had no interface: `ClassifierWorker`
@@ -125,6 +126,12 @@ public record SweepOutcome(int scanned, int fired) {}
 
 `kinds()` is a set rather than a single value because one sweep legitimately serves a family:
 `MetricDriftSweep` runs both `duration_drift` and `cost_drift` from one bean over one baseline store.
+
+**A sweep applies the classifier's call-site list itself.** `ClassifierRow.callSiteIds()` is the
+list, null for every call site, and `ClassifierRow.runsOn` is the test. The worker filters what an
+observation- or turn-grain detector is sent, but it cannot see inside a sweep, so a sweep that ignores
+the list runs on every call site and nothing fails. `MetricDriftSweep` filters its samples; `tool_error`
+does not read the list yet, so `ClassifierService#setCallSiteIds` refuses one for it.
 
 `SweepContext` carries the two records every sweep already took as its two arguments and nothing
 else — no repositories, no catalog, no worker, no clock. An implementation injects the collaborators
@@ -175,22 +182,10 @@ ambiguous.
 ## 4. Packaging
 
 For a paid module: one Maven module per feature, package
-`ai.tessary.paid.*`, parent `ai.tessary.paid:tessary-paid`. Three same-commit co-updates a NEW paid
-module drags with it, each enforced by a script rather than by review:
-
-- The overlay's own dev compose fragment must mount both the new module's `pom.xml` and its `src`
-  directory (`scripts/check-module-hygiene.sh`).
-  The reason is build parity: without the mount the `paid` profile deactivates inside the container
-  and the identical `mvn` command builds a different module set there than on the host. The gate
-  greps for the short bind syntax (trailing colons), so do not convert these
-  mounts to long syntax without changing that script in the same commit. The paths stay
-  repo-root-relative even though the file is one directory down: Compose resolves an override
-  file's relative paths against the project directory, not the fragment's own.
-- A new dependency is pinned with a literal `<version>` element, never a `<*.version>` property —
-  properties are allowed only in `backend/pom.xml`, an open pom (same script). A dependency the Spring
-  Boot BOM manages takes no version at all.
-- Every pom at depth ≥ 2 in the overlay declares `<groupId>ai.tessary.paid</groupId>`
-  (`scripts/check-open-boundary.sh` check 0).
+`ai.tessary.paid.*`, parent `ai.tessary.paid:tessary-paid`. A new dependency is pinned with a
+literal `<version>` element, never a `<*.version>` property — properties are allowed only in
+`backend/pom.xml` (`scripts/check-module-hygiene.sh`). A dependency the Spring Boot BOM manages
+takes no version at all.
 
 For a third-party extension: any group and any package. Nothing in the platform constrains it.
 
@@ -258,99 +253,17 @@ So there are two distinct endings and only one of them writes:
 | This edition does not ship the classifier | the flag/capability layer; `withheldBuiltInKeys` | nothing |
 | The classifier left the catalog | `retireDroppedBuiltIns` | permanent disable |
 
-`ClassifierSweepRegistry` never touches the catalog, and `ClassifierSweepRegistryTest` pins it.
+`ClassifierSweepRegistry` never touches the catalog. `SweepCatalogCoverageTest` pins the other side:
+every fitting-tier catalog kind has exactly one sweep.
 
-**An absent adapter degrades; it does not fail to wire.** `CauseResolver` and `ClassifierDebugContributor`
-are injected as `ObjectProvider<T>` rather than `List<T>`, because Spring treats a required collection
-parameter with no candidates as an *unsatisfied dependency* rather than an empty list. Two of the ports
-have exactly one implementation each, both inside the paid package, so the `List<T>` shape
-would have turned that extraction into a boot failure with no compile error, no import to sever and
-nothing for the boundary grep to see. `TriageSource` stays `List<T>` because its own built-in
-implementation, `BehaviorTriageSource`, never left the open package. `AbsentAdapterContextTest` holds it.
+**An absent adapter degrades; it does not fail to wire.** Spring treats a required collection
+parameter with no candidates as an *unsatisfied dependency* rather than an empty list. `TriageSource`
+is safe as a `List<T>` because its own built-in implementation, `BehaviorTriageSource`, never left the
+open package. `ContextLoadsTest` boots the open edition, which ships no adapter, and holds it.
 
 ---
 
-## 8. The paper port of the three paid classifiers
-
-Frustration is deliberately near-absent from this section: it is a paid CAPABILITY
-(`Capability.FRUSTRATION` joined `CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`) whose paid
-CODE is exactly ONE bean — the frustration module's own
-`FrustrationAutoConfiguration`, registering `frustration_detection` with `DetectionTableRegistry` (§2)
-and nothing else. It rides the always-open, generic `EncoderDetector`, the same detector class other
-encoder-tier signals share, and what is withheld without that one bean is the write path (the
-`writesDetections` gate), not the trained artifact or the detector class. This section is about
-classifiers with an actual Java DETECTOR extraction, and there are three of those.
-
-**Behaviour drift** (package `ai.tessary.paid.classifier.behavior`):
-
-| Port | Implementation |
-|---|---|
-| `ClassifierSweep` for `behavior_drift` (TRACE) | `BehaviorDriftSweep` |
-| `CauseResolver` | `BehaviorDriftCauseResolver` |
-| `ClassifierDebugContributor` | `BehaviorProfileDebugContributor` |
-| `TrajectoryDetector` (its own, private) | `BehaviorDriftDetector` |
-| `CaseSource` | `BehaviorDriftSource` (moved from the open `cases/` package with the classifier, for parity with `ConformanceCaseSource`) |
-
-`GET /behavior/profiles` is served here too, but no longer through one of the six ports above:
-`ProfileSource` and its one caller, `BehaviorProfileController`, both moved into this module,
-so `BehaviorProfileSource` now implements a port-shaped interface that is purely internal wiring
-between two classes in the same module, not a cross-boundary extension point.
-
-**Groundedness** (package `ai.tessary.paid.classifier.groundedness`):
-
-| Port | Implementation |
-|---|---|
-| `DetectorSupplier` for `groundedness` (OBSERVATION) | `GroundednessAutoConfiguration`'s `groundednessDetectorSupplier` bean, building `GroundednessDetector` |
-
-**Groundedness is a PARTIAL extraction, the first one this page has, and worth reading as its own
-shape rather than reusing behaviour drift's or conformance's framing.** Only the compute moves —
-`GroundednessDetector` and its `VerifiableClaims` deterministic pre-filter. The substrate-facing port,
-`GroundingEvidenceReads` (`classifier/detector/`), STAYS OPEN: it is implemented by the open
-`SubstrateReadRepository`, and moving the interface would force that open class to implement a paid
-type, which the `enforce-open-to-paid-direction` enforcer bans outright. So the catalog entry stays
-in-tree (metadata only, `detectorFactory: null`), the port stays open, and only the detector object
-itself crosses the boundary — through `DetectorSupplier`, §2's new seam, not
-`ClassifierSweepRegistry`, which only covers trace/window-grain `ClassifierSweep` and never touches
-observation-grain dispatch.
-
-**SOP conformance** (package `ai.tessary.paid.classifier.conformance`, with `intent/`, `scoring/` and `store/` subpackages):
-
-| Port | Implementation |
-|---|---|
-| `ClassifierSweep` for `sop_conformance` (WINDOW) | `ConformanceSweep` |
-| `TriageSource`, `@Order(10)` | `ConformanceTriageSource` |
-| `CaseSource` | `ConformanceCaseSource` (moved from the open `cases/` package with the classifier) |
-| `SopCompiler` (open, `ai.tessary.sopcompile`; its caller sits in the paid conformance module, so the port has two paid ends and open ground between them) | `compile/ConformanceCompileService` |
-| `FitReportSource` (paid) | `ConformanceRulebookService` |
-
-**The asymmetry that used to be worth copying, and no longer applies.** Conformance was once the only
-whole-directory extraction whose package could not move entirely, and the reason was the wire, not the
-feature: `ConformanceController`, `ConformanceDtos` and the `FitReportSource` port stayed in the open
-`ai.tessary.classifier.conformance`, because the checked-in OpenAPI spec was one document
-generated from the open application context and a route behind the boundary was a route deleted from
-that document. A per-edition spec replaced that rule, and all three were later rejoined with
-the rest of the classifier in the paid module — today there is no open/paid wire split left
-in conformance. `FindingController` (renamed from `BehaviorController`) and its records were
-already in `classifier/finding/`, which does not move, so behaviour drift never needed this asymmetry.
-Groundedness needed no wire asymmetry either (it opens no route of its own — the classifier read
-endpoints are the shared, generic classifier surface — but it needed the SUBSTRATE-port asymmetry
-above instead). An extension author with a wire surface today has no analogous split to copy from this
-codebase.
-
-Behaviour drift and conformance are complete: every attachment is through a port, no open
-class names either implementation, and each extraction was a `git mv` plus a package rename. Behaviour
-drift is the worked example for a whole-classifier move — a module pom, an `@AutoConfiguration` with a
-`@ComponentScan`, and one line in
-`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`, exactly the shape
-§4 describes for a third-party author. Groundedness is the worked example for a PARTIAL move — an
-`@AutoConfiguration` with two `@Bean` methods (the `DetectorSupplier` and a
-`DetectionTable` registration) instead of a `@ComponentScan`, because its contributions are plain
-factory objects rather than scanned stereotypes. What each still drags is
-**text**, not code, and the boundary check is a grep rather than a compiler — see §11.
-
----
-
-## 9. Writing an extension: the worked path
+## 8. Writing an extension: the worked path
 
 **What you write.** One jar, `my-classifier.jar`, in your own group and package:
 
@@ -365,14 +278,13 @@ factory objects rather than scanned stereotypes. What each still drags is
    seam, so a `DetectorSupplier` for a kind of your own registers and is never dispatched to. A brand
    new kind needs a catalog entry, which is hard stop 3 below either way — see §2.)
 4. Optionally, adapters on the read-side ports for what the surfaces show: `TriageSource`
-   (`@Order`-ranked), `CauseResolver`, `ClassifierDebugContributor`, `CaseSource`.
+   (`@Order`-ranked) and `CaseSource`.
 5. If your classifier writes per-span/per-trace detections it needs a table to put them in:
    own your own `SpringLiquibase` bean, `@DependsOn(LiquibaseConfig.BEAN_NAME)`
    so it runs strictly after the open one, applying a changelog that creates your table — then
    register a `@Bean DetectionTable(yourKind, yourTable, Grain.SPAN|TRACE)` (§2) so
    `DetectionTableRegistry` includes it in the stitched union the writer, the retention sweep and
-   every reader use. `PaidDbAutoConfiguration` and `FrustrationAutoConfiguration`
-   are the in-tree worked examples of both halves.
+   every reader use. `PaidDbAutoConfiguration` is the in-tree worked example of both halves.
 
 **Where it runs.** On the classpath of **your own** backend — see §1. Build the platform, then launch
 it with your jar alongside:
@@ -396,36 +308,34 @@ not loaded": Boot reads the imports file, the component scan reaches your class,
 in condition evaluation with `NoClassDefFoundError` before the application starts. Emit it from your own build, as the
 second command above does, or shade your dependencies into the jar.
 
-**What works end to end today, precisely.** The read side is real: a third-party `TriageSource`,
-`CauseResolver`, `ClassifierDebugContributor` or `CaseSource` is discovered by `ObjectProvider`
-injection and feeds the existing findings, triage, debug and case surfaces with no further
-prerequisite. `/behavior/profiles` is not one of these — it is served from inside
-the behaviour-drift module by a port that module owns itself, not one an out-of-tree jar can
-implement (§2, §8). On the write side the **dispatch** is real — `ClassifierSweepRegistry`
+**What works end to end today, precisely.** The read side is real: a third-party `TriageSource`
+or `CaseSource` is discovered by Spring injection and feeds the existing findings, triage and case
+surfaces with no further prerequisite. `/behavior/profiles` is not one of these — it is served from
+inside the behaviour-drift module by a port that module owns itself, not one an out-of-tree jar can
+implement (§2). On the write side the **dispatch** is real — `ClassifierSweepRegistry`
 discovers your sweep, and `ClassifierWorker` runs the kind it claims on the worker's cadence with the
 lease and dead-letter budget — but in the builds this repo produces today **there is no kind left for
 an out-of-tree sweep to claim**, so nothing of yours actually runs yet. Two closed doors, and it is
 worth knowing which one you are at:
 
-**A third door is narrower but genuinely usable today: `DetectorSupplier` for an
-existing observation/turn-grain kind whose in-tree manifest entry has `detectorFactory: null`.**
-`groundedness` is that kind in a self-hosted OPEN build — the paid groundedness module is not on an
-open classpath, so nothing claims it, and a self-hoster's own `@Component DetectorSupplier` for
-`Kind.GROUNDEDNESS` is discovered and dispatched exactly like our own paid implementation would be.
-This is real, working substitution, not a read-side adapter. It does not generalise past that one
-kind, though: every OTHER observation/turn-grain kind (`frustration`, `secret_leak`,
-`malformed_output`) already has an in-tree `detectorFactory`, and a `DetectorSupplier` claiming one of
-those collides with it — the same fail-loud `IllegalStateException` the sweep story hits, not a silent
-override. And on a build that DOES carry the paid groundedness module, a self-hoster's own
-`DetectorSupplier` for `groundedness` collides with OUR implementation the same way. So the honest
-statement is: one kind, one edition, until a future manifest entry ships with `detectorFactory: null`
-on purpose for extensibility rather than as a byproduct of one detector's own extraction.
+**A third door exists but is currently closed: `DetectorSupplier` for an existing
+observation/turn-grain kind whose in-tree manifest entry has `detectorFactory: null`.** Until
+2026-09-21 `groundedness` was that kind in a self-hosted OPEN build — the paid groundedness module was
+not on an open classpath, so nothing claimed it, and a self-hoster's own `@Component
+DetectorSupplier` for `Kind.GROUNDEDNESS` was discovered and dispatched exactly like the paid
+implementation. With the detector now in-tree, every observation/turn-grain kind already has an
+in-tree detector (`groundedness`, `secret_leak` and `malformed_output` through their
+`detectorFactory`, `frustration` through its own in-tree `DetectorSupplier`), and a
+`DetectorSupplier` claiming one of them collides with it — the same fail-loud
+`IllegalStateException` the sweep story hits, not a silent override. So the honest statement is: no
+kind today, until a future manifest entry ships with `detectorFactory: null` on purpose for
+extensibility rather than as a byproduct of one detector's extraction.
 
-- **The five fitting-tier kinds are already taken.** `behavior_drift` (TRACE) and `duration_drift`,
-  `cost_drift`, `tool_error`, `sop_conformance` (WINDOW) are the whole of what
+- **The three fitting-tier kinds are already taken.** `duration_drift`, `cost_drift` and
+  `tool_error` (WINDOW) are the whole of what
   `BuiltInClassifierCatalog` declares at trace or window grain, and each is claimed by an in-tree
-  `@Component` sweep — `BehaviorDriftSweep`, `MetricDriftSweep` (two kinds), `ToolErrorSweep`,
-  `ConformanceSweep`. Claiming one of them a second time is the duplicate-kind ending in §6: the
+  `@Component` sweep — `MetricDriftSweep` (two kinds) and `ToolErrorSweep`. Claiming one of them a
+  second time is the duplicate-kind ending in §6: the
   registry's `toUnmodifiableMap` throws and **the application context refuses to start**. That is the
   designed answer, not a bug, but it means "drop in a sweep for an existing kind" bricks the backend
   on first boot rather than overriding anything.
@@ -435,18 +345,10 @@ on purpose for extensibility rather than as a byproduct of one detector's own ex
   `secret_leak`, registers successfully and is never dispatched. Giving a new kind trace or window
   grain means a catalog manifest entry, which is hard stop 3 below.
 
-**What has to land first**, and it is somebody's issue rather than a mystery: behaviour drift and
-SOP conformance need to move out of `backend/analysis`, which frees `behavior_drift` and
-`sop_conformance` for an out-of-tree sweep in the open build. That alone is not enough — both sit in
-`CapabilityService.UNAVAILABLE_IN_OPEN_EDITION`, a compile-time `EnumSet` whose keys are never seeded
-and never enqueued (`withheldBuiltInKeys`, `enqueueEnabled`), so the set has to become edition-aware
-at the same time. Until then the seam is proven by the in-tree sweeps that ride it, and by
-`ClassifierSweepRegistryTest`, and not by a third-party one.
-
 **Three hard stops bound an extension, and each is somebody else's issue.** They are tracked on
 the roadmap with owners; naming them here is the honest version of the promise:
 
-1. **`Capability` is a closed enum** of 17 constants in the open `product` module, and a manifest's
+1. **`Capability` is a closed enum** of 15 constants in the open `product` module, and a manifest's
    `capability` field is mandatory. An outsider cannot declare a new capability, so an extension
    classifier cannot have a switch of its own.
 2. **`eval_case.detector` is a CHECK constraint over five literal keys** (`0000-baseline.sql:536`). An
@@ -458,13 +360,14 @@ the roadmap with owners; naming them here is the honest version of the promise:
    in full for a BRAND-NEW entry** — a kind, name, capability and config `MODULES` has never
    declared is still catalog-authorship, and still closed, for exactly the reason above. **What it no
    longer blocks is supplying the DETECTOR for a kind the in-tree manifest already claims** —
-   groundedness is exactly this case: its catalog entry is unchanged and in-tree, only the object that
-   scores each observation is external, through `DetectorSupplier` (§2). Say both halves, because a
+   groundedness was exactly this case until its detector moved in-tree: its catalog entry was
+   unchanged and in-tree, only the object that scored each observation was external, through
+   `DetectorSupplier` (§2). Say both halves, because a
    reader who only reads "hard stop 3" would otherwise conclude the whole door is gone; it is ajar for
    one specific, narrower thing.
 
 What each of those blocks: a new capability, a new case key, a new catalog module. What none of them
-blocks: feeding every read-side surface — findings, triage, profiles, the debug rail — which works
+blocks: feeding the read-side surfaces — findings, triage and cases — which works
 today; and supplying the detector object for an EXISTING observation/turn-grain
 kind, which works too. Running a sweep of your own is blocked by neither of them and by the two doors
 above instead: every trace- and window-grain kind is claimed, and an unclaimed kind needs the catalog
@@ -475,18 +378,7 @@ that already has a home.
 
 ---
 
-## 10. Configuration
-
-**Paid classifier configuration stays bound in the open `core` module, deliberately.**
-`ClassifierProperties` carries the whole `tessary.classifier.conformance.*` block — encoder mode,
-encoder concurrency, max turns per sweep, minimum confirmations — and `@ConfigurationPropertiesScan`
-binds it at boot in the open edition whether or not the classifier exists.
-
-The alternative is to move those keys into a paid `@ConfigurationProperties` class, which would make
-every existing deployment's `tessary.classifier.conformance.*` value an unbound property the moment the
-open image shipped. Recorded as a deliberate exception: unused keys in the open image are inert, and
-silently unbound keys in a hosted one are not. Revisit once the two-edition build makes
-"which image binds which keys" a question with a mechanism behind it.
+## 9. Configuration
 
 An extension binds its own configuration however it likes, or reads the classifier row's
 `config_json` — which is the per-project, per-tenant knob and the one an operator can change without a
@@ -494,55 +386,21 @@ deploy.
 
 ---
 
-## 11. When a package moves
+## 10. When a package moves
 
-The check that actually enforces the boundary is `scripts/check-open-boundary.sh` rule 1, and it is a
-**text grep** over every file under `backend/*/src` — main, test and resources — for the package
-prefixes it derives from the overlay's own layout. It is self-arming: it proves nothing until paid
-source exists at a new prefix, and then it fires on everything at once.
+Nothing in this tree greps for another edition's package names, so a reference that points at a
+moved class is caught by a person reading the file, not by a gate. Two consequences the compiler will
+not warn you about:
 
-Two consequences the compiler will not warn you about:
-
-- **Javadoc counts, and only in one direction.** A fully-qualified paid class name inside a
-  `{@code ...}` block is a boundary violation to that grep and invisible to everything else.
-  `BuiltInDetector` carried two such names and they were rewritten to name the seam instead.
-  The rule that follows: **the seam does not name its implementations, in prose or in code.**
-
-  The direction matters, and this was proven in practice. The grep arms on the packages the OVERLAY holds, so it
-  catches a reference written as the NEW name and never sees one written as the OLD name. Every
-  `ai.tessary.classifier.conformance.*` string left in open prose survived that extraction
-  silently, pointing at a package that no longer exists, with the build green. `BuiltInDetector`'s own
-  javadoc had claimed the grep would catch exactly that case; it now says the opposite, because a prose
-  reference to a moved package is caught by nothing but a person reading the file.
+- **Javadoc counts.** A fully-qualified class name inside a `{@code ...}` block goes stale silently
+  when the class moves. `BuiltInDetector` carried two such names and they were rewritten to name the
+  seam instead. The rule that follows: **the seam does not name its implementations, in prose or in
+  code.**
 - **FQN-pinned ArchUnit rules are deleted by the extraction that moves their package, not
   re-pointed.** `ArchitectureRulesTest` pins class names as strings, and `backend/app` scans
   `ai.tessary` only, so a rule pointing at a moved class matches nothing and passes green
-  guarding nothing. `every_pinned_class_name_resolves` exists because that already happened once. Its
-  job transfers to the boundary grep, which arms itself on the new prefix.
+  guarding nothing. `every_pinned_class_name_resolves` exists because that already happened once.
 
-Two CI jobs also read classifier source by path or by regex over source text and will go red with no
-Java error if a refactor moves what they read: `scripts/check-classifier-quality-doc.sh` opens
-`BuiltInClassifierCatalog.java` by literal path and pulls thresholds out of its config string
-literals, and `scripts/check-conformance-parity.sh` pins the test resource
-`backend/analysis/src/test/resources/conformance_parity.json` to the Java port at
-`ai.tessary.paid.classifier.conformance`.
-
-That fixture is worth reading as a worked example, because it has **five** consumers and moving it
-touches every one: the Python generator
-(`build_parity_fixture.py`, which walks up to the repo
-root to find the output path — it now lives in the paid overlay while the fixture stayed open,
-so an open artifact three open consumers read is now regenerated only by paid code), the parity gate above, `scripts/check-classify-service.sh` (which
-reads `encoder_smoke.checkpoint` to validate the embedder registry, and IS in `scripts/check.sh`, so
-missing it turns a local `task check` red rather than only CI), and two Node tests in
-`classify-service/`. Only the first two are obvious from the Java side. A generated artifact that
-lives under a moving directory is not a file move; it is a small graph.
-
-**And three of those five are OPEN**, which is why the fixture did NOT follow the Java port into
-the paid overlay. Moving it there kept every gate green — the enforcer sees no dependency,
-`check-open-boundary.sh` reads only `backend/*/src` and `frontend/` — while `task check` and two CI
-jobs went red in the public repo, because the export process deletes the directory those three open
-consumers were now reading from. A shared fixture belongs on the OPEN side of a boundary and is
-consumed across it; the paid module puts it on its own test classpath with a `<testResource>`, and
-`check-open-boundary.sh` rule 5 now fails any open service or check script that reads out of the
-overlay. Nothing in an open file may name a paid package either, the fixture body included — which
-is why its `comment` names no Java package at all.
+One CI job also reads classifier source by path and will go red with no Java error if a refactor
+moves what it reads: `scripts/check-classifier-quality-doc.sh` opens `BuiltInClassifierCatalog.java`
+by literal path and pulls thresholds out of its config string literals.

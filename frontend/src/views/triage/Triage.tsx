@@ -2,11 +2,15 @@
 /*
  * Triage — the front door: an inbox that wants to be empty.
  *
- * ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
- * nothing in this product is assigned, so ranking is magnitude then recency and
- * the server does it (`ix_eval_case_live_rank`). Muted cases and the week's
- * closures are a filter, not furniture. When nothing is open the serif all-clear
- * state renders instead, with a proof line built from real coverage counts.
+ * Two sections. Cases is ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
+ * nothing in this product is assigned, so ranking is magnitude then recency and the server does it
+ * (`ix_eval_case_live_rank`). Muted cases and the week's closures are a filter, not furniture. Findings
+ * below it holds what has not become a case yet (see `OpenFindings`).
+ *
+ * Until a case or a finding is open, the setup screen (traces → findings → cases) takes the Cases section and
+ * Findings is not drawn: two empty tables say less than the pipeline, which shows what is being watched. Once
+ * a finding is open with no case, Cases says "Nothing needs you." above the findings list, unless the
+ * empty-state ladder still has a step for the reader to take (no provider key, a stopped exporter).
  *
  * This reads `GET {base}/cases` — an indexed table read. The CUSUM replay that
  * decides what is degrading runs on a worker, never on this page load.
@@ -16,10 +20,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Case, Vitals } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
-import { Button, ErrorNote, PageHeader, TableSkeleton } from "../../ui";
-import { Dot, ListChassis, StateDot, causeLine, detectorLabel, magnitudePair, timeAgo } from "./bits";
+import { Button, ErrorNote, PageHeader, Section, TableSkeleton } from "../../ui";
+import { Dot, ListChassis, StateDot, causeLine, detectorLabel, timeAgo } from "./bits";
+import { usd } from "../../lib/usd";
 import { PipelineEmpty } from "./PipelineEmpty";
-import { resolveState } from "./emptyState";
+import { needsSetupScreen, resolveState } from "./emptyState";
+import { OpenFindings } from "./OpenFindings";
 import { useOnboarding } from "../onboarding/useOnboarding";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 
@@ -33,7 +39,6 @@ export function Triage() {
   const triageQ = useQuery({ queryKey: ["cases", api.base], queryFn: api.getTriage });
   // The pulse strip is deterministic vitals, never judged and never paged.
   const vitalsQ = useQuery({ queryKey: ["vitals", "triage", api.base], queryFn: () => api.getVitals(7) });
-  // Passive read (no poll): Triage is not the screen someone stares at while wiring an exporter.
   const onboarding = useOnboarding();
   /*
    * Whether the org holds a model provider key — the fact that separates "triage looked and found
@@ -59,14 +64,26 @@ export function Triage() {
   const resolved = triageQ.data?.recently_resolved ?? [];
   const shown = lens === "open" ? open : lens === "muted" ? muted : resolved;
 
-  const allClear = triageQ.data != null && open.length === 0;
   const openCase = (id: string) => navigate(`${basePath}/cases/${id}`);
+  const setup =
+    triageQ.data && lens === "open" && open.length === 0
+      ? resolveState(triageQ.data.watching, onboarding, basePath, {
+          // null until the read settles — see ProviderFacts for why that must not fire the modifier.
+          configured: modelSettingsQ.data?.configured_providers.length ?? null,
+          canConfigure: canAddProvider,
+        })
+      : null;
+  const showSetup = setup != null && needsSetupScreen(setup);
+  // Findings waits for something to list: a setup screen over a queue with no open finding stands alone.
+  const showFindings =
+    triageQ.isError || (triageQ.data != null && !(showSetup && (triageQ.data.watching.open_findings ?? 0) === 0));
 
   return (
     <>
       <div className="pt-9 px-10 pb-0">
-        <PageHeader
-          kicker="Triage"
+        <PageHeader title="Triage" />
+
+        <Section
           title="Cases"
           actions={
             <>
@@ -88,40 +105,33 @@ export function Triage() {
               </Button>
             </>
           }
-        />
+        >
+          {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
+          {triageQ.isError && <ErrorNote error={triageQ.error} />}
 
-        {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
-        {triageQ.isError && <ErrorNote error={triageQ.error} />}
+          {/* Which empty state it is, and where it sends the reader, is `resolveState`'s call; see its
+              header for why an empty queue is several states and not one. */}
+          {showSetup && <PipelineEmpty state={setup} />}
 
-        {/* One screen for every empty queue. Which of the four it is, and where it sends the reader,
-            is `resolveState`'s call — see its header for why an empty queue is four states and not
-            one, and why a stopped exporter is a modifier on this screen rather than a fifth. */}
-        {triageQ.data && lens === "open" && allClear && (
-          <PipelineEmpty
-            state={resolveState(triageQ.data.watching, onboarding, basePath, {
-              // null until the read settles — see ProviderFacts for why that must not fire the modifier.
-              configured: modelSettingsQ.data?.configured_providers.length ?? null,
-              canConfigure: canAddProvider,
-            })}
-          />
-        )}
+          {triageQ.data && !showSetup && (
+            <>
+              <ListChassis>
+                {shown.map((c) => (
+                  <CaseRow key={c.id} item={c} onOpen={openCase} />
+                ))}
+                {shown.length === 0 && <EmptyRow lens={lens} />}
+              </ListChassis>
 
-        {triageQ.data && !(lens === "open" && allClear) && (
-          <>
-            <ListChassis>
-              {shown.map((c) => (
-                <CaseRow key={c.id} item={c} onOpen={openCase} />
-              ))}
-              {shown.length === 0 && <EmptyRow lens={lens} />}
-            </ListChassis>
+              {lens === "open" && (
+                <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
+                  Resolved 7d{" "}·{" "}{resolved.length}{" "}·{" "}Muted{" "}·{" "}{muted.length}
+                </p>
+              )}
+            </>
+          )}
+        </Section>
 
-            {lens === "open" && (
-              <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
-                Resolved 7d{" "}·{" "}{resolved.length}{" "}·{" "}Muted{" "}·{" "}{muted.length}
-              </p>
-            )}
-          </>
-        )}
+        {showFindings && <OpenFindings basePath={basePath} />}
       </div>
 
       {/* Pulse strip — renders in BOTH states. */}
@@ -147,7 +157,6 @@ function EmptyRow({ lens }: { lens: Lens }) {
 }
 
 function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void }) {
-  const pair = magnitudePair(item);
   const resolved = item.state === "resolved";
   const cause = causeLine(item);
 
@@ -167,8 +176,7 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
             another — and it is the second thing scanned, not part of the first. */}
         {cause && (
           <span className="block truncate text-muted mt-0.75 text-small">
-            {cause.hedged && <span className="text-subtle">Likely: </span>}
-            {cause.text}
+            {cause}
           </span>
         )}
         <span className="flex items-center text-muted gap-2 mt-0.5 text-small">
@@ -185,27 +193,11 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
           <span>{resolved ? `resolved ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
         </span>
       </span>
-
-      {/* Magnitude only where the detector actually moved a rate; otherwise the
-          row stays quiet rather than printing a number that means something else. */}
-      {pair && (
-        <span
-          className="font-mono text-fg text-body"
-          style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
-        >
-          {pair}
-        </span>
-      )}
     </button>
   );
 }
 
 /* ------------------------------------------------------------ pulse strip */
-
-function usd(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
-}
 
 function pct(value: number | null | undefined): string {
   if (value == null) return "—";

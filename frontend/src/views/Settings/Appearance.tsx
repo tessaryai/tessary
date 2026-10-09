@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "../../ui/cn";
-import { Toggle } from "../../ui/Toggle";
 import { useDensity } from "../../ui/density";
 import type { Density } from "../../ui/density";
 
@@ -12,28 +10,8 @@ import type { Density } from "../../ui/density";
  *
  * Theme is NOT a preference — the app is dark only (2026-07 redesign); the
  * toggle was removed with the light theme. Density is wired to its live context
- * so changes apply app-wide immediately. Mono numerals and reduce motion are
- * stubbed to localStorage for now — see the TODO(backend) notes.
+ * so changes apply app-wide immediately.
  */
-
-const MONO_KEY = "tessary.prefs.monoNumerals";
-const REDUCE_MOTION_KEY = "tessary.prefs.reduceMotion";
-
-function readBoolPref(key: string): boolean {
-  try {
-    return localStorage.getItem(key) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function writeBoolPref(key: string, value: boolean) {
-  try {
-    localStorage.setItem(key, String(value));
-  } catch {
-    // ignore persistence failures (private mode, disabled storage)
-  }
-}
 
 /** Compact two-option segmented control, token-driven to match the design. */
 function Segmented<T extends string>({
@@ -107,19 +85,6 @@ function Row({
 export function AppearanceControls() {
   const { density, setDensity } = useDensity();
 
-  // TODO(backend): no /me/preferences API yet — persist locally for now.
-  const [monoNumerals, setMonoNumerals] = useState(() => readBoolPref(MONO_KEY));
-  const [reduceMotion, setReduceMotion] = useState(() => readBoolPref(REDUCE_MOTION_KEY));
-
-  const setMono = (next: boolean) => {
-    setMonoNumerals(next);
-    writeBoolPref(MONO_KEY, next);
-  };
-  const setMotion = (next: boolean) => {
-    setReduceMotion(next);
-    writeBoolPref(REDUCE_MOTION_KEY, next);
-  };
-
   return (
     <div className="flex flex-col">
         <Row
@@ -136,16 +101,6 @@ export function AppearanceControls() {
               ]}
             />
           }
-        />
-        <Row
-          title="Mono numerals"
-          description="Align numeric table columns with tabular figures."
-          control={<Toggle label="Mono numerals" checked={monoNumerals} onChange={setMono} />}
-        />
-        <Row
-          title="Reduce motion"
-          description="Disable the running-state pulse and overlay transitions."
-          control={<Toggle label="Reduce motion" checked={reduceMotion} onChange={setMotion} />}
           last
         />
     </div>

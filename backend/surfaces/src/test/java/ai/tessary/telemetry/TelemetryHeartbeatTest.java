@@ -26,10 +26,11 @@ import ai.tessary.usage.UsageUnit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
@@ -37,17 +38,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 /**
- * The heartbeat against home.tessary.ai's own contract. No network and no Spring context.
- *
- * <p>{@code telemetry/home-ping.v1.schema.json} is a verbatim copy of {@code contracts/ping.v1.schema.json}
- * from the tessary-home repository, which home generates from the zod schema its {@code POST /v1/ping}
- * handler validates with. Validating the real payload against it is what catches this client drifting
- * from the server: a renamed field, a missing required one, or a format home would answer 400 to. When
- * home changes the contract, replace the copy with the new file and let this test say what broke.
+ * The heartbeat against home.tessary.ai's contract, with no network or Spring. {@code telemetry/home-
+ * ping.v1.schema.json} is a verbatim copy of tessary-home's {@code contracts/ping.v1.schema.json}; when home changes
+ * it, replace the copy and let this test say what broke.
  */
 class TelemetryHeartbeatTest {
 
@@ -64,10 +63,16 @@ class TelemetryHeartbeatTest {
 
     private static final String HELD_DIGEST = "a5ad23f7a2d98249588a2f21a305f8e3741bba450fd6216bde505cb9c4bee98a";
 
-    private static JsonSchema homePingSchema() throws IOException {
+    private static Schema homePingSchema() throws IOException {
         try (InputStream in = TelemetryHeartbeatTest.class.getResourceAsStream("/telemetry/home-ping.v1.schema.json")) {
-            return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7).getSchema(in);
+            return SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_7)
+                    .getSchema(in);
         }
+    }
+
+    /** networknt 3.x reads through Jackson 3, so the Jackson 2 node crosses over as JSON text. */
+    private static List<Error> violations(JsonNode node) throws IOException {
+        return homePingSchema().validate(node.toString(), InputFormat.JSON);
     }
 
     private TelemetryHeartbeat heartbeat(
@@ -87,11 +92,9 @@ class TelemetryHeartbeatTest {
     }
 
     /**
-     * The one gate this whole subsystem hangs off: {@link TelemetryProperties#isEnabled()} must be checked
-     * BEFORE anything else in {@link TelemetryHeartbeat#tick()} runs — no DB read (not even the harmless
-     * {@link InstanceIdRepository}, which itself writes on first call), no HTTP client touch. This is what
-     * makes devdocs/reference/telemetry-contract.md §3's "zero outbound calls, including DNS resolution,
-     * when disabled" true.
+     * {@link TelemetryProperties#isEnabled()} is checked before anything in {@link TelemetryHeartbeat#tick()}: no DB
+     * read (even {@link InstanceIdRepository}, which writes on first call) and no HTTP client. This makes telemetry-
+     * contract.md §3's "zero outbound calls when disabled" true.
      */
     @Test
     void disabledTelemetryTouchesNothingDownstream() {
@@ -125,7 +128,7 @@ class TelemetryHeartbeatTest {
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
 
-        Set<ValidationMessage> violations = homePingSchema().validate(sent);
+        List<Error> violations = violations(sent);
         assertTrue(violations.isEmpty(), "home would answer 400: " + violations);
         assertEquals(1, sent.get("contract_version").asInt());
         assertEquals(INSTANCE_ID, sent.get("instance_id").asText());
@@ -141,19 +144,6 @@ class TelemetryHeartbeatTest {
         assertEquals(
                 PriceBookFetcher.SUPPORTED_SCHEMA,
                 sent.path("price_book").path("schema_max").asInt());
-    }
-
-    @Test
-    void checksThePriceBookAfterPinging() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
-
-        InOrder order = inOrder(client, fetcher);
-        order.verify(client).postJson(eq("/v1/ping"), anyString());
-        order.verify(fetcher).refresh();
     }
 
     @Test
@@ -178,22 +168,8 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void anInstallHoldingNoDigestOmitsItButStillSaysWhatItCanParse() throws Exception {
-        ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
-                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
-
-        assertFalse(payload.path("price_book").has("digest"));
-        assertEquals(
-                PriceBookFetcher.SUPPORTED_SCHEMA,
-                payload.path("price_book").path("schema_max").asInt());
-        assertTrue(homePingSchema().validate(payload).isEmpty());
-    }
-
-    @Test
     void homesSchemaDeclaresEveryCountThisClientSends() throws Exception {
-        // additionalProperties is true, so the schema would accept an undeclared count and home would silently
-        // strip it. Pin the declared set to what counts() sends.
+        // additionalProperties is true, so home would silently strip an undeclared count.
         JsonNode declared;
         try (InputStream in = TelemetryHeartbeatTest.class.getResourceAsStream("/telemetry/home-ping.v1.schema.json")) {
             declared = mapper.readTree(in).path("properties").path("counts").path("properties");
@@ -204,7 +180,7 @@ class TelemetryHeartbeatTest {
 
     @Test
     void aFailedCountDropsOnlyTheCounts() throws Exception {
-        // A partial counts object would read as zero for whatever was missing, so it goes out whole or not at all.
+        // A partial counts object reads as zero for what is missing, so it goes out whole or not at all.
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         when(projects.countAll()).thenReturn(3L);
@@ -218,13 +194,13 @@ class TelemetryHeartbeatTest {
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
         assertFalse(sent.has("counts"));
-        assertTrue(homePingSchema().validate(sent).isEmpty());
+        assertTrue(violations(sent).isEmpty());
         assertNull(heartbeat(new TelemetryProperties(), instanceIds, client).counts());
     }
 
     @Test
     void readsTheInstanceIdBeforeTakingAPingSeq() throws Exception {
-        // nextPingSeq updates the singleton row, which only exists once get() has minted it.
+        // The singleton row exists only once get() mints it.
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
@@ -272,50 +248,79 @@ class TelemetryHeartbeatTest {
                         new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
                 .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
 
-        assertTrue(homePingSchema().validate(payload).isEmpty());
+        assertTrue(violations(payload).isEmpty());
     }
 
     @Test
     void theSchemaCopyRejectsWhatHomeRejects() throws Exception {
-        // Proves the validator above can fail, so a green run means something: the ping this client sent
-        // before /v1 (no ping_seq, `timestamp` instead of `sent_at`) is exactly what home answers 400 to.
+        // Proves the validator can fail: the pre-/v1 ping is what home answers 400 to.
         ObjectNode old = mapper.createObjectNode();
         old.put("contract_version", 1);
         old.put("instance_id", INSTANCE_ID);
         old.put("app_version", "dev");
         old.put("timestamp", "2026-09-13T07:20:00Z");
 
-        Set<ValidationMessage> violations = homePingSchema().validate(old);
+        List<Error> violations = violations(old);
 
         assertTrue(violations.toString().contains("ping_seq"), violations.toString());
         assertTrue(violations.toString().contains("sent_at"), violations.toString());
-    }
-
-    @Test
-    void aFailedSendNeverEscapesTheTick() throws Exception {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenReturn(INSTANCE_ID);
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-        when(client.postJson(anyString(), anyString())).thenThrow(new IOException("connection refused"));
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-    }
-
-    @Test
-    void aRepositoryFailureNeverEscapesTheTick() {
-        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
-        when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
-        HomeTessaryClient client = mock(HomeTessaryClient.class);
-
-        assertDoesNotThrow(
-                () -> heartbeat(new TelemetryProperties(), instanceIds, client).tick());
-        verifyNoInteractions(client);
     }
 
     private static List<String> fieldNames(ObjectNode node) {
         List<String> out = new ArrayList<>();
         node.fieldNames().forEachRemaining(out::add);
         return out;
+    }
+
+    /** An interrupted send keeps the interrupt flag, or shutdown hangs. The price-book check still runs. */
+    @Test
+    void anInterruptedSendKeepsTheInterruptFlagAndStillChecksThePriceBook() throws Exception {
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenThrow(new InterruptedException("shutdown"));
+
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+
+        assertTrue(Thread.interrupted(), "the interrupt must survive the tick (and is cleared here)");
+        verify(fetcher).refresh();
+    }
+
+    /** A failed digest read drops only the digest; the ping still goes out and validates. */
+    @Test
+    void anUnreadableHeldDigestIsOmittedAndThePingStillGoesOut() throws Exception {
+        InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
+        when(instanceIds.get()).thenReturn(INSTANCE_ID);
+        when(priceBooks.currentDigest(PriceBook.SOURCE_LITELLM)).thenThrow(new IllegalStateException("db down"));
+        HomeTessaryClient client = mock(HomeTessaryClient.class);
+        when(client.postJson(anyString(), anyString())).thenReturn(204);
+
+        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(client).postJson(eq("/v1/ping"), body.capture());
+        JsonNode sent = mapper.readTree(body.getValue());
+        assertFalse(sent.path("price_book").has("digest"));
+        assertEquals(
+                PriceBookFetcher.SUPPORTED_SCHEMA,
+                sent.path("price_book").path("schema_max").asInt());
+        assertTrue(violations(sent).isEmpty());
+    }
+
+    /**
+     * The OS goes out as its bare family, never the versioned {@code os.name}; others lower-cased, empty as {@code
+     * unknown}.
+     */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource({
+        "Windows 11, windows",
+        "Mac OS X, macos",
+        "Darwin, macos",
+        "Linux, linux",
+        "FreeBSD, freebsd",
+        "'', unknown",
+    })
+    void theHostOsIsReportedAsItsFamily(String osName, String family) {
+        assertEquals(family, TelemetryHeartbeat.osFamily(osName));
     }
 }

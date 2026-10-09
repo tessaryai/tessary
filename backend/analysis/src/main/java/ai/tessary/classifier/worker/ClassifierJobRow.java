@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
  *     advances them. Monotonic + resumable; {@code null} sweeps from the beginning.
  * @param cursorId the {@code observation.id} tiebreaker of the keyset cursor, making it gap-free across a
  *     batch boundary that falls inside a group of observations sharing one {@code created_at}.
+ * @param pageRetries consecutive holds of the page past the cursor; see {@code ClassifierJobRepository#holdPage}
  */
 public record ClassifierJobRow(
         String id,
@@ -26,14 +27,14 @@ public record ClassifierJobRow(
         int attempts,
         @Nullable String lastError,
         String createdAt,
-        String updatedAt) {
+        String updatedAt,
+        int pageRetries) {
     public static final String PENDING = JobStatus.PENDING;
+
     public static final String CLAIMED = JobStatus.CLAIMED;
-    public static final String DONE = JobStatus.DONE;
-    public static final String FAILED = JobStatus.FAILED;
 
     /**
-     * Terminal past the attempt cap, distinct from {@link #FAILED} (still retryable). A signal job is
+     * Terminal past the attempt cap, distinct from {@link JobStatus#FAILED} (still retryable). A signal job is
      * resurrected by every heartbeat's re-pend, so its cap-crossing needs a state that routine re-pend
      * won't touch until the dead-letter cooldown elapses. Both exhaustion legs write it: a fast-failing
      * sweep via {@code ClassifierJobRepository#markFailed}, and a hung/crashed sweep whose lease expired via

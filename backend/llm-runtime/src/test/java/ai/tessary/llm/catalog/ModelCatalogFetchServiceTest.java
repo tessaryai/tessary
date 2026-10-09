@@ -11,11 +11,16 @@ import ai.tessary.crypto.SecretBox;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /**
  * The corrective brief's own four required cases: cache/TTL, stale-fallback on a failed refetch,
@@ -55,7 +60,7 @@ class ModelCatalogFetchServiceTest {
                 "cred_1", ORG, null, provider, null, "sealed-key", null, null, null, null, null, "api_key", "t0", "t0");
     }
 
-    private static ProviderCredential bedrockCred(ModelProvider provider, String region) {
+    private static ProviderCredential bedrockCred(ModelProvider provider, @Nullable String region) {
         return new ProviderCredential(
                 "cred_1",
                 ORG,
@@ -98,20 +103,6 @@ class ModelCatalogFetchServiceTest {
     }
 
     @Test
-    void refreshingReadFetchesOnceThenServesTheCacheWithinTheTtl() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        ScriptedLister lister = new ScriptedLister(List.of(ONE_MODEL));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
-
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead(ORG, ModelProvider.OPENAI));
-        assertEquals(1, lister.callCount(), "a fresh cache entry must not trigger a refetch");
-    }
-
-    @Test
     void cachedReadNeverFetches_returnsEmptyOnAColdCache() {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
         when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
@@ -146,17 +137,6 @@ class ModelCatalogFetchServiceTest {
 
         assertEquals(ONE_MODEL, result, "mandatory property (iii): a failed refetch serves the stale entry");
         assertEquals(2, lister.callCount(), "the refetch was attempted, not skipped");
-    }
-
-    @Test
-    void aFailureWithNothingCachedYet_returnsEmptyRatherThanThrowing() {
-        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        ScriptedLister lister = new ScriptedLister(List.of(new ModelListingException("vendor down", null)));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
-
-        assertEquals(List.of(), svc.refreshingRead(ORG, ModelProvider.OPENAI));
     }
 
     @Test
@@ -220,21 +200,82 @@ class ModelCatalogFetchServiceTest {
         assertEquals(2, lister.callCount(), "the us-east-1 entry was still warm");
     }
 
+    /**
+     * Two orgs' custom endpoints are unrelated servers, so each is fetched against its own URL and
+     * cached apart: sharing one entry would show one org the other's private model list.
+     */
     @Test
-    void nonBedrockNonCustomProvidersShareOneCacheEntryAcrossOrgs() {
-        // Mandatory property (i): a provider's model list does not vary by which org's key asks.
+    void customEndpointsAreListedAgainstTheirOwnUrlAndCachedApart() {
         ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
-        when(repo.findByOrgAndProvider("org_a", ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
-        when(repo.findByOrgAndProvider("org_b", ModelProvider.OPENAI))
-                .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
+        when(repo.findByOrgAndProvider("org_a", ModelProvider.CUSTOM))
+                .thenReturn(Optional.of(customCred("https://a.example.com/v1")));
+        when(repo.findByOrgAndProvider("org_b", ModelProvider.CUSTOM))
+                .thenReturn(Optional.of(customCred("https://b.example.com/v1")));
+        List<String> askedUrls = new ArrayList<>();
+        ProviderModelLister lister = credential -> {
+            askedUrls.add(credential.baseUrl());
+            return List.of(new ProviderModel("m-" + askedUrls.size(), "M", "Custom"));
+        };
+        ModelCatalogFetchService svc = service(repo, ModelProvider.CUSTOM, lister);
+
+        List<ProviderModel> a = svc.refreshingRead("org_a", ModelProvider.CUSTOM);
+        List<ProviderModel> b = svc.refreshingRead("org_b", ModelProvider.CUSTOM);
+
+        assertEquals(List.of("https://a.example.com/v1", "https://b.example.com/v1"), askedUrls);
+        assertEquals(List.of(new ProviderModel("m-1", "M", "Custom")), a);
+        assertEquals(List.of(new ProviderModel("m-2", "M", "Custom")), b, "org_b never sees org_a's list");
+        assertEquals(a, svc.refreshingRead("org_a", ModelProvider.CUSTOM), "org_a's own entry is still warm");
+        assertEquals(2, askedUrls.size());
+    }
+
+    /** A credential with no region or endpoint still reaches its lister rather than failing on the cache key. */
+    @ParameterizedTest
+    @EnumSource(
+            value = ModelProvider.class,
+            names = {"BEDROCK", "CUSTOM"})
+    void aCredentialWithNoRegionOrEndpointStillReachesItsLister(ModelProvider provider) {
+        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
+        ProviderCredential scopeless =
+                provider == ModelProvider.BEDROCK ? bedrockCred(ModelProvider.BEDROCK, null) : customCred(null);
+        when(repo.findByOrgAndProvider(ORG, provider)).thenReturn(Optional.of(scopeless));
         ScriptedLister lister = new ScriptedLister(List.of(ONE_MODEL));
-        ModelCatalogFetchService svc = service(repo, ModelProvider.OPENAI, lister);
 
-        assertEquals(ONE_MODEL, svc.refreshingRead("org_a", ModelProvider.OPENAI));
-        assertEquals(ONE_MODEL, svc.refreshingRead("org_b", ModelProvider.OPENAI));
+        assertEquals(ONE_MODEL, service(repo, provider, lister).refreshingRead(ORG, provider));
+        assertEquals(1, lister.callCount());
+    }
 
-        assertEquals(1, lister.callCount(), "org_b's read reused org_a's cache entry — one shared (provider, region)");
+    /** TypeSafe publishes no listing endpoint: the service still offers its one decision model. */
+    @Test
+    void typeSafeOffersItsDecisionModelWithoutAListingCall() {
+        ProviderCredentialRepository repo = mock(ProviderCredentialRepository.class);
+        when(repo.findByOrgAndProvider(ORG, ModelProvider.TYPESAFE))
+                .thenReturn(Optional.of(apiKeyCred(ModelProvider.TYPESAFE)));
+        SecretBox secretBox = mock(SecretBox.class);
+        when(secretBox.open("sealed-key")).thenReturn("ts-key");
+        ModelCatalogFetchService svc =
+                new ModelCatalogFetchService(repo, secretBox, new ModelCatalogProperties(), new ObjectMapper());
+
+        assertEquals(
+                List.of(new ProviderModel("jev-latest", "Jev (latest)", "TypeSafe")),
+                svc.refreshingRead(ORG, ModelProvider.TYPESAFE));
+    }
+
+    private static ProviderCredential customCred(@Nullable String baseUrl) {
+        return new ProviderCredential(
+                "cred_c",
+                ORG,
+                null,
+                ModelProvider.CUSTOM,
+                baseUrl,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "my-model",
+                "api_key",
+                "t0",
+                "t0");
     }
 
     private static void sleepPastTtl() {

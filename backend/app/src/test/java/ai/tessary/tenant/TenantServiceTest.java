@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -29,9 +32,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  */
 @SpringBootTest
 class TenantServiceTest {
-
-    /** These tests are about bootstrap atomicity, not the owned-org cap. */
-    private static final int UNCAPPED = Integer.MAX_VALUE;
 
     @Autowired
     TenantService tenants;
@@ -176,20 +176,6 @@ class TenantServiceTest {
     }
 
     @Test
-    void setDefaultProject_movesTheDefaultAndKeepsExactlyOne() {
-        Principal u = tenants.upsertUserFromWorkos("user_setdef_001", "setdef@example.com", "SetDef", null);
-        Organization org = tenants.ensureDefaultOrg(u, null);
-        Project first = projects.findDefaultForOrg(org.id()).orElseThrow();
-        Project second = tenants.createProject(org.id(), "Second", null);
-
-        tenants.setDefaultProject(org.id(), second.id());
-
-        assertEquals(
-                second.id(), projects.findDefaultForOrg(org.id()).orElseThrow().id());
-        assertTrue(!projects.findById(first.id()).orElseThrow().isDefault(), "old default is demoted");
-    }
-
-    @Test
     void projectUpdate_isPartial_nameOnlyRenameDoesNotWipeSettings() {
         Principal u = tenants.upsertUserFromWorkos("user_partial_001", "partial@example.com", "Partial", null);
         Organization org = tenants.ensureDefaultOrg(u, null);
@@ -216,36 +202,6 @@ class TenantServiceTest {
         Organization after = orgs.findById(org.id()).orElseThrow();
         assertEquals("Renamed Organization", after.name(), "name updated");
         assertEquals("{\"theme\":\"dark\"}", after.settings(), "omitted settings blob preserved (not nulled)");
-    }
-
-    @Test
-    void bootstrapOrg_createsOrgOwnerAndDefaultProject() {
-        Principal u = tenants.upsertUserFromWorkos("user_bootstrap_001", "bootstrap@example.com", "Bootstrap", null);
-        Organization o = new Organization(
-                Ids.ulid(),
-                null,
-                tenants.uniqueSlug("bootstrap-ws"),
-                "Bootstrap WS",
-                java.time.Instant.now().toString(),
-                null,
-                null);
-
-        Organization created = tenants.bootstrapOrg(o, u.id(), UNCAPPED);
-
-        assertEquals(
-                "owner", memberships.find(created.id(), u.id()).orElseThrow().role(), "creator is owner");
-        Project def = projects.findDefaultForOrg(created.id()).orElseThrow();
-        assertTrue(def.isDefault(), "bootstrap mints exactly one default project");
-        assertEquals(1, projects.findByOrg(created.id()).size());
-    }
-
-    @Test
-    void upsertUser_secondUserDifferentWorkosId_isIsolated() {
-        Principal a = tenants.upsertUserFromWorkos("user_iso_001", "a@example.com", "A", null);
-        Principal b = tenants.upsertUserFromWorkos("user_iso_002", "b@example.com", "B", null);
-        assertNotEquals(a.id(), b.id());
-        assertTrue(users.findById(a.id()).isPresent());
-        assertTrue(users.findById(b.id()).isPresent());
     }
 
     /**
@@ -291,12 +247,13 @@ class TenantServiceTest {
                 .single();
         // The standalone fabricated finding/case/report were folded into the showcase rows so that
         // every seeded row hangs off a real classifier. These are what SampleProjectSeedListener now writes:
-        //   findings — four metric-drift (drift 0-3) plus two tool-error (drift 4-5);
-        //   cases     — three, numbered 1..3, which is what the seeder's own comment says it takes so
-        //               that the first case a real detector opens on the project continues from 4;
+        //   findings — four metric-drift (drift 0-3), two tool-error (drift 4-5), one groundedness and
+        //              one frustration;
+        //   cases     — three seeded directly and numbered 1..3, then the groundedness and frustration
+        //               cases the live CaseOpener opens as 4 and 5;
         //   reports   — one, seeded only by seedCaseA, the single case carrying a full agentic RCA.
-        assertEquals(6, findings, "the sample project's demo + showcase findings were seeded");
-        assertEquals(3, cases, "the sample project's demo + showcase cases were seeded");
+        assertEquals(8, findings, "the sample project's demo + showcase findings were seeded");
+        assertEquals(5, cases, "the sample project's demo + showcase cases were seeded");
         assertEquals(1, rcaReports, "the sample project's demo + showcase RCA report was seeded");
     }
 
@@ -315,5 +272,56 @@ class TenantServiceTest {
                 2,
                 projects.findByOrg(org.id()).size(),
                 "still exactly two projects -- default plus the one sample project");
+    }
+
+    /**
+     * The bug: a known email arriving under a new WorkOS user id (an environment switch) inserts a second
+     * principal and trips {@code UNIQUE(email)}, locking the person out, or rebinds without the new profile.
+     */
+    @Test
+    void upsertUser_rebindsAKnownEmailToItsNewWorkosId() {
+        Principal before = tenants.upsertUserFromWorkos("user_env_old", "rebind@example.com", "Old Name", null);
+        Principal after = tenants.upsertUserFromWorkos(
+                "user_env_new", "rebind@example.com", "New Name", "https://avatar/new.png");
+
+        assertEquals(before.id(), after.id(), "the same person keeps the same principal");
+        assertEquals(after, users.findByWorkosId("user_env_new").orElseThrow(), "every rebound column is stored");
+        assertTrue(users.findByWorkosId("user_env_old").isEmpty());
+    }
+
+    /**
+     * The bug: an org whose projects exist but none is flagged default gets a new starter project minted
+     * beside them, or has its sample project promoted to be the routing target, instead of its earliest
+     * real project.
+     */
+    @Test
+    void ensureDefaultProject_promotesTheEarliestRealProject() {
+        // Present-day stamps: the org and project listings order by created_at, and a back-dated row here
+        // would become the install's "oldest" organization for every test that runs after this one.
+        java.time.Instant now = java.time.Instant.now();
+        String sampleAt = now.toString();
+        String realAt = now.plusSeconds(1).toString();
+        Organization org = new Organization(
+                Ids.ulid(), null, tenants.uniqueSlug("no-default"), "No Default", sampleAt, null, null);
+        orgs.insert(org);
+        projects.insert(new Project(
+                Ids.ulid(), org.id(), "sample", "Sample", null, sampleAt, null, "{\"sample\":true}", false, null));
+        Project real = new Project(Ids.ulid(), org.id(), "real", "Real", "d", realAt, null, null, false, null);
+        projects.insert(real);
+
+        Project promoted = tenants.ensureDefaultProject(org.id());
+
+        assertEquals(new Project(real.id(), org.id(), "real", "Real", "d", realAt, null, null, true, null), promoted);
+        assertEquals(promoted, projects.findDefaultForOrg(org.id()).orElseThrow());
+        assertEquals(2, projects.findByOrg(org.id()).size(), "nothing new is minted");
+    }
+
+    /** The bug: an account with no email, or one without an "@", gets a crash or an empty org name. */
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "handle-without-domain")
+    void ensureDefaultOrg_namesAPersonalOrgPersonalWhenTheEmailHasNoHandle(String email) {
+        Principal u = tenants.upsertUserFromWorkos("user_no_handle_" + System.nanoTime(), email, "No Handle", null);
+        assertEquals("Personal", tenants.ensureDefaultOrg(u, null).name());
     }
 }

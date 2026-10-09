@@ -29,11 +29,6 @@ import org.springframework.stereotype.Component;
 public class MalformedOutputCaseSource implements CaseSource {
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.MALFORMED_OUTPUT;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(classifierKey);
     }

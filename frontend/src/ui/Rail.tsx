@@ -6,7 +6,7 @@
  *     but the left edge is drag-to-resize — width is remembered per browser
  *     (localStorage), not per-rail, so every rail opens at the size you left it;
  *   - opens from any row click; ESC closes; slide-in via the `tsyRail` keyframes;
- *   - optional header slot: title (mono when it's an identifier) + dim meta +
+ *   - a header: title (mono when it's an identifier) + optional dim meta +
  *     an external-link expand + a close (X) button — icons, not text glyphs;
  *   - the body carries its own inset (see BODY_PADDING) — consumers pass content,
  *     never padding;
@@ -109,7 +109,7 @@ export type RailProps = {
   /** Called on ESC (key or button) and when the ⤢/consumer wants to dismiss. */
   onClose: () => void;
   /** Header title. Set `monoTitle` when it is an identifier (`tr_8VQZ…`, `C-118`). */
-  title?: ReactNode;
+  title: ReactNode;
   monoTitle?: boolean;
   /** Dim meta beside the title (12px, subtle) — timestamps, counts, ⌘J hints. */
   meta?: ReactNode;
@@ -117,15 +117,7 @@ export type RailProps = {
   onExpand?: () => void;
   /** Accessible label for ⤢, e.g. "Open full trace". */
   expandLabel?: string;
-  /** Pinned below the scrolling body (e.g. the Ask composer). */
-  footer?: ReactNode;
   children: ReactNode;
-  /**
-   * Extra classes for the scrolling body — ADDITIVE, not an override: `cn` is a plain
-   * join, so a padding utility passed here collides with {@link BODY_PADDING} rather than
-   * replacing it. For a full-bleed body, change the default here instead.
-   */
-  bodyClassName?: string;
   /** Accessible name for the rail when `title` is not plain text. */
   "aria-label"?: string;
 };
@@ -138,9 +130,7 @@ export function Rail({
   meta,
   onExpand,
   expandLabel,
-  footer,
   children,
-  bodyClassName,
   "aria-label": ariaLabel,
 }: RailProps) {
   const trapRef = useFocusTrap<HTMLElement>(open);
@@ -153,8 +143,6 @@ export function Rail({
   useEscToClose(open, onClose);
 
   if (!open) return null;
-
-  const hasHeader = title != null || meta != null || onExpand != null;
 
   return createPortal(
     <aside
@@ -182,37 +170,34 @@ export function Rail({
           style={{ transitionDuration: "var(--duration-micro)" }}
         />
       </div>
-      {hasHeader && (
-        <div className="flex items-center gap-3 px-[18px] py-3.5 border-b border-border shrink-0">
-          <div className={cn("min-w-0 truncate text-code text-fg", monoTitle && "font-mono")}>{title}</div>
-          {meta != null && <div className="min-w-0 truncate text-small text-subtle">{meta}</div>}
-          <div className="flex-1" />
-          {onExpand && (
-            <button
-              type="button"
-              onClick={onExpand}
-              aria-label={expandLabel ?? "Expand"}
-              title={expandLabel ?? "Expand"}
-              className="shrink-0 rounded-control p-1 text-muted hover:text-fg hover:bg-hover transition-colors"
-              style={{ transitionDuration: "var(--duration-micro)" }}
-            >
-              <ExternalLink size={14} strokeWidth={1.75} aria-hidden="true" />
-            </button>
-          )}
+      <div className="flex items-center gap-3 px-[18px] py-3.5 border-b border-border shrink-0">
+        <div className={cn("min-w-0 truncate text-code text-fg", monoTitle && "font-mono")}>{title}</div>
+        {meta != null && <div className="min-w-0 truncate text-small text-subtle">{meta}</div>}
+        <div className="flex-1" />
+        {onExpand && (
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Close"
-            title="Close (Esc)"
-            className="shrink-0 rounded-control border border-border-strong p-1 text-muted hover:text-fg hover:bg-hover transition-colors"
+            onClick={onExpand}
+            aria-label={expandLabel ?? "Expand"}
+            title={expandLabel ?? "Expand"}
+            className="shrink-0 rounded-control p-1 text-muted hover:text-fg hover:bg-hover transition-colors"
             style={{ transitionDuration: "var(--duration-micro)" }}
           >
-            <X size={14} strokeWidth={1.75} aria-hidden="true" />
+            <ExternalLink size={14} strokeWidth={1.75} aria-hidden="true" />
           </button>
-        </div>
-      )}
-      <div className={cn("flex-1 min-h-0 overflow-y-auto", BODY_PADDING, bodyClassName)}>{children}</div>
-      {footer && <div className="shrink-0 border-t border-border">{footer}</div>}
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          title="Close (Esc)"
+          className="shrink-0 rounded-control border border-border-strong p-1 text-muted hover:text-fg hover:bg-hover transition-colors"
+          style={{ transitionDuration: "var(--duration-micro)" }}
+        >
+          <X size={14} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={cn("flex-1 min-h-0 overflow-y-auto", BODY_PADDING)}>{children}</div>
     </aside>,
     document.body,
   );

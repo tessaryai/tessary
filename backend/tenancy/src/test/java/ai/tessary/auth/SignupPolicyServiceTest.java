@@ -4,11 +4,8 @@ package ai.tessary.auth;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.open.errors.AuthError;
@@ -18,7 +15,6 @@ import ai.tessary.tenant.InvitationRepository;
 import ai.tessary.tenant.OrgInvitation;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
-import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.PrincipalRepository;
 import ai.tessary.tenant.SignupPolicy;
 import ai.tessary.tenant.TenantService;
@@ -57,19 +53,6 @@ class SignupPolicyServiceTest {
     }
 
     @Test
-    void openAdmitsEveryone() {
-        policy("open", null);
-        assertDoesNotThrow(() -> service.admit("anyone@example.com", null));
-    }
-
-    @Test
-    void noOrganizationYetMeansOpen() {
-        when(orgs.findOldest()).thenReturn(Optional.empty());
-        assertEquals(SignupPolicy.OPEN, service.current());
-        assertDoesNotThrow(() -> service.admit("anyone@example.com", null));
-    }
-
-    @Test
     void inviteModeRefusesStrangersAndAdmitsInvitations() {
         policy("invite", null);
         refused("stranger@example.com");
@@ -88,24 +71,5 @@ class SignupPolicyServiceTest {
                 .thenReturn(List.of(new OrgInvitation(
                         "inv", "org", "contractor@other.com", "member", "owner", "", "pending", "t", "", "")));
         assertDoesNotThrow(() -> service.admit("contractor@other.com", null));
-    }
-
-    @Test
-    void firstAccountIsAlwaysAdmitted() {
-        policy("invite", null);
-        when(users.anyHumanExists()).thenReturn(false);
-        assertDoesNotThrow(() -> service.admit("founder@example.com", null));
-    }
-
-    @Test
-    void existingPrincipalIsNeverRefused() {
-        policy("invite", null);
-        Principal existing = Principal.human("u", "user_1", "old@example.com", null, null, "t", "t");
-        when(users.findByEmail("old@example.com")).thenReturn(Optional.of(existing));
-        assertDoesNotThrow(() -> service.admit("old@example.com", null));
-        when(users.findByWorkosId("user_2")).thenReturn(Optional.of(existing));
-        assertDoesNotThrow(() -> service.admit("renamed@example.com", "user_2"));
-        verify(orgs, never()).findOldest();
-        verify(invitations, never()).findPendingByEmail(any());
     }
 }

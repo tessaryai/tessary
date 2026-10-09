@@ -72,12 +72,10 @@ export function tokenTemplateUrl(repo: { owner: string; name: string } | null): 
 export function ConnectRepositoryDialog({
   open,
   onClose,
-  onConnected,
   onUseGithubApp,
 }: {
   open: boolean;
   onClose: () => void;
-  onConnected?: () => void;
   /** Omitted where the App path has no home, e.g. the dialog opened from a case. */
   onUseGithubApp?: () => void;
 }) {
@@ -105,14 +103,14 @@ export function ConnectRepositoryDialog({
       setHelpOpen(false);
       void qc.invalidateQueries({ queryKey: ["git-integration", api.base] });
       toast.success("Repository connected");
-      onConnected?.();
       onClose();
     },
   });
 
   // Grey text with an error-colored icon, never red body copy: red passes contrast
   // only in the large-or-bold class (DESIGN_SYSTEM.md § States).
-  const error = connect.error ? (connect.error as ApiError).detail ?? "The request failed. Try again." : null;
+  // `||`, not `??`: a failure whose server message is empty would otherwise render no alert at all.
+  const error = connect.error ? (connect.error as ApiError).detail || "The request failed. Try again." : null;
 
   return (
     <Modal

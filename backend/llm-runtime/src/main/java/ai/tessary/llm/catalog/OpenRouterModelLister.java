@@ -22,13 +22,12 @@ import java.util.Optional;
  * name} carries a human-readable label (e.g. {@code "Meta: Muse Spark 1.3"}).
  *
  * <p>Unlike the single-maker listers, OpenRouter hosts dozens of makers — Meta, Mistral, DeepSeek,
- * Cohere and more, none of them one of the six supported makers — so every entry is run through
+ * Cohere and more, none of them a supported maker — so every entry is run through
  * {@link SupportedMaker#fromOpenRouterPrefix} and dropped on a miss. This is the intersection step
- * the corrective brief specifies for OpenRouter: "its reported catalog INTERSECT the six makers."
+ * the corrective brief specifies for OpenRouter: its reported catalog intersected with the supported makers.
  */
 public final class OpenRouterModelLister implements ProviderModelLister {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
     private static final String DEFAULT_URL = "https://openrouter.ai/api/v1/models";
 
     private final HttpClient http;
@@ -36,21 +35,10 @@ public final class OpenRouterModelLister implements ProviderModelLister {
     private final String url;
     private final Duration timeout;
 
-    public OpenRouterModelLister(HttpClient http, ObjectMapper mapper) {
-        this(http, mapper, DEFAULT_URL, DEFAULT_TIMEOUT);
-    }
-
     /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}; the 2-arg constructor keeps the previous
-     *  fixed default for callers (tests) that do not care. */
+     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
     public OpenRouterModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_URL, timeout);
-    }
-
-    /** Test seam only — production always resolves to {@link #DEFAULT_URL}: OpenRouter is a single
-     *  fixed host, not a credential-supplied one like the OpenAI-compat providers. */
-    OpenRouterModelLister(HttpClient http, ObjectMapper mapper, String url) {
-        this(http, mapper, url, DEFAULT_TIMEOUT);
     }
 
     OpenRouterModelLister(HttpClient http, ObjectMapper mapper, String url, Duration timeout) {
@@ -119,6 +107,7 @@ public final class OpenRouterModelLister implements ProviderModelLister {
             case MOONSHOT -> "Moonshot";
             case ZHIPU -> "Zhipu";
             case XAI -> "xAI";
+            case TYPESAFE -> "TypeSafe";
         };
     }
 }

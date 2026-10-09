@@ -26,7 +26,6 @@ public enum AlertChannelKind {
     PAGERDUTY;
 
     public static AlertChannelKind fromWire(String s) {
-        if (s == null) throw new IllegalArgumentException("alert channel kind is required");
         return switch (s.trim().toLowerCase(Locale.ROOT)) {
             case "slack" -> SLACK;
             case "webhook" -> WEBHOOK;

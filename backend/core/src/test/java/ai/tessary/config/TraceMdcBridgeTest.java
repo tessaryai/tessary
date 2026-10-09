@@ -35,6 +35,7 @@ class TraceMdcBridgeTest {
 
     @Test
     void bindsTraceAndSpanIdFromTheCurrentSpan() {
+        MDC.put(LogContext.TRACE_ID, "outer-trace");
         when(tracer.currentSpan()).thenReturn(span);
         when(span.isNoop()).thenReturn(false);
         when(span.context()).thenReturn(traceContext);
@@ -46,44 +47,20 @@ class TraceMdcBridgeTest {
             assertEquals("span-123", MDC.get(LogContext.SPAN_ID));
         }
 
-        assertNull(MDC.get(LogContext.TRACE_ID), "closing the scope restores the prior (absent) MDC state");
-        assertNull(MDC.get(LogContext.SPAN_ID));
-    }
-
-    @Test
-    void isANoopWhenThereIsNoCurrentSpan() {
-        when(tracer.currentSpan()).thenReturn(null);
-
-        try (LogContext ignored = new TraceMdcBridge(tracer).bindCurrentTrace()) {
-            assertNull(MDC.get(LogContext.TRACE_ID));
-            assertNull(MDC.get(LogContext.SPAN_ID));
-        }
-    }
-
-    @Test
-    void isANoopForTheNoopSpan() {
-        when(tracer.currentSpan()).thenReturn(span);
-        when(span.isNoop()).thenReturn(true);
-
-        try (LogContext ignored = new TraceMdcBridge(tracer).bindCurrentTrace()) {
-            assertNull(MDC.get(LogContext.TRACE_ID));
-            assertNull(MDC.get(LogContext.SPAN_ID));
-        }
-    }
-
-    @Test
-    void restoresAPreviouslyBoundOuterTraceOnClose() {
-        MDC.put(LogContext.TRACE_ID, "outer-trace");
-        when(tracer.currentSpan()).thenReturn(span);
-        when(span.isNoop()).thenReturn(false);
-        when(span.context()).thenReturn(traceContext);
-        when(traceContext.traceId()).thenReturn("inner-trace");
-        when(traceContext.spanId()).thenReturn("inner-span");
-
-        try (LogContext ignored = new TraceMdcBridge(tracer).bindCurrentTrace()) {
-            assertEquals("inner-trace", MDC.get(LogContext.TRACE_ID));
-        }
-
         assertEquals("outer-trace", MDC.get(LogContext.TRACE_ID), "nested scopes restore, not clear");
+        assertNull(MDC.get(LogContext.SPAN_ID), "and an absent key stays absent");
+    }
+
+    @Test
+    void isANoopWhenThereIsNoCurrentSpanOrOnlyTheNoopSpan() {
+        when(span.isNoop()).thenReturn(true);
+        for (Span current : new Span[] {null, span}) {
+            when(tracer.currentSpan()).thenReturn(current);
+
+            try (LogContext ignored = new TraceMdcBridge(tracer).bindCurrentTrace()) {
+                assertNull(MDC.get(LogContext.TRACE_ID));
+                assertNull(MDC.get(LogContext.SPAN_ID));
+            }
+        }
     }
 }

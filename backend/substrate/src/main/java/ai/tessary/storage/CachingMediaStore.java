@@ -80,17 +80,17 @@ public class CachingMediaStore implements MediaStore {
 
     /** Insert {@code media} and evict least-recently-used entries until the budget is respected. */
     private void admit(String key, StoredMedia media) {
-        long size = media.bytes() == null ? 0 : media.bytes().length;
+        long size = media.bytes().length;
         if (size > maxBytes) return; // never retain an object bigger than the whole budget
         synchronized (lock) {
             StoredMedia replaced = cache.put(key, media);
             if (replaced != null) retainedBytes -= sizeOf(replaced);
             retainedBytes += size;
             var it = cache.entrySet().iterator();
-            while (retainedBytes > maxBytes && it.hasNext()) {
-                // Access order ⇒ the iterator yields least-recently-used first.
+            // Access order ⇒ the iterator yields least-recently-used first. The entry just admitted is
+            // last and size <= maxBytes, so the loop stops before reaching it.
+            while (retainedBytes > maxBytes) {
                 Map.Entry<String, StoredMedia> eldest = it.next();
-                if (eldest.getKey().equals(key)) continue; // never evict the entry just admitted
                 retainedBytes -= sizeOf(eldest.getValue());
                 it.remove();
             }
@@ -98,13 +98,6 @@ public class CachingMediaStore implements MediaStore {
     }
 
     private static long sizeOf(StoredMedia m) {
-        return m.bytes() == null ? 0 : m.bytes().length;
-    }
-
-    /** Retained bytes — test seam for the eviction bound. */
-    long retainedBytesForTest() {
-        synchronized (lock) {
-            return retainedBytes;
-        }
+        return m.bytes().length;
     }
 }

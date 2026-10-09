@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The {@code tool_error} classifier's operating point. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §4 and §9.
+ * {@code devdocs/concepts/tool-error.md} §4 and §9.
  *
  * <p>Shaped after {@code CusumParams} and {@code MetricDriftConfig}: per-project dials, clamped on
  * construction, every default tagged {@code EXPERIMENT(tool-error-tuning)}, and deliberately its own
@@ -27,24 +27,25 @@ import org.jspecify.annotations.Nullable;
  * @param shiftMultiple the multiple of the in-control rate the detector is tuned to catch quickly
  * @param shiftFloor the smallest absolute rise worth arming for, as a rate: what makes a tool that
  *     has never failed detectable at all
- * @param minEffectSize Cohen's h reported on a finding. <b>Not a trigger</b>, see the constant
  * @param minBaselineCalls calls the in-control reference must hold before anything is judged
  * @param downArmMinRate in-control rate below which the improvement arm does not run
- * @param settleSeconds retired as a read filter, kept on the wire. The repository now gates on
- *     {@code trace.is_settled}, which states what this window was estimating; the field stays because it
- *     is persisted classifier config and dropping it from the schema would fail to parse every deployed
- *     bundle that carries it.
  * @param maxPatterns failure signatures a finding's breakdown carries before the tail folds
+ * @param minDecisionInterval the lower clamp on the derived threshold. {@link #MIN_DECISION_INTERVAL} for
+ *     tool_error, which never reads it from a blob; see the constant for who may lower it
+ * @param freezeBaselineCalls calls the reference keeps learning up to. Judging starts at
+ *     {@code minBaselineCalls}; from there each later hour is judged against the reference and then added
+ *     to it, until the reference holds this many and stops moving. Defaults to, and is never below,
+ *     {@code minBaselineCalls}, which is the reference frozen the moment judging starts
  */
 public record ToolErrorConfig(
         long arlTarget,
         double shiftMultiple,
         double shiftFloor,
-        double minEffectSize,
         int minBaselineCalls,
         double downArmMinRate,
-        int settleSeconds,
-        int maxPatterns) {
+        int maxPatterns,
+        double minDecisionInterval,
+        int freezeBaselineCalls) {
 
     /**
      * EXPERIMENT(tool-error-tuning): calls a healthy tool should run between false alarms, the ARL₀.
@@ -58,8 +59,8 @@ public record ToolErrorConfig(
     /**
      * EXPERIMENT(tool-error-tuning): the {@code h}-versus-base-rate fit, {@code intercept + slope·ln(p0)}.
      *
-     * <p>Fitted to the exact threshold at each base rate, solved by {@code classifiers/tool_error/arl.py}
-     * (Brook–Evans on a refined integer lattice). It yields 6.0 at 0.5%, 6.4 at 1%, 8.2 at 5% and 9.7 at
+     * <p>Fitted to the exact threshold at each base rate, solved by Brook–Evans on a refined integer
+     * lattice. It yields 6.0 at 0.5%, 6.4 at 1%, 8.2 at 5% and 9.7 at
      * 20%, holding the realised ARL₀ between 220k and 309k against the 250k target. A flat threshold
      * spans 6,936 to 308,498 over the same range, so this collapses a 44x spread to 1.4x.
      *
@@ -71,7 +72,7 @@ public record ToolErrorConfig(
      * <p><b>Exact arithmetic, not a measured operating point.</b> Every figure assumes independent
      * Bernoulli trials, and real tool failures are bursty: one upstream outage fails two hundred
      * consecutive calls, which inflates the false-alarm rate by an amount nobody here has measured.
-     * PROGRAM.md §12's null run against a real corpus is what replaces these two numbers. Expect it to
+     * A null run against real traffic is what replaces these two numbers. Expect it to
      * push them up, not down.
      */
     public static final double ARL_FIT_INTERCEPT = 11.42;
@@ -83,8 +84,14 @@ public record ToolErrorConfig(
      * Bounds on the derived threshold. Below 6 the alarm fires on ordinary sampling noise whatever the
      * rate; above 12 the run length exceeds any corpus anyone will replay, so the detector cannot be shown
      * to work at all. Both ends are also outside the range the fit was measured over.
+     *
+     * <p>A classifier whose trial is a conversation rather than a tool call may set a lower floor, because its
+     * budget is counted in conversations; frustration's is 4 (see {@code FrustrationConfig}).
      */
     public static final double MIN_DECISION_INTERVAL = 6.0;
+
+    /** The lowest floor any classifier may set with {@link #minDecisionInterval}. */
+    public static final double LOWEST_DECISION_INTERVAL = 2.0;
 
     /** See {@link #MIN_DECISION_INTERVAL}. */
     public static final double MAX_DECISION_INTERVAL = 12.0;
@@ -112,22 +119,10 @@ public record ToolErrorConfig(
     public static final double DEFAULT_SHIFT_FLOOR = 0.005;
 
     /**
-     * EXPERIMENT(tool-error-tuning): a reference point for Cohen's h. <b>Never a trigger.</b>
-     * Small-shift suppression is handled in {@link #decisionIntervalFor(double)} instead: a
-     * threshold calibrated to the tool's own base rate refuses small drifts on its own, and
-     * nothing downstream has to.
-     *
-     * <p>0.05 remains a useful landmark when reading a finding: a doubling from 1% to 2% is
-     * h=0.083 and 20.0% to 21.1% is h=0.032, which is why the number survives even though
-     * nothing branches on it.
-     */
-    public static final double DEFAULT_MIN_EFFECT_SIZE = 0.05;
-
-    /**
      * EXPERIMENT(tool-error-tuning): calls the in-control reference must hold before anything is judged.
      *
      * <p>A <em>wait</em>, not a skip: a tool under this keeps accumulating rather than being dropped, so
-     * a rarely-called tool is watched on a slower clock instead of never (PROGRAM.md §3.3). 500 is about
+     * a rarely-called tool is watched on a slower clock instead of never (tool-error.md §3.3). 500 is about
      * the least from which a rate near 1% can be told from a rate near 2% at all; below it the interval
      * on the in-control estimate is wider than the shifts worth catching, and the CUSUM would be
      * accumulating evidence against a number that is itself noise.
@@ -145,17 +140,6 @@ public record ToolErrorConfig(
      */
     public static final double DEFAULT_DOWN_ARM_MIN_RATE = 0.01;
 
-    /**
-     * EXPERIMENT(tool-error-tuning): five minutes, matching the drift slice, because both wait on the
-     * same exporter.
-     *
-     * <p>This measure genuinely needs it even though a tool call is a single span. The span's arrival is
-     * its own completion signal, but the denominator is not one span: a turn's tool calls arrive across
-     * several batch flushes, so reading a trace early counts some of its calls and not others, and there
-     * is no reason to believe the ones that landed first fail at the same rate as the ones that had not.
-     */
-    public static final int DEFAULT_SETTLE_SECONDS = 300;
-
     /** EXPERIMENT(tool-error-tuning): signatures in a finding's breakdown before the tail folds. */
     public static final int DEFAULT_MAX_PATTERNS = 8;
 
@@ -172,13 +156,60 @@ public record ToolErrorConfig(
         // the log-likelihood ratio identically zero, which is a detector that can never fire.
         shiftMultiple = clamp(shiftMultiple, 1.05, 100.0, DEFAULT_SHIFT_MULTIPLE);
         shiftFloor = clamp(shiftFloor, 0.0001, 0.5, DEFAULT_SHIFT_FLOOR);
-        // Up to pi, the largest h two proportions can differ by (0 against 1). Clamped even though nothing
-        // branches on it, so a nonsense value cannot reach a finding a human reads.
-        minEffectSize = clamp(minEffectSize, 0.0, Math.PI, DEFAULT_MIN_EFFECT_SIZE);
         minBaselineCalls = clampInt(minBaselineCalls, 30, 1_000_000, DEFAULT_MIN_BASELINE_CALLS);
         downArmMinRate = clamp(downArmMinRate, 0.0001, 0.5, DEFAULT_DOWN_ARM_MIN_RATE);
-        settleSeconds = clampInt(settleSeconds, 0, 86_400, DEFAULT_SETTLE_SECONDS);
         maxPatterns = clampInt(maxPatterns, 1, ToolErrorRate.MAX_PATTERNS, DEFAULT_MAX_PATTERNS);
+        minDecisionInterval =
+                clamp(minDecisionInterval, LOWEST_DECISION_INTERVAL, MAX_DECISION_INTERVAL, MIN_DECISION_INTERVAL);
+        // Never below the minimum: a reference that stopped learning before judging could start would be one
+        // that never judges anything.
+        freezeBaselineCalls = clampInt(freezeBaselineCalls, minBaselineCalls, 1_000_000, minBaselineCalls);
+    }
+
+    /** A classifier's shape with its own threshold floor, and a reference frozen as soon as judging starts. */
+    public ToolErrorConfig(
+            long arlTarget,
+            double shiftMultiple,
+            double shiftFloor,
+            int minBaselineCalls,
+            double downArmMinRate,
+            int maxPatterns,
+            double minDecisionInterval) {
+        this(
+                arlTarget,
+                shiftMultiple,
+                shiftFloor,
+                minBaselineCalls,
+                downArmMinRate,
+                maxPatterns,
+                minDecisionInterval,
+                minBaselineCalls);
+    }
+
+    /** tool_error's shape: the threshold floor is always {@link #MIN_DECISION_INTERVAL}. */
+    public ToolErrorConfig(
+            long arlTarget,
+            double shiftMultiple,
+            double shiftFloor,
+            int minBaselineCalls,
+            double downArmMinRate,
+            int maxPatterns) {
+        this(
+                arlTarget,
+                shiftMultiple,
+                shiftFloor,
+                minBaselineCalls,
+                downArmMinRate,
+                maxPatterns,
+                MIN_DECISION_INTERVAL);
+    }
+
+    /**
+     * Whether the reference keeps learning after judging has started, which is what a stored accumulator's
+     * epoch has to say (see {@link CarriedState#epochOf}).
+     */
+    public boolean learnsWhileJudging() {
+        return freezeBaselineCalls > minBaselineCalls;
     }
 
     /**
@@ -197,9 +228,9 @@ public record ToolErrorConfig(
      * its log.
      */
     public double decisionIntervalFor(double p0) {
-        if (!Double.isFinite(p0) || p0 <= 0) return MIN_DECISION_INTERVAL;
+        if (!Double.isFinite(p0) || p0 <= 0) return minDecisionInterval;
         double h = ARL_FIT_INTERCEPT + ARL_FIT_SLOPE * Math.log(p0) + Math.log((double) arlTarget / DEFAULT_ARL_TARGET);
-        return Math.max(MIN_DECISION_INTERVAL, Math.min(MAX_DECISION_INTERVAL, h));
+        return Math.max(minDecisionInterval, Math.min(MAX_DECISION_INTERVAL, h));
     }
 
     /** Every default, for a signal whose blob is absent or unreadable. */
@@ -208,10 +239,8 @@ public record ToolErrorConfig(
                 DEFAULT_ARL_TARGET,
                 DEFAULT_SHIFT_MULTIPLE,
                 DEFAULT_SHIFT_FLOOR,
-                DEFAULT_MIN_EFFECT_SIZE,
                 DEFAULT_MIN_BASELINE_CALLS,
                 DEFAULT_DOWN_ARM_MIN_RATE,
-                DEFAULT_SETTLE_SECONDS,
                 DEFAULT_MAX_PATTERNS);
     }
 
@@ -230,11 +259,12 @@ public record ToolErrorConfig(
                     root.path("arl_target").asLong(DEFAULT_ARL_TARGET),
                     root.path("shift_multiple").asDouble(DEFAULT_SHIFT_MULTIPLE),
                     root.path("shift_floor").asDouble(DEFAULT_SHIFT_FLOOR),
-                    root.path("min_effect_size").asDouble(DEFAULT_MIN_EFFECT_SIZE),
                     root.path("min_baseline_calls").asInt(DEFAULT_MIN_BASELINE_CALLS),
                     root.path("down_arm_min_rate").asDouble(DEFAULT_DOWN_ARM_MIN_RATE),
-                    root.path("settle_seconds").asInt(DEFAULT_SETTLE_SECONDS),
-                    root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS));
+                    root.path("max_patterns").asInt(DEFAULT_MAX_PATTERNS),
+                    MIN_DECISION_INTERVAL,
+                    // Absent means the minimum: the reference freezes the moment judging starts.
+                    root.path("freeze_baseline_calls").asInt(0));
         } catch (JsonProcessingException e) {
             return defaults();
         }

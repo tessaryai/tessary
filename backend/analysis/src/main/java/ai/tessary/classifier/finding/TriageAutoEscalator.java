@@ -66,10 +66,10 @@ import org.springframework.stereotype.Component;
  *
  * <h2>One scheduler, several stores</h2>
  *
- * <p>Eligibility is asked through the {@link TriageSource} seam, in registration order — the behaviour
- * table first, conformance after it. The recurrence bar is shared across the sources, read in each
- * store's own observation unit. Registration order no longer decides who gets scheduled, only who is
- * scheduled first: with the caps gone, every eligible finding in every source is taken.
+ * <p>Eligibility is asked through the {@link TriageSource} seam, in registration order. The recurrence bar is
+ * shared across the sources, read in each store's own observation unit. Registration order no longer decides
+ * who gets scheduled, only who is scheduled first: with the caps gone, every eligible finding in every source
+ * is taken.
  */
 @Component
 public class TriageAutoEscalator {

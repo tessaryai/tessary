@@ -1,0 +1,20 @@
+{
+  "scores": [
+    {
+      "unsupported": 0.991,
+      "conflict": 0.012,
+      "spans": [
+        {"start": 0, "end": 33, "unsupported": 0.004, "conflict": 0.001},
+        {"start": 34, "end": 87, "unsupported": 0.991, "conflict": 0.012}
+      ]
+    },
+    {
+      "unsupported": 0.021,
+      "conflict": 0.002,
+      "spans": [
+        {"start": 0, "end": 55, "unsupported": 0.003, "conflict": 0.001},
+        {"start": 60, "end": 96, "unsupported": 0.021, "conflict": 0.002}
+      ]
+    }
+  ]
+}

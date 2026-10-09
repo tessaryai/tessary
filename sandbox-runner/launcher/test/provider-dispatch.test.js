@@ -154,9 +154,8 @@ test('providerConfig: the ANTHROPIC default baseURL carries the /v1 segment', ()
   // only `/messages`, so a bare `https://api.anthropic.com` POSTs to a 404. OpenCode's SERVER mode
   // folds that 404 into an EMPTY assistant turn instead of an error, so the whole run fails as
   // "opencode produced no usable reply" with zero tokens and a perfectly valid key — a failure that
-  // reads like a bad credential and is not one. langchain4j on the backend appends the bare path
-  // the same way (its own default already carries /v1/), so PlatformCatalog holds the /v1 form too
-  // and the two agree literally.
+  // reads like a bad credential and is not one. The backend's PlatformCatalog holds the /v1 form
+  // too, and the two agree literally.
   const cfg = providerConfig({ provider: 'ANTHROPIC', api_key: 'canary-anthropic' }, 'anthropic/claude-sonnet-5');
   assert.equal(cfg.provider.anthropic.options.baseURL, 'https://api.anthropic.com/v1');
   assert.equal(cfg.provider.anthropic.options.apiKey, 'canary-anthropic');
@@ -222,4 +221,62 @@ test('providerConfig: BEDROCK_MANTLE declares its model — `bedrock-mantle-gpt`
   );
   assert.deepEqual(cfg.provider['bedrock-mantle-gpt'].models, { 'openai.gpt-5.6-terra': {} });
   assert.equal(cfg.provider['bedrock-mantle-gpt'].npm, '@ai-sdk/amazon-bedrock/mantle');
+});
+
+// ---- every OpenAI-compat provider, one row each ----
+
+const KEY_ENV_BY_PROVIDER = {
+  OPENAI: 'OPENAI_API_KEY',
+  GEMINI: 'GEMINI_API_KEY',
+  GLM: 'GLM_API_KEY',
+  GROK: 'GROK_API_KEY',
+  CUSTOM: 'CUSTOM_OPENAI_API_KEY',
+  OPENROUTER: 'OPENROUTER_API_KEY',
+  MOONSHOT: 'MOONSHOT_API_KEY',
+  ANTHROPIC: 'ANTHROPIC_API_KEY',
+};
+
+for (const [provider, envName] of Object.entries(KEY_ENV_BY_PROVIDER)) {
+  test(`agentEnvs: a ${provider} credential's key rides in ${envName} and no other provider's variable`, () => {
+    const envs = agentEnvs({ provider, api_key: ` canary-${provider} `, base_url: 'https://llm.internal/v1' }, 'x/m');
+    const keyVars = Object.keys(envs).filter((k) => k.endsWith('_API_KEY'));
+    assert.deepEqual(keyVars, [envName], 'an agent SDK reading another provider\'s variable would authenticate with nothing');
+    assert.equal(envs[envName], `canary-${provider}`, 'trimmed, and from the credential rather than the LEAKED env canary');
+  });
+}
+
+test('providerConfig: a MOONSHOT credential with no base_url gets Moonshot\'s own endpoint', () => {
+  const cfg = providerConfig({ provider: 'MOONSHOT', api_key: 'k' }, 'moonshot/kimi-k2');
+  assert.equal(cfg.provider.moonshot.options.baseURL, 'https://api.moonshot.ai/v1');
+});
+
+test('providerConfig: a CUSTOM credential with no base_url is never pointed at some other provider\'s endpoint', () => {
+  // CUSTOM has no default to assume; borrowing one would send the customer's own key to a third party.
+  const cfg = providerConfig({ provider: 'CUSTOM', api_key: 'k' }, 'custom-openai/my-finetune');
+  assert.equal(cfg.provider['custom-openai'].options.baseURL, '');
+});
+
+test('toProviderModel: an OPENROUTER model gains the openrouter prefix once, slash and all', () => {
+  const cred = { provider: 'OPENROUTER', api_key: 'k' };
+  assert.equal(toProviderModel('openai/gpt-5.6-terra', cred), 'openrouter/openai/gpt-5.6-terra');
+  assert.equal(toProviderModel('openrouter/openai/gpt-5.6-terra', cred), 'openrouter/openai/gpt-5.6-terra');
+});
+
+// ---- egress-injected credentials: the key lives in the sandbox provider's secret store ----
+
+const EGRESS_CRED = { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true };
+
+test('providerConfig: an egress credential gives OpenCode a placeholder key and runs its background work on the same model', () => {
+  const cfg = providerConfig(EGRESS_CRED, 'anthropic/claude-sonnet-5');
+  assert.deepEqual(cfg.provider.anthropic, {
+    npm: '@ai-sdk/anthropic',
+    options: { baseURL: 'https://api.anthropic.com/v1', apiKey: 'injected-at-egress' },
+  });
+  assert.equal(cfg.small_model, 'anthropic/claude-sonnet-5', 'title generation must not reach for a second model');
+});
+
+test('agentEnvs: an egress credential puts only the placeholder in the agent env, never a key', () => {
+  const envs = agentEnvs(EGRESS_CRED, 'anthropic/claude-sonnet-5');
+  assert.equal(envs.ANTHROPIC_API_KEY, 'injected-at-egress');
+  assert.ok(!JSON.stringify(envs).includes('tessary-ai-anthropic'), 'the secret name is the launcher\'s business, not the agent\'s');
 });

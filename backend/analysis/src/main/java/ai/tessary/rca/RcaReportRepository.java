@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.tenant.Ids;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -22,18 +24,20 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class RcaReportRepository {
 
-    private static final String COLS = "r.id, r.project_id, r.job_id, r.subject_kind, r.subject_id, "
-            + "r.subject_label, r.call_site_id, r.metric, r.window_from, r.window_split, r.window_to, "
+    private static final String COLS = "r.id, r.job_id, r.subject_kind, r.subject_id, "
+            + "r.subject_label, r.call_site_id, r.metric, r.report_kind, r.window_from, r.window_split, r.window_to, "
             + "r.current_value, r.prior_value, r.delta, j.status AS status, r.verdict, r.summary, "
-            + "r.ruled_out, r.hypotheses, r.detailed_report, r.engine, r.repo_available, "
+            + "r.ruled_out, r.hypotheses, r.causes, r.detailed_report, r.engine, r.repo_available, "
             + "r.created_at, r.completed_at";
 
     private static final String FROM = "FROM rca_report r JOIN job j ON j.id = r.job_id";
 
     private final JdbcClient jdbc;
+    private final ObjectMapper mapper;
 
-    public RcaReportRepository(JdbcClient jdbc) {
+    public RcaReportRepository(JdbcClient jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
+        this.mapper = mapper;
     }
 
     /** Insert the pending report shell for a job, no-op when a concurrent trigger already inserted it
@@ -49,6 +53,7 @@ public class RcaReportRepository {
             String subjectLabel,
             @Nullable String callSiteId,
             String metric,
+            String reportKind,
             Instant windowFrom,
             Instant windowSplit,
             Instant windowTo,
@@ -58,10 +63,10 @@ public class RcaReportRepository {
             String engine) {
         jdbc.sql("""
                 INSERT INTO rca_report (id, project_id, job_id, finding_id, subject_kind, subject_id,
-                    subject_label, call_site_id, metric, window_from, window_split, window_to,
+                    subject_label, call_site_id, metric, report_kind, window_from, window_split, window_to,
                     current_value, prior_value, delta, status, engine, created_at)
                 VALUES (:id, :pid, :jobId, :findingId, :subjectKind, :subjectId,
-                    :subjectLabel, :callSiteId, :metric, :windowFrom, :windowSplit, :windowTo,
+                    :subjectLabel, :callSiteId, :metric, :reportKind, :windowFrom, :windowSplit, :windowTo,
                     :currentValue, :priorValue, :delta, 'pending', :engine, :now)
                 ON CONFLICT (job_id) DO NOTHING
                 """)
@@ -74,6 +79,7 @@ public class RcaReportRepository {
                 .param("subjectLabel", subjectLabel)
                 .param("callSiteId", callSiteId)
                 .param("metric", metric)
+                .param("reportKind", reportKind)
                 .param("windowFrom", windowFrom.toString())
                 .param("windowSplit", windowSplit.toString())
                 .param("windowTo", windowTo.toString())
@@ -113,13 +119,13 @@ public class RcaReportRepository {
                 .list();
     }
 
-    /** What a finished RCA gives a case row: its verdict, and the leading hypothesis if it reached one. */
+    /** What a finished RCA gives a case row: its verdict and its one-sentence summary. */
     public record CaseLead(
-            @Nullable String verdict, @Nullable String cause) {}
+            @Nullable String verdict, @Nullable String summary) {}
 
     /**
-     * What a finished RCA concluded about each of {@code caseIds} — its verdict and the leading
-     * hypothesis title — as the Triage queue reads it. ONE query for a whole page, served by
+     * What a finished RCA concluded about each of {@code caseIds} — its verdict and summary — as the
+     * Triage queue reads it. ONE query for a whole page, served by
      * {@code ix_rca_report_finding} through the {@code finding} join, rather than a report fetch per
      * row: Triage lists every live case, and a per-row read would put an RCA lookup behind the app's
      * first screen.
@@ -138,15 +144,20 @@ public class RcaReportRepository {
     public Map<String, CaseLead> leadsByCase(String projectId, Collection<String> caseIds) {
         if (caseIds.isEmpty()) return Map.of();
         Map<String, CaseLead> out = new HashMap<>();
-        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, r.verdict,"
-                        + " r.hypotheses -> 0 ->> 'title' AS cause "
+        jdbc.sql("SELECT DISTINCT ON (f.case_id) f.case_id, r.verdict, r.summary, r.report_kind, r.causes,"
+                        + " r.hypotheses "
                         + FROM + " JOIN finding f ON f.id = r.finding_id"
                         + " WHERE r.project_id = :pid AND f.case_id IN (:caseIds) AND j.status = 'done'"
                         + " ORDER BY f.case_id, r.created_at DESC")
                 .param("pid", projectId)
                 .param("caseIds", caseIds)
-                .query((rs, n) ->
-                        out.put(rs.getString("case_id"), new CaseLead(rs.getString("verdict"), rs.getString("cause"))))
+                .query((rs, n) -> {
+                    List<Cause> causes = RcaDtos.causesOf(
+                            mapper, rs.getString("report_kind"), rs.getString("causes"), rs.getString("hypotheses"));
+                    return out.put(
+                            rs.getString("case_id"),
+                            new CaseLead(rs.getString("verdict"), RcaDtos.summaryOf(rs.getString("summary"), causes)));
+                })
                 .list();
         return out;
     }
@@ -161,36 +172,11 @@ public class RcaReportRepository {
 
     /** The project's most recent reports, newest first, bounded by {@code limit}. */
     public List<RcaReportRow> listByProject(String projectId, int limit) {
-        return listByProject(projectId, limit, null, null, null, null);
-    }
-
-    /**
-     * The project's most recent reports, newest first, bounded by {@code limit} and narrowed by any
-     * of the optional filters. Filtering happens in SQL, not after the limit — asking for one
-     * subject's history must not be silently emptied by newer reports on other subjects. {@code
-     * status} filters the live queue status on the joined job, the same column {@link #COLS}
-     * projects as the report's status.
-     */
-    public List<RcaReportRow> listByProject(
-            String projectId,
-            int limit,
-            @Nullable String subjectKind,
-            @Nullable String subjectId,
-            @Nullable String metric,
-            @Nullable String status) {
         return jdbc.sql("SELECT " + COLS + " " + FROM + """
                          WHERE r.project_id = :pid
-                           AND (CAST(:subjectKind AS text) IS NULL OR r.subject_kind = :subjectKind)
-                           AND (CAST(:subjectId AS text) IS NULL OR r.subject_id = :subjectId)
-                           AND (CAST(:metric AS text) IS NULL OR r.metric = :metric)
-                           AND (CAST(:status AS text) IS NULL OR j.status = :status)
                          ORDER BY r.created_at DESC LIMIT :limit
                         """)
                 .param("pid", projectId)
-                .param("subjectKind", subjectKind)
-                .param("subjectId", subjectId)
-                .param("metric", metric)
-                .param("status", status)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
                 .list();
@@ -203,12 +189,12 @@ public class RcaReportRepository {
             @Nullable String verdict,
             @Nullable String summary,
             @Nullable String ruledOutJson,
-            @Nullable String hypothesesJson,
+            @Nullable String causesJson,
             @Nullable String detailedReport,
             @Nullable Boolean repoAvailable) {
         jdbc.sql("""
                 UPDATE rca_report SET status = :status, verdict = :verdict, summary = :summary,
-                    ruled_out = :ruledOut::jsonb, hypotheses = :hypotheses::jsonb,
+                    ruled_out = :ruledOut::jsonb, causes = :causes::jsonb,
                     detailed_report = :detailedReport, repo_available = :repoAvailable,
                     completed_at = :now
                 WHERE job_id = :jobId
@@ -217,7 +203,7 @@ public class RcaReportRepository {
                 .param("verdict", verdict)
                 .param("summary", summary)
                 .param("ruledOut", ruledOutJson)
-                .param("hypotheses", hypothesesJson)
+                .param("causes", causesJson)
                 .param("detailedReport", detailedReport)
                 .param("repoAvailable", repoAvailable)
                 .param("now", Instant.now().toString())
@@ -235,13 +221,13 @@ public class RcaReportRepository {
     private static RcaReportRow map(ResultSet rs) throws SQLException {
         return new RcaReportRow(
                 rs.getString("id"),
-                rs.getString("project_id"),
                 rs.getString("job_id"),
                 rs.getString("subject_kind"),
                 rs.getString("subject_id"),
                 rs.getString("subject_label"),
                 rs.getString("call_site_id"),
                 rs.getString("metric"),
+                rs.getString("report_kind"),
                 rs.getString("window_from"),
                 rs.getString("window_split"),
                 rs.getString("window_to"),
@@ -253,6 +239,7 @@ public class RcaReportRepository {
                 rs.getString("summary"),
                 rs.getString("ruled_out"),
                 rs.getString("hypotheses"),
+                rs.getString("causes"),
                 rs.getString("detailed_report"),
                 rs.getString("engine"),
                 readNullableBoolean(rs, "repo_available"),

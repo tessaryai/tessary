@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.pricing;
 
+import ai.tessary.open.hash.Sha256;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -143,7 +142,7 @@ public record PriceSnapshot(String source, String version, String digest, List<M
     }
 
     /**
-     * LiteLLM's own provider-route prefix ({@code vertex_ai/claude-sonnet-5} → {@code vertex_ai}), and
+     * LiteLLM's own provider-route prefix ({@code vertex_ai/claude-sonnet-5-5} → {@code vertex_ai}), and
      * null for a bare key. Deliberately not guessed from anything else: a vendor-dotted Bedrock id names
      * the model's maker rather than who serves it, and inventing a provider for it would put a value in
      * the column that no file actually claims.
@@ -161,11 +160,6 @@ public record PriceSnapshot(String source, String version, String digest, List<M
 
     /** Lowercase hex sha256 of {@code bytes}: the digest home.tessary.ai publishes a book under. */
     public static String sha256Hex(byte[] bytes) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by every JVM", e);
-        }
+        return HexFormat.of().formatHex(Sha256.digest(bytes));
     }
 }

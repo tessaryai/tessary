@@ -113,6 +113,32 @@ public class RetentionRepository {
     }
 
     /**
+     * Null the {@code request} body of aged {@code frustration_assessment} rows: the copy of a turn's
+     * text the Frustration classifier sent to its decision model ages out with the span payload it was
+     * built from, under the same pin. It cuts on the row's own {@code turn_started_at}, the trace's start,
+     * rather than joining {@code span}, so a row whose trace a previous pass already deleted is still
+     * reached. The rest of the row stays, since whether the
+     * turn was flagged, the answer and the cost are what the rate replay and the audit read, and none of
+     * them is conversation text.
+     */
+    public int nullAssessmentRequests(String projectId, String cutoff, int limit) {
+        return jdbc.sql(withPin("""
+                        UPDATE frustration_assessment SET request = NULL WHERE ctid IN (
+                            SELECT a.ctid FROM frustration_assessment a
+                            LEFT JOIN trace t ON t.project_id = a.project_id AND t.id = a.trace_id
+                            WHERE a.project_id = :pid
+                              AND a.request IS NOT NULL
+                              AND a.turn_started_at < :cutoff::timestamptz
+                              AND NOT {pin}
+                            LIMIT :n)
+                        """, "a.trace_id", "t.session_id"))
+                .param("pid", projectId)
+                .param("cutoff", cutoff)
+                .param("n", limit)
+                .update();
+    }
+
+    /**
      * Delete aged traces. Everything hanging off a trace, its spans and their payloads, goes with it
      * through {@code ON DELETE CASCADE}, so this one statement is the whole structural tier.
      *

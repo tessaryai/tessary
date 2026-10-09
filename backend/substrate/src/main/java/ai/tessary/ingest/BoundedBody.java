@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
  * A size-capped {@code BodyHandler<String>} for credentialed outbound calls. It counts bytes as
  * they arrive and, on overflow, cancels the upstream and fails the body future — so a hostile or
  * broken response never buffers more than the cap into the heap. Shared by every outbound client
- * (the ingest {@link HttpJson}, the Git provider clients), the same way {@link UrlGuard}
+ * (the Git provider clients among them), the same way {@link UrlGuard}
  * is the shared SSRF guard for those calls.
  *
  * <p>The handler stays typed {@code <String>}, so it is a drop-in for
@@ -33,12 +33,7 @@ public final class BoundedBody {
 
     /** A string body handler capped at {@link #MAX_RESPONSE_BYTES}. */
     public static HttpResponse.BodyHandler<String> string() {
-        return string(MAX_RESPONSE_BYTES);
-    }
-
-    /** A string body handler capped at {@code maxBytes}. */
-    public static HttpResponse.BodyHandler<String> string(long maxBytes) {
-        return info -> new BoundedStringSubscriber(maxBytes);
+        return info -> new BoundedStringSubscriber(MAX_RESPONSE_BYTES);
     }
 
     /** Delegates to the JDK UTF-8 string subscriber, counting bytes and aborting past the cap. */

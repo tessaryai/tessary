@@ -15,9 +15,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The two user-visible strings a metric-drift finding is made of: its {@code cause_key} and its
- * evidence blob (see {@code classifiers/metric_drift/PROGRAM.md} §6 and §7). Pure: a {@link Decision},
- * two sketches and two workloads in, JSON out, so the eval can print exactly what a finding would have
- * carried without standing up a schema.
+ * evidence blob (see {@code devdocs/concepts/metric-drift.md} §6 and §7). Pure: a {@link Decision},
+ * two sketches and two workloads in, JSON out, so what a finding would have carried is answerable without
+ * standing up a schema.
  *
  * <p>The workload block matters because the correction loop's job is separating "the agent changed"
  * from "the traffic changed", and triage can only judge that from what the finding carries; it opens
@@ -80,15 +80,9 @@ public final class MetricFindingEvidence {
         };
     }
 
-    /** A sentence, not a metric: the finding's title as prose, rendered in place of the raw key. */
-    public static String title(String measure, String bucketKey, Decision decision) {
-        return title(measure, bucketKey, decision.ratio(), decision.direction());
-    }
-
     /**
-     * The same sentence built from a shift already written down, reading the numbers back out of the
-     * stored evidence ({@link #read}). Shared with the {@link Decision} overload rather than
-     * reimplemented, so a case and the finding it came from can never disagree about the number.
+     * A sentence, not a metric: the finding's title as prose, rendered in place of the raw key, built from
+     * a shift already written down by reading the numbers back out of the stored evidence ({@link #read}).
      */
     public static String title(String measure, String bucketKey, double ratio, Direction direction) {
         String subject = Measure.TOOL_DURATION.equals(measure) ? "calls" : "turns";
@@ -338,7 +332,7 @@ public final class MetricFindingEvidence {
 
     /**
      * A shift at another grain that this finding accounts for, and that was therefore not written as a
-     * finding of its own (PROGRAM.md §6.1). Today there is exactly one shape: a {@code turn_duration}
+     * finding of its own (metric-drift.md §6.1). Today there is exactly one shape: a {@code turn_duration}
      * shift explained by the {@code tool_duration} shift of a tool inside that call site's traces.
      *
      * <p>Carrying it keeps suppression from being lossy: the tool row is the headline because it names
@@ -361,7 +355,7 @@ public final class MetricFindingEvidence {
             double covered) {}
 
     /**
-     * The evidence blob of PROGRAM.md §7.
+     * The evidence blob of metric-drift.md §7.
      *
      * @param ref the reference window's sketch: the previously closed window or the pinned one,
      *     whichever this decision was made against
@@ -372,7 +366,7 @@ public final class MetricFindingEvidence {
      * @param refTokens what the reference window's dollars were made of, or null for every duration
      *     finding and any cost window whose traffic reported no usage
      * @param curTokens the same for the window that just closed. This pair is why {@code cost} is the
-     *     only measure under {@code cost_drift} that opens a finding (PROGRAM.md §6.1): the token
+     *     only measure under {@code cost_drift} that opens a finding (metric-drift.md §6.1): the token
      *     buckets decompose the shift here instead of opening four more rows.
      * @param windowKind {@code count} or {@code elapsed}, the close criterion that fired: a window
      *     closed on thin traffic and one closed on 500 samples in an hour support different amounts of
@@ -389,8 +383,8 @@ public final class MetricFindingEvidence {
             String bucketKind,
             String bucketKey,
             Decision decision,
-            MetricSketch ref,
-            MetricSketch cur,
+            MetricReading ref,
+            MetricReading cur,
             @Nullable MetricWorkload refWorkload,
             @Nullable MetricWorkload curWorkload,
             @Nullable MetricTokens refTokens,
@@ -532,7 +526,7 @@ public final class MetricFindingEvidence {
      * <p>Public because {@link ai.tessary.classifier.metric.MetricSuppression} decides in the same
      * units this blob prints; the two must not disagree about what a bucket's p50 is.
      */
-    public static OptionalDouble rawQuantile(MetricSketch sketch, double q) {
+    public static OptionalDouble rawQuantile(MetricReading sketch, double q) {
         if (sketch.count() == 0) return OptionalDouble.empty();
         Double logValue = sketch.quantile(q);
         return logValue == null ? OptionalDouble.empty() : OptionalDouble.of(Math.exp(logValue));

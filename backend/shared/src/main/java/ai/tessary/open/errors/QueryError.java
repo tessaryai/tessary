@@ -17,8 +17,10 @@ public enum QueryError implements ErrorCode {
     UNKNOWN_INTERVAL(HttpStatus.BAD_REQUEST, "unknown timeseries interval '%s'"),
     INVALID_RANGE(HttpStatus.BAD_REQUEST, "an explicit time range (from/to) is required for this operation"),
     UNKNOWN_SEARCH_MODE(HttpStatus.BAD_REQUEST, "unknown search mode '%s'"),
-    SEARCH_MODE_UNSUPPORTED(HttpStatus.NOT_IMPLEMENTED, "search mode '%s' is not yet supported"),
-    SEARCH_UNSUPPORTED_FOR_DATASET(HttpStatus.BAD_REQUEST, "search is not supported on dataset '%s'");
+    SEARCH_UNSUPPORTED_FOR_DATASET(HttpStatus.BAD_REQUEST, "search is not supported on dataset '%s'"),
+    SEARCH_TOO_BROAD(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "too many traces match this search; add a word or use a shorter time range");
 
     private final HttpStatus status;
     private final String template;

@@ -44,19 +44,6 @@
   --primitive-blue:  #70B6FD;     /* info, warning, links, focus ring */
   --primitive-blue-lift: #A5D0FE; /* the blue one step lighter; link hover only, never a fill */
 
-  /* Chart series — "Siblings". Eight hues in a fixed order, never cycled,
-   * never reused for text, status, or UI chrome; that's what keeps a chart
-   * line from misreading as a pass/fail signal. Consumed only through
-   * --color-chart-series-* below. */
-  --primitive-viz-1: #CFAFFF;     /* lavender */
-  --primitive-viz-2: #C9690C;     /* orange */
-  --primitive-viz-3: #0097AC;     /* cyan */
-  --primitive-viz-4: #F1B047;     /* amber */
-  --primitive-viz-5: #35D8CA;     /* teal */
-  --primitive-viz-6: #AF64BB;     /* violet */
-  --primitive-viz-7: #FFA2D5;     /* rose */
-  --primitive-viz-8: #918A00;     /* olive */
-
   /* Deliberately NOT here: brand pink #FF3D6E (logo/marketing identity only,
    * never a component color) and the wordmark's literal #FFFFFF. Both are
    * documented in DESIGN_SYSTEM.md as fixed brand values, not tokens. */
@@ -138,13 +125,11 @@
    * (grey-50, weight 500), not by a different fill. */
   --color-hover: var(--primitive-level-2);
   --color-selected: var(--primitive-level-2);
-  --color-pressed: var(--primitive-level-3);
 
   /* --- Status --- three hues, used sparingly and only to denote status.
    * Warning collapses into info's blue. All three behave the same way: a
-   * solid fill is fine for a chip or badge, and every solid status fill takes
-   * --color-status-text-on as its label; there is no white-label exception.
-   * The -subtle fills are translucent so they work on any surface level. */
+   * solid fill is fine for a chip or badge. The -subtle fills are translucent
+   * so they work on any surface level. */
   --color-success: var(--primitive-green);
   --color-success-subtle: rgba(127, 209, 70, 0.12);
   --color-warning: var(--primitive-blue);
@@ -153,15 +138,11 @@
   --color-info-subtle: rgba(112, 182, 253, 0.12);
   --color-error: var(--primitive-red);
   --color-error-subtle: rgba(255, 109, 135, 0.12);
-  --color-status-text-on: var(--primitive-level-0);
 
   /* --- Data-viz / charts ---
-   * Structural chrome (grid, axis) reuses border/muted so charts sit in the
-   * same visual language as everything else. The Siblings series ramp itself
-   * is defined below in its own `@theme static` block, not here — see that
-   * block for why. Read these via chartTheme in ui/charts/, not ad hoc. */
+   * Grid lines reuse the border color so the hand-drawn finding charts sit in
+   * the same visual language as everything else. */
   --color-chart-grid: var(--primitive-grey-700);   /* = border */
-  --color-chart-axis: var(--primitive-grey-500);   /* = muted */
 
   /* --- Typography ---
    * Geist Variable (sans) and Geist Mono Variable (mono) are the only two
@@ -175,11 +156,6 @@
    * comes from size and color, not extra weight. */
   --font-sans: 'Geist Variable', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
-
-  --text-display: 2.25rem;
-  --text-display--line-height: 1.1;
-  --text-display--font-weight: 600;
-  --text-display--letter-spacing: -0.02em;
 
   --text-h1: 1.75rem;
   --text-h1--line-height: 1.3;
@@ -208,9 +184,7 @@
   --text-label--font-weight: 500;
   --text-label--letter-spacing: 0.08em;
 
-  /* Hero number on a stat tile. Same metrics as display today; kept as its
-   * own name so a number and a headline can diverge without a rename. Pair
-   * with `tabular-nums`. */
+  /* Hero number on a stat tile. Pair with `tabular-nums`. */
   --text-metric: 2.25rem;
   --text-metric--line-height: 1.1;
   --text-metric--font-weight: 600;
@@ -236,36 +210,13 @@
   --radius-pill: 9999px;        /* pills, avatars */
 
   /* --- Shadow (sparingly: elevation is carried by surface level) --- */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-
-/* The Siblings chart-series ramp is consumed exclusively through
- * seriesColor()/chartSeriesColors in ui/charts/chartTheme.ts, which builds
- * `var(--color-chart-series-N)` from a runtime template string. Tailwind's
- * static usage scan can't see that — it only keeps an @theme custom property
- * whose name appears literally somewhere in scanned source, so slots not
- * otherwise referenced as a literal get silently pruned from the compiled
- * CSS and render as invisible black on the dark canvas. `static`
- * forces Tailwind to always emit every variable in this block regardless of
- * detected usage. Keep this block scoped to just the series ramp — applying
- * `static` repo-wide would force-generate every unused token's utility
- * classes into the bundle. */
-@theme static {
-  --color-chart-series-1: var(--primitive-viz-1);
-  --color-chart-series-2: var(--primitive-viz-2);
-  --color-chart-series-3: var(--primitive-viz-3);
-  --color-chart-series-4: var(--primitive-viz-4);
-  --color-chart-series-5: var(--primitive-viz-5);
-  --color-chart-series-6: var(--primitive-viz-6);
-  --color-chart-series-7: var(--primitive-viz-7);
-  --color-chart-series-8: var(--primitive-viz-8);
 }
 
 /* =============================================================================
  * Non-utility tokens. Not in @theme because they aren't bg/text/border/font
- * namespaces; components read them via var(). (--ease-enter / --ease-exit
- * stay in src/index.css alongside the keyframes that use them.)
+ * namespaces; components read them via var(). (--ease-enter stays in
+ * src/index.css alongside the keyframes that use it.)
  * ============================================================================= */
 
 :root {

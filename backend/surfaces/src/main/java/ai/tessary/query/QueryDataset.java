@@ -27,9 +27,9 @@ import java.util.Set;
  * <p>A span's identity is the producer triple {@code (project_id, trace_id, id)}, and its
  * {@code id} is unique only inside its trace, so a bare id names nothing. Two members carry that
  * fact: {@link #idExpr()} is the SQL expression that renders a row's handle (for {@code spans},
- * {@code trace_id || ':' || id}, the same handle {@code get_span} and the embedding namespace use),
- * and {@link #keyColumns()} is the ordered identity tuple the keyset cursor and the kNN hydration
- * compare on. Single-key datasets simply declare {@code id} for both.
+ * {@code trace_id || ':' || id}, the same handle {@code get_span} uses), and {@link #keyColumns()}
+ * is the ordered identity tuple the keyset cursor compares on. Single-key datasets simply declare
+ * {@code id} for both.
  */
 public enum QueryDataset {
     /**
@@ -268,8 +268,8 @@ public enum QueryDataset {
 
     /**
      * The identity columns behind {@link #idExpr()}, in the order the handle concatenates them. The keyset
-     * cursor's tiebreak tuple and the kNN hydration's row-constructor predicate are both built from this,
-     * so a dataset's identity is stated once and the two paths cannot disagree. Trusted identifiers.
+     * cursor's tiebreak tuple is built from this, so a dataset's identity is stated once. Trusted
+     * identifiers.
      */
     public List<String> keyColumns() {
         return keyColumns;

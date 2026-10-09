@@ -11,11 +11,17 @@ import ai.tessary.cases.CaseDtos.TriageView;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
+import ai.tessary.classifier.detector.groundedness.GroundednessAnswerClearer;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorTriageSource;
 import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
+import ai.tessary.classifier.frustration.FrustrationRateRepository;
+import ai.tessary.classifier.frustration.FrustrationSessionClearer;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
@@ -86,10 +92,22 @@ public class CaseService {
     /** Same reason as {@link #toolErrorStates}, for a malformed-output case: it shares tool_error's
      *  CUSUM engine and so needs the same accumulator reset when a human closes the case by hand. */
     private final MalformedOutputRateRepository malformedOutputRates;
+    /** A frustration case's call-site state: a resolve restarts it and re-learns its reference; see {@link #resolve}. */
+    private final FrustrationRateRepository frustrationRates;
+    /** Clears the conversations a frustration case cites when it is resolved as a false alarm. */
+    private final FrustrationSessionClearer frustrationSessions;
+    /** A groundedness case's call-site state: a resolve restarts it and re-learns its reference, as frustration's. */
+    private final GroundednessRateRepository groundednessRates;
+    /** Clears the answers a groundedness case cites when it is resolved as a false alarm. */
+    private final GroundednessAnswerClearer groundednessAnswers;
     /** "How outputs broke" — the same builder the malformed-output finding page reads. */
     private final MalformedOutputDetailService malformedOutputDetail;
     /** "When it leaked" — the same builder the secret-leak finding page reads. */
     private final SecretLeakDetailService secretLeakDetail;
+
+    private final FrustrationDetailService frustrationDetail;
+
+    private final GroundednessDetailService groundednessDetail;
 
     public CaseService(
             CaseRepository cases,
@@ -106,8 +124,14 @@ public class CaseService {
             ClassifierService classifiers,
             ToolErrorStateRepository toolErrorStates,
             MalformedOutputRateRepository malformedOutputRates,
+            FrustrationRateRepository frustrationRates,
+            FrustrationSessionClearer frustrationSessions,
+            GroundednessRateRepository groundednessRates,
+            GroundednessAnswerClearer groundednessAnswers,
             MalformedOutputDetailService malformedOutputDetail,
-            SecretLeakDetailService secretLeakDetail) {
+            SecretLeakDetailService secretLeakDetail,
+            FrustrationDetailService frustrationDetail,
+            GroundednessDetailService groundednessDetail) {
         this.cases = cases;
         this.ledger = ledger;
         this.events = events;
@@ -122,8 +146,14 @@ public class CaseService {
         this.classifiers = classifiers;
         this.toolErrorStates = toolErrorStates;
         this.malformedOutputRates = malformedOutputRates;
+        this.frustrationRates = frustrationRates;
+        this.frustrationSessions = frustrationSessions;
+        this.groundednessRates = groundednessRates;
+        this.groundednessAnswers = groundednessAnswers;
         this.malformedOutputDetail = malformedOutputDetail;
         this.secretLeakDetail = secretLeakDetail;
+        this.frustrationDetail = frustrationDetail;
+        this.groundednessDetail = groundednessDetail;
     }
 
     // ---- reads -------------------------------------------------------------------------------
@@ -241,7 +271,7 @@ public class CaseService {
         FindingRow finding = findingBehind(projectId, row);
         boolean detectorAvailable = detectorAvailable(projectId, row);
         RcaReportRow report = latestRcaReport(projectId, finding);
-        RcaReportView rca = inlinedRcaReport(projectId, report);
+        RcaReportView rca = inlinedRcaReport(report);
         return new CaseDetailView(
                 // The report is already in hand, so the caption comes off it directly: no second lookup,
                 // and the header cannot disagree with the analysis rendered below it.
@@ -250,7 +280,7 @@ public class CaseService {
                         .map(CaseEventView::of)
                         .toList(),
                 finding == null ? null : finding.id(),
-                ruling(row, finding),
+                ruling(finding),
                 exemplars.forCase(
                         projectId,
                         finding == null ? List.of() : findingEvidence.listByFinding(projectId, finding.id())),
@@ -260,6 +290,8 @@ public class CaseService {
                 rateDetail(finding),
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
+                finding == null ? null : frustrationDetail.detail(finding),
+                finding == null ? null : groundednessDetail.detail(finding),
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
@@ -320,19 +352,19 @@ public class CaseService {
     }
 
     /**
-     * No absorb for an SOP rule: the SOP is the fixed reference, and re-authoring it is a repo edit
-     * rather than a button: there is nothing here for "move the bar" to move.
-     *
-     * <p>No absorb for a secret leak or a malformed-output case either, for a narrower reason: neither
+     * No absorb for a secret leak or a malformed-output case: neither
      * cause has fitted detector state a re-pin could move — {@code BehaviorTriageSource#repin} is a
      * no-op for {@code ARMED_WINDOW}/{@code MALFORMED_RATE} causes — so the button would close the case
      * with nothing having moved, and the next sweep would refile the same finding. Excluded here rather
-     * than left to no-op silently: a case page is not worth a button that does nothing.
+     * than left to no-op silently: a case page is not worth a button that does nothing. A frustration case is
+     * excluded for the same reason: its reference is learned, never re-pinned. A groundedness case's reference
+     * is learned too, but absorbing it re-learns the reference from the traffic after the press, which does
+     * move the bar, so it keeps the button.
      */
     private static boolean absorbable(CaseRow row) {
-        return !CaseRow.Detector.SOP_CONFORMANCE.equals(row.detector())
-                && !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
-                && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector());
+        return !CaseRow.Detector.SECRET_LEAK.equals(row.detector())
+                && !CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())
+                && !CaseRow.Detector.FRUSTRATION.equals(row.detector());
     }
 
     /**
@@ -348,7 +380,7 @@ public class CaseService {
      * every non-human ruling here says the same verdict. What varies is the summary and the citations,
      * which is what a reader deciding whether to page someone actually reads.
      */
-    private static @Nullable CaseRulingView ruling(CaseRow row, @Nullable FindingRow finding) {
+    private static @Nullable CaseRulingView ruling(@Nullable FindingRow finding) {
         if (finding == null) return null;
         if (finding.humanVerdictAt() != null) {
             return new CaseRulingView(
@@ -409,16 +441,55 @@ public class CaseService {
     /**
      * Close a case with the human's one-line reason. The reason is required by the wire contract and
      * by the table; it is the only thing that makes a closed case worth reading later.
+     *
+     * @param disposition only on a frustration or groundedness case ({@link CaseRow.Disposition}): {@code fixed}
+     *     or {@code false_alarm}, stored on the case and in the trail line's detail. Null is allowed there too and
+     *     restarts the call site without clearing anything. Any other case refuses one.
      */
     @Transactional
-    public CaseView resolve(String projectId, String id, String reason, @Nullable String actor) {
+    public CaseView resolve(
+            String projectId, String id, String reason, @Nullable String actor, @Nullable String disposition) {
         CaseRow row = require(projectId, id);
         if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
         if (reason.isBlank()) throw new TessaryException(CaseError.REASON_REQUIRED);
+        boolean frustration = CaseRow.Detector.FRUSTRATION.equals(row.detector());
+        boolean groundedness = CaseRow.Detector.GROUNDEDNESS.equals(row.detector());
+        if (disposition != null && !frustration && !groundedness) {
+            throw new TessaryException(CaseError.DISPOSITION_NOT_APPLICABLE, row.reference());
+        }
 
         Instant now = Instant.now();
-        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, reason, actor, now);
-        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, null, now);
+        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, reason, actor, disposition, now);
+
+        // A frustration case restarts its call site whichever disposition closed it, and unlike tool_error it
+        // re-learns the reference too: a false alarm means the old normal was learned on noise, and a fix means
+        // the rate after it is the normal worth comparing against. The reset fence keeps the next replay from
+        // re-folding the hours before now. A false alarm also clears the conversations the case cites, so they
+        // stop counting as frustrated and their later turns are scored again. Both land before the findings
+        // close, in this transaction.
+        String detail = null;
+        if (frustration) {
+            frustrationRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
+                    ? frustrationSessions.clear(projectId, row.id(), now.toString())
+                    : 0;
+            detail = disposition == null
+                    ? null
+                    : "{\"disposition\":\"" + disposition + "\",\"sessions_cleared\":" + cleared + "}";
+        }
+        // A groundedness case the same way, for the same reasons: its reference is learned, so a fix or a false
+        // alarm both mean the normal is re-learned from here. A false alarm clears the flag on every answer the
+        // case cites, so their traces stop counting as failures.
+        if (groundedness) {
+            groundednessRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
+                    ? groundednessAnswers.clear(projectId, row.id(), now.toString())
+                    : 0;
+            detail = disposition == null
+                    ? null
+                    : "{\"disposition\":\"" + disposition + "\",\"answers_cleared\":" + cleared + "}";
+        }
+        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, detail, now);
 
         // A tool-error case closes on a human saying "dealt with", and the accumulator behind it has to
         // hear that. It is no longer capped, so a serious outage leaves it high enough that draining at
@@ -514,7 +585,7 @@ public class CaseService {
      * first finding link became mandatory can be in that state.
      */
     @Transactional
-    public RcaReportView runRca(String projectId, String id, @Nullable String actor) {
+    public RcaReportView runRca(String projectId, String id, String actor) {
         CaseRow row = require(projectId, id);
         List<FindingRow> caseFindings = findings.listByCase(projectId, row.id());
         if (caseFindings.isEmpty()) {
@@ -568,15 +639,13 @@ public class CaseService {
     /**
      * The already-loaded report as the caption the header reads. Unfinished runs conclude nothing.
      *
-     * <p>The VIEW rather than the row: the row's hypotheses are a raw jsonb string, and the view has
+     * <p>The VIEW rather than the row: the row's causes are a raw jsonb string, and the view has
      * already parsed them for the body of the page. Deriving the header's caption from the same object
      * the reader sees below it is also what keeps the two from ever disagreeing.
      */
     private static @Nullable CaseLead leadOf(@Nullable RcaReportView rca) {
         if (rca == null || !JobRow.Status.DONE.equals(rca.status())) return null;
-        return new CaseLead(
-                rca.verdict(),
-                rca.hypotheses().isEmpty() ? null : rca.hypotheses().get(0).title());
+        return new CaseLead(rca.verdict(), rca.summary());
     }
 
     /** The most recent RCA on the FINDING behind this case. RCA is a finding-analysis lane now, so
@@ -590,7 +659,7 @@ public class CaseService {
     }
 
     /**
-     * That report as the wire view (verdict, hypotheses, ruled-out checklist, the agent's markdown), or null
+     * That report as the wire view (verdict, causes, ruled-out checklist, the agent's markdown), or null
      * while it is still running.
      *
      * <p><b>Running is the one state that stays a bare id.</b> A pending or claimed report is a shell: the
@@ -600,22 +669,16 @@ public class CaseService {
      * {@code status} and a reader can tell the two apart, and a failed analysis is a fact worth having, not a
      * pending one to wait on.
      *
-     * <p>Fetched through {@link RcaReportService} rather than mapped here, so a case page and the RCA surface
-     * render one report shape; the row's id is enough of a handle, and re-reading it by that id costs one
-     * primary-key lookup. Gone between the two reads reads as absent: a case is not worth failing to render
-     * over a report that was deleted mid-request.
+     * <p>Rendered through {@link RcaReportService} rather than mapped here, so a case page and the RCA surface
+     * render one report shape.
      */
-    private @Nullable RcaReportView inlinedRcaReport(String projectId, @Nullable RcaReportRow report) {
+    private @Nullable RcaReportView inlinedRcaReport(@Nullable RcaReportRow report) {
         if (report == null
                 || JobRow.Status.PENDING.equals(report.status())
                 || JobRow.Status.CLAIMED.equals(report.status())) {
             return null;
         }
-        try {
-            return rcaReportViews.get(projectId, report.id());
-        } catch (TessaryException e) {
-            return null;
-        }
+        return rcaReportViews.view(report);
     }
 
     // ---- helpers -----------------------------------------------------------------------------

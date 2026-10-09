@@ -7,8 +7,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -28,8 +26,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class CaseOpener {
-
-    private static final Logger log = LoggerFactory.getLogger(CaseOpener.class);
 
     private final List<CaseSource> sources;
     private final FindingRepository findings;
@@ -55,10 +51,6 @@ public class CaseOpener {
             return Optional.empty();
         }
         CaseSource source = sourceFor(finding.classifierKey());
-        if (source == null) {
-            log.warn("no case source owns classifier={} for finding={}", finding.classifierKey(), findingId);
-            return Optional.empty();
-        }
         return Optional.of(ledger.openOrJoin(projectId, source.shape(finding), actor, Instant.now()));
     }
 
@@ -72,10 +64,7 @@ public class CaseOpener {
         return FindingRow.TriageVerdict.POSITIVE.equals(finding.triageVerdict());
     }
 
-    private @Nullable CaseSource sourceFor(String classifierKey) {
-        for (CaseSource source : sources) {
-            if (source.owns(classifierKey)) return source;
-        }
-        return null;
+    private CaseSource sourceFor(String classifierKey) {
+        return sources.stream().filter(s -> s.owns(classifierKey)).findFirst().orElseThrow();
     }
 }

@@ -47,14 +47,13 @@ export type TraceTimeRange =
 export function resolveRange(range: TraceTimeRange, now: number): { from: string | null; to: string | null } {
   if (range.kind === "all") return { from: null, to: null };
   if (range.kind === "custom") return { from: range.from, to: range.to };
-  const preset = PRESET_BY_KEY.get(range.key);
-  if (!preset) return { from: null, to: null };
+  const preset = PRESET_BY_KEY.get(range.key)!;
   return { from: new Date(now - preset.ms).toISOString(), to: null };
 }
 
 export function rangeLabel(range: TraceTimeRange): string {
   if (range.kind === "all") return "All time";
-  if (range.kind === "preset") return PRESET_BY_KEY.get(range.key)?.label ?? range.key;
+  if (range.kind === "preset") return PRESET_BY_KEY.get(range.key)!.label;
   const from = range.from ? new Date(range.from).toLocaleString() : "the beginning";
   const to = range.to ? new Date(range.to).toLocaleString() : "now";
   return `${from} → ${to}`;
@@ -68,15 +67,32 @@ function rangeBadge(range: TraceTimeRange): string {
 
 // ---- URL state -------------------------------------------------------------
 
-export type FacetKey = "status" | "model" | "kind" | "call_site";
+export type FacetKey = "status" | "kind" | "call_site" | "call_site_scope" | "detected_by";
+
+/**
+ * Which traces the call-site control keeps. `any` is the default and has no param: a trace without a
+ * call site is left out until the reader asks for it. One id is `?call_site=`; `all` and `none` are
+ * `?call_site_scope=`, a param of its own because a call site id can be any string.
+ */
+export type CallSiteFilter = "any" | "all" | "none" | { id: string };
 
 /** Every filter the bar owns, read straight off the URL so a link carries the view. */
 export type TraceQueryState = {
   range: TraceTimeRange;
   facets: Record<FacetKey, string | null>;
+  callSite: CallSiteFilter;
+  /** The submitted search, "" for none. */
+  q: string;
 };
 
-const FACET_KEYS: FacetKey[] = ["status", "model", "kind", "call_site"];
+const FACET_KEYS: FacetKey[] = ["status", "kind", "call_site", "call_site_scope", "detected_by"];
+
+function parseCallSite(params: URLSearchParams): CallSiteFilter {
+  const id = params.get("call_site");
+  if (id) return { id };
+  const scope = params.get("call_site_scope");
+  return scope === "all" || scope === "none" ? scope : "any";
+}
 
 function parseRange(params: URLSearchParams): TraceTimeRange {
   const raw = params.get("range");
@@ -96,6 +112,8 @@ export function useTraceQueryState(): {
   state: TraceQueryState;
   setRange: (r: TraceTimeRange) => void;
   setFacet: (key: FacetKey, value: string | null) => void;
+  setCallSite: (filter: CallSiteFilter) => void;
+  setSearch: (q: string) => void;
   clearAll: () => void;
   activeCount: number;
 } {
@@ -106,7 +124,7 @@ export function useTraceQueryState(): {
       FacetKey,
       string | null
     >;
-    return { range: parseRange(params), facets };
+    return { range: parseRange(params), facets, callSite: parseCallSite(params), q: params.get("q") ?? "" };
   }, [params]);
 
   // Mutations preserve params this bar does not own (?trace=, ?view=, ?span=).
@@ -144,10 +162,31 @@ export function useTraceQueryState(): {
     [write],
   );
 
+  const setCallSite = useCallback(
+    (filter: CallSiteFilter) =>
+      write((next) => {
+        next.delete("call_site");
+        next.delete("call_site_scope");
+        if (typeof filter === "object") next.set("call_site", filter.id);
+        else if (filter !== "any") next.set("call_site_scope", filter);
+      }),
+    [write],
+  );
+
+  const setSearch = useCallback(
+    (q: string) =>
+      write((next) => {
+        if (q) next.set("q", q);
+        else next.delete("q");
+      }),
+    [write],
+  );
+
   const clearAll = useCallback(
     () =>
       write((next) => {
         FACET_KEYS.forEach((k) => next.delete(k));
+        next.delete("q");
         next.delete("range");
         next.delete("from");
         next.delete("to");
@@ -158,7 +197,70 @@ export function useTraceQueryState(): {
   const activeCount =
     FACET_KEYS.filter((k) => state.facets[k]).length + (params.get("range") ? 1 : 0);
 
-  return { state, setRange, setFacet, clearAll, activeCount };
+  return { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount };
+}
+
+// ---- kept for the tab ------------------------------------------------------
+
+/** The params that are the reader's view of the list, as opposed to what is open over it (?trace=). */
+const KEPT_PARAMS = [...FACET_KEYS, "q", "range", "from", "to", "groupBy"];
+
+function keptOf(params: URLSearchParams): URLSearchParams {
+  const kept = new URLSearchParams();
+  for (const k of KEPT_PARAMS) {
+    const v = params.get(k);
+    if (v != null) kept.set(k, v);
+  }
+  return kept;
+}
+
+/**
+ * Keeps the filters for the tab, so leaving the page and coming back does not reset them.
+ *
+ * <p>The URL stays the source of truth; this only copies its filter params to `sessionStorage` and
+ * puts them back when the page opens on a bare URL, the sidebar's plain `/traces`. A URL that brings
+ * its own filters, a Vitals or Classifiers deep link, wins and becomes the kept view. Per tab rather
+ * than per browser: a new tab starts clean, a reload does not.
+ *
+ * <p>Returns false until the restored filters are in the URL, so the page never fetches the
+ * unfiltered list only to throw it away. That is a wait on the URL itself, not on the navigate call:
+ * the router applies the change as a transition, a render or more after it is asked for.
+ */
+export function useKeptTraceView(scope: string): boolean {
+  const [params, setParams] = useSearchParams();
+  const key = `tessary:traces:view:${scope}`;
+  const [pending, setPending] = useState<URLSearchParams | null>(() => {
+    if (keptOf(params).toString() !== "") return null;
+    try {
+      const saved = keptOf(new URLSearchParams(sessionStorage.getItem(key) ?? ""));
+      return saved.toString() !== "" ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+  const ready = pending == null || keptOf(params).toString() !== "";
+
+  // Once, on arrival: every later change to the URL is the reader's own. A plain effect, since the
+  // router drops a navigate made from a layout effect on first mount.
+  useEffect(() => {
+    if (!pending) return;
+    const next = new URLSearchParams(params);
+    pending.forEach((v, k) => next.set(k, v));
+    setParams(next, { replace: true });
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    // Settled; from here a URL with no filters is one the reader cleared, not one still arriving.
+    if (pending) setPending(null);
+    try {
+      sessionStorage.setItem(key, keptOf(params).toString());
+    } catch {
+      // Storage unavailable — the view just isn't kept.
+    }
+  }, [key, params, pending, ready]);
+
+  return ready;
 }
 
 // ---- auto refresh ----------------------------------------------------------
@@ -548,18 +650,31 @@ export function RefreshControl({
 
 export type FacetOption = { value: string; label: string };
 
-/** A single-select filter: `Any` plus whatever values this project actually has. */
+/**
+ * A row above or below the values that is not one of them, such as `Any`. `short` is what the button
+ * shows while the row is selected; without it the button reads as unset.
+ */
+export type FacetFixedRow = { label: string; short?: string; selected: boolean; onSelect: () => void };
+
+/**
+ * A single-select filter: `Any` (or the given head rows), whatever values this project actually has,
+ * then the foot rows.
+ */
 export function FacetControl({
   label,
   value,
   options,
   onChange,
+  head,
+  foot = [],
   emptyHint,
 }: {
   label: string;
   value: string | null;
   options: FacetOption[];
   onChange: (v: string | null) => void;
+  head?: FacetFixedRow[];
+  foot?: FacetFixedRow[];
   emptyHint?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -567,7 +682,21 @@ export function FacetControl({
     open,
     useCallback(() => setOpen(false), []),
   );
-  const selected = options.find((o) => o.value === value);
+  const heads = head ?? [{ label: "Any", selected: !value, onSelect: () => onChange(null) }];
+  const shown = value
+    ? (options.find((o) => o.value === value)?.label ?? value)
+    : [...heads, ...foot].find((h) => h.selected)?.short;
+  const fixedRow = (h: FacetFixedRow) => (
+    <Row
+      key={h.label}
+      label={h.label}
+      selected={h.selected}
+      onClick={() => {
+        h.onSelect();
+        setOpen(false);
+      }}
+    />
+  );
 
   return (
     <div ref={ref} className="relative">
@@ -578,16 +707,16 @@ export function FacetControl({
         onClick={() => setOpen((o) => !o)}
         className={cn(
           "inline-flex h-8 items-center rounded-control border bg-surface transition-colors hover:border-border-strong gap-1.5 py-0 px-2",
-          value ? "border-border-strong text-fg" : "border-border text-muted",
+          shown ? "border-border-strong text-fg" : "border-border text-muted",
         )}
         style={{ transitionDuration: "var(--duration-micro)" }}
       >
         <span className="text-small">
           {label}
-          {value && (
+          {shown && (
             <>
               <span className="text-subtle">: </span>
-              <span className="font-mono">{selected?.label ?? value}</span>
+              <span className="font-mono">{shown}</span>
             </>
           )}
         </span>
@@ -596,14 +725,7 @@ export function FacetControl({
 
       {open && (
         <Panel label={label}>
-          <Row
-            label="Any"
-            selected={!value}
-            onClick={() => {
-              onChange(null);
-              setOpen(false);
-            }}
-          />
+          {heads.map(fixedRow)}
           {options.length === 0 ? (
             <p className="text-subtle py-2 px-2.5 text-label">
               {emptyHint ?? "Nothing to filter by yet."}
@@ -621,6 +743,7 @@ export function FacetControl({
               />
             ))
           )}
+          {foot.map(fixedRow)}
         </Panel>
       )}
     </div>

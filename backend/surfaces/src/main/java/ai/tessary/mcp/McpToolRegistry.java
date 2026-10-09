@@ -6,11 +6,13 @@ import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
@@ -18,8 +20,6 @@ import ai.tessary.model.CallSite;
 import ai.tessary.model.FailureMode;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
 import ai.tessary.query.QueryDataset;
 import ai.tessary.query.QueryDtos.CountRequest;
 import ai.tessary.query.QueryDtos.CountView;
@@ -37,6 +37,7 @@ import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
+import ai.tessary.storage.TraceDetectionRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
@@ -74,7 +75,7 @@ import org.springframework.stereotype.Component;
  *   <li><b>Query (read-only):</b> {@code query_count} / {@code query_timeseries} / {@code query_facets} /
  *       {@code query_search} over the aggregation-first datasets, and {@code describe_dataset}.</li>
  *   <li><b>Substrate lists (read-only):</b> {@code list_traces}, {@code list_spans},
- *       {@code list_sessions}, {@code get_session}: rollup rows and previews, paged with
+ *       {@code list_sessions}, {@code get_session}, {@code get_conversation}: rollup rows and previews, paged with
  *       {@code limit}/{@code cursor}. See {@link #registerSubstrateListTools()}.</li>
  *   <li><b>Classifiers (read-only):</b> {@code list_findings} / {@code get_finding} read the
  *       behaviour/metric/tool-error drift findings, and {@code get_finding_evidence} pages the
@@ -133,7 +134,7 @@ public class McpToolRegistry {
     private final SpanPayloadRepository payloads;
     private final TraceV2Repository traces;
     private final SessionReadService sessions;
-    private final CapabilityService capabilities;
+    private final TraceDetectionRepository detections;
     private final FindingService behaviorDrift;
     private final CaseService cases;
 
@@ -148,9 +149,10 @@ public class McpToolRegistry {
             SpanPayloadRepository payloads,
             TraceV2Repository traces,
             SessionReadService sessions,
-            CapabilityService capabilities,
             FindingService behaviorDrift,
-            CaseService cases) {
+            CaseService cases,
+            TraceDetectionRepository detections) {
+        this.detections = detections;
         this.pipelineService = pipelineService;
         this.projects = projects;
         this.queryService = queryService;
@@ -158,7 +160,6 @@ public class McpToolRegistry {
         this.payloads = payloads;
         this.traces = traces;
         this.sessions = sessions;
-        this.capabilities = capabilities;
         this.behaviorDrift = behaviorDrift;
         this.cases = cases;
         register();
@@ -179,53 +180,20 @@ public class McpToolRegistry {
         this.payloads = null;
         this.traces = null;
         this.sessions = null;
-        this.capabilities = null;
+        this.detections = null;
         this.behaviorDrift = null;
         this.cases = null;
         for (McpTool t : toolset) tools.put(t.name(), t);
     }
 
-    public List<McpTool> all() {
+    /** Every registered tool, in registration order. This is what {@code tools/list} answers. */
+    public List<McpTool> tools() {
         return List.copyOf(tools.values());
     }
 
-    /**
-     * The tools this token's org is offered: every tool whose capability it holds, plus every ungated
-     * one. This is what {@code tools/list} answers. Offering a tool to an org that does not hold its
-     * capability is worse than a 403: the model will plan around a tool that cannot work and burn a
-     * turn discovering it.
-     */
-    public List<McpTool> availableFor(TenantContext ctx) {
-        String orgId = ctx.orgId();
-        // Skip resolution when there's nothing to resolve for: keeps the hand-rolled-toolset test
-        // constructor's null dependencies undereferenced, and a registry with no gated tool has
-        // nothing to ask the capability layer anyway.
-        if (orgId == null || tools.values().stream().noneMatch(t -> t.capability() != null)) {
-            return List.copyOf(tools.values());
-        }
-        CapabilitySet resolved = capabilities.resolve(orgId);
-        List<McpTool> out = new ArrayList<>(tools.size());
-        for (McpTool t : tools.values()) {
-            if (t.capability() == null || resolved.isEnabled(t.capability())) out.add(t);
-        }
-        return List.copyOf(out);
-    }
-
-    public @Nullable McpTool get(String name) {
+    /** The tool by name, or null when there is none. */
+    public @Nullable McpTool tool(String name) {
         return tools.get(name);
-    }
-
-    /**
-     * The tool by name, or null when this org is not offered it. Null rather than a distinct
-     * "forbidden" answer, so a withheld tool is indistinguishable from one that does not exist:
-     * there is nothing a partner can do about a capability it does not hold.
-     */
-    public @Nullable McpTool availableTool(String name, TenantContext ctx) {
-        McpTool tool = tools.get(name);
-        if (tool == null || tool.capability() == null) return tool;
-        String orgId = ctx.orgId();
-        if (orgId == null) return tool;
-        return capabilities.isEnabled(orgId, tool.capability()) ? tool : null;
     }
 
     // ------------------------------------------------------------------ registration
@@ -344,8 +312,7 @@ public class McpToolRegistry {
                                                 CASE_STATES)),
                                 Map.entry(
                                         "detector",
-                                        strField("Restrict to one detector (e.g. 'behavior_drift',"
-                                                + " 'metric_drift', 'tool_error', 'sop_conformance').")),
+                                        strField("Restrict to one detector (e.g. 'metric_drift', 'tool_error').")),
                                 Map.entry(
                                         "call_site_id",
                                         strField("Restrict to cases about one call site. A case whose subject"
@@ -358,9 +325,12 @@ public class McpToolRegistry {
         add(new McpTool(
                 "get_case",
                 "Fetch one case by id, scoped to this token's project: the case, its activity trail, the newest"
-                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the ruling, the"
-                        + " exemplar traces, and the RCA report INLINE in rca when one has finished — its"
-                        + " verdict, hypotheses, the checks it ruled out, and the agent's full written"
+                        + " classifier finding it is about (latest_finding_id — pass it to get_finding), the"
+                        + " classifier's summary numbers with no trace or span ids (page the finding's rows with"
+                        + " get_finding_evidence and latest_finding_id), and the RCA report INLINE in rca when one"
+                        + " has finished — its"
+                        + " verdict, causes (one shape for every case type), the checks it ruled out, and the"
+                        + " agent's full written"
                         + " investigation. rca is null while a report is still running (rca_report_id names it,"
                         + " so poll) and when none has been run; rca_available says whether one could be."
                         + " Accepts either the stored id or the human reference ('C-118'), so a case number"
@@ -488,8 +458,8 @@ public class McpToolRegistry {
     }
 
     /**
-     * The plural substrate readers: {@code list_traces}, {@code list_spans}, {@code list_sessions} and
-     * {@code get_session}. Each wraps the same seam a REST controller or service already reads (cursors are
+     * The plural substrate readers: {@code list_traces}, {@code list_spans}, {@code list_sessions},
+     * {@code get_session} and {@code get_conversation}. Each wraps the same seam a REST controller or service already reads (cursors are
      * shared via {@link TracePageCodec}, so a cursor minted here is readable there), so a list here cannot
      * disagree with the same list in the UI.
      *
@@ -509,7 +479,7 @@ public class McpToolRegistry {
                         + " ROLLUP columns (span_count, error_count, typed token buckets, costs, is_settled,"
                         + " unpriced_spans) and the stored input_preview/output_preview, NEVER the full payloads."
                         + " Filter by model, kind, call_site_id, status and a started_at range, or"
-                        + " keyword-match the trace name and previews with q. A null token or cost column means"
+                        + " search names, ids and span inputs and outputs with q. A null token or cost column means"
                         + " one of two different things and the row says which: is_settled=false is 'still"
                         + " receiving spans', settled-with-null is 'no span reported usage', and unpriced_spans >"
                         + " 0 means the total is real but incomplete. Pass a row's id to get_trace to read its"
@@ -545,8 +515,9 @@ public class McpToolRegistry {
                                                 "Optional inclusive upper bound (ISO-8601).")),
                                 Map.entry(
                                         "q",
-                                        strField("Optional. Case-insensitive match on the trace name and"
-                                                + " the stored previews — not the full payload text.")),
+                                        strField("Optional. Substring of the trace name, session, thread, user"
+                                                + " or id; or every word in one span's input or output, as a word"
+                                                + " prefix (whole for words under 3 letters).")),
                                 Map.entry("limit", limitField()),
                                 Map.entry("cursor", cursorField())),
                         List.of()),
@@ -622,6 +593,21 @@ public class McpToolRegistry {
                         Map.of("id", strField("Session id, e.g. a trace row's session or a span's session_id.")),
                         List.of("id")),
                 (ctx, args) -> getSession(ctx, requireStr(args, "id"))));
+
+        add(new McpTool(
+                "get_conversation",
+                "Fetch one conversation by id, scoped to this token's project: its turns (top-level traces)"
+                        + " oldest-first as the same rows list_traces returns, capped at "
+                        + SessionReadService.SESSION_TRACE_CAP + " with traces_truncated saying so. A"
+                        + " conversation is a session: the key a frustration finding's session refs carry. Use"
+                        + " get_session for the session's sub-agent traces and totals.",
+                schema(
+                        Map.of(
+                                "id",
+                                strField("Session id, e.g. a frustration evidence row's sessionId or a trace's"
+                                        + " session_id.")),
+                        List.of("id")),
+                (ctx, args) -> getConversation(ctx, requireStr(args, "id"))));
     }
 
     /**
@@ -696,7 +682,7 @@ public class McpToolRegistry {
         add(new McpTool(
                 "list_findings",
                 "List classifier findings for this token's project — the aggregated causes behind"
-                        + " behaviour-drift, metric-drift and tool-error-rate-drift detections. Returns headline"
+                        + " metric-drift and tool-error-rate-drift detections. Returns headline"
                         + " rows without the evidence blob; pass an id to get_finding for the full evidence."
                         + " Confirmed findings only by default; pass include='all' for the raw Layer-1 stream,"
                         + " which is a lead list rather than an alert list. Findings whose detector this org does"
@@ -707,8 +693,7 @@ public class McpToolRegistry {
                                 Map.entry("call_site_id", strField("Restrict to one call site.")),
                                 Map.entry(
                                         "detector",
-                                        strField("Restrict to one detector (e.g. 'behavior_drift',"
-                                                + " 'tool_error').")),
+                                        strField("Restrict to one detector (e.g. 'cost_drift', 'tool_error').")),
                                 Map.entry(
                                         "include",
                                         enumField(
@@ -747,9 +732,9 @@ public class McpToolRegistry {
                         + " per-role sizes with no rows, so you can decide how much to page before you spend"
                         + " context on it. counts is what SURVIVES and can still be opened; recorded_counts is"
                         + " what the detector wrote at finding-open — counts below recorded means substrate aged"
-                        + " out, never a lost write. ZERO under a role is a real answer: behaviour drift,"
-                        + " conformance's windowed drift test and metric drift's rolling-control arm all compare"
-                        + " against a fitted model, so they have no baseline rows to point at; read that as 'no"
+                        + " out, never a lost write. ZERO under a role is a real answer: metric drift's"
+                        + " rolling-control arm compares against a fitted model, so it has no baseline rows to"
+                        + " point at; read that as 'no"
                         + " enumerable reference side', not as missing evidence. Pages in the detector's own"
                         + " order, stably; rank has gaps and is an order, not an index. There is NO sampling"
                         + " mode — if you want a stride or a random draw, take it yourself and say in your"
@@ -804,8 +789,7 @@ public class McpToolRegistry {
                             .toList(),
                     view.lane());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "listing findings failed" : message, e);
+            throw toolError(e);
         }
     }
 
@@ -829,14 +813,17 @@ public class McpToolRegistry {
         ToolErrorEvidence.RateDetail toolError = detail.toolError();
         MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
         SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
+        FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
+        GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
                 toolError == null ? null : withoutIds(toolError),
-                detail.baseline(),
                 malformedOutput == null ? null : withoutIds(malformedOutput),
                 secretLeak == null ? null : withoutIds(secretLeak),
-                detail.armedWindow());
+                detail.armedWindow(),
+                frustration == null ? null : frustration.withoutIds(),
+                groundedness == null ? null : groundedness.withoutIds());
     }
 
     private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {
@@ -891,8 +878,7 @@ public class McpToolRegistry {
         try {
             return agentView(behaviorDrift.finding(projectId, id));
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "finding not found: " + id : message, e);
+            throw toolError(e);
         }
     }
 
@@ -927,7 +913,7 @@ public class McpToolRegistry {
         String cursor = strArg(args, "cursor");
         try {
             if (boolArg(args, "count_only")) {
-                return behaviorDrift.findingEvidence(projectId, findingId, role, pageSize, cursor, true);
+                return behaviorDrift.findingEvidence(projectId, findingId);
             }
             BehaviorDtos.FindingEvidenceSpanPage page =
                     behaviorDrift.findingEvidenceSpans(projectId, findingId, role, pageSize, cursor);
@@ -937,8 +923,7 @@ public class McpToolRegistry {
                     page.counts(),
                     page.recordedCounts());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "finding not found: " + findingId : message, e);
+            throw toolError(e);
         }
     }
 
@@ -1164,45 +1149,49 @@ public class McpToolRegistry {
                     "unknown state: " + state + ". list_cases pages one of " + CASE_STATES + ".");
         }
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
-        try {
-            return cases.page(
-                    projectId,
-                    state,
-                    strArg(args, "detector"),
-                    strArg(args, "call_site_id"),
-                    pageSize,
-                    strArg(args, "cursor"));
-        } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "listing cases failed" : message, e);
-        }
+        return cases.page(
+                projectId,
+                state,
+                strArg(args, "detector"),
+                strArg(args, "call_site_id"),
+                pageSize,
+                strArg(args, "cursor"));
     }
 
     private CaseDetailView getCase(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
         try {
             CaseDetailView detail = cases.detail(projectId, id);
-            // Same firewall as get_finding: a case's `ruling` is the triage ruling RCA must not read about
-            // the finding it's investigating. `rca` is deliberately not stripped: the firewall is about
-            // triage, and an earlier RCA report is this lane's own prior work, not the gate it checks.
+            // Both of get_finding's firewalls (see agentView). A case's `ruling` is the triage ruling RCA
+            // must not read about the finding it's investigating, and the summary blocks and exemplars
+            // lose every trace and span id; the exemplars are the finding's evidence rows, which
+            // get_finding_evidence pages with latest_finding_id. `rca` is deliberately not stripped: the
+            // firewall is about triage, and an earlier RCA report is this lane's own prior work, not the
+            // gate it checks.
+            ToolErrorEvidence.RateDetail toolError = detail.toolError();
+            MalformedOutputEvidence.MalformedDetail malformedOutput = detail.malformedOutput();
+            SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
+            FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
+            GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
                     detail.latestFindingId(),
                     null,
-                    detail.exemplars(),
+                    List.of(),
                     detail.rcaReportId(),
                     detail.rca(),
                     detail.metric(),
-                    detail.toolError(),
-                    detail.malformedOutput(),
-                    detail.secretLeak(),
+                    toolError == null ? null : withoutIds(toolError),
+                    malformedOutput == null ? null : withoutIds(malformedOutput),
+                    secretLeak == null ? null : withoutIds(secretLeak),
+                    frustration == null ? null : frustration.withoutIds(),
+                    groundedness == null ? null : groundedness.withoutIds(),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());
         } catch (TessaryException e) {
-            String message = e.getMessage();
-            throw new McpTool.ToolException(message == null ? "case not found: " + id : message, e);
+            throw toolError(e);
         }
     }
 
@@ -1221,7 +1210,7 @@ public class McpToolRegistry {
         try {
             selected = wire == null ? List.of(QueryDataset.values()) : List.of(QueryDataset.fromWire(wire));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
         List<Map<String, Object>> described = new ArrayList<>(selected.size());
         for (QueryDataset d : selected) {
@@ -1247,7 +1236,7 @@ public class McpToolRegistry {
         try {
             return CountView.of(queryService.count(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1258,7 +1247,7 @@ public class McpToolRegistry {
         try {
             return TimeseriesView.of(queryService.timeseries(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1270,7 +1259,7 @@ public class McpToolRegistry {
         try {
             return FacetsView.of(field, queryService.facets(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
@@ -1287,17 +1276,17 @@ public class McpToolRegistry {
         try {
             return SearchView.of(queryService.search(projectId, req));
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
     }
 
     /**
-     * Map a {@link QueryService} validation failure to a {@link McpTool.ToolException} the LLM can
-     * correct, not a {@code -32603} internal error.
+     * Map a service's {@link TessaryException} (a {@link QueryService} validation failure, a finding or case
+     * that is not there) to a {@link McpTool.ToolException} the LLM can correct, not a {@code -32603}
+     * internal error.
      */
-    private static McpTool.ToolException queryError(TessaryException e) {
-        String message = e.getMessage();
-        return new McpTool.ToolException(message == null ? "query failed" : message, e);
+    private static McpTool.ToolException toolError(TessaryException e) {
+        return new McpTool.ToolException(Objects.requireNonNull(e.getMessage()), e);
     }
 
     // ------------------------------------------------------------------ substrate list handlers
@@ -1315,18 +1304,27 @@ public class McpToolRegistry {
                 strArg(args, "model"),
                 strArg(args, "kind"),
                 strArg(args, "call_site_id"),
+                null,
                 range == null ? null : range.from(),
                 range == null ? null : range.to(),
                 strArg(args, "status"),
-                strArg(args, "q"));
+                strArg(args, "q"),
+                null);
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
         TracePageCodec.Key before = TracePageCodec.decode(strArg(args, "cursor"));
         // Over-fetch by one; the codec turns the extra row into next_cursor and drops it from the page.
-        List<TraceV2Repository.Summary> rows =
-                traces.list(projectId, query, null, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
+        List<TraceV2Repository.Summary> rows;
+        try {
+            rows = traces.list(
+                    projectId, query, null, pageSize + 1, before.sortValue(), before.startedAt(), before.id());
+        } catch (TessaryException e) {
+            throw toolError(e);
+        }
         TracePageCodec.Page page = TracePageCodec.trim(rows, pageSize, null);
+        List<String> ids =
+                page.rows().stream().map(TraceV2Repository.Summary::id).toList();
         return new TraceDtos.TracesPage(
-                page.rows().stream().map(TraceDtos::item).toList(), page.nextCursor());
+                TraceDtos.items(page.rows(), detections.forTraces(projectId, ids)), page.nextCursor());
     }
 
     /**
@@ -1377,7 +1375,7 @@ public class McpToolRegistry {
         try {
             page = queryService.search(projectId, req);
         } catch (TessaryException e) {
-            throw queryError(e);
+            throw toolError(e);
         }
 
         List<SpanKey> keys = new ArrayList<>(page.rows().size());
@@ -1553,7 +1551,7 @@ public class McpToolRegistry {
     private SessionDtos.SessionsPage listSessions(TenantContext ctx, Map<String, Object> args) {
         String projectId = requireProject(ctx).id();
         int pageSize = TracePageCodec.clampLimit(intArg(args, "limit"), LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT);
-        return sessions.page(projectId, pageSize, strArg(args, "cursor"), false);
+        return sessions.page(projectId, pageSize, strArg(args, "cursor"), false, TraceV2Repository.TraceQuery.NONE);
     }
 
     /**
@@ -1564,7 +1562,15 @@ public class McpToolRegistry {
      */
     private SessionDtos.SessionDetail getSession(TenantContext ctx, String id) {
         String projectId = requireProject(ctx).id();
-        return sessions.detail(projectId, id).orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
+        return sessions.detail(projectId, id, TraceV2Repository.TraceQuery.NONE)
+                .orElseThrow(() -> new McpTool.ToolException("session not found: " + id));
+    }
+
+    /** {@code get_conversation}: one conversation's turns, project-scoped like {@link #getSession}. */
+    private SessionDtos.ConversationDetail getConversation(TenantContext ctx, String id) {
+        String projectId = requireProject(ctx).id();
+        return sessions.conversation(projectId, id)
+                .orElseThrow(() -> new McpTool.ToolException("conversation not found: " + id));
     }
 
     // ------------------------------------------------------------------ trace/span read handlers

@@ -2,7 +2,6 @@
 package ai.tessary.classifier.toolerror;
 
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
-import ai.tessary.classifier.toolerror.ToolErrorDetector.Direction;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.State;
 import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository.AcceptedReference;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
@@ -15,14 +14,14 @@ import org.jspecify.annotations.Nullable;
 /**
  * Replays a project's hourly tool tallies through {@link ToolErrorDetector} and reports which tools are
  * in an unrecovered degraded spell right now. Design contract:
- * {@code classifiers/tool_error/PROGRAM.md} §5.
+ * {@code devdocs/concepts/tool-error.md} §5.
  *
  * <p><b>Pure given its input, and that is still the whole design.</b> No database, no Spring, no clock.
  * What changed is that the accumulator it starts from is now an input rather than always zero: a sweep
  * hands in what the last sweep left, and gets back what this one leaves.
  *
  * <p>That reintroduces the cursor/double-count bug class this classifier used to be immune to, and
- * {@code classifiers/tool_error/PROGRAM.md} §5 explains what bought it back. The defence is entirely in
+ * {@code devdocs/concepts/tool-error.md} §5 explains what bought it back. The defence is entirely in
  * {@link CarriedState}: fold only buckets strictly after the watermark, and rebuild from scratch rather
  * than resume whenever the tuning or the reference has moved. Both live on the type rather than in a
  * caller's head, because a caller that forgets either produces wrong numbers with nothing to notice.
@@ -38,7 +37,7 @@ import org.jspecify.annotations.Nullable;
  * so a grouped replay is very slightly slower to forget a burst than a per-call one. It never makes the
  * detector more sensitive. What it buys is that the whole history is one aggregate query instead of every
  * row, which is what makes recompute affordable at all. §4.3's run lengths were computed per call, so
- * PROGRAM.md §12's null run must be read as the authority over them.
+ * a grouped replay's measured run lengths are the authority over them.
  */
 public final class ToolErrorTrend {
 
@@ -50,10 +49,6 @@ public final class ToolErrorTrend {
      * @param decision the alarm, carrying the rates, the effect size and the onset. <b>Its rates span the
      *     run since onset</b>, which is the only window that answers "how is this tool doing now"
      * @param baseline the in-control reference the spell is measured against
-     * @param observed the calls this sweep folded in — the buckets after the last watermark, not the whole
-     *     history since the reference. Incremental sweeps mean no single pass sees that history, and a
-     *     field that silently meant "everything" on a rebuild and "the last hour" on a resume would be
-     *     worse than one that means the same thing every time
      * @param onsetBucket the hour the spell began, or null when the detector could not bracket it
      * @param lastBucket the last hourly bucket this replay folded — the tool's own event clock, and what
      *     a persisted finding's {@code last_seen_at} is written from instead of the sweep's wall clock.
@@ -64,7 +59,6 @@ public final class ToolErrorTrend {
             String toolKey,
             Decision decision,
             ToolErrorRate baseline,
-            ToolErrorRate observed,
             @Nullable String onsetBucket,
             @Nullable String lastBucket) {}
 
@@ -100,6 +94,21 @@ public final class ToolErrorTrend {
             ToolErrorConfig config,
             Map<String, AcceptedReference> accepted,
             Map<String, CarriedState> carried) {
+        return sweep(tallies, config, accepted, carried, STATE_SCHEMA_VERSION);
+    }
+
+    /**
+     * {@link #sweep(List, ToolErrorConfig, Map, Map)} under a caller's own schema version, for a classifier whose
+     * accumulator also depends on something this engine does not know about (frustration's scorer version and
+     * threshold floor). The version is baked into every carried row's epoch, so the caller can tell a row built
+     * under other tuning by comparing {@link CarriedState#epochOf} against it.
+     */
+    public static Sweep sweep(
+            List<HourlyToolTally> tallies,
+            ToolErrorConfig config,
+            Map<String, AcceptedReference> accepted,
+            Map<String, CarriedState> carried,
+            String schemaVersion) {
         Map<String, List<HourlyToolTally>> byTool = new LinkedHashMap<>();
         for (HourlyToolTally t : tallies) {
             byTool.computeIfAbsent(t.toolKey(), k -> new ArrayList<>()).add(t);
@@ -107,7 +116,8 @@ public final class ToolErrorTrend {
         List<Spell> spells = new ArrayList<>();
         List<CarriedState> advanced = new ArrayList<>();
         for (Map.Entry<String, List<HourlyToolTally>> e : byTool.entrySet()) {
-            Replayed r = replay(e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()));
+            Replayed r = replay(
+                    e.getKey(), e.getValue(), config, accepted.get(e.getKey()), carried.get(e.getKey()), schemaVersion);
             if (r == null) continue; // still learning a reference; nothing to judge and nothing to carry
             if (r.spell() != null) spells.add(r.spell());
             advanced.add(r.carried());
@@ -118,17 +128,21 @@ public final class ToolErrorTrend {
     /** One tool's outcome: the state to carry forward, and its spell when it is alarming. */
     record Replayed(CarriedState carried, @Nullable Spell spell) {}
 
-    /** Replay one tool. Package-private so a test can drive a single series without assembling a map. */
-    static @Nullable Replayed replay(
+    private static @Nullable Replayed replay(
             String toolKey,
             List<HourlyToolTally> buckets,
             ToolErrorConfig config,
             @Nullable AcceptedReference accepted,
-            @Nullable CarriedState carried) {
+            @Nullable CarriedState carried,
+            String schemaVersion) {
         // The reference is built from the leading buckets until it is thick enough to judge against, then
         // frozen. Frozen, not sliding: a reference that moved with the traffic would drift along with a
         // slow degradation and never notice it — the failure CusumDetector's comment names as the reason
         // the old rolling-baseline gate was replaced.
+        //
+        // A config may freeze it later than judging starts (ToolErrorConfig#freezeBaselineCalls). Then each
+        // hour after the minimum is judged first and learned from second, until the freeze; still anchored
+        // to the leading traffic, only more of it, so a slow degradation still cannot drag it along.
         //
         // UNLESS a human has pinned one. Then that reference IS the in-control rate and the replay starts
         // after the moment it was accepted — see AcceptedReference#acceptedAt. Re-learning from the leading
@@ -138,7 +152,11 @@ public final class ToolErrorTrend {
         // Read once rather than twice: an accessor called in the guard and again in the branch is two
         // calls that only happen to agree, which is exactly what a null analysis cannot assume.
         ToolErrorRate carriedBaseline = carried == null ? null : carried.baseline();
+        String epoch = CarriedState.epochOf(config, schemaVersion);
         ToolErrorRate baseline;
+        // The last hour the reference already holds; a later hour is learned from, this one or an earlier one
+        // never again. Null when the leading fold below just built it: every hour after that fold is new.
+        String learnedThrough = null;
         int i;
         if (accepted != null) {
             baseline = accepted.asRate();
@@ -146,15 +164,24 @@ public final class ToolErrorTrend {
             while (i < buckets.size() && buckets.get(i).bucket().compareTo(accepted.acceptedAt()) < 0) {
                 i++;
             }
-        } else if (carriedBaseline != null) {
+        } else if (carried != null && carriedBaseline != null && keepsCarried(carried, carriedBaseline, config)) {
             // Learned once, on some earlier sweep, and kept. Re-learning it here would read the leading
             // buckets of a window that has slid forward since, which is a reference walking after the very
-            // degradation it is supposed to be measuring.
-            baseline = carriedBaseline;
+            // degradation it is supposed to be measuring. A copy, because one still learning grows below.
+            baseline = carriedBaseline.copy();
+            learnedThrough = carried.learnedThrough();
             i = 0;
         } else {
             baseline = new ToolErrorRate();
             i = 0;
+            // Learned only from traffic after a human reset (see CarriedState#resetAt). A reset that also
+            // dropped the reference means "the old normal was wrong"; re-learning it from the hours before
+            // the reset would put it straight back.
+            while (i < buckets.size()
+                    && carried != null
+                    && carried.fencedOff(buckets.get(i).bucket())) {
+                i++;
+            }
             while (i < buckets.size() && baseline.calls() < config.minBaselineCalls()) {
                 HourlyToolTally b = buckets.get(i);
                 fold(baseline, b.calls(), b.failures());
@@ -165,27 +192,41 @@ public final class ToolErrorTrend {
 
         // Resume or rebuild. Resuming is the fast path and the fragile one, so it is taken only when the
         // state was built under this exact tuning against this exact reference — see resumableUnder.
-        String epoch = CarriedState.epochOf(config, STATE_SCHEMA_VERSION);
         State state = State.EMPTY;
         String watermark = null;
+        boolean resumed = false;
         if (carried != null && carried.resumableUnder(epoch, baseline)) {
+            resumed = true;
             state = carried.state();
             watermark = carried.watermarkBucket();
         }
+        // A rebuild starts from zero and would otherwise re-read the hours a human reset just ruled on,
+        // re-accumulating the very spell they closed. A resume is fenced by its watermark instead, and
+        // is left exactly as it was.
+        @Nullable CarriedState fence = resumed ? null : carried;
 
-        ToolErrorRate observed = new ToolErrorRate();
         for (int j = i; j < buckets.size(); j++) {
             HourlyToolTally b = buckets.get(j);
             // Strictly after the watermark. A bucket at or before it has already been folded in, and
             // folding it again is how a retried sweep invents a case out of evidence it already counted.
             if (watermark != null && b.bucket().compareTo(watermark) <= 0) continue;
+            if (fence != null && fence.fencedOff(b.bucket())) continue;
             state = ToolErrorDetector.advanceBucket(state, baseline, config, b.calls(), b.failures(), b.bucket());
-            fold(observed, b.calls(), b.failures());
             watermark = b.bucket();
+            // Judged first, learned from second, so no hour is judged against a reference that already
+            // holds it the first time it is seen. Only hours after learnedThrough: a rebuild re-reads the
+            // hours the reference learned on earlier passes. A pinned reference is a human's statement of
+            // the normal and never learns.
+            if (accepted == null
+                    && baseline.calls() < config.freezeBaselineCalls()
+                    && (learnedThrough == null || b.bucket().compareTo(learnedThrough) > 0)) {
+                fold(baseline, b.calls(), b.failures());
+            }
         }
 
-        // The pending absorb rides through untouched: it is a human decision, and a sweep passing over it
-        // must neither honour nor forget it. ToolErrorService installs it once the run is thick enough.
+        // The pending absorb and the reset fence ride through untouched: both are human decisions, and a
+        // sweep passing over them must neither honour nor forget them. ToolErrorService installs a pending
+        // absorb once the run is thick enough.
         CarriedState next = new CarriedState(
                 toolKey,
                 state,
@@ -193,22 +234,30 @@ public final class ToolErrorTrend {
                 watermark,
                 epoch,
                 carried == null ? null : carried.pendingPinBy(),
-                carried == null ? null : carried.pendingPinAt());
+                carried == null ? null : carried.pendingPinAt(),
+                carried == null ? null : carried.resetAt());
         Decision decision = ToolErrorDetector.decide(state, baseline, config);
         return new Replayed(
-                next,
-                decision.fired()
-                        ? new Spell(toolKey, decision, baseline, observed, decision.onsetAt(), watermark)
-                        : null);
+                next, decision.fired() ? new Spell(toolKey, decision, baseline, decision.onsetAt(), watermark) : null);
+    }
+
+    /**
+     * Whether a carried reference is used as it stands rather than re-learned from the leading buckets.
+     *
+     * <p>Always, once it is frozen or while it is still below the minimum. Between the two it is still
+     * learning, and it is kept whenever {@link CarriedState#learnedThrough} says which hours it already
+     * holds, resumed or rebuilt, so it keeps growing from the hours after them until the freeze. Only a row
+     * that never advanced a watermark lacks one; that re-learns from the leading buckets after the reset
+     * fence, which are the hours it was built from as long as the window still holds them.
+     */
+    private static boolean keepsCarried(CarriedState carried, ToolErrorRate carriedBaseline, ToolErrorConfig config) {
+        boolean learning = carriedBaseline.calls() >= config.minBaselineCalls()
+                && carriedBaseline.calls() < config.freezeBaselineCalls();
+        return !learning || carried.learnedThrough() != null;
     }
 
     /** Fold a bucket's counts into a rate. Bulk, for the reason {@link ToolErrorRate#addCounts} gives. */
     private static void fold(ToolErrorRate into, long calls, long failures) {
         into.addCounts(calls, failures);
-    }
-
-    /** The direction word a finding's cause key carries. */
-    public static String directionOf(Decision decision) {
-        return decision.direction() == Direction.UP ? "up" : "down";
     }
 }

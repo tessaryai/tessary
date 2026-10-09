@@ -9,22 +9,30 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierService;
+import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
@@ -33,23 +41,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Web-layer acceptance for the v2 trace read API.
- *
- * <p>Driven directly against the controller with a real bootstrapped tenant, so {@code requireProject}
- * and {@code ORG_VIEW} are exercised for real rather than mocked away.
- *
- * <p>What these assert, beyond "the endpoint works":
- *
- * <ul>
- *   <li>The list serves the rollup worker's numbers. The provenance case is in
- *       {@code TraceSubstrateRepositoryTest}; here the concern is that the wire carries them intact,
- *       including the three-way distinction between unsettled, no-usage and unpriced that a single em
- *       dash used to flatten.
- *   <li>A deep link minted before the cutover still resolves. The path parameter is a producer trace id
- *       now, and every bookmark in existence carries a v1 ULID.
- *   <li>A cursor minted before the cutover degrades to page one instead of resuming from a point that is
- *       not on the v2 ordering.
- * </ul>
+ * The v2 trace read API against a real tenant, so {@code requireProject} and {@code ORG_VIEW} run for real. The wire
+ * carries the rollup numbers intact, keeping unsettled, no-usage, and unpriced distinct; a pre-cutover deep link (a
+ * v1 ULID) still resolves; and a pre-cutover cursor degrades to page one.
  */
 @SpringBootTest(
         properties = {
@@ -81,11 +75,17 @@ class TracesControllerTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    ClassifierService classifierService;
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
     private record Tenant(TenantContext ctx, String org, String proj, String pid) {}
@@ -121,10 +121,10 @@ class TracesControllerTest {
                 "tool",
                 t0.plusMillis(100),
                 t0.plusSeconds(1));
-        rollUp(t.pid(), traceId, t0);
+        fx.rollup(t.pid(), traceId, t0, null, true);
 
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(1, page.traces().size());
         var item = page.traces().get(0);
         assertEquals(traceId, item.id(), "the producer's trace id, not a surrogate");
@@ -185,14 +185,15 @@ class TracesControllerTest {
 
         String quiet = SubstrateV2Fixtures.traceId();
         fx.span(t.pid(), quiet, SubstrateV2Fixtures.spanId(), null, "tool", t0.plusSeconds(20), t0.plusSeconds(21));
-        rollUp(t.pid(), quiet, t0);
+        fx.rollup(t.pid(), quiet, t0, null, true);
 
         String unpriced = SubstrateV2Fixtures.traceId();
-        fx.withUsage(fx.llmSpan(t.pid(), unpriced, t0.plusSeconds(10)), 400L, 100L, null, null, null);
-        rollUp(t.pid(), unpriced, t0);
+        fx.withUsage(fx.llmSpan(t.pid(), unpriced, t0.plusSeconds(10)), 400L, 100L);
+        fx.rollup(t.pid(), unpriced, t0, null, true);
 
         var byId = ok(controller.list(
-                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null))
+                        t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null,
+                        null))
                 .traces()
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(TraceDtos.TraceListItem::id, i -> i));
@@ -212,34 +213,6 @@ class TracesControllerTest {
     }
 
     @Test
-    @DisplayName("the legacy-ULID deep-link shim is retired: only a producer trace id resolves")
-    void detailResolvesOnlyAProducerTraceId() {
-        Tenant t = tenant("traces-api-shim");
-        Instant t0 = Instant.parse("2026-06-19T12:00:00Z");
-        String traceId = SubstrateV2Fixtures.traceId();
-        fx.llmSpan(t.pid(), traceId, t0);
-        rollUp(t.pid(), traceId, t0);
-
-        assertEquals(
-                traceId,
-                ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId))
-                        .trace()
-                        .id(),
-                "the producer id is the only path there is");
-
-        // A bookmark minted before the cutover carried a platform ULID and was translated through
-        // substrate_v2_id_map. The map was dropped with the rest of the backfill machinery in 0083, so the
-        // link 404s. That is the accepted end of the transition — it is what "until teardown" meant — and
-        // asserting it here keeps the retirement deliberate rather than a behaviour that quietly lapsed.
-        assertEquals(
-                HttpStatus.NOT_FOUND,
-                assertThrows(
-                                ResponseStatusException.class,
-                                () -> controller.detail(t.ctx(), t.org(), t.proj(), Ids.ulid()))
-                        .getStatusCode());
-    }
-
-    @Test
     @DisplayName("a cursor from before the cutover degrades to page one rather than stranding the reader")
     void aLegacyCursorDegradesToPageOne() {
         Tenant t = tenant("traces-api-cursor");
@@ -247,10 +220,10 @@ class TracesControllerTest {
         String traceId = SubstrateV2Fixtures.traceId();
         fx.trace(t.pid(), traceId, t0);
 
-        // The v1 cursor shape: [occurred_at, id], base64 of the PreviewCursor envelope, no version tag.
+        // The v1 cursor: [occurred_at, id] in a PreviewCursor envelope, no version tag.
         String legacy = ai.tessary.ingest.PreviewCursor.encode(t0 + "\u001f" + Ids.ulid(), 0);
         var page = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null));
+                t.ctx(), t.org(), t.proj(), null, legacy, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(traceId),
                 page.traces().stream().map(TraceDtos.TraceListItem::id).toList(),
@@ -261,7 +234,7 @@ class TracesControllerTest {
                 1,
                 ok(controller.list(
                                 t.ctx(), t.org(), t.proj(), null, garbage, null, null, null, null, null, null, null,
-                                null))
+                                null, null, null))
                         .traces()
                         .size(),
                 "and a garbled one does the same rather than 500");
@@ -277,15 +250,29 @@ class TracesControllerTest {
         fx.trace(t.pid(), older, t0);
         fx.trace(t.pid(), newer, t0.plusSeconds(60));
 
-        var first = ok(
-                controller.list(t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null));
+        var first = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), 1, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.traces().stream().map(TraceDtos.TraceListItem::id).toList());
         assertNotNull(first.nextCursor(), "there is another page, so there is a cursor");
 
         var second = ok(controller.list(
-                t.ctx(), t.org(), t.proj(), 1, first.nextCursor(), null, null, null, null, null, null, null, null));
+                t.ctx(),
+                t.org(),
+                t.proj(),
+                1,
+                first.nextCursor(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null));
         assertEquals(
                 List.of(older),
                 second.traces().stream().map(TraceDtos.TraceListItem::id).toList());
@@ -295,9 +282,8 @@ class TracesControllerTest {
     @Test
     @DisplayName("export preserves real image and document bytes as inline data: URIs, one JSONL span per line")
     void exportRoundTripsRealMediaBytes() throws Exception {
-        // The endpoint TraceSpanMapper.toSpan/toSpanLine had zero production callers before this test.
-        // Base64 media needs no MediaStore round trip (the bytes are already inline), so this
-        // exercises the export wiring end to end without a separate media-store seeding step.
+        // TraceSpanMapper's export had no production callers before this. Base64 media is inline, so no MediaStore
+        // seeding.
         Tenant t = tenant("traces-export");
         Instant t0 = Instant.parse("2026-09-02T12:00:00Z");
         String traceId = SubstrateV2Fixtures.traceId();
@@ -326,8 +312,7 @@ class TracesControllerTest {
         String body = java.util.Objects.requireNonNull(response.getBody());
         String[] lines = body.strip().split("\n");
         assertEquals(1, lines.length, "one JSONL line per span");
-        // gen_ai.input.messages is a JSON-encoded STRING attribute (the plugin's messages-as-attributes
-        // shape), so the message must be decoded from the span line before its fields can be read.
+        // gen_ai.input.messages is a JSON-encoded string attribute, decoded before reading.
         JsonNode inputMessages = MAPPER.readTree(MAPPER.readTree(lines[0])
                 .path("attributes")
                 .path("gen_ai.input.messages")
@@ -354,17 +339,157 @@ class TracesControllerTest {
                         .getStatusCode());
     }
 
-    /** Roll one trace up synchronously — the scheduler is off in this context, so nothing races it. */
-    private void rollUp(String pid, String traceId, Instant startedAt) {
-        traces.applyBatchTimers(
-                pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
+    /** The scheduler is off, so nothing races this rollup. */
+    @Test
+    @DisplayName("a trace opens with each tool call and retrieved document on the span that made it")
+    void detailHangsEachToolCallAndDocumentOffItsOwnSpan() {
+        Tenant t = tenant("traces-api-side-tables");
+        var seeds = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        Instant t0 = Instant.parse("2026-06-20T12:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow root = fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(3));
+        SpanRow tool =
+                fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "tool", t0.plusSeconds(1), null);
+        SpanRow retrieval = fx.span(
+                t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "retriever", t0.plusSeconds(2), null);
+        seeds.toolCall(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, tool.id()), "search", "Timeout", t0);
+        seeds.retrievedDoc(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, retrieval.id()), "passage", 1, null, t0);
+        fx.rollup(t.pid(), traceId, t0, null, true);
+
+        var detail = ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId));
+
+        assertEquals(
+                List.of(root.id(), tool.id(), retrieval.id()),
+                detail.spans().stream().map(TracesController.SpanView::id).toList());
+        assertEquals(List.of(), detail.spans().get(0).toolCalls());
+        assertEquals(List.of(), detail.spans().get(0).retrievalDocuments());
+        assertEquals(
+                List.of(new TracesController.ToolCallView("search", null, null, "Timeout", null, null)),
+                detail.spans().get(1).toolCalls());
+        assertEquals(
+                List.of(new TracesController.RetrievalDocumentView(null, null, "passage", null)),
+                detail.spans().get(2).retrievalDocuments());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{not json", "[1, 2]"})
+    @DisplayName("a payload whose attribute bag is not a JSON object renders the span without attributes")
+    void aSpanWhosePayloadAttributesAreNotAnObjectStillRenders(String attributes) {
+        SpanRow span = SubstrateV2Fixtures.spanRow(
+                "p", "t", "s", null, "llm", "2026-06-20T12:00:00Z", null, "2026-06-20T12:00:00Z");
+        var view = TracesController.toSpan(
+                span,
+                new SpanPayloadRow("p", "t", "s", "in", "out", attributes, null, "2026-06-20T12:00:00Z", null),
+                List.of(),
+                List.of());
+        assertNull(view.attributes(), "the attribute bag is not an object to show");
+        assertEquals("in", view.input(), "the rest of the payload still renders");
+        assertTrue(view.payloadAvailable());
+    }
+
+    @Test
+    @DisplayName(
+            "Detected by keeps a trace Frustration flagged, drops one a false alarm cleared, and names the classifier")
+    void detectedByKeepsFlaggedTracesDropsClearedOnesAndNamesTheClassifier() {
+        Tenant t = frustrationTenant("traces-detected-by");
+        ClassifierRow frustration = frustrationClassifier(t.pid());
+        Instant t0 = Instant.parse("2026-06-21T12:00:00Z");
+        String flagged = SubstrateV2Fixtures.traceId();
+        String cleared = SubstrateV2Fixtures.traceId();
+        String plain = SubstrateV2Fixtures.traceId();
+        fx.trace(t.pid(), flagged, t0);
+        fx.trace(t.pid(), cleared, t0.plusSeconds(10));
+        fx.trace(t.pid(), plain, t0.plusSeconds(20));
+        flag(t.pid(), frustration.id(), flagged, "span-flagged", null);
+        flag(t.pid(), frustration.id(), cleared, "span-cleared", "2026-06-22T09:00:00Z");
+
+        var label = new TraceDtos.DetectionLabel(frustration.id(), frustration.name());
+        var all = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, null));
+        assertEquals(
+                List.of(List.of(), List.of(), List.of(label)),
+                all.traces().stream().map(TraceDtos.TraceListItem::detectedBy).toList(),
+                "newest first: only the uncleared flag names its classifier");
+
+        var byClassifier = ok(controller.list(
+                t.ctx(),
+                t.org(),
+                t.proj(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(flagged),
+                byClassifier.traces().stream().map(TraceDtos.TraceListItem::id).toList());
+
+        var anyDetection = ok(controller.list(
+                t.ctx(), t.org(), t.proj(), null, null, null, null, null, null, null, null, null, null, null, "any"));
+        assertEquals(
+                List.of(flagged),
+                anyDetection.traces().stream().map(TraceDtos.TraceListItem::id).toList());
+    }
+
+    @Test
+    @DisplayName("a trace's detail names the span Frustration scored, and nothing once a false alarm cleared it")
+    void traceDetailNamesTheFlaggedSpan() {
+        Tenant t = frustrationTenant("trace-detail-detections");
+        ClassifierRow frustration = frustrationClassifier(t.pid());
+        Instant t0 = Instant.parse("2026-06-21T13:00:00Z");
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanRow scored = fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        String clearedTrace = SubstrateV2Fixtures.traceId();
+        SpanRow clearedSpan =
+                fx.span(t.pid(), clearedTrace, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        flag(t.pid(), frustration.id(), traceId, scored.id(), null);
+        flag(t.pid(), frustration.id(), clearedTrace, clearedSpan.id(), "2026-06-22T09:00:00Z");
+
+        assertEquals(
+                List.of(new TraceDtos.DetectionMark(frustration.id(), frustration.name(), traceId, scored.id())),
+                ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId)).detections());
+        assertEquals(
+                List.of(),
+                ok(controller.detail(t.ctx(), t.org(), t.proj(), clearedTrace)).detections());
+    }
+
+    private Tenant frustrationTenant(String slug) {
+        var fix = TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.FRUSTRATION));
+        return new Tenant(
+                new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null),
+                fix.org().slug(),
+                fix.project().slug(),
+                fix.project().id());
+    }
+
+    private ClassifierRow frustrationClassifier(String pid) {
+        classifierService.seedBuiltIns(pid);
+        return classifierService.list(pid).stream()
+                .filter(c -> c.classifierKey().equals("frustration"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void flag(String pid, String classifierId, String traceId, String spanId, @Nullable String clearedAt) {
+        jdbc.sql("INSERT INTO frustration_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " subject_span_id, severity, confidence, evidence, cleared_at)"
+                        + " VALUES (:id, :pid, :cid, 'frustration', :trace, :trace, :span, 'warn', 'high',"
+                        + " CAST('{\"score\":0.71}' AS jsonb), :cleared)")
+                .param("id", Ids.ulid())
                 .param("pid", pid)
-                .param("id", traceId)
+                .param("cid", classifierId)
+                .param("trace", traceId)
+                .param("span", spanId)
+                .param("cleared", clearedAt)
                 .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
     }
 
     private static <T> T ok(ai.tessary.web.ApiResponse<T> response) {

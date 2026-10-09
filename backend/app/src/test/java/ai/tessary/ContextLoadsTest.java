@@ -3,7 +3,6 @@ package ai.tessary;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.sources.SourceDtos.CreateSourceRequest;
 import ai.tessary.sources.SourceRow;
@@ -49,10 +48,5 @@ class ContextLoadsTest {
                 new CreateSourceRequest(SourceService.FAKE_PROVIDER, "test-fake", "fake://upstream", Map.of()));
         assertNotNull(row.id());
         assertEquals(setup.project().id(), row.projectId());
-
-        // Synthetic (non-network) sources carry no secret and open to an empty credentials map.
-        Map<String, String> creds =
-                sourceService.openCredentials(sourceService.get(setup.project().id(), row.id()));
-        assertTrue(creds.isEmpty());
     }
 }

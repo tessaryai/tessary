@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.redaction;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.redaction.GitleaksCorpus.Finding;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,10 +20,12 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The vendored credential corpus: that every rule survives the move to Java, that it finds credentials the way
- * gitleaks does, and that the per-name fast path finds exactly what a scan of the whole text would.
+ * gitleaks does, and that the per-name fast path finds what a scan of the whole text would.
  *
  * <p>The credentials below are FAKE: structurally valid shapes minted for this test, exempted from this
  * repo's own secret scan in {@code .gitleaks.toml} with that reason.
@@ -30,9 +35,19 @@ class GitleaksCorpusTest {
     private static final GitleaksCorpus CORPUS = GitleaksCorpus.get();
 
     @Test
-    void everyVendoredRuleCompilesInJava() {
-        assertTrue(CORPUS.size() >= 220, "the pinned release plus the self-minted rules, not a stub: " + CORPUS.size());
-        assertEquals(List.of(), CORPUS.uncompiled(), "a rule that does not compile would never run, silently");
+    void everyVendoredRuleCompilesInJava() throws Exception {
+        JsonNode rules;
+        try (InputStream in = GitleaksCorpusTest.class.getClassLoader().getResourceAsStream(GitleaksCorpus.RESOURCE)) {
+            rules = new ObjectMapper().readTree(in).path("rules");
+        }
+        assertTrue(rules.size() >= 220, "the pinned release plus the self-minted rules, not a stub: " + rules.size());
+        for (JsonNode rule : rules) {
+            String id = rule.path("id").asText();
+            assertDoesNotThrow(
+                    () -> Pattern.compile(
+                            GitleaksCorpus.toJava(rule.path("regex").asText())),
+                    "a rule that does not compile would never run, silently: " + id);
+        }
     }
 
     @Test
@@ -84,16 +99,6 @@ class GitleaksCorpusTest {
     }
 
     @Test
-    void overlappingRulesKeepTheMostSpecificName() {
-        assertOnly("aws-access-token", true, "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\"");
-        assertOnly(
-                "new-relic-browser-api-token",
-                false,
-                "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
-                "a vendor rule beats generic-api-key on the same characters");
-    }
-
-    @Test
     void placeholdersLowEntropyValuesAndProseAreNotCredentials() {
         assertEquals(List.of(), CORPUS.find("api_key = \"${API_KEY}\""), "a template reference is allowlisted");
         assertEquals(List.of(), CORPUS.find("api_key = $API_KEY"), "an environment reference is allowlisted");
@@ -120,25 +125,32 @@ class GitleaksCorpusTest {
     }
 
     @Test
-    void theVendorNameFastPathFindsExactlyWhatAWholeTextScanFinds() {
-        StringBuilder text = new StringBuilder();
-        String[] lines = {
-            "api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"",
-            "adobe_client_id = \"d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0\"",
-            "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
-            "the access token expires in an hour; ask for another",
-            "config: {\"secret\": \"Zk8pQ2rT5wY8bE1hK4nR7uX0\", \"auth\": null}",
-            "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\" and a password: q7Zr2mK9xW4vN8pL",
-            "a-very-long-identifier-name-that-runs-well-past-fifty-characters_api_key = \"Zk8pQ2rT5wY8bE1hK4nR\"",
-            "keyboard layout: dvorak, token count: 12, secret santa: bob",
-        };
-        for (int i = 0; i < 40; i++) {
-            for (String line : lines) text.append(line).append('\n');
-        }
-        String corpus = text.toString();
-        List<Finding> fast = CORPUS.find(corpus);
-        assertFalse(fast.isEmpty(), "the fixture carries credentials, or this proves nothing");
-        assertEquals(CORPUS.findExhaustive(corpus), fast);
+    void theVendorNameFastPathFindsWhatAWholeTextScanFinds() {
+        // The expected list is what a scan of every rule over the whole text found here, recorded when that
+        // reference scan still existed beside the fast path.
+        String text = String.join(
+                "\n",
+                "api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"",
+                "adobe_client_id = \"d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0\"",
+                "NEW_RELIC_BROWSER_API_TOKEN = \"NRJS-3a7f9c2e1b8d4f6a0c5\"",
+                "the access token expires in an hour; ask for another",
+                "config: {\"secret\": \"Zk8pQ2rT5wY8bE1hK4nR7uX0\", \"auth\": null}",
+                "aws_api_key = \"AKIA" + "QYLPMN5HHHFPZAM2\" and a password: q7Zr2mK9xW4vN8pL",
+                "a-very-long-identifier-name-that-runs-well-past-fifty-characters_api_key = \"Zk8pQ2rT5wY8bE1hK4nR\"",
+                "keyboard layout: dvorak, token count: 12, secret santa: bob");
+        List<String> found = CORPUS.find(text).stream()
+                .map(f -> f.ruleId() + " " + text.substring(f.start(), f.end()))
+                .toList();
+        assertEquals(
+                List.of(
+                        "generic-api-key q7Zr2mK9xW4vN8pLr5Tq",
+                        "adobe-client-id d8f2a6c4e8b0a2c4e6f8a0b2c4d6e8f0",
+                        "new-relic-browser-api-token NRJS-3a7f9c2e1b8d4f6a0c5",
+                        "generic-api-key Zk8pQ2rT5wY8bE1hK4nR7uX0",
+                        "aws-access-token AKIA" + "QYLPMN5HHHFPZAM2",
+                        "generic-api-key q7Zr2mK9xW4vN8pL",
+                        "generic-api-key Zk8pQ2rT5wY8bE1hK4nR"),
+                found);
     }
 
     @Test
@@ -163,5 +175,58 @@ class GitleaksCorpusTest {
         assertEquals(1, found.size(), message + " -> " + found);
         assertEquals(rule, found.get(0).ruleId(), message);
         assertEquals(anchored, found.get(0).anchored(), message);
+    }
+
+    /**
+     * Every POSIX bracket class keeps its POSIX meaning in Java: one character the class must admit and one
+     * it must not, as code points. A class translated to its neighbour ({@code print} to {@code graph} drops
+     * the space, {@code word} to {@code alnum} drops the underscore) would silently change what a rule finds.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "alnum, 55, 95",
+        "alpha, 113, 49",
+        "digit, 55, 97",
+        "lower, 97, 65",
+        "upper, 65, 97",
+        "space, 9, 120",
+        "punct, 33, 97",
+        "xdigit, 102, 103",
+        "word, 95, 45",
+        "blank, 9, 10",
+        "cntrl, 7, 97",
+        "graph, 126, 32",
+        "print, 32, 7"
+    })
+    void posixClassesKeepTheirMeaning(String posix, int inside, int outside) {
+        Pattern p = Pattern.compile(GitleaksCorpus.toJava("[[:" + posix + ":]]"));
+        assertTrue(p.matcher(Character.toString(inside)).matches(), posix + " admits " + inside);
+        assertFalse(p.matcher(Character.toString(outside)).matches(), posix + " refuses " + outside);
+    }
+
+    /**
+     * Loading a corpus drops what Java cannot compile without dropping the rule around it: a rule whose regex
+     * does not compile is left out, and an allowlist regex that does not compile allows nothing, so the rule
+     * it guards still runs. The keyword-context rule's vendor name here carries an escaped paren, which the
+     * name scan has to step over rather than count as a group opening.
+     */
+    @Test
+    void loadSkipsWhatWillNotCompileButKeepsTheRuleAnUnusableAllowlistGuards() {
+        ObjectMapper json = new ObjectMapper();
+        ObjectNode rule = json.createObjectNode()
+                .put("id", "acme-token")
+                .put(
+                        "regex",
+                        "(?i)[\\w.-]{0,50}?(?:ac\\(me)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|:)[\\s'\"]{0,5}([a-z0-9]{16})\\b");
+        rule.putArray("keywords").add("ac(me");
+        rule.putArray("allowlists").addObject().putArray("regexes").add("(bad");
+        ObjectNode doc = json.createObjectNode().put("version", "test");
+        doc.putArray("rules")
+                .add(json.createObjectNode().put("id", "broken").put("regex", "(unclosed"))
+                .add(rule);
+
+        GitleaksCorpus corpus = GitleaksCorpus.load(doc);
+
+        assertEquals(List.of(new Finding("acme-token", false, 12, 28)), corpus.find("ac(me_key = 0123456789abcdef"));
     }
 }

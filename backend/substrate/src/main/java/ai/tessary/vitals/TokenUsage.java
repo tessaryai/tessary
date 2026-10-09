@@ -17,18 +17,4 @@ package ai.tessary.vitals;
  * @param cacheReadTokens tokens served from cache at the discounted read rate
  * @param cacheWriteTokens tokens written to cache at the premium write rate
  */
-public record TokenUsage(long inputTokens, long outputTokens, long cacheReadTokens, long cacheWriteTokens) {
-
-    /** Every bucket summed — the honest total, which the lump {@code total_tokens} column is not. */
-    public long total() {
-        return inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
-    }
-
-    public TokenUsage plus(TokenUsage other) {
-        return new TokenUsage(
-                inputTokens + other.inputTokens,
-                outputTokens + other.outputTokens,
-                cacheReadTokens + other.cacheReadTokens,
-                cacheWriteTokens + other.cacheWriteTokens);
-    }
-}
+public record TokenUsage(long inputTokens, long outputTokens, long cacheReadTokens, long cacheWriteTokens) {}

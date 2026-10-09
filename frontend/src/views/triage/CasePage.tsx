@@ -6,12 +6,11 @@
  * run), how big it was, and the failures themselves. Everything else is gone.
  *
  * <h2>The answer sits above the figure</h2>
- * The leading hypothesis is what a reader came here for, so it is carded
- * directly under the headline and the magnitude follows it. The figure is the
+ * The proven causes are what a reader came here for, so they are carded
+ * directly under the headline and the magnitude follows them. The figure is the
  * SIZE of the answer, not the answer, and a page that opens with a chart makes
- * a reader scroll past the measurement to reach the finding. What is left of
- * the analysis — the checks, the weaker leads — stays below the figure, where
- * it reads as working rather than as the conclusion.
+ * a reader scroll past the measurement to reach the finding. The checks stay
+ * below the figure, where they read as working rather than as the conclusion.
  *
  * <h2>The headline IS the story, and it rewrites itself</h2>
  * Before RCA the title is the detector's own sentence plus the window it spans.
@@ -40,29 +39,36 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CaseDetail, EvidenceSpan, RcaReport } from "../../api/types";
+import type {
+  CaseDetail,
+  CaseDisposition,
+  EvidenceSpan,
+  FrustrationDetail,
+  GroundednessDetail,
+  RcaCause,
+  RcaReport,
+} from "../../api/types";
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, Card, ErrorNote, Input, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
-import { rcaRunning, RCA_VERDICT_LABEL } from "../rcaLabels";
+import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
+import { rcaRunning, shiftKind, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
+import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
 import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
-import { Dot, ListChassis, StateDot, causeLine, detectorLabel, displayCallSite, timeAgo, truncateId } from "./bits";
+import { FrustrationRate } from "../classifiers/frustrationStory";
+import { ConversationFilter, FrustratedConversations } from "../classifiers/FrustratedConversations";
+import { GroundednessRate } from "../classifiers/groundednessStory";
+import { FlaggedAnswers } from "../classifiers/FlaggedAnswers";
+import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
-
-/** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
-function stamp(iso: string): string {
-  const d = new Date(iso);
-  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${d.toLocaleTimeString(
-    undefined,
-    { hour: "2-digit", minute: "2-digit", hour12: false },
-  )}`;
-}
+import { traceLinker } from "../traceLinker";
+import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
+import { stamp } from "../classifiers/shared";
 
 export function CasePage() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -98,8 +104,9 @@ export function CasePage() {
   const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
   const [resolveOpen, setResolveOpen] = useState(false);
+  // Which cause's conversations the list shows: "all", or a cause's index in the report.
+  const [causeFilter, setCauseFilter] = useState("all");
   const [absorbOpen, setAbsorbOpen] = useState(false);
-  const [reason, setReason] = useState("");
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["case", api.base, caseId] });
@@ -107,10 +114,10 @@ export function CasePage() {
   };
 
   const resolveM = useMutation({
-    mutationFn: (r: string) => api.resolveCase(c?.id ?? "", r),
+    mutationFn: ({ reason, disposition }: { reason: string; disposition?: CaseDisposition }) =>
+      api.resolveCase(c?.id ?? "", reason, disposition),
     onSuccess: () => {
       setResolveOpen(false);
-      setReason("");
       invalidate();
     },
   });
@@ -138,8 +145,9 @@ export function CasePage() {
   // for anything a reader acts on. `analysing` covers the whole in-flight span — the mutation, the
   // gap before the case read carries an id, and the queued/claimed statuses — and `analysed` is the
   // only state in which this page knows anything it did not know before the press.
-  const analysing =
-    rcaM.isPending || stillRunning || (report != null && rcaRunning(report.status));
+  // Once the polled report is in hand its own status decides: the case read that started the poll still
+  // carries no report, so `stillRunning` alone would hold "Analyzing" after the run has finished.
+  const analysing = rcaM.isPending || (report != null ? rcaRunning(report.status) : stillRunning);
   const analysed = report != null && !analysing;
 
   if (detailQ.isLoading) {
@@ -165,16 +173,35 @@ export function CasePage() {
   }
 
   const live = c.state !== "resolved";
-  const cause = causeLine(c);
+  const frustration = detail.frustration ?? null;
+  const groundedness = detail.groundedness ?? null;
+  const ranked = frustration != null || groundedness != null;
+  const frustrationCauses =
+    frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes : [];
+  const groundednessCauses =
+    groundedness && report?.report_kind === "groundedness_causes" && !analysing ? report.causes : [];
 
   // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
+  // A drift window is taken whole or not at all: the case's last seen is the wall clock the case
+  // opened at, and pairing it with the window's event-time open draws a span that never happened.
+  const driftWindow =
+    detail.metric?.windowOpenedAt && detail.metric.windowClosedAt
+      ? { openedAt: detail.metric.windowOpenedAt, closedAt: detail.metric.windowClosedAt }
+      : null;
   const openedAt =
-    detail.tool_error?.onsetAt ?? detail.malformed_output?.rate?.onsetAt ?? detail.secret_leak?.firstAt ?? c.onset_at;
+    detail.tool_error?.onsetAt ??
+    detail.malformed_output?.rate?.onsetAt ??
+    detail.secret_leak?.firstAt ??
+    detail.frustration?.rate.onsetAt ??
+    detail.groundedness?.rate.onsetAt ??
+    driftWindow?.openedAt ??
+    c.onset_at;
   const closedAt =
     detail.tool_error?.windowClosedAt ??
     detail.malformed_output?.rate?.windowClosedAt ??
     detail.secret_leak?.lastAt ??
+    driftWindow?.closedAt ??
     (c.state === "resolved" ? c.resolved_at : c.last_seen_at);
 
   return (
@@ -237,23 +264,6 @@ export function CasePage() {
           )}
         </div>
 
-        {/* The cause on its own line. It used to be appended to the headline as ", caused by …",
-            which made a sentence that was already two clauses into four and pushed the window date
-            below the fold on a narrow window. A title names the event; this names the finding. */}
-        {cause && (
-          <p
-            className="text-body font-medium text-fg mt-2.5 mx-0 mb-0"
-            style={{ maxWidth: "52ch" }}
-          >
-            {cause.hedged && (
-              <span className="font-normal text-muted">
-                Likely:{" "}
-              </span>
-            )}
-            {cause.text}
-          </p>
-        )}
-
         <div className="flex items-center text-muted gap-2 mt-2.75 text-small" style={{ flexWrap: "wrap" }}>
           <span className="font-mono">
             {stamp(openedAt)}
@@ -291,7 +301,7 @@ export function CasePage() {
 
         {c.state === "resolved" && c.resolution_reason && (
           <p className="text-subtle mt-2.5 mx-0 mb-0 text-small">
-            Resolved {timeAgo(c.resolved_at ?? c.opened_at)}
+            Resolved{dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
             {c.resolved_by ? ` by ${c.resolved_by}` : ""}: {c.resolution_reason}
           </p>
         )}
@@ -312,7 +322,33 @@ export function CasePage() {
 
       {/* ----------------------------------------------------------------- why */}
       {(rcaEnabled || detail.rca_report_id != null) && (
-        <Answer report={report} analysing={analysing} basePath={basePath} />
+        <Why
+          report={report}
+          analysing={analysing}
+          kind={causeKind(detail)}
+          basePath={basePath}
+          show={
+            frustration && report?.report_kind === "frustration_causes"
+              ? {
+                  count: causeSessionCount,
+                  unit: ["session", "sessions"],
+                  onShow: (i) => {
+                    setCauseFilter(String(i));
+                    document.getElementById("frustrated-sessions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  },
+                }
+              : groundedness && report?.report_kind === "groundedness_causes"
+                ? {
+                    count: causeTraceCount,
+                    unit: ["answer", "answers"],
+                    onShow: (i) => {
+                      setCauseFilter(String(i));
+                      document.getElementById("flagged-answers")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    },
+                  }
+                : undefined
+          }
+        />
       )}
 
       {/* -------------------------------------------------------------- how big */}
@@ -324,20 +360,40 @@ export function CasePage() {
           <HowOutputsBroke
             findingId={detail.latest_finding_id}
             detail={detail.malformed_output}
-            linkToTrace={(traceId, spanId) =>
-              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
-            }
+            linkToTrace={traceLinker(basePath)}
           />
         </Block>
       )}
 
       {/* ------------------------------------------------------ the rest of the run */}
       {(rcaEnabled || detail.rca_report_id != null) && (
-        <Attribution report={report} analysing={analysing} basePath={basePath} />
+        <Checks report={report} analysing={analysing} />
       )}
 
       {/* ------------------------------------------------------- the failures */}
-      <Failures detail={detail} basePath={basePath} />
+      {frustration && detail.latest_finding_id ? (
+        <FrustrationList
+          findingId={detail.latest_finding_id}
+          rcaReportId={report?.id ?? null}
+          frustration={frustration}
+          causes={frustrationCauses}
+          filter={causeFilter}
+          onFilter={setCauseFilter}
+          basePath={basePath}
+        />
+      ) : groundedness && detail.latest_finding_id ? (
+        <GroundednessList
+          findingId={detail.latest_finding_id}
+          rcaReportId={report?.id ?? null}
+          groundedness={groundedness}
+          causes={groundednessCauses}
+          filter={causeFilter}
+          onFilter={setCauseFilter}
+          basePath={basePath}
+        />
+      ) : (
+        <Failures detail={detail} basePath={basePath} />
+      )}
 
       <Activity events={detail.events} />
 
@@ -354,10 +410,13 @@ export function CasePage() {
                 Close this case
               </span>
             )}
+            {!analysed && ranked && (
+              <span className="text-subtle text-small">Run RCA before resolving this case.</span>
+            )}
             <div className="ml-auto flex items-center gap-2">
               {analysed && (
                 <Button size="sm" variant="ghost" onClick={() => setResolveOpen(true)}>
-                  Resolve
+                  {ranked ? "Resolve case" : "Resolve"}
                 </Button>
               )}
               {analysed && detail.absorb_available && (
@@ -366,7 +425,7 @@ export function CasePage() {
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => muteM.mutate()} disabled={muteM.isPending}>
-                {c.state === "muted" ? "Unmute" : "Mute"}
+                {c.state === "muted" ? (ranked ? "Unmute case" : "Unmute") : ranked ? "Mute case" : "Mute"}
               </Button>
             </div>
           </div>
@@ -375,28 +434,16 @@ export function CasePage() {
       )}
 
       <Modal open={resolveOpen} onClose={() => setResolveOpen(false)} title="Resolve this case?">
-        <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
-          One line on what this turned out to be. It is the only thing that makes a resolved case worth reading later.
-        </p>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Traffic mix shifted toward enterprise leads"
-          autoFocus
-        />
-        {resolveM.isError && <ErrorNote error={resolveM.error} />}
-        <div className="flex justify-end gap-2 mt-4.5">
-          <Button variant="ghost" size="sm" onClick={() => setResolveOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => resolveM.mutate(reason)}
-            disabled={reason.trim().length === 0 || resolveM.isPending}
-          >
-            {resolveM.isPending ? "Resolving…" : "Resolve case"}
-          </Button>
-        </div>
+        {/* Mounted only while open, so a reopened dialog starts from an empty reason. */}
+        {resolveOpen && (
+          <ResolveCaseForm
+            detector={c.detector}
+            pending={resolveM.isPending}
+            error={resolveM.isError ? resolveM.error : null}
+            onCancel={() => setResolveOpen(false)}
+            onResolve={(reason, disposition) => resolveM.mutate({ reason, disposition })}
+          />
+        )}
       </Modal>
 
       <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb as legitimate?">
@@ -458,6 +505,21 @@ function Block({ label, note, children }: { label: string; note?: string; childr
  * That is the rule this file has always held; it now has something real to hold it against.
  */
 function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: string; basePath: string }) {
+  // A frustration case draws the finding page's own figure, whose first note already states the basis.
+  if (detail.frustration) {
+    return (
+      <Block label="What changed" note="Share of sessions with a user frustrated with the agent">
+        <FrustrationRate detail={detail.frustration} />
+      </Block>
+    );
+  }
+  if (detail.groundedness) {
+    return (
+      <Block label="What changed" note="Share of traces with a flagged answer">
+        <GroundednessRate detail={detail.groundedness} opened="this case" />
+      </Block>
+    );
+  }
   const rate = detail.tool_error;
   const shift = detail.metric;
   const secretLeak = detail.secret_leak;
@@ -493,9 +555,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
           <LeakTimeline secretLeak={secretLeak} />
           <LeakPins
             secretLeak={secretLeak}
-            linkToTrace={(traceId, spanId) =>
-              `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`
-            }
+            linkToTrace={traceLinker(basePath)}
           />
         </>
       ) : malformedOutput ? (
@@ -513,29 +573,46 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
   );
 }
 
+/** Which movement this case's causes explain, from the detector blob the case carries. */
+function causeKind(detail: CaseDetail): CauseKind {
+  if (detail.frustration) return "frustration";
+  if (detail.groundedness) return "groundedness";
+  if (detail.tool_error) return "tool_error";
+  if (detail.malformed_output) return "malformed";
+  if (detail.secret_leak) return "secret_leak";
+  if (detail.metric) return shiftKind(detail.metric.measure, detail.metric.direction !== "down") ?? "other";
+  return "other";
+}
+
+/** What a cause's affected count counts, by case type. */
+function affectedUnit(kind: CauseKind): [string, string] {
+  if (kind === "frustration") return ["frustrated session", "frustrated sessions"];
+  if (kind === "groundedness") return ["flagged answer", "flagged answers"];
+  return ["flagged trace", "flagged traces"];
+}
+
 /**
- * The answer, carded directly under the headline.
+ * The answer, carded directly under the headline: every proven cause, each on its own card.
  *
- * <p>One claim: the leading hypothesis, its confidence, its reasoning and the traces it was read
- * off. The card is what makes it the answer rather than the first row of a list — everything else
- * the run produced is a peer of everything else, and sits below the figure in {@link Attribution}.
+ * <p>With no proven cause the block says so first, gives the run's summary, and only then shows the leads,
+ * labelled as leads. Leads never appear beside a proven cause here; the report page lists them.
  *
  * <p>It also owns the in-flight state, so "Analyzing" appears once and in the place the answer will
  * land rather than under a heading further down the page.
- *
- * <p>An inconclusive run renders as itself. "Nothing happened here" is a supported conclusion of
- * this lane and the only independent check on the gate triage applies, so it must not read as a
- * failed run or as an empty one — a run that reached no hypothesis at all shows its summary here,
- * because then the summary is the only claim there is.
  */
-function Answer({
+function Why({
   report,
   analysing,
+  kind,
   basePath,
+  show,
 }: {
   report: RcaReport | undefined;
   analysing: boolean;
+  kind: CauseKind;
   basePath: string;
+  /** How a frustration or groundedness cause filters the list below; the index is the cause's stored one. */
+  show?: { count: (cause: RcaCause) => number; unit: [string, string]; onShow: (index: number) => void };
 }) {
   if (analysing) {
     return (
@@ -555,47 +632,59 @@ function Answer({
   // Nothing to say before a run, and a failed run says so once, in the block below the figure.
   if (!report || report.status === "failed") return null;
 
-  const verdict = report.verdict ? RCA_VERDICT_LABEL[report.verdict] ?? undefined : undefined;
-  const lead = (report.hypotheses ?? [])[0];
-
-  if (!lead) {
-    if (!report.summary) return null;
-    return (
-      <Block label="Why" note={verdict}>
-        <Card className="border border-border p-5">
-          <p className="text-fg m-0 text-body" style={{ maxWidth: 700 }}>
-            {report.summary}
-          </p>
-        </Card>
-      </Block>
-    );
-  }
+  const indexed = report.causes.map((cause, index) => ({ cause, index }));
+  const proven = indexed.filter((k) => k.cause.confidence === "high");
+  const shown = proven.length > 0 ? proven : indexed;
+  const summary = report.summary ?? (report.verdict ? RCA_VERDICT_LABEL[report.verdict] : null);
 
   return (
-    <Block label="Why" note={verdict}>
-      <Card className="border border-border p-5">
-        <Lead h={lead} basePath={basePath} />
-      </Card>
+    <Block label="Why" note={proven.length > 0 ? undefined : "No cause proven"}>
+      <div className="flex flex-col gap-3">
+        {proven.length === 0 && summary && (
+          <p className="m-0 text-body text-fg" style={{ maxWidth: 700 }}>
+            {summary}
+          </p>
+        )}
+        {shown.map(({ cause, index }) => (
+          <CauseCard
+            key={index}
+            cause={cause}
+            kind={kind}
+            basePath={basePath}
+            affected={affectedUnit(kind)}
+            repoRead={report.repo_available !== false}
+            show={
+              show && {
+                count: show.count(cause),
+                unit: show.unit,
+                onShow: () => show.onShow(index),
+              }
+            }
+          />
+        ))}
+        {report.causes.length > 0 && report.repo_available === false && (
+          <p className="m-0 text-small text-muted">
+            {report.causes.length === 1 ? "This cause isn't" : "These causes aren't"} linked to a prompt or code
+            because no repository was connected. Connect a repository and run RCA again to find them.
+          </p>
+        )}
+      </div>
+      <p className="mt-2.5 mb-0 text-small">
+        <Link to={`${basePath}/rca/${encodeURIComponent(report.id)}`} className="text-link hover:text-link-hover">
+          Read the full analysis
+        </Link>
+      </p>
     </Block>
   );
 }
 
 /**
- * What else the run did — the working behind the answer, below the figure.
+ * What else was checked — the working behind the answer, below the figure.
  *
- * <p>Every check that was measured, with its assessment and what it found, then the leads that
- * ranked below the one in the card. Neither is the conclusion, which is exactly why neither is at
- * the top of the page any more.
+ * <p>Every check that was measured, asked as the analysis phrased it, with its assessment and the answer.
+ * None of it is the conclusion, which is why it sits under the figure rather than at the top.
  */
-function Attribution({
-  report,
-  analysing,
-  basePath,
-}: {
-  report: RcaReport | undefined;
-  analysing: boolean;
-  basePath: string;
-}) {
+function Checks({ report, analysing }: { report: RcaReport | undefined; analysing: boolean }) {
   // The card above owns the in-flight state, and there is nothing to say before a run.
   if (analysing || !report) return null;
 
@@ -610,77 +699,44 @@ function Attribution({
     );
   }
 
-  const hypotheses = report.hypotheses ?? [];
-  // EVERY check, not just the eliminated ones. This used to filter to assessment === "ruled_out",
-  // which silently dropped the two assessments that actually bear on the cause: a `contributing`
-  // check is part of the story and an `explains` check IS the story. On the run that prompted this
-  // redesign, `failing_cohort_shape` came back "contributing" and never reached the page at all.
-  const checks = report.ruled_out ?? [];
+  // EVERY check, not just the eliminated ones: a `contributing` check is part of the story and an
+  // `explains` check IS the story.
+  const checks = report.ruled_out;
+  if (checks.length === 0) return null;
   const eliminated = checks.filter((c) => c.assessment === "ruled_out").length;
-  const [, ...rest] = hypotheses;
-
-  // Everything this block held is now either in the card or absent, so it renders nothing rather
-  // than an empty heading.
-  if (checks.length === 0 && rest.length === 0) return null;
 
   return (
     <Block label="What else was checked">
-      {/* How much work stands behind the answer. Counted, never written — the old five-sentence
-          summary paragraph opened with a prose version of the same claim and then repeated the
-          leading hypothesis almost verbatim. */}
-      {checks.length > 0 && (
-        <p className="text-muted mt-0 mx-0 mb-4 text-body">
-          {checks.length} {checks.length === 1 ? "explanation" : "explanations"} tested, {eliminated}{" "}
-          eliminated.
-        </p>
-      )}
-
-      {/* The investigation, one row per check. This is the pattern-matching the analysis actually
-          did, and a row is scanned rather than read — the previous rendering compressed all of it
-          to a comma-separated list of check names and threw every `detail` away. */}
-      {checks.length > 0 && (
-        <ListChassis>
-          {checks.map((c) => (
-            <div
-              key={c.check}
-              className="grid items-baseline bg-surface gap-4 py-2.75 px-3.5"
-              style={{ gridTemplateColumns: "150px 92px 1fr" }}
-            >
-              <span className="font-mono text-fg text-small" style={{ overflowWrap: "anywhere" }}>
-                {c.check}
-              </span>
-              <span
-                className="font-mono uppercase text-label"
-                style={{ color: assessmentColour(c.assessment) }}
-              >
-                {(c.assessment ?? "unknown").replace(/_/g, " ")}
-              </span>
-              <span className="text-muted text-small">
-                {c.detail}
-              </span>
-            </div>
-          ))}
-        </ListChassis>
-      )}
-
-      {/* Ranked "most likely first" by the schema, so everything past the first is a weaker lead.
-          Rendering them as peers of the leading explanation — which is what a flat <ol> did — gave
-          a low-confidence aside the same weight as the answer. */}
-      {rest.map((h, i) => (
-        <details key={`${h.title}-${i}`} className="mt-3">
-          <summary
-            className="flex cursor-pointer select-none items-center text-subtle hover:text-muted transition-colors gap-2 text-small"
-            style={{ transitionDuration: "var(--duration-micro)" }}
+      <p className="text-muted mt-0 mx-0 mb-4 text-body">
+        {checks.length} {checks.length === 1 ? "explanation" : "explanations"} tested, {eliminated} eliminated.
+      </p>
+      <ListChassis>
+        {checks.map((c) => (
+          <div
+            key={c.check}
+            className="grid items-baseline bg-surface gap-4 py-2.75 px-3.5"
+            style={{ gridTemplateColumns: "minmax(0, 260px) 92px 1fr" }}
           >
-            <span className="font-mono">+</span>
-            <span>{h.title}</span>
-            <Confidence level={h.confidence} />
-          </summary>
-          <div className="mt-2.5 pl-4.5">
-            <Lead h={h} basePath={basePath} hideTitle />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-fg text-small">{c.question ?? c.check}</span>
+              {c.question && (
+                <span className="font-mono text-subtle text-label" style={{ overflowWrap: "anywhere" }}>
+                  {c.check}
+                </span>
+              )}
+            </span>
+            <span
+              className="font-mono uppercase text-label"
+              style={{ color: assessmentColour(c.assessment) }}
+            >
+              {(c.assessment ?? "unknown").replace(/_/g, " ")}
+            </span>
+            <span className="text-muted text-small">
+              {c.detail}
+            </span>
           </div>
-        </details>
-      ))}
+        ))}
+      </ListChassis>
     </Block>
   );
 }
@@ -697,64 +753,6 @@ function assessmentColour(assessment: string | null): string {
     default:
       return "var(--color-subtle)";
   }
-}
-
-/** How sure the analysis is, in the one place it can change a reader's mind about a claim. */
-function Confidence({ level }: { level: string }) {
-  const warn = level === "high" || level === "medium";
-  return (
-    <span
-      className="font-mono uppercase text-label rounded-control px-1.5 py-0.5"
-      style={{
-        color: warn ? "var(--color-warning)" : "var(--color-subtle)",
-        background: warn ? "var(--color-warning-subtle)" : "var(--color-raised)" }}
-    >
-      {level}
-    </span>
-  );
-}
-
-/** One hypothesis: the claim, how sure, why, and the traces it was read off. */
-function Lead({
-  h,
-  basePath,
-  hideTitle,
-}: {
-  h: RcaReport["hypotheses"][number];
-  basePath: string;
-  hideTitle?: boolean;
-}) {
-  return (
-    <>
-      {!hideTitle && (
-        <p className="flex flex-wrap items-center mt-0 mx-0 mb-1.5 gap-2.25">
-          <span className="text-body font-medium text-fg">
-            {h.title}
-          </span>
-          <Confidence level={h.confidence} />
-        </p>
-      )}
-      {/* No measure cap: this paragraph sits in a card that spans the content column, and a
-          rationale stopping two thirds of the way across leaves the card looking half-drawn. */}
-      <p className="text-muted m-0 text-body">
-        {h.rationale}
-      </p>
-      {h.evidence_trace_ids.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-2.25">
-          {h.evidence_trace_ids.map((id) => (
-            <Link
-              key={id}
-              to={`${basePath}/traces/${encodeURIComponent(id)}`}
-              className="rounded-control border border-border-strong font-mono text-link hover:text-link-hover transition-colors py-0.5 px-1.75 text-label"
-              style={{ transitionDuration: "var(--duration-micro)" }}
-            >
-              {truncateId(id)}
-            </Link>
-          ))}
-        </div>
-      )}
-    </>
-  );
 }
 
 /**
@@ -846,10 +844,7 @@ function Failures({ detail, basePath }: { detail: CaseDetail; basePath: string }
 
 /** One failing call: when, what it was, and what it returned. */
 function ErrorSpanRow({ span, basePath }: { span: EvidenceSpan; basePath: string }) {
-  const to =
-    span.traceId != null
-      ? `${basePath}/traces/${encodeURIComponent(span.traceId)}${span.spanId ? `#${encodeURIComponent(span.spanId)}` : ""}`
-      : null;
+  const to = span.traceId != null ? traceLinker(basePath)(span.traceId, span.spanId) : null;
 
   const body = (
     <>
@@ -953,4 +948,126 @@ function RcaErrorNote({ error }: { error: unknown }) {
     );
   }
   return <ErrorNote error={error} />;
+}
+
+/** How many sessions a cause names. */
+function causeSessionCount(cause: RcaCause) {
+  return new Set(cause.evidence_session_ids).size;
+}
+
+/** The case's frustrated sessions, filtered to one cause when the reader asked for it. */
+function FrustrationList({
+  findingId,
+  rcaReportId,
+  frustration,
+  causes,
+  filter,
+  onFilter,
+  basePath,
+}: {
+  findingId: string;
+  /** The report the causes come from, which the server reads a cause's sessions off. */
+  rcaReportId: string | null;
+  frustration: FrustrationDetail;
+  causes: RcaCause[];
+  filter: string;
+  onFilter: (key: string) => void;
+  basePath: string;
+}) {
+  const index = filter === "all" ? -1 : Number(filter);
+  const cause = index >= 0 ? causes[index] : undefined;
+  const options = [
+    { key: "all", label: `All · ${frustration.rate.failuresCur.toLocaleString()}` },
+    ...causes
+      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeSessionCount(k)}` }))
+      .filter((o) => !o.label.endsWith(" · 0")),
+  ];
+  return (
+    <div id="frustrated-sessions">
+      <Block label="Frustrated sessions" note="Each flagged message with the turns before it">
+        {options.length > 1 && (
+          <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
+        )}
+        <FrustratedConversations
+          findingId={findingId}
+          first={{
+            rows: frustration.conversations,
+            nextCursor: frustration.conversationsNextCursor,
+            total: frustration.rate.failuresCur,
+          }}
+          filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          readAhead={
+            rcaReportId
+              ? options.filter((o) => o.key !== "all").map((o) => ({ rcaReport: rcaReportId, index: Number(o.key) }))
+              : []
+          }
+          basePath={basePath}
+        />
+      </Block>
+    </div>
+  );
+}
+
+/**
+ * How many flagged traces a groundedness cause names. Counted as answers on the page, as the rate is: a
+ * trace is flagged by its answer, and a trace with two flagged answers is still one.
+ */
+function causeTraceCount(cause: RcaCause) {
+  return new Set(cause.evidence_trace_ids).size;
+}
+
+/** The case's flagged answers, filtered to one cause when the reader asked for it. */
+function GroundednessList({
+  findingId,
+  rcaReportId,
+  groundedness,
+  causes,
+  filter,
+  onFilter,
+  basePath,
+}: {
+  findingId: string;
+  /** The report the causes come from, which the server reads a cause's answers off. */
+  rcaReportId: string | null;
+  groundedness: GroundednessDetail;
+  causes: RcaCause[];
+  filter: string;
+  onFilter: (key: string) => void;
+  basePath: string;
+}) {
+  const index = filter === "all" ? -1 : Number(filter);
+  const cause = index >= 0 ? causes[index] : undefined;
+  const all = groundedness.rate.failuresCur;
+  const options = [
+    { key: "all", label: `All · ${all.toLocaleString()}` },
+    ...causes
+      .map((k, i) => ({ key: String(i), label: `Cause ${i + 1} · ${causeTraceCount(k)}` }))
+      .filter((o) => !o.label.endsWith(" · 0")),
+  ];
+  return (
+    <div id="flagged-answers">
+      <Block label="Flagged answers" note={`Marked sentences scored ${groundedness.flagThreshold} or higher`}>
+        {options.length > 1 && (
+          <ConversationFilter
+            options={options}
+            value={cause ? filter : "all"}
+            onChange={onFilter}
+            label="Filter answers"
+          />
+        )}
+        <FlaggedAnswers
+          findingId={findingId}
+          first={{ rows: groundedness.answers, nextCursor: groundedness.answersNextCursor }}
+          traces={cause ? causeTraceCount(cause) : all}
+          filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
+          readAhead={
+            rcaReportId
+              ? options.filter((o) => o.key !== "all").map((o) => ({ rcaReport: rcaReportId, index: Number(o.key) }))
+              : []
+          }
+          basePath={basePath}
+        />
+      </Block>
+    </div>
+  );
 }

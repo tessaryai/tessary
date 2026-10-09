@@ -123,21 +123,4 @@ class TenantPathResolverTest {
         assertEquals(
                 HttpStatus.FORBIDDEN, ex.getStatusCode(), "token bound to project A must not satisfy project B's path");
     }
-
-    @Test
-    void requireMembershipForProject_userPath_checksMembership() {
-        var alice = TenantFixture.bootstrap(tenants, "pr-mem-alice");
-        var bob = TenantFixture.bootstrap(tenants, "pr-mem-bob");
-
-        // Bob asking about Alice's project (which he doesn't belong to) → 403
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class,
-                () -> resolver.requireMembershipForProject(
-                        sessionFor(bob.user()), alice.project().id()));
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
-
-        // Alice asking about her own → no throw
-        resolver.requireMembershipForProject(
-                sessionFor(alice.user()), alice.project().id());
-    }
 }

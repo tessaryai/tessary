@@ -27,11 +27,4 @@ public record SessionRow(
         String startedAt,
         String lastActivityAt,
         String eventTs,
-        boolean isDeleted) {
-
-    /** The get-or-create shape: identity plus the two timestamps, both seeded from the first arrival. */
-    public static SessionRow of(
-            String projectId, String id, @Nullable String userId, String startedAt, String eventTs) {
-        return new SessionRow(projectId, id, userId, startedAt, startedAt, eventTs, false);
-    }
-}
+        boolean isDeleted) {}

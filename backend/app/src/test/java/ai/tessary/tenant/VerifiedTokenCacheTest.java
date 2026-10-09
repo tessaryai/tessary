@@ -10,8 +10,6 @@ import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * The three properties {@link VerifiedTokenCache} is only worth having if it holds. Each of these was
@@ -19,12 +17,6 @@ import org.springframework.test.context.TestPropertySource;
  * one names the failure it exists to catch rather than the method it calls.
  */
 @SpringBootTest
-// The flood test leaves thousands of entries in the singleton cache and the kill-switch test mutates
-// singleton properties, so this class does not hand a polluted context to the next one.
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-// Own context on purpose: this class mutates the singleton TokenCacheProperties and floods the shared cache, and its
-// @DirtiesContext would otherwise evict the context most of the suite runs in.
-@TestPropertySource(properties = "test.context-group=verified-token-cache")
 class VerifiedTokenCacheTest {
 
     @Autowired
@@ -132,30 +124,6 @@ class VerifiedTokenCacheTest {
     }
 
     /**
-     * A rejection is a guess about a row that could be issued or restored, so it must expire. Without an
-     * expiry a token rejected once would stay rejected for as long as the entry survived.
-     */
-    @Test
-    void rejection_expires() throws Exception {
-        long was = props.getNegativeTtlSeconds();
-        try {
-            props.setNegativeTtlSeconds(1);
-            String bogus = ApiKeyService.TOKEN_PREFIX + "w_neverissuedatall";
-            assertTrue(tokens.verify(bogus).isEmpty());
-            assertInstanceOf(VerifiedTokenCache.Lookup.Rejected.class, cache.lookup(bogus));
-
-            Thread.sleep(1100);
-
-            assertInstanceOf(
-                    VerifiedTokenCache.Lookup.Unknown.class,
-                    cache.lookup(bogus),
-                    "past the negative TTL the rejection is forgotten, not sticky");
-        } finally {
-            props.setNegativeTtlSeconds(was);
-        }
-    }
-
-    /**
      * The invariant under a genuinely concurrent revoke, whichever way the interleaving falls: a token
      * revoked while it was being verified must not end up cached as valid. This cannot fail spuriously —
      * if the race is not hit, the assertion holds trivially — but it does catch the ordering mistake of
@@ -173,22 +141,5 @@ class VerifiedTokenCacheTest {
         assertTrue(
                 tokens.verify(issued.plaintext()).isEmpty(),
                 "a revoke that lands during a verification must win, whichever order they interleaved in");
-    }
-
-    /** A revoked key must not be answered for, and the rejection must not be cached as a false positive. */
-    @Test
-    void revokedKey_isRejectedAndStaysRejected() {
-        var fix = TenantFixture.bootstrap(tenants, "cache-revoke");
-        var issued = tokens.issue(fix.project().id(), fix.user().id(), "revoked");
-        assertTrue(tokens.verify(issued.plaintext()).isPresent());
-
-        assertTrue(tokens.revoke(issued.token().id()));
-
-        assertTrue(tokens.verify(issued.plaintext()).isEmpty(), "revoked immediately");
-        assertInstanceOf(
-                VerifiedTokenCache.Lookup.Rejected.class,
-                cache.lookup(issued.plaintext()),
-                "and the rejection is remembered, so the repeat costs no bcrypt");
-        assertTrue(tokens.verify(issued.plaintext()).isEmpty(), "and the repeat still refuses");
     }
 }

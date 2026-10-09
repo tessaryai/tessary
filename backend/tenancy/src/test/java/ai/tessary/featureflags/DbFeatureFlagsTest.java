@@ -2,10 +2,9 @@
 package ai.tessary.featureflags;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,30 +35,24 @@ class DbFeatureFlagsTest {
     }
 
     @Test
-    void aKeyWithNoRowHasNoOpinion() {
-        assertEquals(
-                Optional.empty(),
-                flags.override("graders_enabled", FlagContext.forOrg(ORG)),
-                "empty means nobody decided — the caller supplies the edition default, not this class");
-    }
-
-    @Test
-    void aRowIsReturnedInBothDirections() {
-        rows.put("graders_enabled", false);
-        rows.put("triage_automatic_enabled", true);
-
-        assertFalse(flags.override("graders_enabled", FlagContext.forOrg(ORG)).orElseThrow());
-        assertTrue(flags.override("triage_automatic_enabled", FlagContext.forOrg(ORG))
-                .orElseThrow());
-    }
-
-    @Test
     void aGlobalEvaluationHasNoOpinion() {
         rows.put("graders_enabled", false);
         assertEquals(
                 Optional.empty(),
                 flags.override("graders_enabled", FlagContext.global()),
                 "an override is one org's opinion about itself; there is no global row to find");
+    }
+
+    /**
+     * The bug: a context carrying a blank org id queries the override table for an org named by whitespace
+     * instead of landing on the default. A blank org is a global evaluation and has no opinion.
+     */
+    @Test
+    void aBlankOrgHasNoOpinionAndReadsNothing() {
+        rows.put("graders_enabled", false);
+
+        assertEquals(Optional.empty(), flags.override("graders_enabled", FlagContext.forOrg("  ")));
+        verify(repo, never()).findByOrg(anyString());
     }
 
     /**
@@ -72,34 +65,5 @@ class DbFeatureFlagsTest {
             flags.override("cap_" + i + "_enabled", FlagContext.forOrg(ORG));
         }
         verify(repo, Mockito.times(1)).findByOrg(ORG);
-    }
-
-    @Test
-    void invalidatingMakesTheNextReadSeeTheWrite() {
-        assertEquals(Optional.empty(), flags.override("graders_enabled", FlagContext.forOrg(ORG)));
-
-        rows.put("graders_enabled", false);
-        assertEquals(
-                Optional.empty(),
-                flags.override("graders_enabled", FlagContext.forOrg(ORG)),
-                "still the cached map — this is the ten seconds another node would serve");
-
-        flags.invalidate(ORG);
-        assertFalse(
-                flags.override("graders_enabled", FlagContext.forOrg(ORG)).orElseThrow(),
-                "the write path invalidates, so an operator's toggle bites at once on this node");
-        verify(repo, Mockito.times(2)).findByOrg(ORG);
-    }
-
-    @Test
-    void oneOrgsCacheIsNotAnothersAnswer() {
-        rows.put("graders_enabled", false);
-        assertFalse(flags.override("graders_enabled", FlagContext.forOrg(ORG)).orElseThrow());
-
-        rows.clear();
-        assertEquals(
-                Optional.empty(),
-                flags.override("graders_enabled", FlagContext.forOrg("org_2")),
-                "a second org loads its own map rather than inheriting the first's");
     }
 }

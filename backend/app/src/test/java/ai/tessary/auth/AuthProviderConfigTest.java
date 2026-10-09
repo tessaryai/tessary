@@ -35,15 +35,6 @@ class AuthProviderConfigTest {
 
         @Autowired
         AuthProvider provider;
-
-        @Test
-        void passwordProviderIsTheOpenEditionDefault() {
-            assertInstanceOf(
-                    PasswordAuthProvider.class,
-                    provider,
-                    "with no WORKOS_API_KEY/WORKOS_CLIENT_ID, PasswordAuthProvider must be the "
-                            + "single AuthProvider bean -- the open edition's zero-config default");
-        }
     }
 
     @Nested

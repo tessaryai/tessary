@@ -11,39 +11,33 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a qualifying finding into a case for every classifier the four dedicated sources
+ * Shapes a qualifying finding into a case for every classifier the six dedicated sources
  * ({@link MetricDriftSource}, {@link ToolErrorCaseSource}, {@link MalformedOutputCaseSource},
- * {@link SecretLeakCaseSource}) don't own: behaviour drift, SOP conformance, and any per-span classifier
- * an org authors and arms itself. None of these had a case source before decision 1 — behaviour drift's
- * findings never opened one at all, and an armed per-span classifier's only route to a case was a
- * human's <em>Real deviation</em> on a finding {@code ClassifierArming} filed.
+ * {@link SecretLeakCaseSource}, {@link FrustrationCaseSource}, {@link GroundednessCaseSource}) don't own:
+ * any per-span classifier an org authors and arms itself. Before decision 1 such a classifier's only
+ * route to a case was a human's <em>Real deviation</em> on a finding {@code ClassifierArming} filed.
  *
- * <p>Unlike the other four this source carries no evidence blob of its own shape to read numbers back
- * from — its findings span whatever the classifier itself measured (a novel gram, a rule violated, N
- * detections in a window) — so the case it shapes states the fact plainly rather than a fitted
- * before/after pair. {@link #gateSentence} still records which authority ruled, matching every other
- * source's own account of itself.
+ * <p>Unlike the other six this source carries no evidence blob of its own shape to read numbers back
+ * from — its findings span whatever the classifier itself measured (N detections in a window) — so the case
+ * it shapes states the fact plainly rather than a fitted before/after pair. {@link #gateSentence} still
+ * records which authority ruled, matching every other source's own account of itself.
  */
 @Component
 public class GenericFindingCaseSource implements CaseSource {
 
-    /** The classifiers the four dedicated sources already own; this source claims everything else. */
+    /** The classifiers the six dedicated sources already own; this source claims everything else. */
     private static final Set<String> DEDICATED = Set.of(
             BuiltInDetector.Kind.DURATION_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT,
             BuiltInDetector.Kind.TOOL_ERROR,
             BuiltInDetector.Kind.MALFORMED_OUTPUT,
-            BuiltInDetector.Kind.SECRET_LEAK);
+            BuiltInDetector.Kind.SECRET_LEAK,
+            BuiltInDetector.Kind.FRUSTRATION,
+            BuiltInDetector.Kind.GROUNDEDNESS);
 
     /** Severity for a cause this source cannot grade a magnitude for. Mid-list deliberately, same
      *  reasoning as the other sources' own unreadable-evidence fallback. */
     private static final double UNKNOWN_SEVERITY = 0.5;
-
-    @Override
-    public String detector() {
-        // Never read: shape() picks the detector per finding, since this one source spans several.
-        return CaseRow.Detector.CLASSIFIER;
-    }
 
     @Override
     public boolean owns(String classifierKey) {
@@ -52,8 +46,11 @@ public class GenericFindingCaseSource implements CaseSource {
 
     @Override
     public CaseDetection shape(FindingRow finding) {
-        CaseKey key =
-                new CaseKey(detectorOf(finding), subjectKindOf(finding), finding.causeKey(), finding.classifierKey());
+        CaseKey key = new CaseKey(
+                CaseRow.Detector.CLASSIFIER,
+                CaseRow.SubjectKind.CLASSIFIER,
+                finding.causeKey(),
+                finding.classifierKey());
         return new CaseDetection(
                 key,
                 finding.subjectLabel() != null ? finding.subjectLabel() : finding.nativeCauseKey(),
@@ -66,22 +63,6 @@ public class GenericFindingCaseSource implements CaseSource {
                 null,
                 null,
                 null);
-    }
-
-    private static String detectorOf(FindingRow finding) {
-        if (BuiltInDetector.Kind.BEHAVIOR_DRIFT.equals(finding.classifierKey())) {
-            return CaseRow.Detector.BEHAVIOR_DRIFT;
-        }
-        if (BuiltInDetector.Kind.SOP_CONFORMANCE.equals(finding.classifierKey())) {
-            return CaseRow.Detector.SOP_CONFORMANCE;
-        }
-        return CaseRow.Detector.CLASSIFIER;
-    }
-
-    private static String subjectKindOf(FindingRow finding) {
-        return BuiltInDetector.Kind.BEHAVIOR_DRIFT.equals(finding.classifierKey())
-                ? CaseRow.SubjectKind.BEHAVIOR_PROFILE
-                : CaseRow.SubjectKind.CLASSIFIER;
     }
 
     /** Why this crossed its own bar, in this detector's own terms, prefixed by which authority ruled —

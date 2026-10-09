@@ -16,10 +16,10 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { BehaviorFindingDetail, EvidenceRef, TriageCitation } from "../../api/types";
+import type { BehaviorFindingDetail, TriageCitation } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { ErrorNote, LoadingRow, PageHeader, StatusPill, cn } from "../../ui";
-import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, triageState } from "./shared";
+import { CONTAINER, ResolveVerbs, RunTriageButton, chainWords, detectorLabel, stamp, triageState } from "./shared";
 import { PatternBlock } from "./findingCharts";
 import {
   ShiftBehind,
@@ -34,9 +34,12 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
+import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
+import { FrustratedConversations } from "./FrustratedConversations";
+import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
+import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
-// This build's baseline renderer returns null by default.
-import { paid } from "@paid";
+import { traceLinker } from "../traceLinker";
 
 type Detail = BehaviorFindingDetail;
 
@@ -53,12 +56,7 @@ export function FindingPage() {
    * these from the slugs instead.
    */
   const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
-  /** Absolute, not `../traces/...`: these hand-build the href for a plain `<a>` rather than a
-   *  react-router `<Link>` (the timeline and the failing-output viewer render dozens of these off
-   *  data, not JSX), and a relative href on a plain anchor resolves against the URL rather than the
-   *  route tree — exactly the mismatch this page's own top note warns `navigate()` about. */
-  const traceLink = (traceId: string, spanId?: string | null) =>
-    `${basePath}/traces/${encodeURIComponent(traceId)}${spanId ? `#${encodeURIComponent(spanId)}` : ""}`;
+  const traceLink = traceLinker(basePath);
 
   const detailQ = useQuery({
     queryKey: ["behavior-finding", api.base, findingId],
@@ -80,9 +78,8 @@ export function FindingPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["behavior-finding", api.base, findingId] }),
   });
 
-  if (detailQ.isLoading) return <div style={CONTAINER}><LoadingRow /></div>;
   if (detailQ.isError) return <div style={CONTAINER}><ErrorNote error={detailQ.error} /></div>;
-  if (!detailQ.data) return null;
+  if (!detailQ.data) return <div style={CONTAINER}><LoadingRow /></div>;
 
   const detail: Detail = detailQ.data;
   const finding = detail.finding;
@@ -94,10 +91,12 @@ export function FindingPage() {
   const rate = detail.toolError;
   const secretLeak = detail.secretLeak;
   const malformedOutput = detail.malformedOutput;
-  /* All four tell a before-and-after story with a figure, pins and a ruling, and all four put their
-     verbs behind triage. The rest of the detectors keep the older layout until they get a story of
-     their own. */
-  const story = shift ?? rate ?? secretLeak ?? malformedOutput;
+  const frustration = detail.frustration;
+  const groundedness = detail.groundedness;
+  /* All six tell a before-and-after story with a figure, pins and a ruling. Five put their verbs
+     behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
+     layout until they get a story of their own. */
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration ?? groundedness;
 
   return (
     <div style={CONTAINER}>
@@ -113,6 +112,17 @@ export function FindingPage() {
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
         />
+      ) : frustration ? (
+        <FrustrationHeader finding={finding} basePath={basePath} />
+      ) : groundedness ? (
+        <GroundednessHeader
+          finding={finding}
+          detail={groundedness}
+          basePath={basePath}
+          busy={busy}
+          onAnalyze={() => analyzeM.mutate()}
+          onResolve={(action) => resolveM.mutate(action)}
+        />
       ) : malformedOutput ? (
         <MalformedHeader
           rate={malformedOutput.rate}
@@ -124,7 +134,7 @@ export function FindingPage() {
       ) : (
         <>
           <PageHeader
-            breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+            breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
             kicker={finding.detector ? detectorLabel(finding.detector) : "Finding"}
             title={finding.title}
           />
@@ -148,7 +158,7 @@ export function FindingPage() {
                 verbs stop being offered the moment there is one, rather than staying up as an
                 "override" that would just fail. */}
             {!triaged && (
-              <ResolveVerbs causeKind={finding.causeKind} busy={busy} onResolve={(action) => resolveM.mutate(action)} />
+              <ResolveVerbs busy={busy} onResolve={(action) => resolveM.mutate(action)} />
             )}
             {finding.caseId && (
               <Link
@@ -175,8 +185,9 @@ export function FindingPage() {
       {/* The ruling is the decision this finding ended on, so it sits above the evidence rather than
           under it. Its receipts do not: the citations and the check scripts are how a reader CHECKS
           the ruling, and checking comes after reading what was ruled on. No verbs here: a ruled
-          finding is frozen (decision 1), so there is nothing left to override. */}
-      {story && triaged && (
+          finding is frozen (decision 1), so there is nothing left to override. A frustration finding
+          states its ruling and links its case in its own header, so it skips this card. */}
+      {story && triaged && !frustration && (
         <div
           className="flex flex-col rounded-card border border-border-strong bg-surface gap-2.5 mt-5 py-4.25 px-4.75">
           {finding.triageSummary && (
@@ -267,11 +278,70 @@ export function FindingPage() {
         </>
       )}
 
-      {/* Only an SOP-conformance finding carries a baseline. The nullability check stays here;
-          the two `!detail.baseline` siblings below decide what renders in its place when there
-          isn't one. */}
-      {detail.baseline && paid.findingEvidence(detail.baseline)}
-      {!story && !detail.baseline && (
+      {frustration && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+              <span className="text-subtle text-small">Share of sessions with a user frustrated with the agent</span>
+            </div>
+            <FrustrationRate detail={frustration} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-2.75">
+              <h2 className="font-mono text-label uppercase text-muted">Frustrated sessions</h2>
+              <span className="text-subtle text-small">
+                {frustration.conversations.length > 0 && frustration.conversations.every((c) => c.cleared)
+                  ? "Cleared when the case was resolved as a false alarm. They no longer count toward the rate."
+                  : "Each flagged message with the turns before it"}
+              </span>
+            </div>
+            <FrustratedConversations
+              findingId={findingId}
+              first={{
+                rows: frustration.conversations,
+                nextCursor: frustration.conversationsNextCursor,
+                total: frustration.rate.failuresCur,
+              }}
+              basePath={basePath}
+            />
+          </section>
+        </>
+      )}
+
+      {groundedness && (
+        <>
+          <section
+            className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+            style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+          >
+            <div className="flex items-baseline gap-3">
+              <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+              <span className="text-subtle text-small">Share of traces with a flagged answer</span>
+            </div>
+            <GroundednessRate detail={groundedness} />
+          </section>
+          <section className="mt-7">
+            <div className="flex items-baseline gap-3 mb-2.75">
+              <h2 className="font-mono text-label uppercase text-muted">Flagged answers</h2>
+              <span className="text-subtle text-small">
+                Marked sentences scored {groundedness.flagThreshold} or higher
+              </span>
+            </div>
+            <FlaggedAnswers
+              findingId={findingId}
+              first={{ rows: groundedness.answers, nextCursor: groundedness.answersNextCursor }}
+              traces={groundedness.rate.failuresCur}
+              basePath={basePath}
+            />
+          </section>
+        </>
+      )}
+
+      {!story && (
         <p className="text-subtle mt-6 text-body" style={{ maxWidth: 560 }}>
           This cause carries no measured shift. It is a claim about the shape of what the agent did
           rather than about a number that moved, so there is nothing here to plot.
@@ -280,16 +350,16 @@ export function FindingPage() {
 
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
-      <section className="mt-7">
-        <h2 className="font-mono text-label uppercase text-muted mb-1.5">
-          Evidence
-        </h2>
-        {finding.detector === "sop_conformance" ? (
-          !detail.baseline && <EvidenceLinks evidence={finding.evidence} basePath={basePath} />
-        ) : (
+      {/* A frustration finding's evidence is its sessions, and a groundedness finding's its answers, drawn
+          above; the raw witness rows would list the same traces again as bare ids. */}
+      {!frustration && !groundedness && (
+        <section className="mt-7">
+          <h2 className="font-mono text-label uppercase text-muted mb-1.5">
+            Evidence
+          </h2>
           <EvidenceTable findingId={findingId} basePath={basePath} />
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 
@@ -316,11 +386,11 @@ export function FindingPage() {
     const bucket = sh.bucketKey !== f.callSiteId ? sh.bucketKey : null;
     const window =
       sh.windowOpenedAt && sh.windowClosedAt
-        ? `${new Date(sh.windowOpenedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${new Date(sh.windowClosedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`
+        ? `${stamp(sh.windowOpenedAt)} → ${stamp(sh.windowClosedAt)}`
         : null;
     return (
       <PageHeader
-        breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+        breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
         kicker={
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>
@@ -385,7 +455,7 @@ export function FindingPage() {
       : null;
     return (
       <PageHeader
-        breadcrumb={[{ label: "Classifiers", to: `${basePath}/classifiers` }, { label: "Finding" }]}
+        breadcrumb={[{ label: "Triage", to: `${basePath}/triage` }, { label: "Finding" }]}
         kicker={
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted">{f.detector ? detectorLabel(f.detector) : "Finding"}</span>
@@ -578,40 +648,3 @@ function ToolErrorEvidence({ rate }: { rate: NonNullable<Detail["toolError"]> })
     </>
   );
 }
-
-/**
- * What the detector wrote down, as links into the substrate it read.
- *
- * <p>This replaced a single "Exemplar trace →" link, and the difference is what the finding can now
- * say: a rate shift names the witnesses beside its exemplar, a conformance rule lists its violating
- * turns in the order it ranked them, and a distribution shift can point at members of the window it
- * measured. One nullable id could carry the first of those and silently drop the rest.
- *
- * Renders nothing when the set is empty: a finding whose traces have aged out keeps its claim and
- * loses its evidence, and an empty list under a heading reads as a bug rather than as history.
- */
-function EvidenceLinks({ evidence, basePath }: { evidence: EvidenceRef[]; basePath: string }) {
-  const traces = evidence.filter((e) => e.traceId !== null);
-  if (traces.length === 0) return null;
-  return (
-    <div className="mt-2 gap-1" style={{ display: "flex", flexDirection: "column" }}>
-      {traces.map((e) => (
-        <Link
-          key={`${e.role}-${e.traceId}-${e.spanId ?? ""}`}
-          to={`${basePath}/traces/${encodeURIComponent(e.traceId as string)}`}
-          className="text-link hover:text-link-hover transition-colors text-small">
-          {ROLE_LABEL[e.role] ?? e.role} trace
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-/** The detector's own vocabulary, spelled for a reader rather than passed through raw. */
-const ROLE_LABEL: Record<string, string> = {
-  exemplar: "Exemplar",
-  member: "Window member",
-  baseline: "Baseline",
-  witness: "Witness",
-  changepoint: "Changepoint",
-};

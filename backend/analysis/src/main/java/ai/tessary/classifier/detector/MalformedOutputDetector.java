@@ -11,12 +11,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonNodePath;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
-import com.networknt.schema.resource.DisallowSchemaLoader;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
+import com.networknt.schema.path.NodePath;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -51,14 +51,16 @@ public final class MalformedOutputDetector implements BuiltInDetector {
 
     private final CallSiteSchemaReads schemas;
     private final ObjectMapper mapper;
-    // 2020-12 is the dialect default; a schema declaring its own $schema is honored by the factory.
-    // Remote schema retrieval is disallowed: the stored schema is agent-authored from customer repo
-    // content, so a remote $ref would be an SSRF vector (networknt's default loader chain fetches
-    // http(s) IRIs). Standard-dialect meta-schemas are built in and never need a fetch; a schema
-    // whose $ref can't be resolved without the network simply fails compile() and is treated as none.
-    private final JsonSchemaFactory schemaFactory = JsonSchemaFactory.getInstance(
-            SpecVersion.VersionFlag.V202012,
-            builder -> builder.schemaLoaders(loaders -> loaders.add(DisallowSchemaLoader.getInstance())));
+    // 2020-12 is the dialect default; a schema declaring its own $schema is honored by the registry.
+    // Schema retrieval is disallowed outright: the stored schema is agent-authored from customer repo
+    // content, so a remote $ref would be an SSRF vector, and a file: $ref would read the host. Every
+    // IRI is blocked; standard-dialect meta-schemas are built in and never go through the loader. A
+    // schema whose $ref can't be resolved without a fetch fails compile() and is treated as none.
+    // MalformedOutputDetectorTest#refSchemasAreNeverFetched_treatedAsNoneDeclared proves it.
+    private final SchemaRegistry schemaRegistry = SchemaRegistry.withDefaultDialect(
+            SpecificationVersion.DRAFT_2020_12,
+            builder -> builder.schemaLoader(
+                    loader -> loader.fetchRemoteResources(false).block(iri -> true)));
 
     public MalformedOutputDetector(CallSiteSchemaReads schemas, ObjectMapper mapper) {
         this.schemas = schemas;
@@ -104,7 +106,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         if (schemaJsonBySite.isEmpty()) return out;
         // Optional-valued so a compile failure is cached too: one compile attempt per distinct
         // schema per batch (computeIfAbsent alone would retry a null result per observation).
-        Map<String, Optional<JsonSchema>> compiled = new HashMap<>();
+        Map<String, Optional<Schema>> compiled = new HashMap<>();
 
         for (int i = 0; i < batch.size(); i++) {
             SubstrateObservation o = batch.get(i);
@@ -112,8 +114,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
             String out2 = o.output();
             String schemaJson = siteId == null ? null : schemaJsonBySite.get(siteId);
             if (schemaJson == null || out2 == null || out2.isBlank()) continue;
-            Optional<JsonSchema> schema =
-                    compiled.computeIfAbsent(siteId, id -> Optional.ofNullable(compile(schemaJson)));
+            Optional<Schema> schema = compiled.computeIfAbsent(siteId, id -> Optional.ofNullable(compile(schemaJson)));
             if (schema.isEmpty()) continue; // uncompilable stored schema: treated as none declared
             out.set(i, validate(schema.get(), out2));
         }
@@ -125,7 +126,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
      * the output is a gen_ai message envelope, the final assistant message's text content is the
      * document validated — that is the completion the calling code's parse sees.
      */
-    private Detection validate(JsonSchema schema, String output) {
+    private Detection validate(Schema schema, String output) {
         JsonNode node;
         try {
             node = mapper.readTree(output);
@@ -143,9 +144,11 @@ public final class MalformedOutputDetector implements BuiltInDetector {
                 return Detection.fired(Detection.Severity.WARN, notJsonEvidence());
             }
         }
-        Set<ValidationMessage> violations;
+        List<Error> violations;
         try {
-            violations = schema.validate(node);
+            // networknt reads through Jackson 3; the Jackson 2 node crosses over as the JSON text it
+            // was parsed from, so both libraries judge the same document.
+            violations = schema.validate(node.toString(), InputFormat.JSON);
         } catch (RuntimeException e) {
             // Schema pathology surfacing at validate despite preload: same discipline as compile() —
             // treated as none declared, never failing the whole sweep on one poisoned schema.
@@ -171,12 +174,12 @@ public final class MalformedOutputDetector implements BuiltInDetector {
 
     /**
      * {@code required}'s own instance location is the object missing the property, not the property
-     * itself — {@link ValidationMessage#getProperty()} carries the missing name instead, so it is appended
+     * itself — {@link Error#getProperty()} carries the missing name instead, so it is appended
      * to the parent's collapsed path here rather than read off the location.
      */
-    private static Violation toViolation(ValidationMessage vm) {
+    private static Violation toViolation(Error vm) {
         String field = collapsedPath(vm.getInstanceLocation());
-        String keyword = vm.getType();
+        String keyword = vm.getKeyword();
         String property = vm.getProperty();
         if ("required".equals(keyword) && property != null && !property.isBlank()) {
             field = field.isEmpty() ? property : field + "." + property;
@@ -186,7 +189,7 @@ public final class MalformedOutputDetector implements BuiltInDetector {
     }
 
     /** {@code items[2].sku} → {@code items[].sku}: every array index collapses to an empty pair of brackets. */
-    private static String collapsedPath(JsonNodePath location) {
+    private static String collapsedPath(NodePath location) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < location.getNameCount(); i++) {
             Object element = location.getElement(i);
@@ -227,13 +230,13 @@ public final class MalformedOutputDetector implements BuiltInDetector {
         return "";
     }
 
-    private @Nullable JsonSchema compile(String schemaJson) {
+    private @Nullable Schema compile(String schemaJson) {
         try {
-            JsonSchema schema = schemaFactory.getSchema(schemaJson);
-            // $ref resolution is lazy in networknt: force it here so an unresolvable (or disallowed
-            // remote) ref fails at compile — cached as none-declared — instead of throwing out of
+            Schema schema = schemaRegistry.getSchema(schemaJson);
+            // $ref resolution is lazy in networknt: force it here so an unresolvable (or blocked)
+            // ref fails at compile — cached as none-declared — instead of throwing out of
             // validate() once per observation.
-            schema.preloadJsonSchema();
+            schema.initializeValidators();
             return schema;
         } catch (RuntimeException e) {
             return null;
@@ -255,10 +258,6 @@ public final class MalformedOutputDetector implements BuiltInDetector {
             n.put("keyword", v.keyword());
             n.put("message", v.message());
         }
-        try {
-            return mapper.writeValueAsString(root);
-        } catch (JsonProcessingException e) {
-            return "{\"reason\":\"schema_violation\"}";
-        }
+        return root.toString();
     }
 }

@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * High-level tenancy operations: ensure-user-on-login, ensure-org, create-project,
  * resolve-by-slug, plus the organization/project lifecycle (rename, archive, default-project
- * guarantee, transfer-ownership, delete). Stays thin: controllers compose at the boundary,
+ * guarantee, delete). Stays thin: controllers compose at the boundary,
  * this class owns the "what does it mean to be a tenant" semantics.
  */
 @Service
@@ -128,6 +128,7 @@ public class TenantService {
             String slug = uniqueSlug(workosOrgId.toLowerCase(Locale.ROOT).replace("org_", "org-"));
             Organization fresh = newOrg(Ids.ulid(), workosOrgId, slug, slug);
             orgs.insert(fresh);
+            events.publishEvent(new OrganizationCreatedEvent(fresh.id()));
             ensureMembership(fresh.id(), user.id(), OrgMembership.MEMBER);
             return fresh;
         }
@@ -139,6 +140,7 @@ public class TenantService {
         String slug = uniqueSlug(Ids.slugify(personalName));
         Organization personal = newOrg(Ids.ulid(), null, slug, personalName);
         orgs.insert(personal);
+        events.publishEvent(new OrganizationCreatedEvent(personal.id()));
         ensureMembership(personal.id(), user.id(), OrgMembership.OWNER);
         return personal;
     }
@@ -168,6 +170,7 @@ public class TenantService {
                     HttpStatus.TOO_MANY_REQUESTS, "org creation limit reached (" + maxOwnedOrgs + ")");
         }
         orgs.insert(org);
+        events.publishEvent(new OrganizationCreatedEvent(org.id()));
         ensureMembership(org.id(), ownerUserId, OrgMembership.OWNER);
         createProject(org.id(), "Default", null, true);
         return org;
@@ -242,36 +245,6 @@ public class TenantService {
         }
     }
 
-    /**
-     * Transfers ownership of an organization to one of its members, atomically: promotes the
-     * recipient to owner (bounded by their owned-org cap) and steps the transferrer down to
-     * member, in one transaction. {@link OrganizationRepository#lockOrgCreationFor} keys on the
-     * recipient, whose count is being bounded, so the cap check is exact even under concurrent
-     * transfers, and the same lock serializes against concurrent creates by that user.
-     *
-     * <p>404 if the recipient is not a member, 429 at the cap, no-op if already owner, no
-     * demotion when transferring to oneself. The "never orphan an organization" invariant
-     * (&gt;= 1 owner) holds at every step.
-     */
-    @Transactional
-    public void transferOwnership(String orgId, String fromUserId, String toUserId, int maxOwnedOrgs) {
-        orgs.lockOrgCreationFor(toUserId);
-        OrgMembership recipient = memberships
-                .find(orgId, toUserId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "recipient is not a member of this organization"));
-        if (orgs.countOwnedBy(toUserId) >= maxOwnedOrgs) {
-            throw new ResponseStatusException(
-                    HttpStatus.TOO_MANY_REQUESTS, "recipient already owns the maximum number of organizations");
-        }
-        if (!OrgMembership.OWNER.equals(recipient.role())) {
-            memberships.updateRole(orgId, toUserId, OrgMembership.OWNER);
-        }
-        if (!toUserId.equals(fromUserId)) {
-            memberships.updateRole(orgId, fromUserId, OrgMembership.MEMBER);
-        }
-    }
-
     private void ensureMembership(String orgId, String userId, String role) {
         memberships.insert(OrgMembership.of(orgId, userId, role, Instant.now().toString()));
     }
@@ -333,8 +306,7 @@ public class TenantService {
     }
 
     /**
-     * Runs {@code action} once this transaction has finished, whichever way it finished, or
-     * immediately when there is no transaction to wait for.
+     * Runs {@code action} once this transaction has finished, whichever way it finished.
      *
      * <p>Uses {@code afterCompletion}, not {@code afterCommit}: Spring skips {@code afterCommit}
      * when {@code doCommit} throws but the database had in fact committed. For a cache eviction
@@ -345,10 +317,6 @@ public class TenantService {
      * evicting, which costs one bcrypt on the next request and nothing else.
      */
     private static void afterCompletion(Runnable action) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action.run();
-            return;
-        }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {

@@ -5,14 +5,13 @@ import ai.tessary.config.RetentionProperties;
 import ai.tessary.ops.RetentionPolicyRepository;
 import ai.tessary.ops.RetentionPolicyRow;
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
 /**
  * What a project's retention actually is: the platform default for each data class, overridden by any
- * {@code retention_policy} row the project has.
+ * {@code retention_policy} row the project has, unless {@link FixedRetention} fixes it for the project.
  *
  * <p>One resolver rather than a lookup in each caller, because the sweep and the customer-facing answer have
  * to be the same number. A data-handling page that states 90 days while the sweeper runs on 30 is worse than
@@ -53,10 +52,12 @@ public class RetentionResolver {
 
     private final RetentionPolicyRepository policies;
     private final RetentionProperties props;
+    private final FixedRetention fixed;
 
-    public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props) {
+    public RetentionResolver(RetentionPolicyRepository policies, RetentionProperties props, FixedRetention fixed) {
         this.policies = policies;
         this.props = props;
+        this.fixed = fixed;
     }
 
     /** Every data class's effective retention for one project, in declaration order. */
@@ -67,18 +68,21 @@ public class RetentionResolver {
         }
         List<EffectiveRetention> out = new ArrayList<>(DataClass.values().length);
         for (DataClass dataClass : DataClass.values()) {
+            int fixedDays = fixedTtlDays(projectId, dataClass);
             Integer override = overrides.get(dataClass.wire());
-            out.add(new EffectiveRetention(
-                    dataClass, override != null ? override : platformDefault(dataClass), override != null));
+            if (fixedDays > 0) {
+                out.add(new EffectiveRetention(dataClass, fixedDays, false));
+            } else {
+                out.add(new EffectiveRetention(
+                        dataClass, override != null ? override : platformDefault(dataClass), override != null));
+            }
         }
         return out;
     }
 
-    /** The same answer keyed for a caller that wants one class. */
-    public Map<DataClass, EffectiveRetention> resolveByDataClass(String projectId) {
-        Map<DataClass, EffectiveRetention> out = new EnumMap<>(DataClass.class);
-        for (EffectiveRetention e : resolve(projectId)) out.put(e.dataClass(), e);
-        return out;
+    /** The fixed retention for one class, or {@code 0} when this project's own settings apply. */
+    public int fixedTtlDays(String projectId, DataClass dataClass) {
+        return Math.max(0, fixed.fixedTtlDays(projectId, dataClass));
     }
 
     public int platformDefault(DataClass dataClass) {

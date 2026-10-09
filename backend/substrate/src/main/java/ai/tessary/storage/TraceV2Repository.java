@@ -13,11 +13,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JdbcClient repository for the trace table and the rollup protocol that maintains it
@@ -30,10 +32,12 @@ import org.springframework.stereotype.Repository;
  * <h2>The three write shapes, and why they are three</h2>
  *
  * <ul>
- *   <li>{@link #getOrCreate}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
+ *   <li>{@link #getOrCreateAll}: identity only, {@code ON CONFLICT DO NOTHING}. Makes {@code fk_span_trace}
  *       satisfiable regardless of arrival order (§6.1) and writes no timing or rollup column.
- *   <li>{@link #applyBatchTimers}: the only in-place update on this row, and it is {@code min}/{@code
- *       max} plus a monotonically-earlier deadline. Idempotent under replay by construction (§7.1).
+ *   <li>{@link #applyBatchTimers} and {@link #fillCorrelation}: the in-place updates on this row, under one
+ *       lock. The first is {@code min}/{@code max} plus a monotonically-earlier deadline (§7.1); the second
+ *       only ever turns a null name, user, session or thread into a value (§6.3). Both are idempotent under
+ *       replay by construction.
  *   <li>{@link #claimDue} + {@link #recompute}: the worker. Every sum and count is a replacement read
  *       from the trace's spans, never a delta (§7.2). A running sum has no repair path: one double-add is
  *       permanent and undetectable, whereas a full recompute self-heals after any bug.
@@ -56,9 +60,12 @@ public class TraceV2Repository {
 
     private final NamedParameterJdbcTemplate named;
 
-    public TraceV2Repository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    private final TraceFilters filters;
+
+    public TraceV2Repository(JdbcClient jdbc, NamedParameterJdbcTemplate named, TraceFilters filters) {
         this.jdbc = jdbc;
         this.named = named;
+        this.filters = filters;
     }
 
     private static final String GET_OR_CREATE_SQL = """
@@ -88,22 +95,13 @@ public class TraceV2Repository {
     }
 
     /**
-     * One JDBC batch of {@link #getOrCreate} inserts, in the order given (the caller sorts, see SpanBatchWriter).
+     * Get-or-create traces, identity fields only (§6.1 step 2), as one JDBC batch in the order given (the
+     * caller sorts, see SpanBatchWriter).
      */
     public void getOrCreateAll(List<TraceV2Row> rows) {
-        if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
                 GET_OR_CREATE_SQL, rows.stream().map(TraceV2Repository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
-    }
-
-    /**
-     * Get-or-create a trace, identity fields only (§6.1 step 2).
-     *
-     * @return true when this call created the row.
-     */
-    public boolean getOrCreate(TraceV2Row row) {
-        return jdbc.sql(GET_OR_CREATE_SQL).paramSource(params(row)).update() > 0;
     }
 
     /**
@@ -140,9 +138,6 @@ public class TraceV2Repository {
      * @return the number of trace rows updated.
      */
     public int applyBatchTimers(String projectId, Collection<TimerUpdate> updates) {
-        if (updates.isEmpty()) {
-            return 0;
-        }
         List<TimerUpdate> sorted = updates.stream()
                 .sorted(Comparator.comparing(TimerUpdate::traceId))
                 .toList();
@@ -192,68 +187,86 @@ public class TraceV2Repository {
     }
 
     /**
-     * Give a trace copied by a backfill the three things {@link #getOrCreate} deliberately does not
-     * write: its end time, whether it has a root span, and a rollup deadline.
+     * The handles one batch saw for a trace, any of which may be absent.
      *
-     * <p>Not {@link #applyBatchTimers}: that statement arms every trace it touches within ten
-     * seconds, catastrophic for a backfill, where a million historical traces would all come due at
-     * once. The caller passes a staggered deadline instead (row number times an interval), so the
-     * recompute flood is spread over hours.
-     *
-     * <p>{@code coveredThrough} is what makes the stagger safe. The backfill copies traces in one
-     * phase and their spans in a later one, so a deadline armed with the trace alone would fire
-     * against however many of its spans happen to have landed by then, sometimes none, recomputing to
-     * {@code span_count = 0} and settling permanently before the spans ever arrive. So the span phase
-     * calls this again with the newest {@code event_ts} it just wrote, and a deadline is re-offered
-     * whenever the last rollup did not already cover that instant. A trace that has never rolled up is
-     * stale by definition, which is what the trace phase's null {@code coveredThrough} asks about.
-     *
-     * <p>Idempotent, which the whole job depends on: {@code ended_at} folds through {@code GREATEST},
-     * {@code has_root_span} through {@code OR}, and the deadline is re-offered only to a trace whose
-     * rollup genuinely predates its spans, so a second run over a settled, fully-rolled-up trace
-     * changes nothing and does not drag it back into the queue.
-     *
-     * <p>{@code is_settled} is cleared only when the deadline is, exactly as {@link #applyBatchTimers}
-     * treats a span arriving into a quiet trace; a trace this call leaves alone keeps whatever ingest
-     * last said about it.
-     *
-     * @param coveredThrough the newest span {@code event_ts} this caller has written for the trace, or null
-     *     in the trace phase, where no span has been copied yet and the only staleness that can be asserted
-     *     is "has never rolled up".
-     * @return the number of trace rows updated.
+     * @param name the batch's root span name; a child span never names its trace.
      */
-    public int armBackfilled(
-            String projectId,
+    public record CorrelationFill(
             String traceId,
-            @Nullable String endedAt,
-            boolean hasRootSpan,
-            @Nullable String coveredThrough,
-            String rollupDueAt) {
-        return jdbc.sql("UPDATE trace t SET"
-                        + " ended_at      = GREATEST(t.ended_at, :endedAt::timestamptz),"
-                        + " has_root_span = t.has_root_span OR :hasRoot,"
-                        + " rollup_due_at = CASE WHEN " + ROLLUP_STALE
-                        + "                      THEN COALESCE(t.rollup_due_at, :dueAt::timestamptz)"
-                        + "                      ELSE t.rollup_due_at END,"
-                        + " is_settled    = CASE WHEN " + ROLLUP_STALE + " THEN false ELSE t.is_settled END"
-                        + " WHERE t.project_id = :pid AND t.id = :tid")
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("endedAt", endedAt)
-                .param("hasRoot", hasRootSpan)
-                .param("through", coveredThrough)
-                .param("dueAt", rollupDueAt)
-                .update();
-    }
+            @Nullable String name,
+            @Nullable String userId,
+            @Nullable String sessionId,
+            @Nullable String threadId) {}
 
     /**
-     * "This trace's rollup does not yet account for what the backfill has written." Never rolled up at all,
-     * or rolled up through an instant older than the newest span the caller just copied into it.
+     * Fill a trace's {@code name}, {@code user_id}, {@code session_id} and {@code thread_id} where they are
+     * still null (§6.3).
+     *
+     * <p>The get-or-create insert takes them from whichever batch arrives first, and a batch exporter ships
+     * the root last (§6.4). A producer that sets them on the root alone would otherwise leave the trace
+     * unnamed and anonymous for good. A value already set is never replaced, so a trace cannot move between
+     * sessions and a replay changes nothing.
+     *
+     * <p>Run after {@link #applyBatchTimers} in the same transaction, which already holds these rows
+     * {@code FOR UPDATE}, so this takes no lock that statement did not.
+     *
+     * @return the ids of the traces whose session this call filled, usually none.
      */
-    private static final String ROLLUP_STALE = """
-            (t.rolled_up_at IS NULL
-             OR (:through::timestamptz IS NOT NULL
-                 AND (t.rolled_up_through IS NULL OR t.rolled_up_through < :through::timestamptz)))""";
+    public List<String> fillCorrelation(String projectId, Collection<CorrelationFill> fills) {
+        List<CorrelationFill> sorted = fills.stream()
+                .filter(f -> f.name() != null || f.userId() != null || f.sessionId() != null || f.threadId() != null)
+                .sorted(Comparator.comparing(CorrelationFill::traceId))
+                .toList();
+        if (sorted.isEmpty()) return List.of();
+
+        StringBuilder values = new StringBuilder();
+        for (int i = 0; i < sorted.size(); i++) {
+            values.append(i == 0 ? "" : ", ")
+                    .append("(:tid")
+                    .append(i)
+                    .append(", :nm")
+                    .append(i)
+                    .append("::text, :uid")
+                    .append(i)
+                    .append("::text, :sid")
+                    .append(i)
+                    .append("::text, :thr")
+                    .append(i)
+                    .append("::text)");
+        }
+        // `o` is the same row read before this statement writes it, so RETURNING can tell a session filled
+        // here from one the trace already had.
+        var spec = jdbc.sql("""
+                        UPDATE trace t SET
+                            name       = COALESCE(t.name, v.name),
+                            user_id    = COALESCE(t.user_id, v.user_id),
+                            session_id = COALESCE(t.session_id, v.session_id),
+                            thread_id  = COALESCE(t.thread_id, v.thread_id)
+                        FROM (VALUES """ + values + """
+                        ) AS v (trace_id, name, user_id, session_id, thread_id)
+                        JOIN trace o ON o.project_id = :pid AND o.id = v.trace_id
+                        WHERE t.project_id = :pid AND t.id = v.trace_id
+                          AND ((t.name IS NULL AND v.name IS NOT NULL)
+                               OR (t.user_id IS NULL AND v.user_id IS NOT NULL)
+                               OR (t.session_id IS NULL AND v.session_id IS NOT NULL)
+                               OR (t.thread_id IS NULL AND v.thread_id IS NOT NULL))
+                        RETURNING t.id, (o.session_id IS NULL AND v.session_id IS NOT NULL) AS session_filled
+                        """).param("pid", projectId);
+        for (int i = 0; i < sorted.size(); i++) {
+            CorrelationFill f = sorted.get(i);
+            spec = spec.param("tid" + i, f.traceId())
+                    .param("nm" + i, f.name())
+                    .param("uid" + i, f.userId())
+                    .param("sid" + i, f.sessionId())
+                    .param("thr" + i, f.threadId());
+        }
+        return spec.query((rs, n) -> new Filled(rs.getString("id"), rs.getBoolean("session_filled"))).list().stream()
+                .filter(Filled::sessionFilled)
+                .map(Filled::traceId)
+                .toList();
+    }
+
+    private record Filled(String traceId, boolean sessionFilled) {}
 
     /** A claimed trace: the key the recompute runs against. */
     public record Claim(String projectId, String traceId) {}
@@ -325,11 +338,15 @@ public class TraceV2Repository {
      * {@code input_tokens = 0} and {@code output_tokens = 0}, and zero is not null, so counting those
      * would trip the marker on traces that represent no spend and withhold them from cost-drift scoring.
      *
-     * <p>The previews and the call site are copied down from the root span, not stored by ingest: that
+     * <p>The previews and the call site are copied down from the spans, not stored by ingest: that
      * is what keeps the traces list a single-table read (spec rule 1) rather than a join to find each
-     * row's entry point. They are a replacement like everything else here, gated on {@code has_root_span}
-     * so a trace whose root has not landed yet keeps whatever it had rather than being blanked by a
-     * rollup that fired between a child and its parent.
+     * row's entry point. The previews are the root's. The call site is the root's when the root carries
+     * one, else the earliest-starting tagged span's: instrumentation tags the span around the model call,
+     * not the handler that encloses it, so an untagged root is the normal case, not a gap. When a turn
+     * reaches several call sites, the first one it reached is the turn's, and each span keeps its own.
+     * They are a replacement like everything else here, gated on {@code has_root_span} so a trace whose
+     * root has not landed yet keeps whatever it had rather than being blanked, or attributed from a
+     * partial set of children, by a rollup that fired between a child and its parent.
      *
      * @return the outcome, or empty if the trace was deleted under the worker.
      */
@@ -363,6 +380,15 @@ public class TraceV2Repository {
                                AND NOT is_deleted
                              ORDER BY started_at, id
                              LIMIT 1
+                        ), tagged AS (
+                            SELECT call_site_id
+                              FROM span
+                             WHERE project_id   = :pid
+                               AND trace_id     = :tid
+                               AND call_site_id IS NOT NULL
+                               AND NOT is_deleted
+                             ORDER BY started_at, id
+                             LIMIT 1
                         )
                         UPDATE trace t
                            SET span_count         = agg.span_count,
@@ -381,12 +407,13 @@ public class TraceV2Repository {
                                                          ELSE t.input_preview END,
                                output_preview     = CASE WHEN t.has_root_span THEN root.output_preview
                                                          ELSE t.output_preview END,
-                               call_site_id       = CASE WHEN t.has_root_span THEN root.call_site_id
+                               call_site_id       = CASE WHEN t.has_root_span
+                                                         THEN COALESCE(root.call_site_id, tagged.call_site_id)
                                                          ELSE t.call_site_id END,
                                rolled_up_at       = now(),
                                rolled_up_through  = agg.through,
                                is_settled         = (t.rollup_due_at IS NULL)
-                          FROM agg LEFT JOIN root ON true
+                          FROM agg LEFT JOIN root ON true LEFT JOIN tagged ON true
                          WHERE t.project_id = :pid AND t.id = :tid
                         RETURNING t.is_settled, t.span_count
                         """)
@@ -457,17 +484,13 @@ public class TraceV2Repository {
      * histogram would bury the tail the instrumentation exists to expose.
      */
     public Map<String, String> rolledUpThrough(String projectId, Collection<String> traceIds) {
-        if (traceIds.isEmpty()) {
-            return Map.of();
-        }
         Map<String, String> out = new HashMap<>();
         jdbc.sql("SELECT id, rolled_up_through FROM trace"
                         + " WHERE project_id = :pid AND id IN (:ids) AND rolled_up_through IS NOT NULL")
                 .param("pid", projectId)
                 .param("ids", List.copyOf(traceIds))
                 .query((rs, n) -> {
-                    String through = Timestamps.iso(rs, "rolled_up_through");
-                    if (through != null) out.put(rs.getString("id"), through);
+                    out.put(rs.getString("id"), Timestamps.iso(rs, "rolled_up_through"));
                     return rs.getString("id");
                 })
                 .list();
@@ -484,23 +507,25 @@ public class TraceV2Repository {
      * becomes {@code EXISTS (SELECT 1 FROM span …)}, keep this trace when any of its spans matches,
      * which is a filter the planner can satisfy from an index and stop at the first hit.
      *
-     * <p>{@code status} reads the rollup: {@code error} means {@code error_count > 0}, {@code ok} means it
-     * is zero. A trace that has never rolled up has a null {@code error_count} and is therefore neither;
-     * it is excluded by an explicit status filter rather than silently counted as healthy.
+     * <p>{@code hasCallSite} is the same semi-join over any call site: {@code true} keeps a trace when some span
+     * carries one, {@code false} keeps it when none does. So the {@code true} set is every {@code callSite} set
+     * together, and a trace tagged only below its root still counts.
+     *
+     * <p>{@code detectedBy} keeps a trace a classifier flagged: a classifier id, or {@code any}
+     * ({@link TraceDetectionRepository}). {@link TraceFilters} writes the SQL for every field.
      */
     public record TraceQuery(
             @Nullable String model,
             @Nullable String kind,
             @Nullable String callSite,
+            @Nullable Boolean hasCallSite,
             @Nullable String from,
             @Nullable String to,
             @Nullable String status,
-            @Nullable String q) {
+            @Nullable String q,
+            @Nullable String detectedBy) {
 
-        /** The unfiltered query, every field absent. */
-        public static TraceQuery none() {
-            return new TraceQuery(null, null, null, null, null, null, null);
-        }
+        public static final TraceQuery NONE = new TraceQuery(null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -539,9 +564,8 @@ public class TraceV2Repository {
             @Nullable String inputPreview,
             @Nullable String outputPreview) {}
 
-    /** Sort keys the list accepts. Anything else falls back to {@link #WHEN}. */
+    /** Sort keys the list accepts. Anything else falls back to the default start-time ordering. */
     public static final class Sort {
-        public static final String WHEN = "when";
         public static final String TOKENS = "tokens";
         public static final String COST = "cost";
         public static final String LATENCY = "latency";
@@ -587,6 +611,7 @@ public class TraceV2Repository {
      * @param beforeSort the previous page's last row's sort value, or null when that row had none (or when
      *     the sort has no column). Only meaningful together with {@code beforeStartedAt}/{@code beforeId}.
      */
+    @Transactional(readOnly = true)
     public List<Summary> list(
             String projectId,
             TraceQuery query,
@@ -627,108 +652,26 @@ public class TraceV2Repository {
             params.put("beforeId", beforeId);
         }
 
-        addEq(where, params, " AND t.started_at >= :fromTs::timestamptz", "fromTs", query.from());
-        addEq(where, params, " AND t.started_at <= :toTs::timestamptz", "toTs", query.to());
+        try {
+            filters.append(projectId, where, params, query);
 
-        addExists(where, params, "provided_model_name", "model", query.model());
-        addExists(where, params, "kind", "kind", query.kind());
-        addExists(where, params, "call_site_id", "callSite", query.callSite());
+            String orderBy = sortCol == null
+                    ? " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit"
+                    : " ORDER BY " + sortCol + " DESC NULLS LAST, t.started_at DESC, t.id DESC LIMIT :limit";
 
-        String status = query.status();
-        if (status != null && !status.isBlank()) {
-            // A trace with a NULL error_count has not rolled up and therefore has no answer to this
-            // question; it is excluded rather than counted as healthy.
-            where.append(" AND t.error_count IS NOT NULL AND t.error_count ")
-                    .append("error".equalsIgnoreCase(status) ? "> 0" : "= 0");
+            String sql = "SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
+                    + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens, t.output_tokens,"
+                    + " t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens, t.total_tokens,"
+                    + " t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans, t.is_settled,"
+                    + " t.input_preview, t.output_preview"
+                    + " FROM trace t "
+                    + where
+                    + orderBy;
+
+            return jdbc.sql(sql).params(params).query((rs, n) -> summary(rs)).list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
         }
-
-        String q = query.q();
-        if (q != null && !q.isBlank()) {
-            where.append(" AND (t.name ILIKE :q OR t.session_id ILIKE :q OR t.thread_id ILIKE :q"
-                    + " OR t.user_id ILIKE :q OR t.id ILIKE :q)");
-            params.put("q", "%" + q + "%");
-        }
-
-        String orderBy = sortCol == null
-                ? " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit"
-                : " ORDER BY " + sortCol + " DESC NULLS LAST, t.started_at DESC, t.id DESC LIMIT :limit";
-
-        String sql = "SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
-                + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens, t.output_tokens,"
-                + " t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens, t.total_tokens,"
-                + " t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans, t.is_settled,"
-                + " t.input_preview, t.output_preview"
-                + " FROM trace t "
-                + where
-                + orderBy;
-
-        return jdbc.sql(sql).params(params).query((rs, n) -> summary(rs)).list();
-    }
-
-    /**
-     * The ids of the traces matching a filter, newest first, and nothing else: no counts, no sums, no
-     * previews. The dataset-snapshot materializer is the caller, and a snapshot only ever used the id.
-     *
-     * <p>Filter semantics are exactly {@link #list}'s, so a snapshot contains what the Explore page shows
-     * for the same filter.
-     */
-    public List<String> listIdsMatching(String projectId, TraceQuery query, int limit) {
-        var params = new HashMap<String, Object>();
-        params.put("pid", projectId);
-        params.put("limit", limit);
-
-        var where = new StringBuilder("WHERE t.project_id = :pid AND NOT t.is_deleted");
-        addEq(where, params, " AND t.started_at >= :fromTs::timestamptz", "fromTs", query.from());
-        addEq(where, params, " AND t.started_at <= :toTs::timestamptz", "toTs", query.to());
-
-        addExists(where, params, "provided_model_name", "model", query.model());
-        addExists(where, params, "kind", "kind", query.kind());
-        addExists(where, params, "call_site_id", "callSite", query.callSite());
-
-        String status = query.status();
-        if (status != null && !status.isBlank()) {
-            where.append(" AND t.error_count IS NOT NULL AND t.error_count ")
-                    .append("error".equalsIgnoreCase(status) ? "> 0" : "= 0");
-        }
-
-        String q = query.q();
-        if (q != null && !q.isBlank()) {
-            where.append(" AND (t.name ILIKE :q OR t.session_id ILIKE :q OR t.thread_id ILIKE :q"
-                    + " OR t.user_id ILIKE :q OR t.id ILIKE :q)");
-            params.put("q", "%" + q + "%");
-        }
-
-        return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit")
-                .params(params)
-                .query(String.class)
-                .list();
-    }
-
-    /**
-     * {@code EXISTS (SELECT 1 FROM span …)} on one span column, a filter, never an aggregation.
-     *
-     * <p>The correlated predicate carries {@code project_id} as well as {@code trace_id} because the span
-     * primary key leads with the project: without it the subquery would scan by trace id alone, which is
-     * both slower and one typo away from crossing a project boundary.
-     */
-    private static void addExists(
-            StringBuilder where, Map<String, Object> params, String column, String name, @Nullable String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        where.append(" AND EXISTS (SELECT 1 FROM span sx WHERE sx.project_id = t.project_id"
-                + " AND sx.trace_id = t.id AND NOT sx.is_deleted AND sx." + column + " = :" + name + ")");
-        params.put(name, value);
-    }
-
-    /** Append a clause and bind its parameter, but only when {@code value} is present. */
-    private static void addEq(
-            StringBuilder clause, Map<String, Object> params, String fragment, String name, @Nullable String value) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        clause.append(fragment);
-        params.put(name, value);
     }
 
     /**
@@ -766,6 +709,49 @@ public class TraceV2Repository {
                         + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
                 .param("pid", projectId)
                 .param("sid", sessionId)
+                .param("limit", limit)
+                .query((rs, n) -> summary(rs))
+                .list();
+    }
+
+    /**
+     * The ids of a session's traces that pass {@code filter}, oldest first: the traces of an expanded session row
+     * the traces list would show. Served by {@code ix_trace_session}.
+     */
+    @Transactional(readOnly = true)
+    public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
+        var params = new HashMap<String, Object>();
+        params.put("pid", projectId);
+        params.put("sid", sessionId);
+        params.put("limit", limit);
+        var where = new StringBuilder("WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted");
+        try {
+            filters.append(projectId, where, params, filter);
+            return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                    .params(params)
+                    .query(String.class)
+                    .list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
+        }
+    }
+
+    /**
+     * A conversation's turns, oldest first. A conversation is a session and a turn is a top-level trace: the key
+     * and grain the frustration classifier scores at. Served by {@code ix_trace_session}.
+     */
+    public List<Summary> listByConversation(String projectId, String conversationId, int limit) {
+        return jdbc.sql("SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
+                        + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens,"
+                        + " t.output_tokens, t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens,"
+                        + " t.total_tokens, t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans,"
+                        + " t.is_settled, t.input_preview, t.output_preview"
+                        + " FROM trace t"
+                        + " WHERE t.project_id = :pid AND t.session_id = :cid"
+                        + " AND t.parent_trace_id IS NULL AND NOT t.is_deleted"
+                        + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                .param("pid", projectId)
+                .param("cid", conversationId)
                 .param("limit", limit)
                 .query((rs, n) -> summary(rs))
                 .list();
@@ -840,14 +826,11 @@ public class TraceV2Repository {
      * {@code ix_trace_session}, not a scan over spans, because the sessions being summed are already the
      * page a recency-ordered list chose, never a sort key themselves (§7.5).
      *
-     * <p>Sessions with no traces yet (a session row can exist via {@code getOrCreate} before its first trace
+     * <p>Sessions with no traces yet (a session row can exist via {@code getOrCreateAll} before its first trace
      * lands) are simply absent from the GROUP BY result; the caller fills in a zeroed row rather than this
      * method returning one, so the SQL stays a plain GROUP BY with no LEFT JOIN against the id list.
      */
     public Map<String, SessionTotalsRow> sessionTotalsForIds(String projectId, Collection<String> sessionIds) {
-        if (sessionIds.isEmpty()) {
-            return Map.of();
-        }
         Map<String, SessionTotalsRow> out = new HashMap<>();
         jdbc.sql("""
                         SELECT session_id,
@@ -902,9 +885,6 @@ public class TraceV2Repository {
      * highest {@code n} per session (ties broken by {@code lastSeenAt}) to name the session's dominant agent.
      */
     public List<CallSiteCount> callSiteFrequencyForIds(String projectId, Collection<String> sessionIds) {
-        if (sessionIds.isEmpty()) {
-            return List.of();
-        }
         return jdbc.sql("""
                         SELECT session_id, call_site_id, count(*) AS n, max(started_at) AS last_seen_at
                           FROM trace
@@ -932,9 +912,6 @@ public class TraceV2Repository {
      * index-ordered skip, not a sort of every row.
      */
     public Map<String, String> firstInputPreviewForIds(String projectId, Collection<String> sessionIds) {
-        if (sessionIds.isEmpty()) {
-            return Map.of();
-        }
         Map<String, String> out = new HashMap<>();
         jdbc.sql("""
                         SELECT DISTINCT ON (session_id) session_id, input_preview
@@ -951,9 +928,6 @@ public class TraceV2Repository {
 
     /** The most recent trace's output preview per session, see {@link #firstInputPreviewForIds}. */
     public Map<String, String> lastOutputPreviewForIds(String projectId, Collection<String> sessionIds) {
-        if (sessionIds.isEmpty()) {
-            return Map.of();
-        }
         Map<String, String> out = new HashMap<>();
         jdbc.sql("""
                         SELECT DISTINCT ON (session_id) session_id, output_preview
@@ -1002,16 +976,6 @@ public class TraceV2Repository {
                 .param("id", id)
                 .query((rs, n) -> map(rs))
                 .optional();
-    }
-
-    /** A project's traces, newest first: the list surface's read, served by {@code ix_trace_project_started}. */
-    public List<TraceV2Row> listByProject(String projectId, int limit) {
-        return jdbc.sql("SELECT " + COLS + " FROM trace WHERE project_id = :pid AND NOT is_deleted"
-                        + " ORDER BY started_at DESC, id DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     private static TraceV2Row map(ResultSet rs) throws SQLException {

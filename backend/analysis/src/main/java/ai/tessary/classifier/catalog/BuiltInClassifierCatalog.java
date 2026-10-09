@@ -8,12 +8,11 @@ import ai.tessary.classifier.catalog.ClassifierModelModule.Deps;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import ai.tessary.classifier.detector.Detection;
 import ai.tessary.classifier.detector.DeterministicNlPhraseCompiler;
-import ai.tessary.classifier.detector.EncoderDetector;
 import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.detector.SecretLeakDetector;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetector;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,22 +31,22 @@ import org.springframework.stereotype.Component;
  * detector-dispatch map from {@link #MODULES}, so adding or changing a classifier is a single
  * declaration here, not edits scattered across the catalog, the detector list, and seeding.
  *
- * <p>Nine built-ins ship in three tiers. The <b>deterministic</b> tier costs nothing per observation
+ * <p>Seven built-ins ship in four tiers. The <b>deterministic</b> tier costs nothing per observation
  * and calls no model: Secret Leak matches the vendored gitleaks credential corpus ({@link
  * SecretLeakDetector}); Malformed Output validates outputs against the call site's captured schema
- * ({@link MalformedOutputDetector}). The <b>encoder</b> tier scores observation text against a shared
- * ONNX head served by the standalone classify-service {@code /classify}: Frustration ({@link
- * EncoderDetector}) and Groundedness, the one PAIR head, a claim against a premise rather than one
- * string in isolation, and the one detector with a deterministic filter in front of it. Groundedness's
- * detector is not named here by class: it is supplied through the {@link DetectorSupplier} seam
- * rather than built in this file's {@link #MODULES} list, see that module's {@code detectorFactory}
- * comment below. The <b>fitting</b> tier holds five modules that ship as per-project procedures
- * rather than models, and so carry no {@link BuiltInDetector} at all: trace-grain Behaviour Drift
- * ({@code BehaviorDriftDetector}), the two window-grain metric classifiers (Duration Drift and Cost
- * Drift), Tool Errors, and SOP Conformance, scored against an authored rulebook plus a fitted
- * per-project reference bundle. All ship project-local state rather than a model, because "atypical
- * for this agent", "slow for this call site", "expensive for this call site" and "compliant with this
- * SOP" are definitionally project-relative and none has a transferable model to ship.
+ * ({@link MalformedOutputDetector}). The <b>encoder</b> tier is Groundedness, a TOKEN head that reads
+ * the retrieved passages and the whole answer in one pass ({@link GroundednessDetector}), scored by
+ * the groundedness model server's {@code /classify} with a deterministic filter in front of it. The
+ * <b>decision</b> tier is Frustration: each eligible user turn is one question to a hosted decision
+ * model on the org's own key, and a call site's rate of frustrated conversations is watched with Tool
+ * Error's sequential test. Its detector is not named here by class: it is supplied through the {@link
+ * DetectorSupplier} seam rather than built in this file's {@link #MODULES} list, see that module's
+ * {@code detectorFactory} comment below. The <b>fitting</b> tier holds three modules that ship as
+ * per-project procedures rather than models, and so carry no {@link BuiltInDetector} at all: the two
+ * window-grain metric classifiers (Duration Drift and Cost Drift) and Tool Errors. All ship
+ * project-local state rather than a model, because "slow for this call site", "expensive for this call
+ * site" and "failing more than usual" are definitionally project-relative and none has a transferable
+ * model to ship.
  *
  * <p>Duration and cost are <b>two switches rather than one or seven</b>. A classifier is one decision
  * a human makes: "do I want to hear about latency here" is a different decision from "do I want to
@@ -55,15 +54,15 @@ import org.springframework.stereotype.Component;
  * its {@code defaultConfigJson} rather than as modules of their own. That is what lets one switch span
  * two candidate grains, which a single catalog {@link Grain} cannot express.
  *
- * <p>What every tier has in common is the L1 cost model: <b>no built-in makes a per-observation API
+ * <p>What every tier has in common is the L1 cost model: <b>no built-in makes a per-observation LLM
  * call.</b> A detector that needs one belongs behind Layer-2 triage, on the findings that already
  * fired, not in front of the whole stream.
  *
  * <p>A classifier withdrawn from the catalog is disabled on every project that has it, never deleted:
  * {@link ClassifierService#resyncBuiltIns}'s retirement path handles that, so history stays listable.
  *
- * <p>Seeding is per-project and idempotent: a project missing a built-in gets it inserted with
- * {@code enabled=true}; an existing built-in whose catalog {@code version} advanced has its
+ * <p>Seeding is per-project and idempotent: a project missing a built-in gets it inserted with its
+ * module's {@code defaultEnabled}; an existing built-in whose catalog {@code version} advanced has its
  * definition re-synced. User enable/disable state is never clobbered.
  *
  * <p><b>Catalog membership is not availability.</b> Every module here is defined for every org,
@@ -87,8 +86,10 @@ public class BuiltInClassifierCatalog {
      * on. {@code capability} rides along because seeding reads it, to decide whether the classifier
      * reaches the org at all.
      *
-     * <p>Every built-in seeds enabled; trust in an unmeasured classifier is expressed only by who its
-     * capability flag is on for, resolved per org without a deploy, rather than by a second switch here.
+     * <p>Every built-in seeds enabled except two. Frustration seeds disabled because enabling it
+     * spends the org's own provider credit, and Groundedness because it needs a model server a person
+     * sets up first. Trust in an unmeasured classifier is expressed only by who
+     * its capability flag is on for, resolved per org without a deploy, rather than by this switch.
      */
     public record BuiltIn(
             String classifierKey,
@@ -103,7 +104,9 @@ public class BuiltInClassifierCatalog {
              * project: {@code ClassifierService} preserves the tenant's stored mode across a
              * re-seed, so moving an existing estate is a migration, deliberately and once.
              */
-            String defaultMode) {}
+            String defaultMode,
+            /** Whether a freshly seeded row starts enabled; an existing row's switch is never touched. */
+            boolean defaultEnabled) {}
 
     /**
      * The classifier manifests, the single source of truth for the built-in catalog. Each entry
@@ -118,74 +121,51 @@ public class BuiltInClassifierCatalog {
                     // User-facing, and re-synced onto every seeded project by the version bump below, so
                     // it has to track the scorer: a stale description here gets written into production
                     // rows as fact.
-                    "Frustration the AGENT caused. Two heads: cirimus ModernBERT-GoEmotions scores the "
-                            + "last exchange for emotion (calibrated max(annoyance, anger)), and a second "
-                            + "head reads the full thread and judges whether the agent's own conduct caused "
-                            + "it. A turn is HIGH only if BOTH agree; real frustration aimed at the "
-                            + "restaurant, the courier, a promo code or a billing bug is demoted to LOW "
-                            + "rather than dropped, so discovery mode still shows it. A conversation's "
-                            + "opening turn is not scored (nothing the agent did could have caused it). "
-                            + "Behavioral/task-failure frustration is a separate signal.",
+                    "Frustration the agent caused, judged by TypeSafe's Jev decision model on your "
+                            + "OpenRouter or TypeSafe key. Off by default. Scores every call site unless you "
+                            + "limit it to some. Scores a user message only when four text messages on the same call site "
+                            + "precede it, and a session, one conversation on one call site, only until its "
+                            + "first detection. Each call site learns its own normal rate of frustrated "
+                            + "sessions and is watched from its first 100 with the same sequential "
+                            + "test Tool Error uses, still learning its normal until it has seen 1,000; a "
+                            + "case opens when the rate has risen above "
+                            + "that normal. A call site that is bad from day one learns that as normal and "
+                            + "is flagged only if it gets worse.",
                     Kind.FRUSTRATION,
                     // ClassifierService re-syncs a built-in onto an already-seeded project only when the
                     // catalog version exceeds the stored one, so every threshold or config change below
-                    // needs a bump or it reaches fresh installs only. Ship the classify-service scorer
-                    // change before a band change that assumes it: a backend on a tighter band against the
-                    // old scorer under-fires, which is the safe direction, the reverse over-fires.
-                    8,
+                    // needs a bump or it reaches fresh installs only. 9 replaced the encoder config
+                    // wholesale; 10 re-syncs the description for picked call sites; 11 re-syncs it for
+                    // every call site by default. The list lives in classifier.call_site_ids, which a
+                    // re-sync never writes, so a bump does not drop it.
+                    11,
                     Capability.FRUSTRATION,
                     // TURN grain: the subject is what the USER said, and the user says it once. A turn
-                    // lands as several observations (agent span + its llm child carrying the same delta +
-                    // inner planner/summarizer calls), so scoring per observation would draw the head's
-                    // calibrated per-item false-positive rate several times over ONE user message and
-                    // emit several verdicts for it. The sweep scores that turn's root observation only.
+                    // lands as several observations (a wrapper span, a router, the reply, a memory pass,
+                    // tool rounds), so scoring per observation would send one user message several times.
+                    // The sweep scores the first span of each call site in the turn that it runs on.
                     Grain.TURN,
-                    // EMOTION member: cirimus (28-label GoEmotions) emotion proxy, calibrated in classify.js.
-                    // Band 0.66/0.90 is the measured F1 peak against real production traffic
-                    // (annoyance/anger only, with the turn gate below); 0.90 is a genuine confidence tier
-                    // rather than a flat-precision cutoff.
-                    //
-                    // GATE: skip a conversation's opener (context_min_prior_user_turns=1). The agent has
-                    // not acted yet, so any emotion there is what the user arrived with, not something the
-                    // product caused; this costs a few true positives for a real precision gain.
-                    //
-                    // CONTEXT: the last exchange only, assistant prose stubbed to "[reply]". cirimus is a
-                    // pooled single-utterance head with no way to weight the trailing turn, so more context
-                    // dilutes the message being judged; one exchange scores short turns far better than an
-                    // unbounded thread does.
-                    //
-                    // NOTE: this catches EMOTIONAL frustration only; emotion-less task-failure/loops are a
-                    // separate signal, unioned with this at the signal layer.
-                    //
-                    // ATTRIBUTION GATE: a HIGH emotion score is re-scored by the `attribution` head over
-                    // the full thread and demoted to LOW below 0.64. The emotion band alone is
-                    // mis-specified rather than miscalibrated: on a hand-labelled census only a fifth of
-                    // its HIGH fires were frustration the agent actually caused, and no threshold on the
-                    // emotion score alone fixes that.
-                    //
-                    // 0.64, not the head's own 0.81 cutoff, because of a train/serve mismatch: the head
-                    // was trained on a template with a [SEP] separator that the real thread renderer never
-                    // emits, which shifts its scores enough to move the calibrated threshold. Recall is
-                    // deliberately traded for precision here, since this signal over-fires; the knob is
-                    // per-project config, so a project that wants recall can lower or remove it.
-                    "{\"threshold_high\":0.90,\"threshold_low\":0.66,"
-                            + "\"context_user_turns\":1,\"context_stub_assistant\":true,"
-                            + "\"context_min_prior_user_turns\":1,"
-                            + "\"attribution_head\":\"attribution\",\"attribution_threshold\":0.64}",
-                    // INPUT selects the scored user turn; the CONTEXT is the narrowed thread described
-                    // above, so "nevermind" is legible against the assistant reply it reacts to.
-                    d -> new EncoderDetector(
-                            Kind.FRUSTRATION,
-                            "frustration",
-                            ClassifierField.INPUT,
-                            Detection.Severity.WARN,
-                            d.encoderScorer(),
-                            d.mapper(),
-                            d.threadAssembler()),
-                    // TRACKING, not the catalog's discovery default: the high+low union fires too often
-                    // to be a review queue, so every project is seeded at the volume it actually operates
-                    // at rather than gated behind a graduation step nothing ever triggers.
-                    ClassifierRow.Mode.TRACKING),
+                    // Every key here is one FrustrationConfig parses. threshold is the flag cutoff on
+                    // P(unhappy_with_assistant), set on a held-out labelled set; it is hashed into the
+                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
+                    // rate test's dials. arl_target and min_decision_interval are Tool Error's false-alarm
+                    // budget converted from tool calls to conversations, reasoned rather than measured.
+                    // EXPERIMENT(frustration-tuning): threshold, arl_target and min_decision_interval
+                    // are starting values until a null replay on real traffic settles them. Judged from 100
+                    // conversations, the reference learning until 1,000, as Groundedness does in traces.
+                    "{\"threshold\":0.40,\"arl_target\":10000,\"min_decision_interval\":4,"
+                            + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
+                            + "\"min_baseline_conversations\":100,\"freeze_baseline_conversations\":1000}",
+                    // null: the detector is JevFrustrationDetector, a Spring bean supplied through the
+                    // DetectorSupplier seam (FrustrationDetectorSupplier), because it needs the decision
+                    // client, the provider resolver and its own repositories, none of which are Deps.
+                    null,
+                    // TRACKING: the one band Jev writes is HIGH, so both modes read the same rows; tracking
+                    // is kept so a project's stored mode does not change under it.
+                    ClassifierRow.Mode.TRACKING,
+                    // Seeds disabled: enabling it spends the org's own provider credit, so a person turns
+                    // it on, through the enable flow that asks for the key.
+                    false),
             new ClassifierModelModule(
                     "secret_leak",
                     "Secret Leak",
@@ -225,77 +205,51 @@ public class BuiltInClassifierCatalog {
             new ClassifierModelModule(
                     "groundedness",
                     "Groundedness",
-                    "The output CONTRADICTS its source content — a three-way NLI head "
-                            + "(bart-large-mnli) scores each asserted sentence against the source the "
-                            + "trace actually produced: the retrieved documents where there are any, the "
-                            + "prompt where the document sits in the prompt. It fires on contradiction "
-                            + "only. A sentence the source simply does not mention is NOT a finding — "
-                            + "most such sentences are facts the agent got from a tool, and calling them "
-                            + "hallucinations was this classifier's largest error. The cost of that is "
-                            + "stated plainly: an INVENTED addition the source is silent on reads the "
-                            + "same as a true one and is not caught. Gated to call sites whose shape "
-                            + "declares verifiable source content (extract/summarize/rag_answer), quiet "
-                            + "on a turn that asserts nothing checkable, and tool-backed answers remain "
-                            + "out of scope.",
+                    // User-facing, the classifier row's text. How the model reads an answer and how the rate
+                    // test judges a call site is the method card's job (ClassifierMethodCard), and the
+                    // catalog quotes no benchmark numbers.
+                    "Answers that state things the retrieved documents don't support.",
                     Kind.GROUNDEDNESS,
-                    // The premise is the trace's own evidence (retrieved documents, or the prompt where
-                    // the document sits in it), scored per sentence rather than per answer, and an answer
-                    // with no verifiable sentence abstains. Tool results are withdrawn as an evidence
-                    // carrier entirely: a claim sourced from a tool call abstains rather than firing,
-                    // because the head has no reliable way to judge it against a policy document that
-                    // could neither confirm nor deny it. bart-large-mnli is three-way, so it can express
-                    // that abstain (NEUTRAL) where a binary support/not-support head cannot. A version
-                    // bump here rewrites configJson wholesale, so an operator's edited thresholds are
-                    // replaced by the catalog's, which is why the values below are unchanged from v1:
-                    // the decoded `unsupported` score (1 - P(contradiction)) is sharply bimodal, so the
-                    // same 0.9/0.6 band still sits in empty space.
-                    4,
-                    // bart-large-mnli (MIT), three-way MNLI, off-the-shelf but measured against this
-                    // classifier's own labelled data before shipping.
+                    // v5 (2026-09-18): the pair head (bart-large-mnli, contradiction-only, per-sentence
+                    // windows) is replaced by the long-context token head. The contract changed with it,
+                    // from "contradicts" to "unsupported: contradicted OR baseless", because on
+                    // human-labelled data the contradiction-only question was unreachable by any model of
+                    // this size while the unsupported question is where the field's own benchmarks sit.
+                    // Evidence reaches the head as a LIST of documents (GroundingEvidenceReads.Evidence#
+                    // documents), never one joined string: the layout with numbered passages is the one
+                    // the checkpoint was trained on.
+                    // v6 (2026-09-21): the classifier armed by default, three detections in a day.
+                    // v7: arming is replaced by a rate test per call site, and the two bands by one
+                    // threshold. A fixed count arms on the model's false alarms, whose rate depends on the
+                    // domain; a reference learned per call site absorbs it, so only a rise is a finding.
+                    // A version bump rewrites configJson wholesale, which is what drops the arming block
+                    // and the second band from projects seeded before it.
+                    7,
+                    // tessaryai/groundedness-classifier-v1 (MIT; ModernBERT-large, Apache-2.0 base;
+                    // RAGTruth, MIT), measured on RAGTruth's human-labelled test split before shipping;
+                    // numbers in the classifiers README and the model card.
                     Capability.GROUNDEDNESS,
-                    // Per-call: the pair head scores one output against ITS OWN input, so an inner
+                    // Per-call: the head scores one output against ITS OWN input, so an inner
                     // retrieval-answer call is exactly as checkable as the outermost one.
                     Grain.OBSERVATION,
-                    // Unsupportedness (1 - support) bands, see GroundednessDetector's threshold_high/
-                    // threshold_low commentary. Wide separation observed in spot checks (supported
-                    // ~0.95+, unsupported/contradicted ~0.01-0.10); revisit once the eval harness has
-                    // measured this head's actual recall@fixed-fp.
-                    "{\"threshold_high\":0.9,\"threshold_low\":0.6}",
-                    // null, not a factory lambda: the one detectorFactory here that is null for a reason
-                    // other than "not observation/turn grain" (see ClassifierModelModule's
-                    // DetectorFactory javadoc). Groundedness is observation-grain, but its detector is
-                    // supplied externally through the DetectorSupplier seam folded into this class's
-                    // constructor below, rather than closed over here by class reference, so this file
-                    // never has to name that implementation directly. The manifest entry still owns every
-                    // other fact about the classifier, catalog metadata, the operating point, the
-                    // capability and grain, because check-classifier-quality-doc.sh greps this config
-                    // literal by literal path.
-                    null),
-            new ClassifierModelModule(
-                    "behavior_drift",
-                    "Behaviour Drift",
-                    "The agent is doing something it does not usually do — atypical action sequences, "
-                            + "new capabilities appearing, established steps quietly disappearing. Ships as "
-                            + "a fitting procedure, not a model: it learns this project's normal from this "
-                            + "project's own traces, with no labels, and stays silent until the learned "
-                            + "baseline saturates.",
-                    Kind.BEHAVIOR_DRIFT,
-                    1,
-                    // No measured operating point yet: there is no portable gold set for "atypical for
-                    // this agent" and there cannot be one, so the eval is synthetic injection (recall at
-                    // a fixed alert budget, per perturbation operator) and the gate is set from the first
-                    // measured run rather than guessed here.
-                    Capability.BEHAVIOR_DRIFT,
-                    // Trace grain: an action skeleton only exists across a whole trace.
-                    Grain.TRACE,
-                    // The BehaviorDriftConfig policy defaults, stated explicitly so a project can move
-                    // its own operating point without a redeploy.
-                    "{\"alert_budget_per_1k\":3,\"min_support\":30,\"graduation_sessions\":50,"
-                            + "\"graduation_span_days\":3,\"omission_support\":0.9,\"rare_floor\":0.001,"
-                            + "\"max_order\":3,\"arm_min_traces\":300,\"arm_discovery_floor\":2.0,"
-                            + "\"arm_sustained_fits\":2,\"novelty_count_floor\":10,"
-                            + "\"trace_settle_seconds\":300}",
-                    null),
+                    // Every key here is one GroundednessConfig parses. threshold is the flag cutoff on
+                    // P(unsupported), the 2% false-alarm point on RAGTruth test; it is hashed into the
+                    // scorer version, so changing it starts a new set of assessment rows. The rest are the
+                    // rate test's dials, in traces: judged from 100, the reference learning until 1,000,
+                    // and one false finding per 50,000 traces on a healthy call site.
+                    "{\"threshold\":0.975,\"arl_target\":50000,\"min_decision_interval\":4,"
+                            + "\"shift_multiple\":2.0,\"shift_floor\":0.02,"
+                            + "\"min_baseline_traces\":100,\"freeze_baseline_traces\":1000}",
+                    // null: the detector writes its own groundedness_assessment rows, one per scored
+                    // answer, so it arrives through the DetectorSupplier seam with its repository
+                    // (GroundednessDetectorSupplier), as Frustration's does.
+                    null,
+                    // TRACKING: the one band the detector writes is HIGH, so both modes read the same
+                    // rows, as Frustration's.
+                    ClassifierRow.Mode.TRACKING,
+                    // Seeds disabled: it needs a model server a person sets up first, so a person turns
+                    // it on, through the setup flow that checks the model answers.
+                    false),
             new ClassifierModelModule(
                     "duration_drift",
                     "Duration Drift",
@@ -346,9 +300,9 @@ public class BuiltInClassifierCatalog {
                     "{\"measures\":[\"turn_duration\",\"tool_duration\"],\"window_target_count\":500,"
                             + "\"window_max_hours\":24,\"min_sample\":100,\"w1_floor\":0.139,"
                             + "\"explained_by_fraction\":0.5,\"settle_seconds\":300,\"hist_bins\":320}",
-                    // No detector factory, exactly as behaviour drift has none: this is a per-project
-                    // fitting procedure dispatched through the ClassifierSweep registered for this kind on
-                    // ClassifierWorker's Grain.WINDOW branch, not an observation-grain BuiltInDetector.
+                    // No detector factory: this is a per-project fitting procedure dispatched through the
+                    // ClassifierSweep registered for this kind on ClassifierWorker's Grain.WINDOW branch,
+                    // not an observation-grain BuiltInDetector.
                     //
                     // callSiteFactsRead() is deliberately empty, worth saying since there's no object here
                     // to say it on. It exists for detectors gated on a call_site column captured from the
@@ -389,11 +343,9 @@ public class BuiltInClassifierCatalog {
                     // MetricSource and printed inside the cost finding's evidence as the decomposition
                     // that explains it.
                     //
-                    // settle_seconds matters here and not for duration_drift: cost sums over a trace's
-                    // spans, so it has to wait for every span to arrive, or measuring early would read as
-                    // cheap and surface as a permanent drift toward cheaper whenever ingest lags. Duration
-                    // is read off a single span whose arrival is its own completion signal, so it needs no
-                    // such wait.
+                    // settle_seconds is not a per-measure wait: the sweep reads only settled traces, and
+                    // settle_seconds only caps how long a page is held open for a trace whose root span
+                    // never lands.
                     //
                     // w1_floor is the same simulated 0.139 as duration drift, unvalidated for the same
                     // reason.
@@ -429,87 +381,19 @@ public class BuiltInClassifierCatalog {
                     // classifier, with the WINDOW branch looking this detector kind up in
                     // ClassifierSweepRegistry rather than falling into metric drift.
                     Grain.WINDOW,
-                    // Every key here is one ToolErrorConfig parses. decision_interval is the CUSUM
-                    // threshold and it is a guess: 6.0 buys a false alarm about every 250,000 calls under
-                    // independent Bernoulli trials, and real tool failures are bursty in a way that
-                    // arithmetic cannot price; a null run against a real corpus is what replaces it, and it
-                    // will very likely move up.
+                    // decision_interval is the CUSUM threshold and it is a guess: 6.0 buys a false alarm
+                    // about every 250,000 calls under independent Bernoulli trials, and real tool failures
+                    // are bursty in a way that arithmetic cannot price; a null run against a real corpus is
+                    // what replaces it, and it will very likely move up.
                     //
-                    // min_effect_size is not a second threshold on the same thing, it is the guard that
-                    // makes a sequential test usable at volume: a CUSUM accumulates evidence indefinitely,
-                    // so on a busy tool it eventually crosses on a tenth of a percentage point, which is
-                    // real and is nobody's problem.
+                    // ToolErrorConfig does not read min_effect_size or settle_seconds; it ignores keys it
+                    // does not know.
                     "{\"decision_interval\":6.0,\"shift_multiple\":2.0,\"shift_floor\":0.005,"
                             + "\"min_effect_size\":0.05,\"min_baseline_calls\":500,"
                             + "\"down_arm_min_rate\":0.01,\"settle_seconds\":300,\"max_patterns\":8}",
                     // No detector factory and no sweep. callSiteFactsRead() is moot for the same reason it
                     // is empty on the metric modules: this reads tool_call, the observation attribute bag
                     // and the trace spine, nothing captured onto call_site from a repository.
-                    null),
-            new ClassifierModelModule(
-                    "sop_conformance",
-                    "SOP Conformance",
-                    // User-facing. It says both halves, per-turn conformance and windowed drift,
-                    // because "did the agent follow the SOP on this turn" and "did compliance fall
-                    // below what history predicts" are the two questions the classifier answers, and
-                    // an operator reading only one would mis-file the findings it raises.
-                    "The agent is drifting from a written SOP — for every authored rule, each turn is "
-                            + "judged (did the rule apply, was it satisfied), and each rule's compliance "
-                            + "rate is tested against what the reference period predicts for this traffic "
-                            + "(one-sided, Bonferroni, minimum effect). Turns whose intent the reference "
-                            + "never saw stay out of the test's evidence, and a rule whose activation "
-                            + "gate itself shifted carries a \"reference stale — refit the gate\" "
-                            + "annotation instead of a silent verdict; a second, distinct gate annotation "
-                            + "(\"gate precision degraded (PACC)\") marks windows where the gate is "
-                            + "admitting turns the rule does not apply to even inside intents the "
-                            + "reference knew — same remediation, refit the gate, but the deficit likely "
-                            + "belongs to falsely-admitted turns rather than the agent. Requires an "
-                            + "authored SOP and a "
-                            + "fitted artifact bundle from the conformance engine. Interim serving "
-                            + "posture: turn-text embedding runs in-process on the backend, bounded to a "
-                            + "configured number of concurrent encoder passes (the classify-service "
-                            + "exists because of the 2026-07-12 OOM incident; in-JVM was chosen so the "
-                            + "fit arithmetic stays parity-pinnable) — the accepted plan moves embedding "
-                            + "behind a classify-service /embed endpoint before any project is enabled.",
-                    Kind.SOP_CONFORMANCE,
-                    // Description and config here re-sync onto an already-seeded project only when this
-                    // version advances (ClassifierService.seedBuiltIns), so a description or config-key
-                    // change needs a bump or an existing project keeps the stale text or an absent key
-                    // reading as unset. shadow_mode is a case in point: a project seeded before it existed
-                    // would otherwise read the key as absent and default to surfacing findings rather than
-                    // staying quiet.
-                    4,
-                    // Seeds enabled, like every built-in, and is held back by its flag alone, which is
-                    // targeted on for no org yet: the engine's zero-false-alarm figure was measured on one
-                    // corpus with synthetic injected drift, and no per-project bundle exists until an
-                    // operator deploys one (ConformanceArtifactStore). Behind the flag, an
-                    // enabled-but-bundle-less row's sweep is a cursor-preserving no-op, which is the second
-                    // fence.
-                    Capability.SOP_CONFORMANCE,
-                    // WINDOW grain: the drift test fires on a window of a rule's admitted activations,
-                    // never on one turn; a per-turn verdict row is evidence, not a finding. An enabled
-                    // row rides ClassifierWorker's WINDOW branch, which resolves this kind to its own
-                    // registered sweep, one lookup, no ordering between classifiers to get wrong.
-                    Grain.WINDOW,
-                    // measures stays [] as belt-and-braces: dispatch resolves this kind to its own sweep,
-                    // but if that routing ever regresses, an empty list keeps the metric-drift fold inert
-                    // (an absent list falls back to the duration measures, which would open duration
-                    // findings under the conformance switch). alpha / min_activations / min_effect are the
-                    // engine's frozen drift knobs (Bonferroni across the SOP's rules, windows of at least
-                    // 30 activations, 0.10 minimum effect), parsed by conformance.ConformanceConfig.
-                    // settle_seconds and drift_window_turns are serving knobs with no engine counterpart,
-                    // since the engine scores a finished file while the sweep scores a live stream: how
-                    // old a turn's trace must be before it is scored, and how many stored per-turn
-                    // verdicts one rule's windowed drift test reads. shadow_mode is the third, and the
-                    // only one about who sees the output rather than how it is computed: true keeps
-                    // scoring and recording while withholding automatic escalation and case opening
-                    // (ConformanceShadowMode). Seeded false, so a project opts into shadow rather than a
-                    // detector ever being muted by an absent key.
-                    "{\"measures\":[],\"alpha\":0.01,\"min_activations\":30,\"min_effect\":0.1,"
-                            + "\"settle_seconds\":300,\"drift_window_turns\":2000,\"shadow_mode\":false}",
-                    // No detector factory, exactly as the other fitting-tier classifiers: nothing
-                    // observation-grain to dispatch. The ClassifierSweep registered for this kind owns the
-                    // dispatch, feeding the scoring service with the phase-A repositories and the encoder.
                     null));
 
     private final List<BuiltIn> builtIns;
@@ -520,9 +404,8 @@ public class BuiltInClassifierCatalog {
             ObjectMapper mapper,
             SubstrateReadRepository substrate,
             EncoderScorer encoderScorer,
-            ConversationThreadAssembler threadAssembler,
             ObjectProvider<DetectorSupplier> discovered) {
-        Deps deps = new Deps(mapper, encoderScorer, substrate, threadAssembler);
+        Deps deps = new Deps(mapper, encoderScorer, substrate);
 
         // Catalog metadata + built-in detectors are both derived from the manifests.
         this.builtIns = MODULES.stream().map(ClassifierModelModule::toBuiltIn).toList();
@@ -536,8 +419,8 @@ public class BuiltInClassifierCatalog {
 
         // One dispatch-only detector is NOT a catalog built-in but is registered so the worker
         // dispatches its kind for USER-authored signals:
-        //  - RegexDetector backs USER-authored `regex` classifiers; empty default phrases (each such row
-        //    supplies its own via config_json), ClassifierField.BOTH so a phrase can match either side of
+        //  - RegexDetector backs USER-authored `regex` classifiers; each such row supplies its phrases
+        //    via config_json, ClassifierField.BOTH so a phrase can match either side of
         //    the exchange, WARN because a user tracker feeds metrics, not incident escalation. Nothing
         //    mints one of these any more, but the kind stays dispatched so rows already on disk keep
         //    scoring.
@@ -545,7 +428,6 @@ public class BuiltInClassifierCatalog {
                 Kind.REGEX,
                 ClassifierField.BOTH,
                 Detection.Severity.WARN,
-                List.of(),
                 true,
                 new DeterministicNlPhraseCompiler(),
                 mapper);
@@ -554,7 +436,8 @@ public class BuiltInClassifierCatalog {
         // fail-loud invariant kept via the collector framework rather than an explicit constructor
         // throw, which SpotBugs forbids (CT_CONSTRUCTOR_THROW). A module with no factory is one of
         // the five fitting-tier classifiers, dispatched by the ClassifierSweep registered for their
-        // kind, or groundedness, whose detector is instead supplied through `discovered` below.
+        // kind, or frustration or groundedness, whose detectors are instead supplied through
+        // `discovered` below.
         //
         // `discovered` is the generic source: any DetectorSupplier bean on the classpath is folded in
         // for the kind it claims, with no check against MODULES membership; see DetectorSupplier's

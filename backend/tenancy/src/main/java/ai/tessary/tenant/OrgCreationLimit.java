@@ -2,10 +2,9 @@
 package ai.tessary.tenant;
 
 /**
- * How many organizations a single user may own, via the org-creation and ownership-transfer paths.
- * Both paths enforce it inside a transaction under the same per-owner lock
- * ({@code OrganizationRepository#lockOrgCreationFor}): creation in {@code TenantService#bootstrapOrg},
- * transfer in {@code TenantService#transferOwnership}.
+ * How many organizations a single user may own, via the org-creation path. It is enforced inside a
+ * transaction under a per-owner lock ({@code OrganizationRepository#lockOrgCreationFor}) in
+ * {@code TenantService#bootstrapOrg}.
  *
  * <p>This build self-hosts one org per install: {@code createOrg} exists only to bootstrap that
  * first org on a fresh signup, so the default caps at 1. {@link OrganizationController} depends
@@ -17,6 +16,6 @@ package ai.tessary.tenant;
  */
 public interface OrgCreationLimit {
 
-    /** The maximum number of organizations one user may own at a time. */
-    int maxOwnedOrgsPerUser();
+    /** The maximum number of organizations this user may own at a time. */
+    int maxOwnedOrgsFor(String userId);
 }

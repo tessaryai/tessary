@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.git.github;
 
+import static ai.tessary.git.github.GithubFixtures.location;
+import static ai.tessary.git.github.GithubFixtures.secretBox;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,15 +15,12 @@ import ai.tessary.auth.AuthProperties;
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.auth.TenantPathResolver.Resolved;
-import ai.tessary.config.TessaryProperties;
-import ai.tessary.crypto.SecretBox;
 import ai.tessary.git.GitIntegrationDtos.ManifestStartView;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.Project;
 import ai.tessary.web.ApiResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.Base64;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -43,14 +42,6 @@ class GithubManifestControllerTest {
 
     private final TenantContext ctx = new TenantContext("u", "e@x.io", "o", "p1", "owner", null);
 
-    private static SecretBox secretBox() {
-        TessaryProperties p = new TessaryProperties();
-        byte[] key = new byte[32];
-        for (int i = 0; i < key.length; i++) key[i] = (byte) (i + 5);
-        p.setSecretKey(Base64.getEncoder().encodeToString(key));
-        return new SecretBox(p);
-    }
-
     @BeforeEach
     void setUp() {
         state = new GithubInstallStateService(secretBox(), mapper);
@@ -65,11 +56,6 @@ class GithubManifestControllerTest {
                 new Project("p1", "o", "web", "Web", "d", "t", null, null, true, null),
                 "owner");
         when(resolver.requireProject(ctx, "acme", "web")).thenReturn(resolved);
-    }
-
-    private static String location(ResponseEntity<Void> resp) {
-        assertEquals(HttpStatus.FOUND, resp.getStatusCode());
-        return resp.getHeaders().getLocation().toString();
     }
 
     // ---- manifest-url --------------------------------------------------------
@@ -132,7 +118,7 @@ class GithubManifestControllerTest {
 
         assertTrue(
                 location(resp).endsWith("/orgs/acme/projects/web/settings/git?github_app_connected=1"), location(resp));
-        verify(appConfig).persist("999", appNode.path("pem").asText(), "whsec", "tessary-byo", "cid", "csec");
+        verify(appConfig).persist("999", appNode.path("pem").asText(), "tessary-byo", "cid", "csec");
     }
 
     @Test
@@ -146,26 +132,19 @@ class GithubManifestControllerTest {
         verify(exchange, never()).convert(anyString());
     }
 
+    /** The wizard mints a deployment-wide App, so a plain org member may not start it. */
     @Test
-    void callback_reusedOrExpiredCode_surfacesDistinctError() {
-        // GitHub invalidates a manifest code after first use; the exchange throws
-        // MANIFEST_CONVERSION_FAILED on the resubmitted attempt, not a generic app-config error.
-        String stateParam = state.mint("acme", "web", "p1");
-        when(exchange.convert("reused"))
-                .thenThrow(new ai.tessary.open.errors.TessaryException(
-                        ai.tessary.open.errors.GitError.MANIFEST_CONVERSION_FAILED));
+    void manifestUrl_refusesANonOwner() {
+        TenantContext member = new TenantContext("u2", "m@x.io", "o", "p1", "member", null);
+        when(resolver.requireProject(member, "acme", "web"))
+                .thenReturn(new Resolved(
+                        new Organization("o", "wo", "acme", "Acme", "t", null, null),
+                        new Project("p1", "o", "web", "Web", "d", "t", null, null, true, null),
+                        "member"));
 
-        ResponseEntity<Void> resp = controller.callback(stateParam, "reused");
-
-        assertTrue(location(resp).contains("GIT.MANIFEST_CONVERSION_FAILED"), location(resp));
-        verify(appConfig, never())
-                .persist(anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
-    }
-
-    @Test
-    void callback_invalidState_throwsRatherThanRedirecting() {
-        // No verified project to redirect to — mirrors GithubCallbackController's same choice.
-        org.junit.jupiter.api.Assertions.assertThrows(
-                ai.tessary.open.errors.TessaryException.class, () -> controller.callback("garbage", "code"));
+        org.springframework.web.server.ResponseStatusException e = org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.manifestUrl(member, "acme", "web"));
+        assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
     }
 }

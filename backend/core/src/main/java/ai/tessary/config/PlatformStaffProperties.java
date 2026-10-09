@@ -11,13 +11,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * The platform-staff allowlist, bound from {@code tessary.platform.staff-emails}: the identities
- * that may administer another org's plan by hand, which is how a pilot customer gets a paid tier,
- * the only way, since there is no self-serve purchase path.
+ * {@code PlatformStaff} lets through to the non-public {@code /actuator/**} paths.
  *
  * <p><b>Empty means nobody.</b> Unlike a capability default, an unset {@code
  * TESSARY_PLATFORM_STAFF_EMAILS} grants no one anything: a deployment that forgets the variable
- * loses the pilot-upgrade affordance rather than opening it. Staff identity is only half the
- * gate; {@code PlatformStaff} additionally requires owner/admin standing in the target org.
+ * keeps those paths closed rather than opening them.
  *
  * <p>The entries are matched against the email on the principal row, which WorkOS verified at
  * sign-up and which no request header can influence. Comparison is lowercase so a
@@ -35,10 +33,6 @@ public class PlatformStaffProperties {
             return false;
         }
         return staffEmails.contains(normalize(email));
-    }
-
-    public Set<String> getStaffEmails() {
-        return staffEmails;
     }
 
     public void setStaffEmails(@Nullable List<String> emails) {

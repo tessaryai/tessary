@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
-import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.open.jobqueue.LeasedJobSql;
 import ai.tessary.tenant.Ids;
@@ -39,10 +38,7 @@ public class BehaviorTriageJobRepository {
     static final String KIND = "triage";
 
     private static final String COLS = "id, project_id, payload->>'finding_id' AS finding_id, "
-            + "payload->>'verdict_id' AS verdict_id, "
-            + "payload->>'classifier_key' AS classifier_key, "
-            + "status, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at, "
-            + "payload->>'finding_kind' AS finding_kind, payload->>'conformance' AS conformance";
+            + "status, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at";
 
     /** True for a look parked in {@code dead} whose cooldown floor has passed; see {@link #REVIVE_IF_COOLED}. */
     private static final String REVIVABLE = LeasedJobSql.deadLetterCooldownGate("job", BehaviorTriageJobRow.DEAD);
@@ -52,8 +48,8 @@ public class BehaviorTriageJobRepository {
      * status exactly as it found it.
      *
      * <p><b>Why {@code CASE} rather than a {@code WHERE} on the update.</b> Postgres returns NO row from
-     * {@code ON CONFLICT DO UPDATE ... WHERE cond RETURNING} when {@code cond} is false, and both enqueue
-     * paths read the conflicting row's id and status back through {@code RETURNING ... .single()}. The
+     * {@code ON CONFLICT DO UPDATE ... WHERE cond RETURNING} when {@code cond} is false, and
+     * {@link #enqueue} reads the conflicting row's id and status back through {@code RETURNING ... .single()}. The
      * unconditional no-op self-assignment is what makes the row come back at all; the revival rides
      * inside it as a branch rather than beside it as a filter.
      *
@@ -75,7 +71,7 @@ public class BehaviorTriageJobRepository {
         this.props = props;
     }
 
-    /** The moment a dead-lettered look becomes revivable; bound as {@code :deadFloor} by both enqueues. */
+    /** The moment a dead-lettered look becomes revivable; bound as {@code :deadFloor} by {@link #enqueue}. */
     private String deadFloor() {
         return Instant.now()
                 .minus(Duration.ofSeconds(props.getDeadLetterCooldownSeconds()))
@@ -99,65 +95,11 @@ public class BehaviorTriageJobRepository {
      * before. The automatic lane cannot reach this branch at all: {@code FindingRepository}'s escalation
      * sweep requires {@code escalated_at IS NULL}, and a finding with a dead-lettered job has it set.
      */
-    public EnqueueOutcome enqueue(
-            String projectId, String findingId, @Nullable String verdictId, String classifierKey, String now) {
+    public EnqueueOutcome enqueue(String projectId, String findingId, String now) {
         return jdbc.sql("""
                 INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
                 VALUES (:id, :pid, '""" + KIND + """
-                ', 'pending', 0, :dedupeKey, jsonb_build_object(
-                    'finding_id', :findingId::text, 'verdict_id', :verdictId::text,
-                    'classifier_key', :classifierKey::text
-                ), :now, :now)
-                ON CONFLICT (dedupe_key) WHERE kind = '""" + KIND + """
-                ' DO UPDATE SET\s""" + REVIVE_IF_COOLED + """
-
-                RETURNING id, status
-                """)
-                .param("id", Ids.ulid())
-                .param("pid", projectId)
-                .param("dedupeKey", dedupeKey(projectId, findingId))
-                .param("findingId", findingId)
-                .param("verdictId", verdictId)
-                .param("classifierKey", classifierKey)
-                .param("deadFloor", deadFloor())
-                .param("now", now)
-                .query((rs, n) -> new EnqueueOutcome(rs.getString("id"), rs.getString("status")))
-                .single();
-    }
-
-    /**
-     * Enqueue the triage for a conformance finding: same job kind, same dedupe key shape, same
-     * budget numerator as {@link #enqueue}, because a conformance escalation is not a second pipeline.
-     * What differs is the payload: {@code finding_kind} routes the worker to the conformance store, and
-     * the {@code conformance} object carries the SOP rule sentence, the expect/never obligation and the
-     * tested window's numbers, so the triage agent rules against the SOP rather than n-gram causes.
-     *
-     * <p>No {@code verdict_id}: conformance verdicts are per (rule, turn) rows in their own table, not
-     * {@code verdict} rows, so there is nothing in that channel to attribute the analysis to.
-     */
-    public EnqueueOutcome enqueueConformance(
-            String projectId,
-            String findingId,
-            String classifierKey,
-            BehaviorTriageJobRow.Conformance conformance,
-            String now) {
-        return jdbc.sql("""
-                INSERT INTO job (id, project_id, kind, status, attempts, dedupe_key, payload, created_at, updated_at)
-                VALUES (:id, :pid, '""" + KIND + """
-                ', 'pending', 0, :dedupeKey, jsonb_build_object(
-                    'finding_id', :findingId::text, 'verdict_id', NULL::text,
-                    'classifier_key', :classifierKey::text, 'finding_kind', :findingKind::text,
-                    'conformance', jsonb_build_object(
-                        'rule_key', :ruleKey::text, 'rule_sentence', :ruleSentence::text,
-                        'obligation', :obligation::text,
-                        'reference_rate', :referenceRate::double precision,
-                        'current_rate', :currentRate::double precision,
-                        'z', :z::double precision, 'p', :p::double precision,
-                        'n_activations', :nActivations::bigint,
-                        'kind', :conformanceKind::text,
-                        'n_violations', :nViolations::bigint
-                    )
-                ), :now, :now)
+                ', 'pending', 0, :dedupeKey, jsonb_build_object('finding_id', :findingId::text), :now, :now)
                 ON CONFLICT (dedupe_key) WHERE kind = '""" + KIND + """
                 ' DO UPDATE SET\s""" + REVIVE_IF_COOLED + """
 
@@ -168,41 +110,8 @@ public class BehaviorTriageJobRepository {
                 .param("dedupeKey", dedupeKey(projectId, findingId))
                 .param("findingId", findingId)
                 .param("deadFloor", deadFloor())
-                .param("classifierKey", classifierKey)
-                .param("findingKind", BuiltInDetector.Kind.SOP_CONFORMANCE)
-                .param("ruleKey", conformance.ruleKey())
-                .param("ruleSentence", conformance.ruleSentence())
-                .param("obligation", conformance.obligation())
-                .param("referenceRate", conformance.referenceRate())
-                .param("currentRate", conformance.currentRate())
-                .param("z", conformance.z())
-                .param("p", conformance.p())
-                .param("nActivations", conformance.nActivations())
-                .param(
-                        "conformanceKind",
-                        conformance.kind() == null ? BehaviorTriageJobRow.Conformance.KIND_DRIFT : conformance.kind())
-                .param("nViolations", conformance.nViolations())
                 .param("now", now)
                 .query((rs, n) -> new EnqueueOutcome(rs.getString("id"), rs.getString("status")))
-                .single();
-    }
-
-    /**
-     * How many triages this project has enqueued since {@code since}: the numerator of automatic
-     * mode's bound (launch requirement B5).
-     *
-     * <p>Counts every status and both triggers. A job that failed still cost a run, and a hand-press is
-     * still this project spending, so excluding either would make the bound describe something other than
-     * what it is bounding. Enqueue time is the clock rather than completion time, because the thing being
-     * limited is how fast work is created, and a slow queue would otherwise let an unbounded backlog
-     * accumulate while the count stayed low.
-     */
-    public long countEnqueuedSince(String projectId, String since) {
-        return jdbc.sql("SELECT count(*) FROM job WHERE kind = '" + KIND + "'"
-                        + " AND project_id = :pid AND created_at >= :since")
-                .param("pid", projectId)
-                .param("since", since)
-                .query(Long.class)
                 .single();
     }
 
@@ -287,7 +196,8 @@ public class BehaviorTriageJobRepository {
     }
 
     /**
-     * Hand a failed run back to the queue: keep it {@code claimed}, expire its lease now, and record why.
+     * Hand a failed run back to the queue: keep it {@code claimed}, expire its lease {@code delaySeconds}
+     * from now, and record why.
      *
      * <p><b>Not {@code failed}.</b> A triage that did not produce a ruling leaves {@code triage_verdict}
      * NULL, and a terminal job would strand that finding un-triaged forever, invisible because nothing
@@ -295,18 +205,11 @@ public class BehaviorTriageJobRepository {
      * {@link #claimBatch}'s reclaim leg while attempts remain, and {@link #failExhausted} dead-letters it
      * once they do not. Status is left alone rather than set to {@code pending} on purpose: the pending
      * arm of the claim does not consult {@code attempts}, so a released job would retry forever.
-     */
-    public void markRetryable(String id, @Nullable String error) {
-        markRetryable(id, error, 0L);
-    }
-
-    /**
-     * As {@link #markRetryable(String, String)}, but the lease expires {@code delaySeconds} from now
-     * rather than immediately.
      *
-     * <p>Immediate expiry meant the next tick re-claimed at once, so a job that fails deterministically
-     * spent all {@code maxAttempts} as fast as the scheduler could turn, with no pause in which the thing
-     * it depends on might recover. The delay is the difference between a retry and a spin.
+     * <p>The delay exists because immediate expiry meant the next tick re-claimed at once, so a job that
+     * fails deterministically spent all {@code maxAttempts} as fast as the scheduler could turn, with no
+     * pause in which the thing it depends on might recover. The delay is the difference between a retry and a
+     * spin.
      */
     public void markRetryable(String id, @Nullable String error, long delaySeconds) {
         Instant now = Instant.now();
@@ -365,16 +268,12 @@ public class BehaviorTriageJobRepository {
                 rs.getString("id"),
                 rs.getString("project_id"),
                 rs.getString("finding_id"),
-                rs.getString("verdict_id"),
-                rs.getString("classifier_key"),
                 rs.getString("status"),
                 rs.getString("lease_owner"),
                 rs.getString("lease_expires_at"),
                 rs.getInt("attempts"),
                 rs.getString("last_error"),
                 rs.getString("created_at"),
-                rs.getString("updated_at"),
-                rs.getString("finding_kind"),
-                rs.getString("conformance"));
+                rs.getString("updated_at"));
     }
 }

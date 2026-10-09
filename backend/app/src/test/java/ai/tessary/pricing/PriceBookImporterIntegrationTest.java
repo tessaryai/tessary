@@ -2,12 +2,9 @@
 package ai.tessary.pricing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.math.BigDecimal;
 import java.util.List;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,9 +18,9 @@ import org.springframework.test.context.TestPropertySource;
  * so every test here is really asking what a SECOND boot does.
  */
 @SpringBootTest
-// Own context on purpose: it asserts what a SECOND boot of the importer does, so it must own the price-book tables
-// the first boot seeded.
-@TestPropertySource(properties = "test.context-group=price-book-importer")
+// Own context on purpose, shared only with ModelResolverIntegrationTest, which only reads the books: it asserts what a
+// SECOND boot of the importer does, so no other class may write the price-book tables the first boot seeded.
+@TestPropertySource(properties = "test.context-group=pricing-books")
 class PriceBookImporterIntegrationTest {
 
     @Autowired
@@ -37,24 +34,6 @@ class PriceBookImporterIntegrationTest {
 
     private long count(String table) {
         return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single();
-    }
-
-    private String versionOf(String source) {
-        return books.currentBooks().stream()
-                .filter(b -> b.source().equals(source))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("no book in force for source " + source))
-                .version();
-    }
-
-    @Test
-    @DisplayName("boot imports the vendored book")
-    void boot_importsTheVendoredBook() {
-        List<PriceBook> current = books.currentBooks();
-        assertEquals(1, current.size(), "one book in force per source: " + current);
-        assertEquals(PriceBook.SOURCE_LITELLM, current.get(0).source());
-        assertTrue(count("model") > 1000, "every snapshot key becomes a model row");
-        assertTrue(count("model_price") > 1000, "and every one of them gets a rate row");
     }
 
     @Test
@@ -72,23 +51,18 @@ class PriceBookImporterIntegrationTest {
         assertEquals(prices, count("model_price"), "no duplicate rate rows");
     }
 
+    /**
+     * Before any book is imported (a fresh install, or pricing switched off) nothing is priced, and the
+     * coverage count the vitals card shows is zero rather than a query that cannot be written.
+     * Transactional, so the books this context's other tests read come back when it ends.
+     */
     @Test
-    @DisplayName("a model resolves to the vendored book's own rate")
-    void rateFor_resolvesFromTheVendoredBook() {
-        // The mantle route-prefixed spelling BedrockModelProfile.MANTLE_ROUTE_PREFIX reports
-        // resolves without any override, straight off the imported vendored book.
-        ModelRate mantle = books.rateFor("bedrock_mantle/openai.gpt-5.6-luna").orElseThrow();
-        assertEquals(versionOf(PriceBook.SOURCE_LITELLM), mantle.priceBookVersion());
-        assertEquals(
-                0, new BigDecimal("0.22").compareTo(requireRate(mantle.rates().inputPerMtok())));
+    @org.springframework.transaction.annotation.Transactional
+    void withNoBookInForce_nothingIsPricedAndTheCoverageIsZero() {
+        jdbc.sql("DELETE FROM price_book").update();
 
-        ModelRate sonnet = books.rateFor("claude-sonnet-4-6").orElseThrow();
-        assertEquals(versionOf(PriceBook.SOURCE_LITELLM), sonnet.priceBookVersion());
-        assertEquals(0, new BigDecimal("3").compareTo(requireRate(sonnet.rates().inputPerMtok())));
-    }
-
-    private static BigDecimal requireRate(@Nullable BigDecimal rate) {
-        assertNotNull(rate, "expected a rate");
-        return rate;
+        assertEquals(List.of(), books.currentBooks());
+        assertEquals(0, books.pricedModelCount());
+        assertTrue(books.rateFor("claude-haiku-4-5").isEmpty(), "unpriced, not free");
     }
 }

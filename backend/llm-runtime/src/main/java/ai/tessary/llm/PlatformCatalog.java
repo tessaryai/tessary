@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
+import ai.tessary.llmspi.ModelLane;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-platform connection metadata, served alongside the {@link ModelCatalog}
  * so the "Add a model" form can render generically. The {@code auth} kind drives
  * which credential fields the UI shows, which keeps the form consistent across
  * platforms (every {@code api_key} platform looks identical) and means adding a
- * platform is one descriptor here plus a build branch in {@code ChatModelFactory},
- * no per-provider conditionals to edit in the frontend.
+ * platform is one descriptor here, with no per-provider conditionals to edit in the frontend.
  */
 public final class PlatformCatalog {
 
@@ -20,29 +21,60 @@ public final class PlatformCatalog {
 
     public static final String AUTH_AWS = "aws";
 
+    /**
+     * No credential of the org's own: the deployment supplies it ({@link ModelProvider#PLATFORM}). The
+     * form renders no fields, only the supplier's label and {@code detail}.
+     */
+    public static final String AUTH_PLATFORM = "platform";
+
+    /**
+     * @param usedBy the lanes, by wire name, that are the only reason to add this platform's key: set for a
+     *     provider that serves one feature and no chat lane, so the Providers page can say what it is for.
+     *     Empty for a chat provider, which every agentic lane may use.
+     * @param detail a short status line the Providers page shows under the label; set only on the
+     *     {@link #AUTH_PLATFORM} descriptor a {@link PlatformProviderSupplier} describes, null otherwise
+     */
     public record PlatformDescriptor(
             ModelProvider id,
             String label,
             String auth,
             @JsonProperty("supports_base_url") boolean supportsBaseUrl,
-            @JsonProperty("default_base_url") String defaultBaseUrl) {}
+            @JsonProperty("default_base_url") String defaultBaseUrl,
+            @JsonProperty("used_by") List<String> usedBy,
+            @JsonProperty("detail") @Nullable String detail) {
 
-    // Every platform requires an org-provided credential; there is no credential-free platform.
-    // ChatModelFactory never falls back to an ambient key for a run selection.
+        PlatformDescriptor(
+                ModelProvider id, String label, String auth, boolean supportsBaseUrl, String defaultBaseUrl) {
+            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, List.of(), null);
+        }
+
+        PlatformDescriptor(
+                ModelProvider id,
+                String label,
+                String auth,
+                boolean supportsBaseUrl,
+                String defaultBaseUrl,
+                List<String> usedBy) {
+            this(id, label, auth, supportsBaseUrl, defaultBaseUrl, usedBy, null);
+        }
+    }
+
+    // Every platform but PLATFORM requires an org-provided credential. PLATFORM's descriptor is a
+    // placeholder: the settings endpoints drop it unless a PlatformProviderSupplier offers the
+    // provider, and replace its label and detail with the supplier's when one does.
     private static final List<PlatformDescriptor> PLATFORMS = List.of(
             new PlatformDescriptor(ModelProvider.OPENAI, "OpenAI", AUTH_API_KEY, true, "https://api.openai.com/v1"),
-            // WITH the /v1: langchain4j-anthropic's DefaultAnthropicClient appends the bare path
-            // "messages" to whatever baseUrl it's given rather than adding the version segment itself,
-            // and OpenCode's @ai-sdk/anthropic in the agentic sandbox does the same. A bare host here
-            // would post to /messages and 404 on both paths if a user typed it into the form.
+            // WITH the /v1: OpenCode's @ai-sdk/anthropic in the agentic sandbox appends the bare path
+            // "messages" to whatever baseUrl it's given rather than adding the version segment itself.
+            // A bare host here would post to /messages and 404 if a user typed it into the form.
             new PlatformDescriptor(
                     ModelProvider.ANTHROPIC, "Anthropic", AUTH_API_KEY, true, "https://api.anthropic.com/v1"),
             new PlatformDescriptor(
                     ModelProvider.OPENROUTER, "OpenRouter", AUTH_API_KEY, true, "https://openrouter.ai/api/v1"),
             new PlatformDescriptor(
                     ModelProvider.MOONSHOT, "Moonshot", AUTH_API_KEY, true, "https://api.moonshot.ai/v1"),
-            // Gemini over its own OpenAI-compatible endpoint, the same Chat Completions build path
-            // as OpenRouter/Moonshot, so no new auth kind or build method.
+            // Gemini over its own OpenAI-compatible endpoint, like OpenRouter/Moonshot, so no new auth
+            // kind.
             new PlatformDescriptor(
                     ModelProvider.GEMINI,
                     "Google Gemini",
@@ -60,7 +92,16 @@ public final class PlatformCatalog {
             // Mantle authenticates with the same AWS credentials as Bedrock (SigV4), just against the
             // bedrock-mantle service name, so it reuses AUTH_AWS and the Providers form renders it
             // unchanged. No base-URL override: the host is derived from the region.
-            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null));
+            new PlatformDescriptor(ModelProvider.BEDROCK_MANTLE, "AWS Bedrock (mantle)", AUTH_AWS, false, null),
+            // A decision-model provider, not a chat one: its key reaches llm/decisions/ only.
+            new PlatformDescriptor(
+                    ModelProvider.TYPESAFE,
+                    "TypeSafe",
+                    AUTH_API_KEY,
+                    true,
+                    "https://api.typesafe.ai",
+                    List.of(ModelLane.FRUSTRATION.wire())),
+            new PlatformDescriptor(ModelProvider.PLATFORM, "Platform", AUTH_PLATFORM, false, null));
 
     private PlatformCatalog() {}
 
@@ -72,8 +113,8 @@ public final class PlatformCatalog {
         return PLATFORMS.stream().filter(p -> p.id() == id).findFirst();
     }
 
-    /** Auth kind for a platform, defaulting to {@code api_key} for any unmapped value. */
+    /** Auth kind for a platform. */
     public static String authOf(ModelProvider id) {
-        return find(id).map(PlatformDescriptor::auth).orElse(AUTH_API_KEY);
+        return find(id).orElseThrow().auth();
     }
 }

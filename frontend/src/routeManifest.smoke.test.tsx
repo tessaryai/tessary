@@ -1,59 +1,54 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Route render smoke test.
+ * Route render smoke test: mounts the real <App/> in a MemoryRouter at every 'view' entry of the route manifest and
+ * asserts it renders without throwing or an un-allowlisted console.error. Content is each view's own test's job.
  *
- * Mounts the real <App/> (wrapped as src/main.tsx wraps it, with BrowserRouter swapped for a
- * MemoryRouter pointed at one URL) at every 'view' entry in the regenerated route manifest, and
- * asserts each one renders something without throwing. This is a render-smoke test, not a content
- * test: the only assertion per route is that the container is non-blank and nothing threw. A
- * view's actual behavior is that view's own test's job.
+ * The real App picks its own provider stack per URL, so this cannot get that wrong. auth.me(), getCapabilities()
+ * and listProjects() run on every mount and get realistic answers; FAKE_ME.orgs is the org list RootRedirect, Sidebar
+ * and Link read.
  *
- * WHY MOUNT THE REAL APP rather than hand-select a provider stack per route: App.tsx itself
- * decides which of TenantProvider/CapabilityGate/ProtectedRoute apply to a given URL (some view
- * entries must NOT be wrapped in TenantProvider, which throws synchronously outside the tenant
- * prefix — see TenantContext.tsx). Mounting the real App and letting its own <Routes> tree pick
- * the wrapper avoids getting that call wrong here.
+ * "Mounts" means the view's own Suspense fallback is gone and react-query is quiet, not just that the shell drew
+ * text.
  *
- * MOCKING STRATEGY. auth.me()/getCapabilities()/getGradingStatus()/listProjects() are called
- * unconditionally on mount (AuthProvider, useCapabilities, the shell chrome's grading banner and
- * sidebar) — these get fixed, realistic answers below so every route gets past the loading screen.
- * FAKE_ME.orgs stands in for the org list: RootRedirect, Sidebar, and Link all read it off
- * GET /auth/me. Every other `auth` method is a mutation, never invoked at mount, so it is stubbed
- * to a rejected-never-called shape only for type completeness.
+ * Detail routes are reached with ids that 404, so the case, finding and RCA pages also mount once on real
+ * payloads.
  *
- * WHAT "MOUNTS" MEANS HERE. Every view is React.lazy'd behind ProjectShell's own <Suspense>, whose
- * fallback sits inside the shell chrome — so a container that merely has text proves the chrome
- * rendered, not the view. Each route's settle loop below waits for that fallback to go away as
- * well as for react-query to go quiet, and fails the route if it never does.
- *
- * `projectApi(...)` is different, deliberately: each method a test case does not explicitly
- * override defaults to `Promise.resolve(undefined)` via a Proxy, not a safe-empty default. This
- * suite's whole purpose is catching a capability key or API shape that silently stopped resolving
- * — a safe-empty default (`[]`/`{}`) would let exactly that regression pass silently.
+ * Unlisted projectApi methods resolve undefined rather than a safe-empty default, so a capability key or API shape
+ * that stopped resolving fails here instead of passing silently.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
+import { auth as mockedAuth } from "./api/client";
 import { ThemeProvider } from "./ui/ThemeContext";
 import { DensityProvider } from "./ui/density";
 import { ApiError } from "./api/types";
+import type {
+  BehaviorFindingDetail,
+  CaseDetail,
+  ChartCard,
+  ChartPoint,
+  ClassifierCharts,
+  EvidenceSpanPage,
+  MalformedOutputDetail,
+  MalformedOutputPage,
+  RcaReport,
+} from "./api/types";
+import type { components } from "./api/generated/schema";
 import type { CapabilityWire } from "./api/types-auth";
 import manifest from "./routeManifest.generated.json";
+import {
+  GROUNDEDNESS_CASE_DETAIL,
+  GROUNDEDNESS_FINDING_DETAIL,
+  GROUNDEDNESS_REPORT,
+} from "./test/groundednessFixtures";
 
 // ---- api/client mock -------------------------------------------------------------------------
 
-// Capability defaults mirror CapabilityService.UNAVAILABLE_IN_OPEN_EDITION / OFF_BY_DEFAULT
-// (backend/product/src/main/java/ai/tessary/plan/CapabilityService.java): every wire key is true
-// except these five, which this deployment reports unavailable/off.
-const UNAVAILABLE_OR_OFF_IN_OPEN_EDITION: CapabilityWire[] = [
-  "triage_automatic_enabled",
-  "behavior_drift_enabled",
-  "sop_conformance_enabled",
-  "frustration_enabled",
-  "groundedness_enabled",
-];
+// Mirrors CapabilityDefaults.open(): every wire key is on except these.
+const OFF_IN_OPEN_EDITION: CapabilityWire[] = ["triage_automatic_enabled", "alerts_enabled"];
 const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "ci_integration_enabled",
   "rca_enabled",
@@ -69,21 +64,17 @@ const ALL_CAPABILITY_KEYS: CapabilityWire[] = [
   "groundedness_enabled",
   "secret_leak_enabled",
   "malformed_output_enabled",
-  "behavior_drift_enabled",
-  "sop_conformance_enabled",
   "triage_automatic_enabled",
 ];
 const OPEN_EDITION_CAPABILITIES: Record<CapabilityWire, boolean> = Object.fromEntries(
-  ALL_CAPABILITY_KEYS.map((k) => [k, !UNAVAILABLE_OR_OFF_IN_OPEN_EDITION.includes(k)]),
+  ALL_CAPABILITY_KEYS.map((k) => [k, !OFF_IN_OPEN_EDITION.includes(k)]),
 ) as Record<CapabilityWire, boolean>;
 
 const FAKE_ME = {
   id: "user-fake",
   email: "smoke@example.com",
-  // GET /api/me/orgs is gone; RootRedirect/Sidebar/Link all read the org list off GET /auth/me
-  // instead, so this fixture (not a mocked listMyOrgs()) is what stands between every one of
-  // those routes and an unwanted redirect to /login on an empty list. TenantService#ensureDefaultOrg
-  // guarantees the list is never actually empty post-auth.
+  // RootRedirect, Sidebar and Link read the org list off GET /auth/me; an empty list would redirect every route to
+  // /login.
   orgs: [{ id: "org-fake", slug: "fake-orgSlug", name: "Fake Org", role: "owner" }],
   platform_staff: false,
 };
@@ -108,8 +99,7 @@ const FAKE_PROJECT = {
   is_default: true,
 };
 
-/** Never actually invoked at mount — see the header note — kept only so a stray call fails loudly
- * with a clear message rather than "not a function". */
+/** Never invoked at mount; a stray call fails with a clear message. */
 function unusedMutation(name: string) {
   return vi.fn(() => Promise.reject(new Error(`auth.${name} was not expected to run during a route smoke test`)));
 }
@@ -117,32 +107,31 @@ function unusedMutation(name: string) {
 vi.mock("./api/client", () => {
   const auth = {
     me: vi.fn(() => Promise.resolve(FAKE_ME)),
-    getCapabilities: vi.fn(() => Promise.resolve({ capabilities: OPEN_EDITION_CAPABILITIES, unavailable: UNAVAILABLE_OR_OFF_IN_OPEN_EDITION })),
-    getGradingStatus: vi.fn(() => Promise.resolve({ paused: false, since: null })),
+    getCapabilities: vi.fn(() => Promise.resolve({ capabilities: OPEN_EDITION_CAPABILITIES })),
     listProjects: vi.fn(() => Promise.resolve([FAKE_PROJECT])),
     getOrg: vi.fn(() => Promise.resolve(FAKE_ORG)),
     listMembers: vi.fn(() => Promise.resolve([])),
     listInvitations: vi.fn(() => Promise.resolve([])),
+    listCapabilityOverrides: vi.fn(() =>
+      Promise.resolve(
+        ALL_CAPABILITY_KEYS.map((k) => {
+          const on = !OFF_IN_OPEN_EDITION.includes(k);
+          return { capability: k, enabled: on, default_enabled: on, has_override: false };
+        }),
+      ),
+    ),
     loginUrl: vi.fn((returnTo?: string) => `/auth/login${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`),
-    // Called unconditionally on mount by Login/Signup -- must resolve, same as
-    // me()/getCapabilities() above, or those two routes hang on the loading screen forever.
+    // Login and Signup call this on mount; unresolved, both hang on the loading screen.
     mode: vi.fn(() => Promise.resolve({ redirectFlow: false, firstRun: false })),
     login: unusedMutation("login"),
     signup: unusedMutation("signup"),
     logout: unusedMutation("logout"),
-    createOrg: unusedMutation("createOrg"),
     addMember: unusedMutation("addMember"),
     revokeInvitation: unusedMutation("revokeInvitation"),
     updateMember: unusedMutation("updateMember"),
     removeMember: unusedMutation("removeMember"),
     createProject: unusedMutation("createProject"),
-    getBilling: unusedMutation("getBilling"),
-    getLlmUsage: unusedMutation("getLlmUsage"),
-    getLlmUsageSeries: unusedMutation("getLlmUsageSeries"),
     updateOrg: unusedMutation("updateOrg"),
-    // archiveOrg/unarchiveOrg/deleteOrg/transferOwnership live elsewhere now -- the `auth` export
-    // here no longer has them to mock.
-    updateProject: unusedMutation("updateProject"),
     makeProjectDefault: unusedMutation("makeProjectDefault"),
     archiveProject: unusedMutation("archiveProject"),
     unarchiveProject: unusedMutation("unarchiveProject"),
@@ -153,8 +142,7 @@ vi.mock("./api/client", () => {
     confirm: unusedMutation("link.confirm"),
     deny: unusedMutation("link.deny"),
   };
-  // See the header note: unlisted methods default to Promise.resolve(undefined), never a
-  // safe-empty shape.
+  // Unlisted methods resolve undefined, never a safe-empty shape (see the header).
   function projectApi(orgSlug: string, projectSlug: string) {
     const overrides = currentProjectApiOverrides;
     return new Proxy(
@@ -169,9 +157,7 @@ vi.mock("./api/client", () => {
       },
     );
   }
-  // Provider credentials live on an org-scoped API (TenantContext.useOrgApi) -- the Settings ->
-  // Providers route calls it on mount, same "unlisted methods default to Promise.resolve(undefined)"
-  // shape projectApi uses above.
+  // Provider credentials are org-scoped; Settings > Providers calls this on mount.
   function orgApi(orgSlug: string) {
     const overrides = currentOrgApiOverrides;
     return new Proxy(
@@ -189,9 +175,7 @@ vi.mock("./api/client", () => {
   return { auth, link, projectApi, orgApi };
 });
 
-// The active test case's projectApi/orgApi overrides — set by each it() before rendering, read by
-// the `projectApi`/`orgApi` mock factories above (called lazily by TenantContext, after the module
-// mock is already wired, so a module-level mutable slot is what connects the two).
+// The active test's overrides, read lazily by the projectApi/orgApi factories after the module mock is wired.
 // eslint-disable-next-line prefer-const
 let currentProjectApiOverrides: Record<string, unknown> = {};
 // eslint-disable-next-line prefer-const
@@ -199,13 +183,9 @@ let currentOrgApiOverrides: Record<string, unknown> = {};
 
 // ---- console.error allowlist ------------------------------------------------------------------
 
-// Populated by actually running the suite once and inventorying known-benign library/React noise
-// that fires under jsdom + a MemoryRouter regardless of which view is mounted. Anything NOT on this
-// list fails the test it fires in — see each route's settle loop below.
+// Known-benign jsdom and MemoryRouter noise, inventoried from a real run. Anything else fails the test it fires in.
 const CONSOLE_ERROR_ALLOWLIST: RegExp[] = [
-  // React Router v7 warns about relative-splat resolution edge cases in dev builds; none of these
-  // routes exercise the ambiguous case, but the warning is a `console.warn`-shaped message some
-  // versions route through `console.error` under React's dev channel.
+  // React Router v7's relative-splat warning, which some versions route through console.error.
   /Relative route resolution/i,
 ];
 
@@ -220,17 +200,15 @@ type ManifestEntry = { path: string; kind: "view" | "redirect"; fullPath: string
 const ENTRIES = manifest as ManifestEntry[];
 const VIEWS = ENTRIES.filter((e) => e.kind === "view");
 
-/** Every distinct `:paramName` token used across the manifest's fullPaths, mapped mechanically to
- * one fixed fake value per name (`fake-<name>`) — not hand-picked per route. */
+/** Every `:paramName` in the manifest, mapped mechanically to `fake-<name>`. */
 const PARAM_NAMES = Array.from(
   new Set(VIEWS.flatMap((v) => Array.from(v.fullPath.matchAll(/:(\w+)/g)).map((m) => m[1]))),
 );
 const FIXED_PARAM_VALUES: Record<string, string> = Object.fromEntries(
   PARAM_NAMES.map((name) => [name, `fake-${name}`]),
 );
-// The two tenant params double as the fake org/project slugs used in the auth mock's fixtures
-// above, so a view that cross-checks the URL's orgSlug/projectSlug against the fetched
-// Organization/Project's own `slug` field still sees a consistent identity.
+// The tenant params double as the fake org and project slugs, so a view cross-checking URL against fetched slug stays
+// consistent.
 if (FIXED_PARAM_VALUES.orgSlug !== FAKE_ORG.slug || FIXED_PARAM_VALUES.projectSlug !== FAKE_PROJECT.slug) {
   throw new Error("routeManifest.smoke.test.tsx: FAKE_ORG/FAKE_PROJECT slugs must match FIXED_PARAM_VALUES");
 }
@@ -242,33 +220,26 @@ function resolveUrl(fullPath: string): string {
 // ---- per-route projectApi overrides ------------------------------------------------------------
 
 /**
- * The real answer a single-resource GET gives for one of this suite's `fake-<param>` ids: a 404
- * `ApiError`, which is exactly what the backend sends and what `http()` throws for it. Detail views
- * are reached here with ids that deliberately do not exist, so a 404 is the FAITHFUL response —
- * whereas the `Promise.resolve(undefined)` these overrides used before is a shape the endpoint can
- * never produce (a 200 carries real JSON, a genuine absence is `null`, a miss throws), and it only
- * ever exercised react-query's own "Query data cannot be undefined" dev-warning path. Rejecting
- * makes the route deterministically render its not-found/error state, which is a real render.
+ * What the backend really answers for a `fake-<param>` id: a 404 ApiError, so detail views render their not-found
+ * state deterministically. Resolving undefined is a shape the endpoint never produces.
  */
 const NOT_FOUND = (resource: string) => () =>
   Promise.reject(new ApiError(404, { code: `${resource}.not_found`, message: `no ${resource} with that id` }));
 
-/** Shared across many entries below. A genuinely empty list is a valid real API response for
- * these endpoints, not a stand-in for "didn't bother" -- each is still an explicit named override. */
+/** A genuinely empty list is a real response for these endpoints. */
 const EMPTY_TRIAGE = {
   cases: [],
   muted: [],
   recently_resolved: [],
-  // Read directly (no `?.`) by Triage.tsx's all-clear state, which an empty `cases: []` triggers.
-  // `traces_total`/`open_findings` are nullable on the wire and null only when the project has an
-  // open queue; zero here is correct since this fixture has `cases: []`.
+  // Triage's all-clear state reads this without `?.`.
   watching: { classifiers: 0, call_sites: 0, traces_last_day: 0, traces_total: 0, open_findings: 0 },
 };
 const EMPTY = () => Promise.resolve([]);
 
-/** Matches the full `Vitals` schema shape (dimension/groups/priced_models/total/window), not just
- * the two fields the pulse strip's happy path reads first -- an incomplete fixture here passed
- * only because the suite used to finish asserting before PulseStrip read `total.cost`. */
+/**
+ * The full `Vitals` shape: a partial fixture once passed only because the suite stopped before PulseStrip read
+ * `total.cost`.
+ */
 const EMPTY_GROUP = { cost: { usd: 0, delta_pct_per_turn: null, baseline_usd: null, calls: 0, unpriced_calls: 0, tokens: 0, flagged: false }, duration: { p50_ms: 0, p95_ms: 0, delta_pct: null, baseline_p95_ms: null, turns: 0, flagged: false }, flagged: false, key: null, label: null };
 const EMPTY_VITALS = {
   dimension: "call_site",
@@ -278,9 +249,7 @@ const EMPTY_VITALS = {
   window: { from: "2026-01-01T00:00:00Z", to: "2026-01-08T00:00:00Z", days: 7, baseline_from: "2025-12-25T00:00:00Z", baseline_to: "2026-01-01T00:00:00Z" },
 };
 
-/** Matches the `OnboardingView` schema -- `useOnboarding` (Triage) reads `.stage` directly, no
- * `?.`, so an unmocked default trips the same "data cannot be undefined" failure on any route
- * that mounts it. */
+/** `useOnboarding` reads `.stage` without `?.`. */
 const EMPTY_ONBOARDING = {
   stage: "watching" as const,
   listening: true,
@@ -298,12 +267,7 @@ const EMPTY_ONBOARDING = {
   baseline_best_window_count: 0,
 };
 
-/**
- * Matches `SubstrateStatusView` with `has_tagged_span: true` -- deliberately not the not-connected
- * shape a brand-new project would report. `ProjectShell` reads this on every project-scoped route
- * to decide whether to render `<ConnectGate/>` in place of the real view; without a connected
- * fixture here, every project-scoped route would mount the gate instead of the view under test.
- */
+/** A connected project: without it ProjectShell mounts ConnectGate in place of every project-scoped view. */
 const CONNECTED_SUBSTRATE_STATUS = {
   has_live: true,
   untagged_spans: 0,
@@ -314,102 +278,88 @@ const CONNECTED_SUBSTRATE_STATUS = {
   service_name: "smoke-test",
 };
 
-/** Envelope-shaped list endpoints — each returns its own wrapper object, never a bare array, so an
- * `EMPTY` (`[]`) fixture would be the same wrong-but-plausible shape this suite exists to catch. */
+/** Envelope-shaped: a bare `[]` would be the wrong-but-plausible shape this suite exists to catch. */
 const EMPTY_PROVIDER_CATALOG = { models: [] as unknown[], platforms: [] as unknown[] };
 const EMPTY_PROVIDER_CREDENTIALS = { credentials: [] as unknown[] };
 const EMPTY_MODEL_SETTINGS = { groups: [] as unknown[], lanes: [] as unknown[], models: [] as unknown[], settings: [] as unknown[], configured_providers: [] as unknown[] };
 const EMPTY_REDACTION_RULES = { rules: [] as unknown[] };
 const EMPTY_SESSION_SPANS = { spans: [] as unknown[], spans_truncated: false };
+const EMPTY_CHART_SCOPES = { days: 28, call_sites: [] as unknown[], tools: [] as unknown[], classifiers: [] as unknown[] };
 
 /**
- * Applied to every tenant-scoped route, view-specific overrides layered on top. `useCaseCounts`
- * calls `api.getTriage` for the nav badge from inside `ShellChrome`, which every tenant route
- * mounts regardless of which view it lands on -- an unmocked query resolving `undefined` logs a
- * "data cannot be undefined" console.error even when a `?.` consumer never lets it crash.
- *
- * `getVitals`/`onboarding` belong here too: `CapabilityGate` fail-closes while its capability read
- * is loading and redirects to Triage, so on every capability-gated route Triage briefly mounts,
- * starts these queries, and unmounts before they resolve -- React Query still runs them to
- * completion and logs the same warning.
- *
- * `substrateStatus` joins the set because `ProjectShell` reads it before `ShellChrome` (and every
- * route inside it) ever mounts -- see `CONNECTED_SUBSTRATE_STATUS`'s own comment.
+ * Applied to every tenant route. ShellChrome's nav badge reads getTriage; CapabilityGate briefly mounts Triage
+ * (getVitals, onboarding, listBehaviorFindings) while its read loads; ProjectShell reads substrateStatus before anything mounts. Unmocked,
+ * each logs "data cannot be undefined".
  */
 const SHELL_CHROME_OVERRIDES: Record<string, () => Promise<unknown>> = {
   getTriage: () => Promise.resolve(EMPTY_TRIAGE),
   getVitals: () => Promise.resolve(EMPTY_VITALS),
   onboarding: () => Promise.resolve(EMPTY_ONBOARDING),
   substrateStatus: () => Promise.resolve(CONNECTED_SUBSTRATE_STATUS),
-  // Same transient-Triage-mount reason as getVitals/onboarding above: Triage reads
-  // `configured_providers` to tell "found nothing" apart from "never ran", so this fires on
-  // every tenant route, gated ones included.
+  // Triage reads `configured_providers` during that same transient mount.
   getModelSettings: () => Promise.resolve(EMPTY_MODEL_SETTINGS),
+  // ...and its Findings section, below Cases.
+  listBehaviorFindings: () => Promise.resolve({ findings: [] }),
 };
 
-/** Per-view projectApi overrides, keyed by the manifest's raw (un-nested) `path` — unique enough
- * for this purpose since it only needs to key INTO the per-test override map, not to be a URL. */
+/** Keyed by the manifest's raw `path`. */
 const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   "cases/:caseId": {
     getCase: NOT_FOUND("case"),
-    // The header offers "Connect repository" beside Run RCA when the project has none, so the
-    // case page now reads the integration too (useRepoPrompt).
+    // The case header offers "Connect repository" when the project has none.
     getGitIntegration: () => Promise.resolve(null),
   },
   sources: {
     listSources: EMPTY,
   },
   traces: {
-    // Matches the real `TracesPage` schema (`traces`/`next_cursor`), not a generic
-    // `items`/`next_cursor` shape -- `useObservedFacets` reads `pages.flatMap((p) => p.traces)`
-    // with no `?.`.
+    // The real `TracesPage` shape: `useObservedFacets` reads `p.traces` without `?.`.
     listTraces: () => Promise.resolve({ traces: [], next_cursor: null }),
+    // The Detected by filter offers the project's classifiers.
+    listClassifiers: EMPTY,
   },
   "traces/:traceId": {
     getTrace: NOT_FOUND("trace"),
   },
-  // SessionDetail issues BOTH reads on mount; the spans read is its own envelope
-  // (`{spans, spans_truncated}`), not a bare array.
+  // SessionDetail issues both reads on mount; spans come in their own envelope.
   "sessions/:sessionId": {
     getSession: NOT_FOUND("session"),
     getSessionSpans: () => Promise.resolve(EMPTY_SESSION_SPANS),
   },
   classifiers: {
     listClassifiers: EMPTY,
-    listBehaviorFindings: EMPTY,
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
+    getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
   },
+  // The old catalog redirects to Classifiers, so it issues Classifiers' reads.
   "classifiers/detectors": {
     listClassifiers: EMPTY,
-    getClassifierDailyVolume: EMPTY,
-    listClassifierHealth: EMPTY,
+    getClassifierChartScopes: () => Promise.resolve(EMPTY_CHART_SCOPES),
   },
+  // No classifier has the fake id: the configure page's not-found state.
+  "classifiers/:classifierId": {
+    listClassifiers: EMPTY,
+  },
+  // A real groundedness finding, so the whole story renders rather than only not-found.
   "classifiers/findings/:findingId": {
-    getBehaviorFinding: NOT_FOUND("behavior finding"),
+    getBehaviorFinding: () => Promise.resolve(GROUNDEDNESS_FINDING_DETAIL),
   },
   vitals: {
     getVitals: () => Promise.resolve(EMPTY_VITALS),
   },
-  // Legacy `/pipeline/*` URLs are the one entry here that still resolves to a VIEW rather than a
-  // redirect: `ToProjectSegment segment="triage"` in App.tsx. The grader overview it used to land
-  // on is gone, along with `getGraderStats`/`listObserverAlerts`/`listObserverProposals`, so what
-  // remains is the triage surface's own queries. The `graders`, `review` and `observer` entries
-  // that sat here are gone with their views -- those paths are redirects in the manifest now.
+  // Legacy `/pipeline/*` still resolves to a view (triage), so it needs triage's queries.
   "pipeline/*": {
     getPipeline: () => Promise.resolve(null),
     getTriage: () => Promise.resolve(EMPTY_TRIAGE),
   },
   "rca/:reportId": {
     getRcaReport: NOT_FOUND("rca report"),
-    // Same read as the case page: the "analyzed without repository access" notice offers to fix it.
+    // The "analyzed without repository access" notice reads this too.
     getGitIntegration: () => Promise.resolve(null),
   },
-  // ---- Settings sections -----------------------------------------------------------------------
-  // Every one of these mounts a view that reads at least one project endpoint on mount, and each
-  // needs the real shape its endpoint returns for an empty project.
+  // Settings sections each read at least one endpoint on mount and need its real empty shape.
 
-  // `/settings` itself has no view: its index route redirects to `settings/sources`, so it lands on
-  // Sources and issues Sources' read.
+  // `/settings` redirects to Sources, so it issues Sources' read.
   settings: {
     listSources: EMPTY,
   },
@@ -417,9 +367,7 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
     listSources: EMPTY,
     getGitIntegration: () => Promise.resolve(null),
   },
-  // listProviderCatalog/listProviderCredentials live on the org-scoped API -- see
-  // VIEW_ORG_OVERRIDES below, not this (project-scoped) map.
-  // The client coalesces the endpoint's empty body to `null` — a real "no repo connected" answer.
+  // The client coalesces an empty body to `null`: a real "no repo connected" answer.
   git: {
     getGitIntegration: () => Promise.resolve(null),
   },
@@ -450,23 +398,422 @@ const VIEW_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
         can_manage: true,
       }),
   },
-  // Keyed on the manifest's literal raw path, "*" collides two distinct routes: the project-level
-  // catch-all (falls to Triage) and Settings' own catch-all (falls to Sources). `listSources` only
-  // matters to the second but is harmless on the first, and there's no way to tell them apart by
-  // path alone.
+  // "*" is both the project catch-all (Triage) and Settings' catch-all (Sources); listSources matters only to the
+  // second.
   "*": {
     listSources: EMPTY,
   },
 };
 
-// Provider credentials are org-scoped (TenantContext.useOrgApi), not project-scoped -- a second,
-// smaller override map for the one route that reads them.
+// Provider credentials are org-scoped, so the one route that reads them gets its own map.
 const VIEW_ORG_OVERRIDES: Record<string, Record<string, () => Promise<unknown>>> = {
   providers: {
     listProviderCatalog: () => Promise.resolve(EMPTY_PROVIDER_CATALOG),
     listProviderCredentials: () => Promise.resolve(EMPTY_PROVIDER_CREDENTIALS),
   },
 };
+
+// Shapes follow the generated schema types, so an API rename fails `tsc` here.
+
+const T0 = "2026-01-06T10:00:00Z";
+const T1 = "2026-01-06T12:00:00Z";
+
+const SECRET_LEAK: components["schemas"]["SecretLeakDetail"] = {
+  basis: "Any high-confidence match opens a case.",
+  confidence: "high",
+  firstAt: T0,
+  lastAt: T1,
+  keys: [{ lastAt: T1, leaks: 2, masked: "sk-a…9f2c", storedRaw: true, traces: 2 }],
+  leakCount: 2,
+  leaks: [
+    { at: T0, masked: "sk-a…9f2c", spanId: "span-1", stored: "raw", traceId: "trace-1" },
+    { at: T1, masked: "sk-a…9f2c", spanId: "span-2", stored: "redacted", traceId: "trace-2" },
+  ],
+  rule: "openai_api_key",
+  threshold: 1,
+  traceCount: 2,
+  windowEnd: T1,
+  windowSeconds: 86400,
+  windowStart: "2026-01-05T12:00:00Z",
+};
+
+const MALFORMED_OUTPUT: MalformedOutputDetail = {
+  fields: [
+    { depth: 0, failing: 0, name: "items", path: "items", required: true, type: "array" },
+    { depth: 1, failing: 14, name: "sku", path: "items[].sku", required: true, type: "string" },
+  ],
+  notJson: 3,
+  other: 0,
+  rate: {
+    bucketKey: "extract.order",
+    criticality: 0.9,
+    curRate: 0.17,
+    deltaPp: 15,
+    direction: "up",
+    effectSize: 0.6,
+    failingTraces: ["trace-3"],
+    failuresCur: 17,
+    nCur: 100,
+    nRef: 400,
+    onsetAt: T0,
+    patterns: [],
+    patternsTruncated: false,
+    refRate: 0.02,
+    statistic: 5.1,
+    threshold: 3,
+    windowClosedAt: T1,
+    windowOpenedAt: "2026-01-05T12:00:00Z",
+  },
+};
+
+const MALFORMED_OUTPUTS: MalformedOutputPage = {
+  nextCursor: null,
+  total: 1,
+  rows: [
+    {
+      document: '{"items":[{"qty":2}]}',
+      highlightLines: [1],
+      message: "items[0].sku is required",
+      name: "extract_order",
+      spanId: "span-3",
+      startedAt: T0,
+      traceId: "trace-3",
+    },
+  ],
+};
+
+const WITNESS_EVIDENCE: EvidenceSpanPage = {
+  counts: { witness: 1 },
+  recordedCounts: { witness: 1 },
+  nextCursor: null,
+  rows: [
+    {
+      callSiteId: "extract.order",
+      errorType: null,
+      inputPreview: "order #1182",
+      kind: "llm",
+      latencyMs: 820,
+      level: null,
+      models: ["gpt-5"],
+      name: "extract_order",
+      notRolledUp: false,
+      outputPreview: '{"items":[{"qty":2}]}',
+      partialCost: false,
+      rank: 1,
+      role: "witness",
+      secretKey: null,
+      sessionId: null,
+      spanId: "span-3",
+      staleTotals: false,
+      startedAt: T0,
+      status: "ok",
+      storedAs: null,
+      totalCost: 0.002,
+      totalTokens: 900,
+      traceId: "trace-3",
+      violation: null,
+    },
+  ],
+};
+
+function caseDetail(detector: string, title: string, over: Partial<CaseDetail>): CaseDetail {
+  const base = GROUNDEDNESS_CASE_DETAIL;
+  return {
+    ...base,
+    groundedness: null,
+    rca: null,
+    rca_report_id: null,
+    ...over,
+    case: {
+      ...base.case,
+      call_site_id: "extract.order",
+      detector,
+      metric: detector,
+      rca_verdict: null,
+      subject_id: "extract.order",
+      subject_label: "extract.order",
+      title,
+    },
+  };
+}
+
+function findingDetail(
+  detector: string,
+  causeKind: BehaviorFindingDetail["finding"]["causeKind"],
+  over: Partial<BehaviorFindingDetail>,
+): BehaviorFindingDetail {
+  const base = GROUNDEDNESS_FINDING_DETAIL;
+  return {
+    ...base,
+    groundedness: null,
+    ...over,
+    finding: {
+      ...base.finding,
+      callSiteId: "extract.order",
+      caseId: GROUNDEDNESS_CASE_DETAIL.case.id,
+      causeKey: `${detector}:extract.order`,
+      causeKind,
+      detector,
+      title: `${detector} finding`,
+      workflowKey: "extract.order",
+    },
+  };
+}
+
+const FINISHED_RCA: RcaReport = {
+  ...GROUNDEDNESS_REPORT,
+  report_kind: "degradation",
+  verdict: "behavior_change",
+  metric: "tool_error_rate",
+  current_value: 0.17,
+  prior_value: 0.02,
+  delta: -0.15,
+  detailed_report: "The order extractor dropped `sku` after the prompt change.",
+  causes: [{ ...GROUNDEDNESS_REPORT.causes[0], affected_count: 1 }],
+  call_site_id: "extract.order",
+  subject_id: "extract.order",
+  subject_label: "extract.order",
+  summary: "The prompt change dropped the sku field.",
+  ruled_out: [
+    {
+      assessment: "ruled_out",
+      check: "traffic_mix",
+      detail: "Traffic mix unchanged.",
+      measurement: null,
+      passed: true,
+      question: "Did the traffic mix change?",
+    },
+  ],
+};
+
+const resolved = <T,>(value: T) => () => Promise.resolve(value);
+
+const SECRET_LEAK_CLASSIFIER: components["schemas"]["ClassifierView"] = {
+  id: "fake-classifierId",
+  classifier_key: "secret_leak",
+  name: "Secret leak",
+  description: "API keys and tokens in outputs.",
+  detector: "secret_leak",
+  config_json: null,
+  built_in: true,
+  version: 1,
+  enabled: true,
+  mode: "tracking",
+  created_at: T0,
+  updated_at: T0,
+  readiness: null,
+  call_site_ids: null,
+};
+
+/** Every read the configure page issues on mount, answered for a real classifier. */
+const CONFIGURE_PAGE_READS: Record<string, () => Promise<unknown>> = {
+  listClassifiers: resolved([SECRET_LEAK_CLASSIFIER]),
+  getClassifierDailyVolume: resolved({ days: [], trace_totals: [], classifiers: [] }),
+  listClassifierHealth: EMPTY,
+  listClassifierEvents: EMPTY,
+  listClassifierCallSites: EMPTY,
+};
+
+/** One point of a chart, with only the fields its kind uses set. */
+function chartPoint(start: number, hours: number, d: Partial<ChartPoint>): ChartPoint {
+  return {
+    start_at: new Date(start).toISOString(),
+    end_at: new Date(start + hours * 3_600_000).toISOString(),
+    open: false,
+    checked: null,
+    flagged: null,
+    n: null,
+    p50: null,
+    p95: null,
+    count: null,
+    total: null,
+    reached: null,
+    ...d,
+  };
+}
+
+const CHART_FROM = Date.parse("2026-09-11T00:00:00Z");
+const CHART_DAYS = 28;
+/** One point a day, the last one still filling. */
+const dailyPoints = (d: (i: number) => Partial<ChartPoint>) =>
+  Array.from({ length: CHART_DAYS }, (_, i) =>
+    chartPoint(CHART_FROM + i * 86_400_000, 24, { open: i === CHART_DAYS - 1, ...d(i) }),
+  );
+/** Every 6-hour bucket of the range, as a 28-day count card carries them. */
+const sixHourPoints = (d: (i: number) => Partial<ChartPoint>) =>
+  Array.from({ length: CHART_DAYS * 4 }, (_, i) =>
+    chartPoint(CHART_FROM + i * 6 * 3_600_000, 6, { open: i === CHART_DAYS * 4 - 1, ...d(i) }),
+  );
+
+const chartCard = (c: Partial<ChartCard>): ChartCard => ({
+  classifier_id: "c",
+  classifier_key: "frustration",
+  name: "Frustration",
+  kind: "rate",
+  measure: null,
+  unit: "fraction",
+  learning: null,
+  headline: { value: null, delta: null },
+  baseline: null,
+  arming: null,
+  points: [],
+  cases: { open_cases: 0, spans: [] },
+  ...c,
+});
+
+/** One call site and one tool, with a card of every kind: a rate with a baseline and an open case, a learning range, a count with an arming bar. */
+const CHART_SCOPES: components["schemas"]["ChartScopesView"] = {
+  days: 28,
+  call_sites: [{ call_site_id: "extract.order", open_cases: 1, learning: false, turns: 500 }],
+  tools: [{ tool_key: "tool:search_orders", label: "search_orders", open_cases: 0, calls: 900, callers: ["extract.order"] }],
+  classifiers: [
+    {
+      id: "c-frustration",
+      classifier_key: "frustration",
+      name: "Frustration",
+      status: "on",
+      waiting_reason: null,
+      covers: "call_sites",
+      all_call_sites: false,
+      call_site_count: 1,
+    },
+  ],
+};
+
+const chartsView = (scope: "call_site" | "tool", scopeId: string, cards: ChartCard[]): ClassifierCharts => ({
+  scope,
+  scope_id: scopeId,
+  days: CHART_DAYS,
+  from_day: "2026-09-11",
+  to_day: "2026-10-08",
+  cards,
+  chips: [{ classifier_id: "c-malformed", classifier_key: "malformed_output", name: "Malformed Output", state: "waiting", reason: "no_schema", since: null }],
+});
+
+const CALL_SITE_CHARTS = chartsView("call_site", "extract.order", [
+  chartCard({
+    classifier_id: "c-frustration",
+    headline: { value: 0.072, delta: 0.03 },
+    baseline: { calls: 1000, failures: 42, rate: 0.042, pinned: false, p50: null, p95: null },
+    points: dailyPoints((i) => ({ checked: i === 3 ? 0 : 100, flagged: i % 9 })),
+    cases: {
+      open_cases: 1,
+      spans: [
+        {
+          finding_id: "f1",
+          case_id: "case-1",
+          case_reference: "C-43",
+          case_title: "Users on extract.order grew frustrated",
+          case_state: "open",
+          start_at: "2026-10-04T09:00:00Z",
+          end_at: null,
+          resolution: null,
+          disposition: null,
+        },
+      ],
+    },
+  }),
+  chartCard({
+    classifier_id: "c-duration",
+    classifier_key: "duration_drift",
+    name: "Duration Drift",
+    kind: "range",
+    measure: "turn_duration",
+    unit: "ms",
+    learning: { learned: 34, needed: 100 },
+    headline: { value: 16_500, delta: null },
+    points: dailyPoints((i) => (i < 20 ? { n: 0 } : { n: 40, p50: 4_000 + i * 10, p95: 11_000 + i * 50 })),
+  }),
+  chartCard({
+    classifier_id: "c-secret",
+    classifier_key: "secret_leak",
+    name: "Secret Leak",
+    kind: "count",
+    unit: "count",
+    headline: { value: 3, delta: null },
+    arming: { threshold: 1, window_seconds: 86_400, basis: "event_count", confidence: "high" },
+    points: sixHourPoints((i) => ({ count: i === 80 ? 2 : 0, total: i === 80 ? 3 : 0, reached: i >= 80 && i < 84 })),
+  }),
+]);
+
+const TOOL_CHARTS = chartsView("tool", "tool:search_orders", [
+  chartCard({ classifier_id: "c-tool", classifier_key: "tool_error", name: "Tool Errors", points: dailyPoints(() => ({ checked: 30, flagged: 1 })) }),
+]);
+
+/** One detail route on a real payload: its manifest entry, the reads it answers, and the heading it must draw. */
+const DETAIL_FIXTURES: {
+  name: string;
+  path: string;
+  overrides: Record<string, () => Promise<unknown>>;
+  heading: RegExp;
+}[] = [
+  {
+    name: "a real classifier",
+    path: "classifiers/:classifierId",
+    overrides: CONFIGURE_PAGE_READS,
+    heading: /Secret leak/,
+  },
+  {
+    name: "real charts for a call site and a tool",
+    path: "classifiers",
+    overrides: {
+      getClassifierChartScopes: resolved(CHART_SCOPES),
+      getClassifierCharts: (scope?: unknown) =>
+        Promise.resolve(scope && typeof scope === "object" && "tool" in scope ? TOOL_CHARTS : CALL_SITE_CHARTS),
+    },
+    heading: /^Classifiers$/,
+  },
+  {
+    name: "a secret-leak case",
+    path: "cases/:caseId",
+    overrides: {
+      getCase: resolved(
+        caseDetail("secret_leak", "OpenAI key in extract.order output", { secret_leak: SECRET_LEAK }),
+      ),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+    },
+    heading: /OpenAI key in extract\.order output/,
+  },
+  {
+    name: "a malformed-output case",
+    path: "cases/:caseId",
+    overrides: {
+      getCase: resolved(
+        caseDetail("malformed_output", "extract.order outputs failing their schema", {
+          malformed_output: MALFORMED_OUTPUT,
+        }),
+      ),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+      getMalformedOutputs: resolved(MALFORMED_OUTPUTS),
+    },
+    heading: /extract\.order outputs failing their schema/,
+  },
+  {
+    name: "a secret-leak finding",
+    path: "classifiers/findings/:findingId",
+    overrides: {
+      getBehaviorFinding: resolved(findingDetail("secret_leak", "armed_window", { secretLeak: SECRET_LEAK })),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+    },
+    heading: /openai_api_key in extract\.order output/,
+  },
+  {
+    name: "a malformed-output finding",
+    path: "classifiers/findings/:findingId",
+    overrides: {
+      getBehaviorFinding: resolved(findingDetail("malformed_output", "malformed_rate", { malformedOutput: MALFORMED_OUTPUT })),
+      getBehaviorFindingEvidence: resolved(WITNESS_EVIDENCE),
+      getMalformedOutputs: resolved(MALFORMED_OUTPUTS),
+    },
+    heading: /Schema failure rate 2\.00% → 17\.00%/,
+  },
+  {
+    name: "a finished RCA report",
+    path: "rca/:reportId",
+    overrides: { getRcaReport: resolved(FINISHED_RCA) },
+    heading: /RCA \(root-cause analysis\): extract\.order/,
+  },
+];
 
 // ---- rendering ----------------------------------------------------------------------------------
 
@@ -477,7 +824,7 @@ function renderApp(url: string) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <DensityProvider persist className="contents">
+        <DensityProvider className="contents">
           <MemoryRouter initialEntries={[url]}>
             <App />
           </MemoryRouter>
@@ -488,16 +835,58 @@ function renderApp(url: string) {
   return { ...view, queryClient };
 }
 
-// Every view is React.lazy-loaded (`named()` in App.tsx). In production that import gets a head
-// start from AuthContext's `preloadRouteChunk`, keyed off `window.location.pathname` -- but this
-// suite renders behind a MemoryRouter, which never touches `window.location`, so every test would
-// otherwise hit a cold `import()` on first mount. That import can still be in flight at the
-// moment the DOM looks non-blank and at the moment react-query first reports `isFetching() === 0`,
-// so glob-importing every view module up front, once, removes the race at its source.
-// Exclude *.test.tsx: it also matches sibling test files under views/, and eagerly importing one
-// runs its top-level vi.mock() calls in this file's module context, silently overriding a real
-// dependency for every test that runs after it.
+// Eagerly import every view once. Behind a MemoryRouter the production preload never fires, so a cold lazy import
+// could still be in flight when the page looks settled. Test files are excluded: importing one would run its
+// vi.mock() calls here.
 const VIEW_MODULES = import.meta.glob(["./views/**/*.tsx", "!./views/**/*.test.tsx"]);
+
+/** Mounts the real App at `url` and waits until the view has settled; throws if it never does. */
+async function mountAndSettle(url: string): Promise<HTMLElement> {
+  const { container, queryClient } = renderApp(url);
+
+  await waitFor(
+    () => {
+      expect(container.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+    },
+    { timeout: 5000 },
+  );
+  // Settled means the view's Suspense fallback ("Loading view") is gone, react-query is idle, and the query cache has
+  // not changed for QUIET_MS; one idle snapshot can fall between two state changes of one query. Each poll is its own
+  // short act() scope: React flushes queued work, including lazy imports, as a scope exits, and one long waitFor-
+  // style act parked the imports so most routes asserted against a spinner.
+  const QUIET_MS = 60;
+  const TIMEOUT_MS = 5000;
+  const snapshotQueries = () =>
+    JSON.stringify(
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .map((q) => [q.queryHash, q.state.status, q.state.fetchStatus])
+        .sort(),
+    );
+  let lastSnapshot = snapshotQueries();
+  let quietSince = Date.now();
+  const deadline = Date.now() + TIMEOUT_MS;
+  for (;;) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const suspended = container.querySelector('[aria-label="Loading view"]') !== null;
+    const busy = queryClient.isFetching() > 0 || queryClient.isMutating() > 0;
+    const snapshot = snapshotQueries();
+    if (suspended || busy || snapshot !== lastSnapshot) {
+      lastSnapshot = snapshot;
+      quietSince = Date.now();
+    }
+    if (!suspended && Date.now() - quietSince >= QUIET_MS) break;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `route never settled while mounting ${url} (view still suspended: ${suspended}, react-query busy: ${busy})`,
+      );
+    }
+  }
+  return container;
+}
 
 describe("route manifest render smoke test", () => {
   beforeAll(async () => {
@@ -525,7 +914,6 @@ describe("route manifest render smoke test", () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
-    cleanup();
   });
 
   for (const view of VIEWS) {
@@ -534,104 +922,121 @@ describe("route manifest render smoke test", () => {
       currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...(VIEW_OVERRIDES[view.path] ?? {}) };
       currentOrgApiOverrides = { ...(VIEW_ORG_OVERRIDES[view.path] ?? {}) };
 
-      const { container, queryClient } = renderApp(url);
-
-      await waitFor(
-        () => {
-          expect(container.textContent?.trim().length ?? 0).toBeGreaterThan(0);
-        },
-        { timeout: 5000 },
-      );
-      // Wait for the route to genuinely SETTLE — which means three things at once, none of which
-      // the DOM merely looking non-blank implies:
-      //
-      //  1. The routed view has actually MOUNTED. Every view is React.lazy'd behind ProjectShell's
-      //     own <Suspense> (App.tsx), and the shell chrome around that boundary already satisfies
-      //     the non-blank check above — so "container has text" is true while the routed view is
-      //     still nothing but a spinner. Waiting on the fallback's `aria-label="Loading view"` to
-      //     disappear is what makes this a render smoke test of the VIEW rather than of the shell.
-      //  2. react-query is idle, and
-      //  3. the query cache's shape has been completely unchanged for a full QUIET_MS window —
-      //     a single isFetching()===0 snapshot can be pure luck between two of one query's own
-      //     state transitions, so it does not reliably outlast react-query's "Query data cannot be
-      //     undefined" dev warning, which fires synchronously inside a query's fetch strictly
-      //     before that query's status settles.
-      //
-      // Each poll re-enters `act()` DELIBERATELY. React flushes the work it has queued as an
-      // `act()` scope EXITS, so a wait that runs entirely inside one long-lived act scope — which
-      // is exactly what a single RTL `waitFor` is, since its asyncWrapper wraps the whole poll loop
-      // in one act — parks React's lazy-import resolution in the act queue and never flushes it.
-      // That was this file's real nondeterminism: on most project-scoped routes the view never
-      // mounted at all before the assertion ran, so most of this suite was asserting against a
-      // spinner, and the handful of runs where a view DID win the race were the ones that "flaked"
-      // — its unmocked queries resolved undefined and tripped the console.error assertion. Short
-      // act scopes in a loop flush per iteration, so every route now mounts its view every run.
-      const QUIET_MS = 250;
-      const TIMEOUT_MS = 5000;
-      const snapshotQueries = () =>
-        JSON.stringify(
-          queryClient
-            .getQueryCache()
-            .getAll()
-            .map((q) => [q.queryHash, q.state.status, q.state.fetchStatus])
-            .sort(),
-        );
-      let lastSnapshot = snapshotQueries();
-      let quietSince = Date.now();
-      const deadline = Date.now() + TIMEOUT_MS;
-      for (;;) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        });
-        const suspended = container.querySelector('[aria-label="Loading view"]') !== null;
-        const busy = queryClient.isFetching() > 0 || queryClient.isMutating() > 0;
-        const snapshot = snapshotQueries();
-        if (suspended || busy || snapshot !== lastSnapshot) {
-          lastSnapshot = snapshot;
-          quietSince = Date.now();
-        }
-        if (!suspended && Date.now() - quietSince >= QUIET_MS) break;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `route never settled while mounting ${url} (view still suspended: ${suspended}, react-query busy: ${busy})`,
-          );
-        }
-      }
+      await mountAndSettle(url);
 
       expect(unexpectedErrors, `unexpected console.error while mounting ${url}:\n${unexpectedErrors.join("\n")}`).toEqual([]);
     });
   }
 
-  // The Sidebar project switcher's "Organizations" section (header, org rows, "+ New
-  // organization") is not rendered in this test's mock -- it's the actual multi-org UI, not
-  // NewOrg.tsx, and it renders on every authenticated page, so a wrong answer here would be far
-  // more visible than on the one screen NewOrg used to live on.
+  // Bug: a crash in the success render of the case, finding or RCA page ships green, because the loop reaches them
+  // only with ids that 404.
+  for (const fixture of DETAIL_FIXTURES) {
+    const view = VIEWS.find((v) => v.path === fixture.path);
+    it(`mounts ${fixture.path} on ${fixture.name} and draws its heading`, async () => {
+      if (!view) throw new Error(`no manifest view with raw path ${fixture.path}`);
+      const url = resolveUrl(view.fullPath);
+      currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES[fixture.path], ...fixture.overrides };
+
+      const container = await mountAndSettle(url);
+
+      within(container).getByRole("heading", { level: 1, name: fixture.heading });
+      expect(unexpectedErrors, `unexpected console.error while mounting ${url}:\n${unexpectedErrors.join("\n")}`).toEqual([]);
+    });
+  }
+
+  // The switcher renders on every page, so an Organizations section here would be far more visible than NewOrg ever
+  // was.
   it("sidebar switcher has no Organizations section or New-organization action", async () => {
     currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES };
     const url = resolveUrl("/orgs/:orgSlug/projects/:projectSlug/triage");
     const { container } = renderApp(url);
 
-    // ProjectShell reads listProjects + substrateStatus before ever mounting ShellChrome, so a
-    // bare "some text exists" check would pass on the transient "Loading…" screen (App.tsx's
-    // `FullScreen`) rather than on the Sidebar this test actually asserts against. Wait for the
-    // switcher button itself.
+    // Wait for the switcher itself: a text check passes on ProjectShell's transient loading screen.
     await waitFor(() => {
       expect(container.querySelector('button[aria-haspopup="menu"]'), "project switcher button not found").toBeTruthy();
     });
     const switcherButton = container.querySelector('button[aria-haspopup="menu"]');
-    // click, not mouseenter: ProjectSwitcher's onClick also opens the dropdown, and React 17+'s
-    // enter/leave handling is computed off native mouseover/mouseout pairs, not a raw synthetic
-    // "mouseenter" dispatch -- click is the reliable way to open it from a bare DOM event.
+    // Click opens the dropdown reliably; a synthetic mouseenter does not.
     (switcherButton as HTMLButtonElement).click();
 
     await waitFor(() => {
-      // "Projects" -- the section that stays open -- must actually be there, so an absent
-      // "Organizations" heading means the paid section didn't render, not that the dropdown itself
-      // never opened.
+      // Projects must render, so a missing Organizations heading means no section, not an unopened menu.
       expect(container.textContent).toContain("Projects");
     });
 
     expect(container.textContent).not.toContain("Organizations");
     expect(container.textContent).not.toContain("New organization");
+  });
+
+  // Bug: the notifications page reachable by URL while alerting is off, showing settings that deliver nothing.
+  it("does not open the notifications page while alerting is off", async () => {
+    const listAlertRules = vi.fn(EMPTY);
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...VIEW_OVERRIDES.notifications, listAlertRules };
+
+    await mountAndSettle(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/settings/notifications"));
+
+    expect(listAlertRules).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * Where the app sends a visitor before any view mounts. Bugs: a signed-in user with no organization left on a blank
+ * screen, an org's only real project confused with its sample, and a project with no tagged span shown the shell
+ * instead of the connect gate.
+ */
+describe("app entry redirects", () => {
+  afterEach(() => {
+    currentProjectApiOverrides = {};
+  });
+
+  // Not to /login: that sends a signed-in visitor back to the root, which sent them there, forever.
+  it("tells a signed-in user who belongs to no organization so, and lets them sign out", async () => {
+    vi.mocked(mockedAuth.me).mockResolvedValueOnce({ ...FAKE_ME, orgs: [] });
+    const { container } = renderApp("/");
+
+    await waitFor(() => expect(container.textContent).toContain("not a member of any organization"));
+    // Signing in again mints a personal organization, so an invitation is not what they need.
+    expect(container.textContent).toContain("Sign out and sign in again to get your own organization.");
+    expect(mockedAuth.mode).not.toHaveBeenCalled();
+
+    vi.mocked(mockedAuth.logout).mockResolvedValueOnce({ frontendUrl: "about:blank" });
+    within(container).getByRole("button", { name: "Sign out" }).click();
+    await waitFor(() => expect(mockedAuth.logout).toHaveBeenCalled());
+  });
+
+  it("sends an organization whose only project is the sample to create a real one", async () => {
+    vi.mocked(mockedAuth.listProjects).mockResolvedValueOnce([{ ...FAKE_PROJECT, deleting_at: null, settings: '{"sample": true}' }]);
+    const { container } = renderApp("/orgs/fake-orgSlug");
+
+    await waitFor(() => expect(container.textContent).toContain("New project"));
+  });
+
+  // Bug: a bookmark or Slack link to the old catalog rail (`?classifier=<id>`) lands on the Classifiers charts
+  // instead of the classifier it named.
+  it("sends an old catalog link for one classifier to that classifier's configure page", async () => {
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
+    const { container } = renderApp(
+      `${resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors")}?classifier=fake-classifierId`,
+    );
+
+    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Secret leak" }));
+  });
+
+  it("sends the old catalog itself to Classifiers", async () => {
+    currentProjectApiOverrides = { ...SHELL_CHROME_OVERRIDES, ...CONFIGURE_PAGE_READS };
+    const { container } = renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/classifiers/detectors"));
+
+    await waitFor(() => within(container).getByRole("heading", { level: 1, name: "Classifiers" }));
+  });
+
+  it("puts a project with no tagged span behind the connect gate", async () => {
+    currentProjectApiOverrides = {
+      ...SHELL_CHROME_OVERRIDES,
+      substrateStatus: () => Promise.resolve({ ...CONNECTED_SUBSTRATE_STATUS, has_tagged_span: false, tagged_spans: 0 }),
+    };
+    const { container } = renderApp(resolveUrl("/orgs/:orgSlug/projects/:projectSlug/triage"));
+
+    await waitFor(() => expect(container.textContent).toContain("Connect your traces"));
+    expect(container.querySelector('button[aria-haspopup="menu"]')).toBeNull();
   });
 });

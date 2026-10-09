@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.metering;
 
-import ai.tessary.llmspi.ModelLane;
 import java.math.BigDecimal;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -11,13 +10,10 @@ import org.springframework.stereotype.Repository;
 /**
  * The READ half of the llm_call ledger — usage reporting.
  *
- * <p>Split from {@code usage.LlmUsageQueryRepository} (which keeps only the insert) because the two halves
+ * <p>Split from {@code usage.LlmCallWriteRepository} (which keeps only the insert) because the two halves
  * sit at different layers: recording a call is a substrate concern every LLM caller performs, while
  * aggregating calls into a bill is a surface one. Sharing a class made every caller of the recorder
  * depend on the reporting stack.
- *
- * <p>Original: The single owner of {@code llm_call} SQL: the per-call append, and the org-scoped aggregations the
- * usage surface reads.
  *
  * <p><b>Why not {@code metric_rollup}.</b> That table meters CLOSED hour/day buckets of one
  * {@code llm_tokens} scalar — no lane, no model, no per-bucket token split — so it can say how many
@@ -25,10 +21,6 @@ import org.springframework.stereotype.Repository;
  * price, in which bucket. This ledger is written per call and read live, so the usage page is current
  * to the last call rather than lagging a bucket grain. The rollup stays the billing basis; this is the
  * breakdown.
- *
- * <p><b>Writes are fire-and-forget accounting, not the hot path's business.</b> {@link #insert} is
- * called after a completed LLM call, and {@link LlmUsageAccountant} swallows its failures — a ledger
- * outage must never fail a grading run.
  */
 @Repository
 public class LlmUsageQueryRepository {
@@ -124,7 +116,7 @@ public class LlmUsageQueryRepository {
                 from,
                 to,
                 filter);
-        return one.isEmpty() ? empty(null) : one.get(0);
+        return one.get(0);
     }
 
     /**
@@ -213,70 +205,6 @@ public class LlmUsageQueryRepository {
                         rs.getBigDecimal("cost_usd"),
                         rs.getLong("unpriced_runs"),
                         rs.getString("last_at")))
-                .list();
-    }
-
-    // ---- read: cross-org platform spend (the operator's question) ------------------------------
-
-    /**
-     * One org's PLATFORM-FUNDED spend over a window — the row the daily operator report prints.
-     *
-     * <p>Every other read on this repository is scoped to one org because it answers a customer's
-     * question. This one answers ours, and is the only cross-org read here: launch H is done when we can
-     * say "what did last week cost, and which org drove it" without opening a provider invoice, and no
-     * per-org endpoint can answer a question whose subject is the comparison between orgs.
-     *
-     * <p>BYO spend is excluded outright rather than carried alongside: it is the customer's bill, and an
-     * operator report about our costs that silently included it would overstate them.
-     */
-    public record OrgSpend(
-            String orgId,
-            String orgSlug,
-            long calls,
-            long totalTokens,
-            BigDecimal costUsd,
-            long unpricedCalls,
-            long triageRuns,
-            BigDecimal triageCostUsd) {}
-
-    /**
-     * Platform-funded spend per org over {@code [from, to)}, costliest first. Orgs with no platform LLM
-     * activity in the window do not appear.
-     */
-    public List<OrgSpend> platformSpendByOrg(String from, String to, int limit) {
-        return jdbc.sql("""
-                        SELECT o.id AS org_id,
-                               o.slug AS org_slug,
-                               COUNT(*) AS calls,
-                               COALESCE(SUM(c.total_tokens), 0) AS total_tokens,
-                               COALESCE(SUM(c.cost_usd), 0) AS cost_usd,
-                               COUNT(*) FILTER (WHERE c.cost_usd IS NULL) AS unpriced_calls,
-                               COUNT(*) FILTER (WHERE c.lane = :triageLane) AS triage_runs,
-                               COALESCE(SUM(c.cost_usd) FILTER (WHERE c.lane = :triageLane), 0)
-                                   AS triage_cost_usd
-                        FROM llm_call c
-                        JOIN project p ON p.id = c.project_id
-                        JOIN organization o ON o.id = p.org_id
-                        WHERE c.funding = 'platform'
-                          AND c.created_at >= :from::timestamptz
-                          AND c.created_at < :to::timestamptz
-                        GROUP BY o.id, o.slug
-                        ORDER BY cost_usd DESC, total_tokens DESC
-                        LIMIT :limit
-                        """)
-                .param("from", from)
-                .param("to", to)
-                .param("triageLane", ModelLane.TRIAGE.wire())
-                .param("limit", limit)
-                .query((rs, n) -> new OrgSpend(
-                        rs.getString("org_id"),
-                        rs.getString("org_slug"),
-                        rs.getLong("calls"),
-                        rs.getLong("total_tokens"),
-                        rs.getBigDecimal("cost_usd"),
-                        rs.getLong("unpriced_calls"),
-                        rs.getLong("triage_runs"),
-                        rs.getBigDecimal("triage_cost_usd")))
                 .list();
     }
 
@@ -400,10 +328,5 @@ public class LlmUsageQueryRepository {
                         rs.getBigDecimal("byo_cost_usd"),
                         rs.getLong("unpriced_calls")))
                 .list();
-    }
-
-    /** The all-zero slice — the shape an aggregate-over-nothing reduces to. */
-    private static UsageSlice empty(@Nullable String key) {
-        return new UsageSlice(key, null, 0, 0, 0, 0, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 0);
     }
 }

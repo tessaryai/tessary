@@ -23,7 +23,7 @@ public final class DeterministicNlPhraseCompiler implements NlPhraseCompiler {
     @Override
     public Pattern compile(String nlPhrase, boolean wordBoundary) {
         String collapsed = WHITESPACE.matcher(nlPhrase.strip()).replaceAll(" ");
-        String[] tokens = collapsed.isEmpty() ? new String[0] : collapsed.split(" ");
+        String[] tokens = collapsed.split(" ");
         StringBuilder regex = new StringBuilder();
         for (int i = 0; i < tokens.length; i++) {
             if (i > 0) regex.append("\\s+");

@@ -6,21 +6,20 @@ import { useTenant } from "../../../tenant/TenantContext";
 import { Collapsible, ErrorNote, LoadingRow } from "../../../ui";
 import { PayloadViewer } from "../../components/PayloadViewer";
 import { CommonStatus } from "./sections/CommonStatus";
+import { DecisionDebug } from "./sections/DecisionDebug";
 import { DeterministicDebug } from "./sections/DeterministicDebug";
 import { EncoderDebug } from "./sections/EncoderDebug";
 import { MetricDriftDebug } from "./sections/MetricDriftDebug";
-// The alias resolves to the stub next door in this build; a build may override it.
-import { paid } from "@paid";
 
 /**
- * Everything the platform already computes for this classifier that the rail above doesn't render:
+ * Everything the platform already computes for this classifier that the page above doesn't render:
  * sweep cursor/lease detail plus family-specific fitted state. Collapsed by default: the query only
- * runs once opened (`enabled: open`), so browsing the classifier list costs nothing extra, and this
- * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifiersPage.tsx`)
+ * runs once opened (`enabled: open`), so opening a configure page costs nothing extra, and this
+ * whole subtree is a separate lazy chunk (see its `React.lazy` import site in `ClassifierConfigurePage.tsx`)
  * so its code isn't fetched until then either.
  *
  * Not part of the product surface: deleting this directory and its one mount point in
- * `ClassifiersPage.tsx` removes the feature cleanly, with no flag, no entitlement, and no route to
+ * `ClassifierConfigurePage.tsx` removes the feature cleanly, with no flag, no entitlement, and no route to
  * unregister.
  */
 export default function DebugSection({ classifier }: { classifier: Classifier }) {
@@ -56,19 +55,15 @@ export default function DebugSection({ classifier }: { classifier: Classifier })
   );
 }
 
-/** Dispatches on the same three execution tiers the backend catalog itself dispatches on. */
+/** Dispatches on the same execution tiers the backend catalog itself dispatches on. */
 function FamilySection({ debug }: { debug: ClassifierDebug }) {
   switch (debug.family) {
     case "metric_drift":
       return <MetricDriftDebug baselines={debug.metric_baselines ?? []} />;
-    // Kept deliberately: deleting this arm would not fail to compile, it would fall through to
-    // `default` and render `DeterministicDebug` for a drift classifier, a wrong panel rather than a
-    // missing one. Answering `null` through the seam renders nothing, and `RawFallback` below still
-    // prints the whole payload.
-    case "behavior_drift":
-      return paid.debugSection(debug);
     case "encoder":
       return <EncoderDebug />;
+    case "decision":
+      return <DecisionDebug />;
     default:
       return <DeterministicDebug />;
   }

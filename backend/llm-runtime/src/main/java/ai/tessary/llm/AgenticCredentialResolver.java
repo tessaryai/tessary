@@ -4,10 +4,10 @@ package ai.tessary.llm;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
-import org.springframework.stereotype.Component;
 
 /**
  * The org's own {@link ProviderCredential}, decrypted and shaped for the sandbox
@@ -28,8 +28,12 @@ import org.springframework.stereotype.Component;
  * launcher itself never persists it to disk or forwards it to the agent's own prompt/context — see
  * {@code sandbox-runner/launcher/server.js}'s file-header doc and {@code requireCredential} for the
  * other half of that discipline.
+ *
+ * <p>Registered by {@link LlmSeamConfig} only when no other build supplies one, so another build can
+ * extend this class and resolve {@link ModelProvider#PLATFORM} to a credential of its own;
+ * {@link Credential#platformFunded()} is how that build tells the ledger whose bill the run lands on,
+ * and {@link #release} is where it frees whatever it reserved for the run.
  */
-@Component
 public class AgenticCredentialResolver {
 
     private final ProviderCredentialRepository repo;
@@ -51,6 +55,12 @@ public class AgenticCredentialResolver {
      * irrelevant to {@link #provider} are simply null and dropped by {@code @JsonInclude(NON_NULL)}
      * — the launcher's own {@code requireCredential} validates by provider, so there is no shared
      * "every field always present" contract to keep.
+     *
+     * <p>{@code egressSecret} names a secret in the sandbox provider's own store that its egress proxy
+     * injects into the model provider's requests, outside the sandbox, in place of {@code apiKey}: the
+     * key never enters the VM. {@code lease} is an opaque handle a resolver can attach to find the
+     * run's reservation again in {@link #release}; it never goes on the wire. This build sets
+     * neither; Tessary Cloud's resolver sets both for its Tessary AI provider.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Credential(
@@ -60,7 +70,22 @@ public class AgenticCredentialResolver {
             @JsonProperty("custom_model_name") @Nullable String customModelName,
             @JsonProperty("aws_region") @Nullable String awsRegion,
             @JsonProperty("aws_access_key") @Nullable String awsAccessKey,
-            @JsonProperty("aws_secret_key") @Nullable String awsSecretKey) {}
+            @JsonProperty("aws_secret_key") @Nullable String awsSecretKey,
+            @JsonProperty("platform_funded") boolean platformFunded,
+            @JsonProperty("egress_secret") @Nullable String egressSecret,
+            @JsonIgnore @Nullable String lease) {
+
+        public Credential(
+                ModelProvider provider,
+                @Nullable String apiKey,
+                @Nullable String baseUrl,
+                @Nullable String customModelName,
+                @Nullable String awsRegion,
+                @Nullable String awsAccessKey,
+                @Nullable String awsSecretKey) {
+            this(provider, apiKey, baseUrl, customModelName, awsRegion, awsAccessKey, awsSecretKey, false, null, null);
+        }
+    }
 
     /**
      * Resolve, decrypt, and shape the org's credential for {@code provider} — the credential an
@@ -69,9 +94,8 @@ public class AgenticCredentialResolver {
      * {@link ModelConfigError#AGENTIC_IAM_ROLE_UNSUPPORTED} when the org's Bedrock/mantle credential
      * is {@code auth_mode=iam_role}: an E2B microVM cannot assume the
      * operator's own ambient AWS identity, and there is no {@code roleArn}/STS-relay path for it to
-     * use instead. IAM-role auth stays usable for the backend's own direct judge calls
-     * ({@link ChatModelFactory}); a credential meant to drive a sandbox agent must be
-     * {@code api_key} mode.
+     * use instead. IAM-role auth stays usable for the backend's own model-catalog listing; a
+     * credential meant to drive a sandbox agent must be {@code api_key} mode.
      */
     public Credential resolve(String projectId, ModelProvider provider) {
         String orgId = orgResolver.orgIdFor(projectId);
@@ -112,5 +136,16 @@ public class AgenticCredentialResolver {
                 null,
                 null,
                 null);
+    }
+
+    /**
+     * Called once the run {@code credential} was resolved for has ended, however it ended: success,
+     * failure or timeout. Nothing to free here, since an org's own key reserves nothing; a build that
+     * reserves something per run (a slot, a budget) frees it here, using {@link Credential#lease()}.
+     * Tessary Cloud's resolver frees its per-org run slot here, which is why the sandboxes call a
+     * method that does nothing in this build.
+     */
+    public void release(Credential credential) {
+        // An org's own key reserves nothing per run, so there is nothing to free.
     }
 }

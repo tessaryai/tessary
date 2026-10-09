@@ -60,9 +60,7 @@ export function Signup() {
     );
   }
 
-  const error = submit.isError
-    ? ((submit.error as ApiError).message ?? "Could not create account")
-    : null;
+  const error = submit.isError ? (submit.error as ApiError).message : null;
 
   return (
     <div className="min-h-screen bg-bg text-fg flex items-center justify-center p-10">

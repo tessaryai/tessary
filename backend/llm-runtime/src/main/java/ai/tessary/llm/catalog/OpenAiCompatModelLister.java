@@ -36,20 +36,13 @@ import java.util.List;
  */
 public final class OpenAiCompatModelLister implements ProviderModelLister {
 
-    private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
-
     private final HttpClient http;
     private final ObjectMapper mapper;
     private final String vendor;
     private final Duration timeout;
 
-    public OpenAiCompatModelLister(HttpClient http, ObjectMapper mapper, String vendor) {
-        this(http, mapper, vendor, DEFAULT_TIMEOUT);
-    }
-
     /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}; the 3-arg constructor keeps the previous fixed
-     *  default for callers (tests) that do not care. */
+     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
     public OpenAiCompatModelLister(HttpClient http, ObjectMapper mapper, String vendor, Duration timeout) {
         this.http = http;
         this.mapper = mapper;

@@ -9,6 +9,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { SessionListItemView as SessionListItem } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
+import { filterParams, type TraceFilters } from "./index-data";
 
 const PAGE_SIZE = 50;
 
@@ -17,15 +18,19 @@ const PAGE_SIZE = 50;
  * rollup numbers on the row, unlike the flat list's opt-in per-trace rollups which are cheap by
  * default. `epoch` mirrors useTracesIndex's cache-busting nonce so the two toggles' refresh wiring
  * stays identical.
+ *
+ * The filters are the flat list's: a session is listed when one of its traces passes every one.
  */
-export function useSessionsIndex(epoch = 0, enabled = true) {
+export function useSessionsIndex(filters: TraceFilters, epoch = 0, enabled = true) {
   const api = useProjectApi();
   return useInfiniteQuery({
-    queryKey: ["sessions-index", api.base, epoch],
+    queryKey: ["sessions-index", api.base, filters, epoch],
     queryFn: ({ pageParam }) =>
-      api.listSessions({ limit: PAGE_SIZE, cursor: pageParam ?? undefined, include: "totals" }),
+      api.listSessions({ limit: PAGE_SIZE, cursor: pageParam ?? undefined, include: "totals", ...filterParams(filters) }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? null,
+    // A search the server stopped at its timeout would only run as long again, three more times.
+    retry: false,
     enabled,
   });
 }

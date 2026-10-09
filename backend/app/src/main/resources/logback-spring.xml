@@ -50,14 +50,10 @@
                 <includeMdcKeyName>traceId</includeMdcKeyName>
                 <includeMdcKeyName>spanId</includeMdcKeyName>
                 <!-- Business context bound by obs/LogContext (see that class for
-                     the key constants). orgId is reserved but not yet bound. -->
-                <includeMdcKeyName>runId</includeMdcKeyName>
+                     the key constants). -->
                 <includeMdcKeyName>projectId</includeMdcKeyName>
-                <includeMdcKeyName>graderId</includeMdcKeyName>
                 <includeMdcKeyName>jobId</includeMdcKeyName>
                 <includeMdcKeyName>classifierKey</includeMdcKeyName>
-                <includeMdcKeyName>callSiteId</includeMdcKeyName>
-                <includeMdcKeyName>subjectTraceId</includeMdcKeyName>
                 <customFields>{"service.name":"tessary-backend"}</customFields>
             </encoder>
         </appender>
@@ -91,7 +87,7 @@
                  <captureCodeAttributes>true</captureCodeAttributes> -->
             <captureMarkerAttribute>true</captureMarkerAttribute>
             <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
-            <captureMdcAttributes>traceId,spanId,runId,projectId,graderId,jobId,classifierKey,callSiteId,subjectTraceId</captureMdcAttributes>
+            <captureMdcAttributes>traceId,spanId,projectId,jobId,classifierKey</captureMdcAttributes>
         </appender>
         <root level="INFO">
             <appender-ref ref="JSON"/>

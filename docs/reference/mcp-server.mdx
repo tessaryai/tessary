@@ -1,6 +1,6 @@
 ---
 title: "MCP Server"
-description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 19 tools with their arguments, and how to configure a client."
+description: "Look up the Tessary MCP endpoint, the credential it accepts, its read-only guarantee, all 20 tools with their arguments, and how to configure a client."
 ---
 
 Tessary speaks MCP (Model Context Protocol) at `POST /mcp` on the same service that serves the web UI and the REST API. It ships with the backend, so there is no separate server to install or version.
@@ -64,6 +64,10 @@ Three tools strip the triage ruling before their response leaves the server. [Ro
 
 Two fields deliberately survive: `triageStatus`, which says only whether a ruling exists and which the findings list needs to render, and a case's inline `rca`, which is the analysis lane's own prior work rather than the gate the redaction exists to protect. The redaction applies to every MCP caller, not only to keys minted for analysis. The full ruling is one click away in the UI, which reads these fields over REST and is untouched.
 
+A high-confidence secret leak and a frustration finding have no triage run to strip: each is filed already ruled, and `triageStatus` reflects that ruling. On a frustration finding or case, the `frustration` block also comes back with an empty `conversations` list, so the frustrated sessions' ids do not reach a caller through it. `get_finding_evidence` pages them as refs.
+
+A groundedness finding goes through triage like any other, so its ruling is stripped as the table says. On a groundedness finding or case, the `groundedness` block comes back with an empty `answers` list and a null `answersNextCursor`, so the flagged answers' trace and span ids do not reach a caller through it. `get_finding_evidence` pages them as `witness` refs.
+
 ## Conventions the tools share
 
 - **Read-only.** Nothing writes, spends, or starts an agent run.
@@ -75,7 +79,7 @@ Two fields deliberately survive: `triageStatus`, which says only whether a rulin
 
 ## The tools
 
-Tessary offers all 19 tools to every organization. The per-tool capability mechanism still exists in the code but no tool declares one today, so `tools/list` returns the whole catalog for any valid token.
+Tessary offers all 20 tools to every organization, so `tools/list` returns the whole catalog for any valid token.
 
 `tools/list` is the authoritative schema. The tables below name each tool's arguments so you can see the shape of the surface; they are not a schema copy.
 
@@ -94,7 +98,11 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_cases` | none | `state` (`open` \| `muted` \| `resolved`, default `open`), `detector`, `call_site_id`, `limit`, `cursor` | Paged case rows. Open and muted pages are worst-first by severity then most recently opened; a resolved page is newest-closure-first |
-| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, exemplar traces, and the root-cause report inline in `rca` once one has finished. The ruling is redacted on this surface |
+| `get_case` | `id` | none | The case, its activity trail, `latest_finding_id` and `finding_count`, the classifier's summary numbers, and the root-cause report inline in `rca` once one has finished: its summary, verdict, causes, the checks it ruled out, and the full investigation. The ruling, exemplars, and every trace and span id are redacted on this surface; page the finding's rows with `get_finding_evidence` and `latest_finding_id` |
+
+On a frustration case, `frustration` carries the call site's learned and current rates of frustrated sessions with the session counts behind each, and the scoring settings the finding was filed under.
+
+On a groundedness case, `groundedness` carries the call site's learned and current rates of flagged answers with the trace counts behind each, the score at which a sentence is flagged (`flagThreshold`), and the rate test's settings the finding was filed under.
 
 `get_case` accepts either the stored id or the human reference a person would quote, such as `C-118`. `rca` is null while a report is still running, in which case `rca_report_id` names it so you can poll, and null when none has been run; `rca_available` says whether one could be.
 
@@ -103,7 +111,7 @@ Start with `get_project`. An empty case list is not an all-clear on its own: `tr
 | Tool | Required | Optional | Returns |
 | --- | --- | --- | --- |
 | `list_findings` | none | `status`, `call_site_id`, `detector`, `include` (`confirmed` \| `all`, default `confirmed`) | Headline finding rows without the evidence blob |
-| `get_finding` | `id` | none | One finding with its parsed evidence |
+| `get_finding` | `id` | none | One finding with its parsed evidence, including the `frustration` block on a frustration finding and the `groundedness` block on a groundedness finding |
 | `get_finding_evidence` | `finding_id` | `role` (`exemplar` \| `member` \| `baseline` \| `witness` \| `changepoint`), `count_only`, `limit`, `cursor` | Paged refs shaped `{role, grain, session_id?, trace_id?, span_id?, rank?}`, plus live and as-written per-role counts |
 
 A finding is the aggregated cause behind many classifier firings, distinct from a single firing in the `classifier_events` dataset.
@@ -124,6 +132,7 @@ There is deliberately no server-side sampling mode. An agent that wants a stride
 | `get_span` | `trace_id` **and** `span_id` | none | One span with its full raw payload |
 | `list_sessions` | none | `limit`, `cursor` | Paged sessions, most recently active first, identity only |
 | `get_session` | `id` | none | The session, totals summed from its traces, and those traces oldest first, capped at 1,000 with `traces_truncated` saying so |
+| `get_conversation` | `id` | none | One conversation's turns (top-level traces) oldest first, capped at 1,000 with `traces_truncated` saying so. `id` is a session id: a conversation is a session, the key a frustration finding's session refs carry. A thread ID names no conversation |
 
 `get_span` needs both ids because a producer span id is unique only within its trace. A call with no `trace_id` returns a tool error naming the argument to add.
 
@@ -186,7 +195,7 @@ Four things constrain these tools:
   <Step title="Restart the client">
     Restart Claude Code so it reads the new configuration.
 
-    <Check>`tools/list` returns 19 tools, and `get_project` names the project the token is bound to.</Check>
+    <Check>`tools/list` returns 20 tools, and `get_project` names the project the token is bound to.</Check>
   </Step>
 </Steps>
 

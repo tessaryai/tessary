@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.plan;
 
-import ai.tessary.edition.Edition;
 import ai.tessary.featureflags.FeatureFlags;
 import ai.tessary.featureflags.FlagContext;
 import ai.tessary.open.errors.CapabilityError;
 import ai.tessary.open.errors.TessaryException;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /**
@@ -21,14 +18,11 @@ import org.springframework.stereotype.Service;
  *
  * <ol>
  *   <li>the org's own <b>override</b>, if it states one ({@link FeatureFlags});
- *   <li>this build's <b>default</b> below: on, except {@link #OFF_BY_DEFAULT} and, where it
- *       applies, {@link #UNAVAILABLE_IN_OPEN_EDITION}.
+ *   <li>this build's <b>default</b>, from {@link CapabilityDefaults}.
  * </ol>
  *
  * There is no third layer here: plan tiers and numeric quotas are not this class's concern, and it
- * never reads a plan. {@link Capability#defaultEnabled()} is likewise not read here: those flags
- * encode Tessary's hosted free tier, where most capabilities are off, and serving that to a
- * self-hoster would ship most of the product dark for no reason a self-hoster has.
+ * never reads a plan.
  *
  * <h2>What an empty flag store does</h2>
  * {@link FeatureFlags#override} returns empty when nothing holds an opinion (no row, no matching
@@ -42,37 +36,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class CapabilityService {
 
-    /**
-     * Capabilities this build cannot honour, because the classifier code behind them is not on this
-     * classpath. They are not all the same shape: some are missing a dedicated detector class
-     * entirely, while {@code frustration} rides the generic, always-open {@code EncoderDetector} —
-     * what is missing there is the trained artifact and its registration, not a package. All four
-     * are reported separately from "off" by {@link #unavailable} so a client can say "not
-     * available" rather than offering a switch that would do nothing, and the write path refuses to
-     * set an override for one.
-     *
-     * <p>This stays a constant rather than something derived from what is registered: {@code
-     * frustration}'s detector is reachable from {@code backend/analysis} regardless, so deriving
-     * availability from what is registered would misreport it as available here. The {@link Edition}
-     * bean decides whether this set applies at all; the edition is derived from the classpath, never
-     * from a property, for the reason {@link Edition}'s javadoc gives.
-     */
-    private static final Set<Capability> UNAVAILABLE_IN_OPEN_EDITION = EnumSet.of(
-            Capability.BEHAVIOR_DRIFT, Capability.SOP_CONFORMANCE, Capability.FRUSTRATION, Capability.GROUNDEDNESS);
-
-    /**
-     * Capabilities that are present but start off. Exactly one: automatic Layer-2 triage drives LLM
-     * escalation with no ceiling, so running it unattended is an opt-in an operator takes knowingly.
-     * It is toggleable per org like anything else; this is a default, not a restriction.
-     */
-    private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC);
-
     private final FeatureFlags featureFlags;
-    private final Edition edition;
+    private final CapabilityDefaults defaults;
 
-    public CapabilityService(FeatureFlags featureFlags, Edition edition) {
+    public CapabilityService(FeatureFlags featureFlags, CapabilityDefaults defaults) {
         this.featureFlags = featureFlags;
-        this.edition = edition;
+        this.defaults = defaults;
     }
 
     // ---- capability resolution --------------------------------------------------------------
@@ -106,32 +75,16 @@ public class CapabilityService {
     }
 
     /**
-     * The capabilities this build cannot honour whatever an org asks for: the "not available" half
-     * of the capability payload, and the set the override write path refuses.
-     */
-    public Set<Capability> unavailable() {
-        return edition.paid() ? Set.of() : UNAVAILABLE_IN_OPEN_EDITION;
-    }
-
-    /**
-     * This build's answer with nobody's override in play: on, except {@link #OFF_BY_DEFAULT} and,
-     * where it applies, {@link #UNAVAILABLE_IN_OPEN_EDITION}. Public because the Features settings
-     * read renders "on, but that is only the default" differently from "on, because somebody turned
-     * it on", and recomputing this table in the controller would be two copies of one policy.
+     * The answer with nobody's override in play, from {@link CapabilityDefaults}. Public
+     * because the Features settings read renders "on, but that is only the default" differently from
+     * "on, because somebody turned it on", and recomputing this table in the controller would be two
+     * copies of one policy.
      */
     public boolean defaultFor(Capability capability) {
-        return !unavailable().contains(capability) && !OFF_BY_DEFAULT.contains(capability);
+        return defaults.defaultFor(capability);
     }
 
-    /**
-     * The org's override of the default.
-     *
-     * <p>An override still wins for an unavailable capability, and that is deliberate rather than an
-     * oversight: unavailability is enforced where overrides are written (the override endpoint 422s
-     * on {@code behavior_drift} / {@code sop_conformance}) and reported where the payload is read.
-     * Hard-falsing it here too would refuse the write path its own 422 already covers, in two places
-     * that would then have to agree.
-     */
+    /** The org's override of the default. */
     private boolean resolveOne(FlagContext ctx, Capability capability) {
         return featureFlags.override(capability.wire(), ctx).orElseGet(() -> defaultFor(capability));
     }
@@ -144,8 +97,7 @@ public class CapabilityService {
 
         /**
          * Whether {@code capability} is on. A capability missing from the map is off: {@link #resolve} always
-         * fills every constant, so an absent key means the set was built by hand and is incomplete — and
-         * {@link Capability#defaultEnabled()} is the wrong fallback here, being the hosted free tier.
+         * fills every constant, so an absent key means the set was built by hand and is incomplete.
          */
         public boolean isEnabled(Capability capability) {
             return capabilities.getOrDefault(capability, false);

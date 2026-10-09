@@ -8,4 +8,4 @@ package ai.tessary.tenant;
  *     {@link ProjectDeleteJobRepository} for why that column is NULL on this kind.
  * @param attempts the count AFTER the claim incremented it, which is what decides dead-lettering.
  */
-public record ProjectDeleteJobRow(String id, String projectId, String status, int attempts) {}
+public record ProjectDeleteJobRow(String id, String projectId, int attempts) {}

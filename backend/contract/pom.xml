@@ -14,31 +14,15 @@
     <artifactId>contract</artifactId>
     <description>
         Open API-contract module. Home of the
-        checked-in canonical OpenAPI spec (the single source of truth that ships in the open jar) and,
-        later, generated Spring API interfaces the app's controllers implement. Depends ONLY on
-        shared + jspecify/jackson — NO dependency on the app or any closed module — so it is cleanly
+        checked-in canonical OpenAPI spec (the single source of truth that ships in the open jar).
+        Depends ONLY on jspecify — NO dependency on the app or any closed module — so it is cleanly
         extractable to the open-source repo alongside shared.
     </description>
 
     <dependencies>
         <dependency>
-            <groupId>ai.tessary</groupId>
-            <artifactId>shared</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
-        </dependency>
-        <!-- Jackson for the spec/schema DTOs (versions managed by the inherited spring-boot parent). -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -68,9 +52,7 @@
                                     </excludes>
                                     <message>
                                         tessary-contract is an OPEN module: it must not depend on the app
-                                        (`app`), which assembles the application above it. The paid
-                                        overlay is banned separately, for every module, by
-                                        `enforce-open-to-paid-direction` on the aggregator.
+                                        (`app`), which assembles the application above it.
                                     </message>
                                 </bannedDependencies>
                             </rules>

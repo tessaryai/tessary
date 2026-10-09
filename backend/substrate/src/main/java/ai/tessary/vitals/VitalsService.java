@@ -30,7 +30,7 @@ import org.springframework.stereotype.Service;
  * makes escalation structurally impossible rather than merely switched off.
  *
  * <p><b>Tool errors were the third filter and are no longer here at all.</b> They are a classifier
- * again ({@code classifiers/tool_error/PROGRAM.md}) — but a windowed one, per tool, against that tool's
+ * again ({@code devdocs/concepts/tool-error.md}) — but a windowed one, per tool, against that tool's
  * own past, which is a different thing from the per-observation detector migration {@code 0030} deleted.
  * That one wrote a detection per failing span and every detection enqueued a grader run; this one writes
  * one finding per closed window and enqueues nothing. The property this javadoc claims for the slice is
@@ -38,9 +38,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class VitalsService {
-
-    /** How many days a window spans when the caller does not say. */
-    public static final int DEFAULT_WINDOW_DAYS = 7;
 
     /** Widest window we will scan; beyond this the read stops being interactive. */
     public static final int MAX_WINDOW_DAYS = 90;
@@ -141,8 +138,8 @@ public class VitalsService {
 
     private static Cost cost(Bucket cur, Bucket base) {
         // The denominator comes from the SPENDING population, not the root-span one. They are not the
-        // same set: an llm span tagged with a call site whose root span is not puts its cost in the
-        // call-site bucket and its turn in `__unattributed__`, so the bucket would read "spend, zero
+        // same set: a turn that reaches a second call site puts that llm span's cost in the second
+        // call-site bucket and its turn in the first, so the second bucket would read "spend, zero
         // turns" and could never flag. For `by=model` the mismatch is total — root spans carry no
         // model — which left cost flagging permanently dead on that view.
         long turns = cur.costTurns();

@@ -10,6 +10,7 @@ import type { OrgRole, OrgMember, SignupPolicyMode } from "../../api/types-auth"
 import {
   Badge,
   Button,
+  ErrorNote,
   Field,
   Input,
   Modal,
@@ -70,6 +71,8 @@ function invitedAgo(iso: string): string {
 export function Members() {
   const { orgSlug } = useTenant();
   const { user } = useAuth();
+  // The organization by name wherever the page refers to it; the slug is the URL segment only.
+  const orgName = user?.orgs?.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
   const qc = useQueryClient();
   const toast = useToast();
 
@@ -193,7 +196,7 @@ export function Members() {
         title="Members"
         subtitle={
           <>
-            Who can access <span className="font-mono text-fg">{orgSlug}</span>, and what each person can do.
+            Who can access <span className="text-fg">{orgName}</span>, and what each person can do.
           </>
         }
         actions={
@@ -226,19 +229,14 @@ export function Members() {
         <div className="flex items-center gap-2 py-10 text-small text-muted">
           <Spinner size="sm" /> Loading members…
         </div>
+      ) : members.isError ? (
+        <ErrorNote error={members.error} />
       ) : roster.length === 0 ? (
         <div className="py-12 text-center">
-          <p className="text-body text-fg">No members yet</p>
-          <p className="text-small text-muted mt-1">
-            {canManage
-              ? "Invite a teammate to share this organization."
-              : "Members did not load. Reload the page to try again."}
-          </p>
-          {canManage && (
-            <Button variant="primary" className="mt-4" onClick={() => setInviteOpen(true)}>
-              Invite
-            </Button>
-          )}
+          {/* Never "invite someone": whoever is reading this is a member, so an empty roster is a
+              failed read, and the permission to invite is itself read off the roster. */}
+          <p className="text-body text-fg">Members did not load</p>
+          <p className="text-small text-muted mt-1">Reload the page to try again.</p>
         </div>
       ) : (
         <div className="rounded-card border border-border overflow-hidden">
@@ -339,7 +337,10 @@ export function Members() {
           {policy.data && !policy.data.governing && (
             <p className="text-small text-muted mt-2" role="note">
               The policy is instance-wide and is managed under organization{" "}
-              <span className="font-mono text-fg">{policy.data.governing_org_slug ?? "unknown"}</span>; it is shown
+              <span className="text-fg">
+                {policy.data.governing_org_name ?? policy.data.governing_org_slug ?? "unknown"}
+              </span>
+              ; it is shown
               here read-only.
             </p>
           )}

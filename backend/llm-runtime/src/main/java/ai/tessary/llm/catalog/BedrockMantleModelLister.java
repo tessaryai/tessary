@@ -4,9 +4,8 @@ package ai.tessary.llm.catalog;
 import java.util.List;
 
 /**
- * Mantle has no per-request discovery endpoint reachable from this codebase: {@code
- * MantleProperties} only documents chat-call paths, and there's no mantle equivalent of Bedrock's
- * {@code ListFoundationModels} control-plane call.
+ * Mantle has no per-request discovery endpoint reachable from this codebase: there's no mantle
+ * equivalent of Bedrock's {@code ListFoundationModels} control-plane call.
  *
  * <p>{@code scripts/refresh-model-prices.sh} vendors LiteLLM's price book, which does carry a
  * versioned mantle model-identity list, a better identity source than this class uses. It isn't

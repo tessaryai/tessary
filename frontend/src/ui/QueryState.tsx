@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ReactNode } from "react";
 import { ApiError } from "../api/types";
 import { Spinner, Skeleton } from "./Spinner";
-import { EmptyState } from "./EmptyState";
 import { cn } from "./cn";
 
 /**
@@ -16,7 +14,7 @@ import { cn } from "./cn";
  * {@link TableSkeleton} for a data-dense table's loading frame.
  */
 
-/** Inline "Loading…" line — spinner + muted text, polite to screen readers. */
+/** Inline "Loading…" line — spinner + muted text, polite to screen readers. `label` says what is loading. */
 export function LoadingRow({ label = "Loading…", className }: { label?: string; className?: string }) {
   return (
     <div role="status" aria-live="polite" className={cn("flex items-center gap-2 text-small text-muted", className)}>
@@ -32,13 +30,13 @@ export function ErrorNote({ error, className }: { error: unknown; className?: st
   // `ApiError.detail` rather than `.message`: the latter is already prefixed with the code, and the
   // code is rendered separately below.
   const message =
-    error instanceof ApiError
+    (error instanceof ApiError
       ? error.detail
       : error instanceof Error
         ? error.message
         : typeof error === "string"
           ? error
-          : "The request failed. Try again.";
+          : "") || "The request failed. Try again.";
   return (
     <p role="alert" className={cn("text-small text-error", className)}>
       {code && <code className="font-mono">{code}</code>}
@@ -72,33 +70,4 @@ export function TableSkeleton({ rows = 6, cols = 4, className }: { rows?: number
       </div>
     </div>
   );
-}
-
-/**
- * One wrapper for the loading → error → empty → content lifecycle of a query.
- * Pass the TanStack Query flags plus the data; render content via `children`.
- * Keeps a surface's happy path uncluttered while guaranteeing all three states
- * are handled. `isEmpty` defaults to never — pass it when content can be empty.
- */
-export function QueryState({
-  isLoading,
-  isError,
-  error,
-  isEmpty = false,
-  loading,
-  empty,
-  children,
-}: {
-  isLoading: boolean;
-  isError: boolean;
-  error?: unknown;
-  isEmpty?: boolean;
-  loading?: ReactNode;
-  empty?: ReactNode;
-  children: ReactNode;
-}) {
-  if (isLoading) return <>{loading ?? <LoadingRow />}</>;
-  if (isError) return <ErrorNote error={error} />;
-  if (isEmpty) return <>{empty ?? <EmptyState title="Nothing here yet" />}</>;
-  return <>{children}</>;
 }

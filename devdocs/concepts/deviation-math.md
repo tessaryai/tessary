@@ -338,7 +338,9 @@ hour it arrived. A call with no start time is skipped and counted, never guessed
 rate because a missing timestamp is a property of the producer rather than of the call's outcome, so
 numerator and denominator drop together. The reference is built from the leading buckets until it holds
 `min_baseline_calls`, then **frozen** — a reference that moved with the traffic would drift along with
-a slow degradation and never notice it.
+a slow degradation and never notice it. A classifier may set `freeze_baseline_calls` above the minimum:
+judging still starts at `min_baseline_calls`, and each later hour is judged against the reference and
+then added to it, until the reference holds `freeze_baseline_calls` and stops moving.
 
 Recompute-per-read deletes the cursor/watermark/double-count bug class rather than defending against
 it, and a retuned threshold takes effect on the next pass instead of invalidating stored state. The
@@ -349,6 +351,56 @@ forget a burst. It is never more sensitive.
 Only tools alarming **at the end of the replay** are reported. A tool that degraded mid-window and has
 since recovered is not firing now, and reporting it would open a case nothing will ever close.
 
+### A human reset is a fence
+
+Resolving a case resets the accumulator and stamps `reset_at` on the state row. A replay that
+**rebuilds** rather than resumes (Malformed Output on every pass, `tool_error` after a tuning change)
+skips every bucket before `reset_at`, both while learning a reference and while folding. Without the
+fence a rebuild re-folds the hours the human just ruled on and the closed spell returns on the next
+pass. A resumed replay needs no fence: its watermark already sits past those hours, and it is left as
+it was. `resetAndRelearn` also drops the learned reference, so the replay re-learns it from the
+traffic after the reset only.
+
+### The same engine on other trials
+
+Malformed Output runs this engine per call site, a trial being one output checked against its schema.
+Frustration runs it per call site with a **session**, a conversation on one call site, as the trial
+(`FrustrationRateService`): a session is a failure when it holds an uncleared frustration detection on
+that call site. Like Malformed Output it rebuilds every pass, because a later turn can flag a session
+first scored hours ago and a `false_alarm` resolve can clear one; the replay reads
+it in its original hour either way. Judging starts at `min_baseline_conversations = 100`, and the
+reference keeps learning until `freeze_baseline_conversations = 1,000`, as Groundedness's does. A
+state row built under another scorer version or other dials is reset with the note `tuning changed`
+and re-learns, because a reference learned under other weights is not comparable. Its budget is in
+conversations, so its dials differ (`FrustrationConfig`, whose engine config carries the floor as
+`ToolErrorConfig.minDecisionInterval`; tool_error's stays 6 and no tool-error blob can lower it):
+`arl_target = 10,000`, `shift_floor = 0.02` and a clamp floor of 4 on `h` instead of 6, giving
+
+```
+h(p0) = clamp(11.42 + 1.088·ln(p0) + ln(10000 / 250000), 4, 12)
+      = clamp( 8.20 + 1.088·ln(p0), 4, 12)
+```
+
+The shipped line against the exact solve (all counts are conversations). **Starting values**, owed a
+null replay on real traffic like `tool_error`'s:
+
+| p0 | p1 | exact h | fitted h | ARL₀ at exact | ARL₀ at fitted | lag at p1, exact | lag at p1, fitted |
+|---|---|---|---|---|---|---|---|
+| 0.5% | 2.5% | 4.33 | 4.00 | 10,127 | 7,101 | 193 | 176 |
+| 1% | 3% | 4.23 | 4.00 | 10,084 | 7,781 | 276 | 258 |
+| 2% | 4% | 3.96 | 4.00 | 10,004 | 10,458 | 411 | 416 |
+| 3% | 6% | 4.35 | 4.39 | 10,032 | 10,370 | 303 | 306 |
+| 5% | 10% | 4.88 | 4.94 | 10,013 | 10,707 | 202 | 205 |
+| 8% | 16% | 5.40 | 5.45 | 10,082 | 10,687 | 136 | 138 |
+| 10% | 20% | 5.69 | 5.70 | 10,076 | 10,161 | 111 | 112 |
+| 15% | 30% | 6.16 | 6.14 | 10,066 | 9,775 | 76 | 75 |
+| 20% | 40% | 6.40 | 6.45 | 10,453 | 11,082 | 56 | 57 |
+
+The fit lands within 0.06 of the exact threshold from 2% up. Below 2% the floor of 4 runs about 30%
+looser than the budget; a floor of 6 there would run six to eight times stricter. The 0.02 shift floor
+is what keeps the budget honest at low rates: with 0.005 the exact thresholds at 1% and below fall
+under 4.
+
 ---
 
 ## 3. What is measured and what is not
@@ -358,10 +410,9 @@ since recovered is not firing now, and reporting it would open a case nothing wi
 | W₁ noise law `c(rate)·σ·sqrt(2/nEff)` | **Measured** — synthetic null, ±1.3% across σ and window mixes |
 | `c(rate)` table | **Measured** — 40k null comparisons per point |
 | `w1_floor` = 0.139 | A **choice** expressed as a move; equals the 1% bar on wide traffic |
-| Real-corpus null run | **Owed.** PLAN.md §9 — real traffic split in half, unmodified, where every firing is by construction a false positive. Synthetic traffic is lognormal by assumption; real traffic is not. |
+| Real-corpus null run | **Owed.** Real traffic split in half, unmodified, where every firing is by construction a false positive. Synthetic traffic is lognormal by assumption; real traffic is not. |
 | `arl_target` = 250,000 | A **choice**, and the only threshold dial. One false alarm per corpus-and-a-half at the project the launch is measured against. |
-| `h(p0) = 11.42 + 1.088·ln(p0) + ln(arl_target/250000)` | **Derived**, by `classifiers/tool_error/arl.py`, to hold `arl_target` at every base rate — but under an independence assumption real traffic violates. Failures are bursty, and autocorrelation inflates false alarms by an amount arithmetic cannot price. The gap between predicted and measured ARL₀ is what a null-case replay exists to produce. |
-| `min_effect_size` = 0.05 | A **landmark**, no longer a gate. Nothing branches on it; it is kept because it is the scale a reader judges a reported effect size against. |
+| `h(p0) = 11.42 + 1.088·ln(p0) + ln(arl_target/250000)` | **Derived**, by an exact Brook–Evans solve, to hold `arl_target` at every base rate — but under an independence assumption real traffic violates. Failures are bursty, and autocorrelation inflates false alarms by an amount arithmetic cannot price. The gap between predicted and measured ARL₀ is what a null-case replay exists to produce. |
 | `criticality = 10·ln(S)` | A **choice** of scale. Natural log so every 10 points is 2.72x more evidence; unnormalised by design. |
 
 **Silence always carries a reason.** Both detectors enumerate why they did not fire — no reference

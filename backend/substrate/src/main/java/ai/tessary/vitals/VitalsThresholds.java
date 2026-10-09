@@ -17,11 +17,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><b>Tool errors are deliberately not here any more.</b> They were, with a two-proportion z-test, and
  * both the statistic and the surface it fed are gone: tool failures are a classifier now
- * ({@code classifiers/tool_error/PROGRAM.md}), watched per tool against that tool's own past rather than
+ * ({@code devdocs/concepts/tool-error.md}), watched per tool against that tool's own past rather than
  * per project against last week. Two bars for one fact is exactly the disagreement to avoid, and the
  * resolution taken was one number in one place rather than two that happen to agree today. The z-test did not survive the move on its own merits either — significance inflates with
  * sample size while effect size does not, so on a tool called 200k times a week it reports a 0.05pp move
- * as real (PROGRAM.md §4.3).
+ * as real (tool-error.md §4.3).
  */
 public final class VitalsThresholds {
 

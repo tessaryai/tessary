@@ -10,17 +10,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link ModelCatalog#entries()} used to BE the roster —
- * so pinning "gpt-4o is gone" or "Bedrock hosts no Moonshot models yet" here was a fact about the
- * whole product. It no longer is: {@link ModelCatalog#mergeLive} means the roster a project actually
- * sees is the static table overlaid with a live-fetched listing, per org and per provider — "which
- * models exist" is now a question {@code ModelCatalogFetchService}, {@code OpenAiCompatModelListerTest}
- * and friends answer, against fake vendor responses, not a hardcoded fact pinned here.
- *
- * <p>What stays here: the static table's own SHAPE invariants (every entry names a real platform,
- * vendor is never blank) and {@link ModelCatalog#mergeLive}'s reconciliation logic — the design point
- * the class javadoc calls out (per-model overlay, not per-provider, because OPENROUTER's own static
- * rows already carry different {@code effortLevels} per model).
+ * The static table's shape invariants (every entry names a real platform, vendor never blank) and {@link
+ * ModelCatalog#mergeLive}'s per-model overlay (OPENROUTER's static rows carry different {@code effortLevels} per
+ * model). Which models exist is {@code ModelCatalogFetchService}'s question now, not a fact pinned here.
  */
 class ModelCatalogTest {
 
@@ -34,18 +26,16 @@ class ModelCatalogTest {
     }
 
     @Test
-    void platformAuthKinds() {
-        // Ollama has been removed (the platform's one AUTH_NONE, credential-free provider) — every
-        // platform is now AUTH_API_KEY or AUTH_AWS; see PlatformCatalog's own removal note.
-        assertEquals(PlatformCatalog.AUTH_AWS, PlatformCatalog.authOf(ModelProvider.BEDROCK));
-        assertEquals(PlatformCatalog.AUTH_API_KEY, PlatformCatalog.authOf(ModelProvider.ANTHROPIC));
-        assertEquals(PlatformCatalog.AUTH_API_KEY, PlatformCatalog.authOf(ModelProvider.OPENAI));
+    void onlyTypeSafeNamesTheLaneItIsFor() {
+        for (PlatformCatalog.PlatformDescriptor p : PlatformCatalog.platforms()) {
+            List<String> expected = p.id() == ModelProvider.TYPESAFE ? List.of("frustration") : List.of();
+            assertEquals(expected, p.usedBy(), p.id().name());
+        }
     }
 
     @Test
     void mergeLiveWithNoLiveListing_passesTheStaticTableThroughUnchanged() {
-        // A cold cache (no credential, or a fetch that failed with nothing to fall back to) must
-        // degrade to today's static list, not to nothing, at this seam.
+        // A cold cache degrades to the static list, not to nothing.
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(ModelProvider.OPENAI, List.of());
         List<ModelCatalog.CatalogEntry> staticEntries = ModelCatalog.entries().stream()
                 .filter(e -> e.provider() == ModelProvider.OPENAI)
@@ -55,9 +45,7 @@ class ModelCatalogTest {
 
     @Test
     void mergeLiveOverlaysDisplayNameAndVendorOntoAMatchingStaticEntry_capabilityFieldsUnchanged() {
-        // gpt-5.5 is a real static OPENAI entry with strictJsonSchema=true and OPENAI_EFFORTS — the
-        // live listing must not be allowed to touch either, since a vendor's /models response carries
-        // no capability information at all (see OpenAiCompatModelLister's own javadoc).
+        // gpt-5.5's strictJsonSchema and efforts are static; a vendor's /models carries no capability data.
         ModelCatalog.CatalogEntry before =
                 ModelCatalog.find(ModelProvider.OPENAI, "gpt-5.5").orElseThrow();
         List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
@@ -91,17 +79,8 @@ class ModelCatalogTest {
     }
 
     @Test
-    void mergeLiveNeverCrossesProviders() {
-        // A live listing passed for OPENAI must not touch ANTHROPIC's static rows, even though
-        // ModelCatalog.entries() holds both.
-        List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(ModelProvider.OPENAI, List.of());
-        assertTrue(merged.stream().allMatch(e -> e.provider() == ModelProvider.OPENAI));
-    }
-
-    @Test
     void pricingIdRoutePrefixesTheSevenModelsWhoseBookKeysCarryOne() {
-        // The seven catalog entries the vendored book prices only under a route-prefixed key (see
-        // LanePriority's TRIAGE comment for their per-MTok rates); everything else is bare.
+        // The seven entries priced only under a route-prefixed key; everything else is bare.
         assertEquals("xai/grok-4.6", ModelCatalog.pricingId(ModelProvider.GROK, "grok-4.6"));
         assertEquals("xai/grok-code-fast-1", ModelCatalog.pricingId(ModelProvider.GROK, "grok-code-fast-1"));
         assertEquals("zai/glm-5.3", ModelCatalog.pricingId(ModelProvider.GLM, "glm-5.3"));
@@ -116,12 +95,46 @@ class ModelCatalogTest {
     }
 
     @Test
-    void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantleLikeChatModelFactoryAlreadyDid() {
+    void pricingIdLeavesBareBookKeysUnchangedAndRoutesMantle() {
         assertEquals("gpt-5.6-terra", ModelCatalog.pricingId(ModelProvider.OPENAI, "gpt-5.6-terra"));
-        assertEquals("claude-sonnet-5", ModelCatalog.pricingId(ModelProvider.ANTHROPIC, "claude-sonnet-5"));
+        assertEquals("claude-sonnet-5-5", ModelCatalog.pricingId(ModelProvider.ANTHROPIC, "claude-sonnet-5-5"));
         assertEquals("gemini-3.1-pro-preview", ModelCatalog.pricingId(ModelProvider.GEMINI, "gemini-3.1-pro-preview"));
         assertEquals(
                 "bedrock_mantle/openai.gpt-5.6-luna",
                 ModelCatalog.pricingId(ModelProvider.BEDROCK_MANTLE, "openai.gpt-5.6-luna"));
+    }
+
+    @Test
+    void pricingIdPricesTypeSafeUnderItsBookPrefix() {
+        assertEquals("typesafe/jev-latest", ModelCatalog.pricingId(ModelProvider.TYPESAFE, "jev-latest"));
+    }
+
+    @Test
+    void decisionPricingIdPricesEveryJevRouteUnderTheSameBookKey() {
+        assertEquals("typesafe/jev-latest", ModelCatalog.decisionPricingId(ModelProvider.TYPESAFE, "jev-latest"));
+        assertEquals(
+                "typesafe/jev-latest",
+                ModelCatalog.decisionPricingId(ModelProvider.OPENROUTER, "~typesafe/jev-latest"));
+        assertEquals(
+                "typesafe/jev-latest", ModelCatalog.decisionPricingId(ModelProvider.PLATFORM, "~typesafe/jev-latest"));
+    }
+
+    @Test
+    void mergeLiveDropsPinnedJevVersionsFromAnOpenRouterListing_keepingTheStaticEntry() {
+        List<ModelCatalog.CatalogEntry> merged = ModelCatalog.mergeLive(
+                ModelProvider.OPENROUTER,
+                List.of(
+                        new ProviderModel("~typesafe/jev-latest", "TypeSafe: Jev Latest", "TypeSafe"),
+                        new ProviderModel("typesafe/jev-1.13", "TypeSafe: Jev 1.13", "TypeSafe"),
+                        new ProviderModel("typesafe/jev-router", "TypeSafe: Jev Router", "TypeSafe")));
+
+        List<String> jev = merged.stream()
+                .map(ModelCatalog.CatalogEntry::modelName)
+                .filter(n -> n.contains("typesafe/"))
+                .toList();
+        assertEquals(List.of("~typesafe/jev-latest"), jev);
+        assertTrue(merged.stream()
+                .filter(e -> e.modelName().equals("~typesafe/jev-latest"))
+                .allMatch(ModelCatalog.CatalogEntry::decision));
     }
 }

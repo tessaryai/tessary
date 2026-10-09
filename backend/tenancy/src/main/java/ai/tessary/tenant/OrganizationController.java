@@ -82,15 +82,22 @@ public class OrganizationController {
     /**
      * The {@code GET /api/orgs/{slug}/signup-policy} view. The policy is instance-wide and
      * lives on the install's first organization; {@code governing} says whether the addressed
-     * organization is that one, and {@code governing_org_slug} names it either way.
+     * organization is that one, and {@code governing_org_slug} and {@code governing_org_name} name
+     * it either way (the name is what the UI shows; the slug is the URL segment).
      */
     public record SignupPolicyView(
             String mode,
             List<String> domains,
             boolean governing,
-            @JsonProperty("governing_org_slug") @Nullable String governingOrgSlug) {
-        static SignupPolicyView of(SignupPolicy p, boolean governing, @Nullable String governingOrgSlug) {
-            return new SignupPolicyView(p.mode().wire(), p.domains(), governing, governingOrgSlug);
+            @JsonProperty("governing_org_slug") @Nullable String governingOrgSlug,
+            @JsonProperty("governing_org_name") @Nullable String governingOrgName) {
+        static SignupPolicyView of(SignupPolicy p, boolean governing, @Nullable Organization governingOrg) {
+            return new SignupPolicyView(
+                    p.mode().wire(),
+                    p.domains(),
+                    governing,
+                    governingOrg == null ? null : governingOrg.slug(),
+                    governingOrg == null ? null : governingOrg.name());
         }
     }
 
@@ -144,7 +151,7 @@ public class OrganizationController {
         // failure can't leave an org with no membership or no default project. The owned-org cap
         // is checked in there too, under a per-owner lock, so a concurrent second request from
         // the same user cannot slip past it.
-        return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsPerUser()));
+        return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsFor(ctx.userId())));
     }
 
     @PatchMapping("/api/orgs/{orgSlug}")
@@ -174,7 +181,7 @@ public class OrganizationController {
 
     private TenantPathResolver.OrgResolved requireOwner(TenantContext ctx, String orgSlug, String action) {
         var r = resolver.requireOrg(ctx, orgSlug);
-        // Irreversible organization lifecycle (rename/archive/delete/transfer) is owner-only,
+        // Irreversible organization lifecycle (rename/archive/delete) is owner-only,
         // expressed as the ORG_ADMIN permission which only the owner role holds.
         r.require(Permission.ORG_ADMIN, action);
         return r;
@@ -204,7 +211,7 @@ public class OrganizationController {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.MEMBERS_MANAGE, "add members");
         String email = req.email().toLowerCase(Locale.ROOT).trim();
-        String role = (req.role() == null || req.role().isBlank()) ? OrgMembership.MEMBER : req.role();
+        String role = req.role() == null ? OrgMembership.MEMBER : req.role();
         String now = Instant.now().toString();
 
         Optional<Principal> existing = users.findByEmail(email);
@@ -219,10 +226,7 @@ public class OrganizationController {
         }
 
         // Unknown email → pending invite, consumed on the invitee's first login.
-        String workosInvitationId = null;
-        if (provider.isEnabled()) {
-            workosInvitationId = provider.createInvitation(email).id();
-        }
+        String workosInvitationId = provider.createInvitation(email).id();
         OrgInvitation inv = new OrgInvitation(
                 Ids.ulid(),
                 r.org().id(),
@@ -245,7 +249,7 @@ public class OrganizationController {
         return ApiResponse.ok(SignupPolicyView.of(
                 signupPolicy.current(),
                 signupPolicy.governs(r.org().id()),
-                signupPolicy.governingOrg().map(Organization::slug).orElse(null)));
+                signupPolicy.governingOrg().orElse(null)));
     }
 
     /**
@@ -257,8 +261,8 @@ public class OrganizationController {
             TenantContext ctx, @PathVariable String orgSlug, @RequestBody SignupPolicyRequest req) {
         var r = resolver.requireOrg(ctx, orgSlug);
         r.require(Permission.MEMBERS_MANAGE, "change the sign-up policy");
-        String governingSlug =
-                signupPolicy.governingOrg().map(Organization::slug).orElse(null);
+        Organization governingOrg = signupPolicy.governingOrg().orElse(null);
+        String governingSlug = governingOrg == null ? null : governingOrg.slug();
         if (!signupPolicy.governs(r.org().id())) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
@@ -272,7 +276,7 @@ public class OrganizationController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }
         return ApiResponse.ok(
-                SignupPolicyView.of(signupPolicy.update(r.org(), next, ctx.userId()), true, governingSlug));
+                SignupPolicyView.of(signupPolicy.update(r.org(), next, ctx.userId()), true, governingOrg));
     }
 
     @GetMapping("/api/orgs/{orgSlug}/invitations")
@@ -295,7 +299,7 @@ public class OrganizationController {
                 .filter(i -> i.orgId().equals(r.org().id()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "no such invitation"));
         invitations.markRevoked(inv.id(), Instant.now().toString());
-        if (inv.workosInvitationId() != null && provider.isEnabled()) {
+        if (inv.workosInvitationId() != null) {
             try {
                 provider.revokeInvitation(inv.workosInvitationId());
             } catch (RuntimeException e) {

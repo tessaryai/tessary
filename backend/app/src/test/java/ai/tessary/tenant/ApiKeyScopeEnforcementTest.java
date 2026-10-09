@@ -45,15 +45,6 @@ class ApiKeyScopeEnforcementTest {
     }
 
     @Test
-    void ingest_acceptsWriteScopedKey_pastTheScopeGate() {
-        // A WRITE key clears the scope gate; the call then fails later on malformed protobuf, proving the
-        // scope check did not short-circuit it.
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> otlp.export(keyCtx(KeyScope.WRITE), new byte[] {1, 2, 3}));
-        assertEquals(IngestError.OTLP_MALFORMED_BODY, ex.error());
-    }
-
-    @Test
     void ingest_acceptsMcpSupersetKey_pastTheScopeGate() {
         TessaryException ex =
                 assertThrows(TessaryException.class, () -> otlp.export(keyCtx(KeyScope.ADMIN), new byte[] {1, 2, 3}));

@@ -86,7 +86,7 @@ never a `tessary.*` attribute.
   ignored.
 - **`gen_ai.system` / `gen_ai.provider.name`** — carried in `span_payload.attributes`, not promoted to
   a column.
-- **`tessary.sdk`, `tessary.upstream.*`** — provenance markers; written, never read by processing.
+- **`tessary.sdk`** — a provenance marker the producer stamps; carried through, never read by processing.
 - **`gen_ai.evaluation.result`** (span event) and the `gen_ai.evaluation.*` attributes under it —
   **no longer read.** They landed explicit user feedback as first-class rows until the feature was
   removed and its changeset `0083` (folded into the baseline in a 2026-09 partition squash)

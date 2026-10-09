@@ -35,24 +35,17 @@
         <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE" />
     </Match>
 
-    <!-- Transparent rethrow: LlmCaller catches RuntimeException only to record it on the
-         OpenTelemetry span, then rethrows the original unchanged. -->
+    <!-- Transparent rethrow: span-recording call sites (JevDecisionClient) catch RuntimeException
+         only to record it on the OpenTelemetry span, then rethrow the original unchanged. -->
     <Match>
         <Bug pattern="THROWS_METHOD_THROWS_RUNTIMEEXCEPTION" />
     </Match>
 
-    <!-- TessaryException carries transient request-context args (which may hold non-serializable
-         values); the rendered message is preserved on the RuntimeException superclass, args() is
-         null-safe, and the exception is never Java-serialized in this web app. -->
-    <Match>
-        <Class name="ai.tessary.open.errors.TessaryException" />
-        <Bug pattern="SE_TRANSIENT_FIELD_NOT_RESTORED" />
-    </Match>
     <!-- ===================================================================================
          find-sec-bugs (added with the plugin itself). Its first full run over this tree
          produced 343 findings and zero real bugs; what follows is that triage, kept in the two
          shapes this file's header asks for. Re-run the triage with:
-           mvn -P '!paid' -DskipTests -Dpmd.skip=true -Dspotbugs.failOnError=false -fae verify
+           mvn -DskipTests -Dpmd.skip=true -Dspotbugs.failOnError=false -fae verify
          =================================================================================== -->
 
     <!-- Informational detectors that fire on shape, not on a defect. SPRING_ENDPOINT marks every
@@ -77,14 +70,14 @@
     <!-- IMPROPER_UNICODE on toLowerCase/toUpperCase, 33 sites, every one of them already passing
          Locale.ROOT. This is NOT excluded wholesale, because a blanket rule would also silence the
          detector on code written later in exactly the places it is worth having. It is excluded
-         everywhere EXCEPT the seven guard classes below, where it stays armed; the sites those
+         everywhere EXCEPT the five guard classes below, where it stays armed; the sites those
          classes have today are then excluded one by one, each having been read.
 
          An earlier draft of this block claimed case mapping was a live security gap in the
          platform-staff email match, where the allowlist lowercases and the column does not. That
          claim was wrong and review caught it: PlatformStaffProperties normalizes BOTH sides through
-         the same normalize() (:36 stores, :52 compares), so the match itself is sound. The real
-         issue there is a different one, and not this detector's to catch: app_user.email is
+         the same normalize() (setStaffEmails stores, isStaffEmail compares), so the match itself is
+         sound. The real issue there is a different one, and not this detector's to catch: app_user.email is
          case-sensitively UNIQUE, so `Ops@example.com` can be registered alongside a staff
          `ops@example.com` and will normalize into the allowlist. That is a schema fix. -->
     <Match>
@@ -96,8 +89,6 @@
                 <Class name="ai.tessary.auth.PublicOriginGuard" />
                 <Class name="ai.tessary.tenant.SignupPolicy" />
                 <Class name="ai.tessary.ingest.UrlGuard" />
-                <Class name="ai.tessary.git.github.GithubWebhookAdapter" />
-                <Class name="ai.tessary.llm.MantleHttpClient" />
             </Or>
         </Not>
     </Match>
@@ -110,9 +101,7 @@
            PublicOriginGuard     a hostname and a tls-mode enum
            SignupPolicy          a wire enum
            UrlGuard              a URI scheme
-           GithubWebhookAdapter  an HTTP header NAME, ASCII by RFC 9110
-           MantleHttpClient      the same, against the JDK restricted-header set
-         A NEW case-fold in any of these seven classes still fires, which is the point of the
+         A NEW case-fold in any of these five classes still fires, which is the point of the
          shape above. -->
     <Match>
         <Or>
@@ -121,13 +110,11 @@
             <Class name="ai.tessary.auth.PublicOriginGuard" />
             <Class name="ai.tessary.tenant.SignupPolicy" />
             <Class name="ai.tessary.ingest.UrlGuard" />
-            <Class name="ai.tessary.git.github.GithubWebhookAdapter" />
-            <Class name="ai.tessary.llm.MantleHttpClient" />
         </Or>
         <Bug pattern="IMPROPER_UNICODE" />
     </Match>
 
-    <!-- The four narrow false positives, each pinned to the method it fires on so the detector stays
+    <!-- The three narrow false positives, each pinned to the method it fires on so the detector stays
          live everywhere else. These are the detectors worth having; blanket-excluding any of them
          would defeat the reason the plugin was added. -->
     <Match>
@@ -136,13 +123,6 @@
         <Class name="ai.tessary.pricing.PriceBookRepository" />
         <Method name="batch" />
         <Bug pattern="SQL_INJECTION_SPRING_JDBC" />
-    </Match>
-    <Match>
-        <!-- ALL_ZEROS.equals(headSha): GitHub's branch-deleted sentinel, not a secret comparison.
-             The HMAC comparison in this same class uses MessageDigest.isEqual and is not flagged. -->
-        <Class name="ai.tessary.git.github.GithubWebhookAdapter" />
-        <Method name="parsePush" />
-        <Bug pattern="UNSAFE_HASH_EQUALS" />
     </Match>
     <Match>
         <!-- These three write Jackson-serialised JSON under Content-Type: application/json. There is
@@ -161,10 +141,7 @@
     <Match>
         <!-- Seeded Random for deterministic sample data. Feeds no token, id or secret; those use
              SecureRandom (SecretBox, ApiKeyService, Ids, SessionCipher, DeviceLinkService). Pinned to
-             the one method so a future new Random() anywhere else in this class still fires.
-             PriorsGovernance was in this list in an earlier draft and should not have been: review
-             established it is the differential-privacy epsilon-noise draw, where a predictable PRNG
-             is the whole attack. It is fixed in code rather than excluded here. -->
+             the one method so a future new Random() anywhere else in this class still fires. -->
         <Class name="ai.tessary.onboarding.SampleShowcase" />
         <Method name="generate" />
         <Bug pattern="PREDICTABLE_RANDOM" />
@@ -178,8 +155,8 @@
     <Match>
         <!-- to_regclass('<table>') on a name that comes from DetectionTableRegistry, i.e. registered
              in code, never from a request. The detector cannot see that, and it is right not to
-             assume it: assertPlainIdentifier now enforces the property at the call rather than
-             leaving it as a convention, mirroring ProjectPurgeRepository.assertKnown. assertHasColumn
+             assume it: DetectionTable's compact constructor validates the name against its
+             TABLE_NAME pattern when the bean is built. assertHasColumn
              (migration 0012's column probe) concatenates the same already-validated table name plus
              a private static final column constant, never request input. -->
         <Class name="ai.tessary.detection.DetectionTableSchemaCheck" />

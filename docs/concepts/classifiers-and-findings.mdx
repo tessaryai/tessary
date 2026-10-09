@@ -27,14 +27,25 @@ Two notes on the deterministic pair.
 
 `malformed_output` checks each output against its call site's schema, and opens a finding when a call site's failure rate rises above what its own history predicts, not on a fixed count. It needs a captured output schema to do anything, and says so: until your repository is connected and a call site declares one, the classifier reads as waiting on schemas rather than as quiet.
 
-### What is not available in the open edition
+### Frustration, on your own key
 
-Four classifiers exist in the product and cannot run here:
+`frustration` is in this build and starts switched off on every project. It watches whether users become frustrated with the agent, and it is the one classifier that makes a model call per item it scores: each eligible user message is one call to TypeSafe's Jev decision model on your own OpenRouter or TypeSafe key.
 
-- `frustration` and `groundedness` depend on a separate encoder service. The self-hosting configuration does not start it, its endpoint and API key ship blank, and the model weights are not published.
-- `behavior_drift` and `sop_conformance` ship as catalog entries whose detector code is not on this build's classpath, so this build cannot run either one. `sop_conformance` is the classifier that measures an agent against a written SOP (standard operating procedure), and it is switched off for every organization in every edition today, not only here.
+A flagged message is not a finding on its own. Each call site learns its normal rate of frustrated sessions, and a finding and its case open together when that rate rises. [Watch for frustrated users](/classifiers/frustration) covers turning it on, what it sends, and reading the case.
 
-The capability API refuses an override for any of the four rather than accepting one and doing nothing, so enabling one returns an error instead of leaving you hunting through your traces for results that were never going to appear. [Set up Tessary](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) states the same boundary from the install side.
+### Groundedness, on a separate model service
+
+`groundedness` is in this build and starts switched off on every project. It checks whether an answer is supported by the documents the call retrieved: a public model (`tessaryai/groundedness-classifier-v1`) reads the documents and the whole answer in one pass and flags the sentences they don't support. The model needs a GPU and runs outside Tessary's containers, on a Mac with Apple silicon for development or on a GPU instance on AWS for production. Turning it on under **Classifiers** gives you a prompt for your coding agent, which follows the setup file [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md).
+
+A flagged answer is not a finding on its own. Each call site learns its normal share of traces with a flagged answer, and a finding opens when that share rises, like frustration's. Its findings go through triage, and a positive ruling opens a case. Its measured quality is on the [classifier quality page](https://github.com/tessaryai/tessary/blob/main/devdocs/reference/classifier-quality.md). [Catch answers your documents don't support](/classifiers/groundedness) covers turning it on, what it sends, what it costs, and reading the case.
+
+## Run a classifier on some call sites
+
+A classifier runs on every call site until you limit it. Open the classifier under **Classifiers**, choose **Only some** under **Call sites**, and switch on the call sites it should check. Spans of other call sites are skipped, and so are spans with no call site. A span with no call site of its own counts as its trace's call site when another span of that trace carries one.
+
+This is how you spend less on `groundedness` and `frustration`: they send only the call sites you picked. For `frustration`, keep the call sites that reply to the user, see [Limit the call sites to score](/classifiers/frustration#limit-the-call-sites-to-score).
+
+When you add a call site, `secret_leak` and `malformed_output` go back and check its past spans. `groundedness` and `frustration` check it from now on, because going back would send their whole history to the model again. `tool_error` always runs on every call site, because it watches a tool across all of them.
 
 ## Fitting a baseline, and why a new project waits
 
@@ -69,9 +80,9 @@ The record has four properties worth understanding, because they shape what you 
 
 **Onset is the start of the current spell.** It holds still while the detection keeps firing and moves only after the detection has gone quiet for longer than that classifier's own window. That gap is how Tessary observes a recovery: nothing writes "this came back", a recovered detection stops appearing.
 
-**A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings — and, on the Classifiers page, charts its volume — on the real days that traffic occurred.
+**A backfill files under the days it happened, not the day it was uploaded.** A per-span classifier's detections carry the time the flagged span actually ran, so a month of historical traffic checked in one afternoon still opens findings on the real days that traffic occurred, and the Classifiers page charts its volume on those days too.
 
-**The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. [Cases](/concepts/cases) covers that step.
+**The claim is what gets audited.** Everything a classifier asserts, its numbers, its shift, the population it measured, is written onto the finding, and that is what triage reads. A ruling that agrees opens a case, or joins the one already open for that cause, and the finding stays open for as long as the case does; a ruling that disagrees closes the finding outright. A high-confidence secret leak and a frustration finding are the exceptions: each is filed already ruled, because its numbers are the claim, and opens its case without triage. [Cases](/concepts/cases) covers that step.
 
 ## Read next
 

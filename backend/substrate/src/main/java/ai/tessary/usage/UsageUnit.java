@@ -20,6 +20,8 @@ import ai.tessary.open.errors.TessaryException;
 public enum UsageUnit {
     /** Ingested typed observations (spans), counted from {@code observation}. */
     INGESTED_SPANS("ingested_spans"),
+    /** Ingested traces, counted from {@code trace} on the hour they arrived. The billable unit. */
+    INGESTED_TRACES("ingested_traces"),
     /**
      * Layer 2: escalation analysis of a finding. Retired and no longer produced. The constant stays
      * because {@link #fromWire} 422s on an unknown value and historical {@code metric_rollup} rows
@@ -77,7 +79,7 @@ public enum UsageUnit {
      * reads back) but nothing writes a new row under it.
      */
     public static UsageUnit[] metered() {
-        return new UsageUnit[] {INGESTED_SPANS, L1_EVALS};
+        return new UsageUnit[] {INGESTED_SPANS, INGESTED_TRACES, L1_EVALS};
     }
 
     /** Whether {@code granularity} is an allow-listed grain ({@code hour} or {@code day}). */

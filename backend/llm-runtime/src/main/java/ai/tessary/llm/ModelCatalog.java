@@ -2,9 +2,7 @@
 package ai.tessary.llm;
 
 import ai.tessary.llm.catalog.ProviderModel;
-import ai.tessary.llmspi.LaneGroup;
-import ai.tessary.llmspi.ModelLane;
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import ai.tessary.llm.catalog.SupportedMaker;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,8 +36,7 @@ public final class ModelCatalog {
             @JsonProperty("strict_json_schema") boolean strictJsonSchema,
             /**
              * The reasoning-effort levels this model accepts, in ascending order; empty when it takes
-             * no effort parameter at all. Surfaced as a per-run selector in the run modal and applied
-             * in {@code ChatModelFactory}.
+             * no effort parameter at all.
              *
              * <p>A list rather than a boolean because the sets genuinely differ: the OpenAI line takes
              * low/medium/high, while the GPT-5.6 models on bedrock-mantle also take none, xhigh and max.
@@ -57,12 +54,34 @@ public final class ModelCatalog {
              * ProjectModelSettings} is the only reader, it is the seam that lets a non-Bedrock model
              * be pointed at an {@link ai.tessary.llmspi.LaneGroup#AGENT_VM} lane at all.
              */
-            @JsonProperty("agentic") boolean agentic) {
+            @JsonProperty("agentic") boolean agentic,
+            /**
+             * Whether this entry is a hosted decision model (TypeSafe's Jev) rather than a chat model:
+             * it answers typed questions over {@code llm/decisions/}, never through {@code ChatModel},
+             * so no chat or agent lane may run it.
+             */
+            @JsonProperty("decision") boolean decision) {
 
-        /** Whether a reasoning effort is meaningful for this model at all. */
-        @JsonIgnore
-        public boolean supportsEffort() {
-            return !effortLevels.isEmpty();
+        /** A chat-model entry, the shape every entry but the decision models takes. */
+        public CatalogEntry(
+                ModelProvider provider,
+                String vendor,
+                String modelName,
+                String displayName,
+                boolean strictJsonSchema,
+                Set<String> effortLevels,
+                String defaultBaseUrl,
+                boolean agentic) {
+            this(
+                    provider,
+                    vendor,
+                    modelName,
+                    displayName,
+                    strictJsonSchema,
+                    effortLevels,
+                    defaultBaseUrl,
+                    agentic,
+                    false);
         }
     }
 
@@ -77,10 +96,16 @@ public final class ModelCatalog {
     private static final Set<String> NO_EFFORT = Set.of();
 
     /**
-     * Shared with {@link BedrockModelProfile} so a customer's own mantle credential offers exactly the
-     * levels the platform's own lanes do: one transcription of what the endpoint accepts, not two.
+     * The reasoning-effort levels the GPT-5.6 line accepts on mantle, in ascending order so a UI can
+     * render them as a scale.
+     *
+     * <p>Transcribed from what the endpoint itself enumerates, not from a doc page: AWS's launch blog
+     * lists these six, a secondary source claimed a seventh ({@code minimal}), and the API settles it
+     * by rejecting {@code minimal} with a message naming the supported set. Ordered, so
+     * {@code LinkedHashSet} rather than {@code Set.of}.
      */
-    private static final Set<String> MANTLE_GPT_EFFORTS = BedrockModelProfile.MANTLE_GPT_EFFORTS;
+    private static final Set<String> MANTLE_GPT_EFFORTS =
+            new LinkedHashSet<>(List.of("none", "low", "medium", "high", "xhigh", "max"));
 
     private static final List<CatalogEntry> ENTRIES = List.of(
             // OpenAI (direct), the GPT-5 line.
@@ -117,8 +142,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
-                    "claude-opus-4-7",
-                    "Claude Opus 4.7",
+                    "claude-opus-5-5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     "https://api.anthropic.com/v1",
@@ -126,8 +151,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
-                    "claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     "https://api.anthropic.com/v1",
@@ -155,8 +180,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
-                    "anthropic/claude-opus-4.7",
-                    "Claude Opus 4.7",
+                    "anthropic/claude-opus-5.5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
@@ -164,8 +189,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
-                    "anthropic/claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "anthropic/claude-sonnet-5.5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
@@ -197,15 +222,15 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
-            // The GPT-5.6 line over OpenRouter, the two agentic lanes' defaults for this provider. Named
-            // with the route, like the OpenAI-direct and mantle spellings of the same models, since three
-            // providers reach Terra and Luna at three different prices. Priced via #pricingId's
-            // "openrouter/" prefix, not by modelName alone — see that method's javadoc.
+            // GPT-6 Sol and Luna over OpenRouter, the two agentic lanes' models for this provider. Named
+            // with the route, like the OpenAI-direct spellings of the same models, since each route
+            // prices them separately. Priced via #pricingId's "openrouter/" prefix, not by modelName
+            // alone — see that method's javadoc.
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
-                    "openai/gpt-5.6-terra",
-                    "GPT-5.6 Terra (OpenRouter)",
+                    "openai/gpt-6-sol",
+                    "GPT-6 Sol (OpenRouter)",
                     false,
                     OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
@@ -213,8 +238,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "OpenAI",
-                    "openai/gpt-5.6-luna",
-                    "GPT-5.6 Luna (OpenRouter)",
+                    "openai/gpt-6-luna",
+                    "GPT-6 Luna (OpenRouter)",
                     false,
                     OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
@@ -245,8 +270,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.BEDROCK,
                     "Anthropic",
-                    "anthropic.claude-sonnet-5",
-                    "Claude Sonnet 5",
+                    "anthropic.claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
                     false,
                     NO_EFFORT,
                     null,
@@ -263,8 +288,8 @@ public final class ModelCatalog {
             new CatalogEntry(
                     ModelProvider.BEDROCK,
                     "Anthropic",
-                    "anthropic.claude-opus-4-7",
-                    "Claude Opus 4.7",
+                    "anthropic.claude-opus-5-5",
+                    "Claude Opus 5.5",
                     false,
                     NO_EFFORT,
                     null,
@@ -282,7 +307,7 @@ public final class ModelCatalog {
             // AWS Bedrock via the mantle endpoint, the only place the GPT-5.6 line exists, over the
             // OpenAI Responses API. Same AWS credential as Bedrock above, so the base URL stays null
             // here too. These take a reasoning effort, but the level set is not low/medium/high; see
-            // BedrockModelProfile.
+            // MANTLE_GPT_EFFORTS.
             new CatalogEntry(
                     ModelProvider.BEDROCK_MANTLE,
                     "OpenAI",
@@ -310,15 +335,14 @@ public final class ModelCatalog {
             // the same table that prices a completed run. Google Vertex is not covered: its
             // service-account/ADC auth fits none of PlatformCatalog's three auth kinds.
             //
-            // The GPT-5.6 line direct, distinct from the two bedrock-mantle entries above: same models,
-            // a different route at a different price. Terra is RCA's default on this provider since it's
-            // half the price of the flagship gpt-5.6 on the same line and cheaper than the mantle route
-            // to itself. Both stay offered; the price book decides the default.
+            // OpenAI direct. Sol is RCA's default on this provider: GPT-6 Sol ($2/$10) is half the input
+            // price of the flagship gpt-5.6 and replaced GPT-5.6 Terra ($2/$12) outright, since OpenAI
+            // shipped no GPT-6 Terra. Both stay offered; the price book decides the default.
             new CatalogEntry(
                     ModelProvider.OPENAI,
                     "OpenAI",
-                    "gpt-5.6-terra",
-                    "GPT-5.6 Terra (OpenAI)",
+                    "gpt-6-sol",
+                    "GPT-6 Sol (OpenAI)",
                     true,
                     OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
@@ -359,13 +383,13 @@ public final class ModelCatalog {
             // declared with their provider's own rows above instead, since each is that provider's only
             // current-generation model at its size.
             //
-            // Luna is named for its route, since the platform also reaches it over bedrock-mantle at a
-            // different price on a different credential.
+            // Luna is named for its route, like Sol above, since OpenRouter reaches it at a different
+            // price on a different credential.
             new CatalogEntry(
                     ModelProvider.OPENAI,
                     "OpenAI",
-                    "gpt-5.6-luna",
-                    "GPT-5.6 Luna (OpenAI)",
+                    "gpt-6-luna",
+                    "GPT-6 Luna (OpenAI)",
                     true,
                     OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
@@ -398,52 +422,46 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://api.x.ai/v1",
                     true),
+            // TypeSafe's Jev decision model, direct and over OpenRouter. Only the moving pointer is
+            // offered: the provider echoes the version that answered, which is what gets recorded.
+            // OpenRouter spells that pointer with a leading ~ and answers 400 "does not exist" to
+            // typesafe/jev-latest without it.
+            new CatalogEntry(
+                    ModelProvider.TYPESAFE,
+                    "TypeSafe",
+                    "jev-latest",
+                    "Jev (latest)",
+                    false,
+                    NO_EFFORT,
+                    "https://api.typesafe.ai",
+                    false,
+                    true),
+            new CatalogEntry(
+                    ModelProvider.OPENROUTER,
+                    "TypeSafe",
+                    "~typesafe/jev-latest",
+                    "Jev (latest)",
+                    false,
+                    NO_EFFORT,
+                    "https://openrouter.ai/api/v1",
+                    false,
+                    true),
+            // The deployment-supplied provider runs Anthropic's model on Anthropic's wire, so it prices
+            // under the same bare book key. No default base URL: the supplying build decides the route.
+            new CatalogEntry(
+                    ModelProvider.PLATFORM,
+                    "Anthropic",
+                    "claude-sonnet-5-5",
+                    "Claude Sonnet 5.5",
+                    false,
+                    NO_EFFORT,
+                    null,
+                    true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
-            // shows unqualified; ChatModelFactory#buildOpenAiCompat overrides it whenever the stored
-            // credential's customModelName is set.
+            // shows unqualified.
             new CatalogEntry(
                     ModelProvider.CUSTOM, "Custom", "custom-model", "Custom model", false, NO_EFFORT, null, true));
-
-    static {
-        verifyLanePriorities();
-    }
-
-    /**
-     * Fail at class load if what a {@link LanePriority} lane names and what that lane's group offers
-     * are not the same set of models.
-     *
-     * <p>Two directions, catching different mistakes: a model a lane names that its group doesn't
-     * offer renders in the dropdown and 400s on save, while a model the group offers that the lane
-     * doesn't name is missing from that lane's picker even though the group permits it.
-     */
-    private static void verifyLanePriorities() {
-        for (ModelLane lane : ModelLane.values()) {
-            Set<String> offered = offeredFor(lane.group());
-            Set<String> named = new LinkedHashSet<>(LanePriority.modelKeys(lane));
-            for (String key : named) {
-                if (!offered.contains(key)) {
-                    throw new IllegalStateException(
-                            "lane " + lane + " offers " + key + ", which " + lane.group() + " does not permit");
-                }
-            }
-            Set<String> missing = new LinkedHashSet<>(offered);
-            missing.removeAll(named);
-            if (!missing.isEmpty()) {
-                throw new IllegalStateException(lane.group() + " permits " + missing + ", which lane " + lane
-                        + " does not name, so its picker cannot offer them");
-            }
-        }
-    }
-
-    /** Every model a lane group permits: its Bedrock offer list, plus the agentic catalog entries. */
-    private static Set<String> offeredFor(LaneGroup group) {
-        Set<String> offered = new LinkedHashSet<>(BedrockModelProfile.offeredFor(group));
-        if (group == LaneGroup.AGENT_VM) {
-            ENTRIES.stream().filter(CatalogEntry::agentic).forEach(e -> offered.add(key(e)));
-        }
-        return offered;
-    }
 
     private ModelCatalog() {}
 
@@ -454,16 +472,25 @@ public final class ModelCatalog {
     /**
      * A catalog entry's {@code model_key} on the wire, {@code "<PROVIDER>:<model_name>"}, the
      * non-Bedrock half of the union {@link ProjectModelSettings} decodes. One function, because the
-     * settings payload, the lane priority check and the stored row all have to spell it the same way.
+     * settings payload, the lane priority list and the stored row all have to spell it the same way.
      */
     public static String key(CatalogEntry entry) {
         return entry.provider().name() + ":" + entry.modelName();
     }
 
     /**
+     * The book prefix every Jev call is priced under, whichever gateway carried it. The book has no
+     * {@code openrouter/typesafe/...} key, so the OpenRouter route prices its already-namespaced
+     * {@code ~typesafe/jev-latest} as {@code typesafe/jev-latest} rather than through
+     * {@link #pricingId}'s {@code openrouter/} case.
+     */
+    public static final String DECISION_PRICING_PREFIX = "typesafe/";
+
+    /**
      * The id this {@code (provider, modelName)} pair is priced under in the vendored LiteLLM book,
      * distinct from {@code modelName} for the routes whose book keys carry a prefix this catalog's own
-     * names do not: {@code xai/}, {@code zai/}, {@code moonshot/}, {@code openrouter/}, and
+     * names do not: {@code xai/}, {@code zai/}, {@code moonshot/}, {@code openrouter/}, {@link #DECISION_PRICING_PREFIX} for
+     * {@link ModelProvider#TYPESAFE}, and
      * {@link BedrockModelProfile#MANTLE_ROUTE_PREFIX} for {@link ModelProvider#BEDROCK_MANTLE} (the
      * same split {@link BedrockModelProfile.ModelDescriptor#inferenceProfileId} documents for the
      * platform-funded lanes). Every other provider's book keys are bare, so {@code modelName} is
@@ -481,8 +508,20 @@ public final class ModelCatalog {
             case MOONSHOT -> "moonshot/" + modelName;
             case OPENROUTER -> "openrouter/" + modelName;
             case BEDROCK_MANTLE -> BedrockModelProfile.MANTLE_ROUTE_PREFIX + modelName;
+            case TYPESAFE -> DECISION_PRICING_PREFIX + modelName;
             default -> modelName;
         };
+    }
+
+    /**
+     * The id a decision model is priced under: {@code typesafe/<bare id>} on every gateway. OpenRouter's
+     * and the platform provider's names are already namespaced, so they only lose OpenRouter's
+     * {@code ~} latest-pointer mark rather than going via {@link #pricingId}'s {@code openrouter/} case,
+     * which names no book key.
+     */
+    public static String decisionPricingId(ModelProvider provider, String modelName) {
+        if (provider == ModelProvider.TYPESAFE) return pricingId(provider, modelName);
+        return modelName.startsWith("~") ? modelName.substring(1) : modelName;
     }
 
     public static Optional<CatalogEntry> find(ModelProvider provider, String modelName) {
@@ -530,10 +569,16 @@ public final class ModelCatalog {
                                     e.strictJsonSchema(),
                                     e.effortLevels(),
                                     e.defaultBaseUrl(),
-                                    e.agentic()));
+                                    e.agentic(),
+                                    e.decision()));
         }
         // Whatever is left in liveByName exists only in the live listing, synthesize fail-closed.
         for (ProviderModel m : liveByName.values()) {
+            // A decision model is offered only as its static entry: pinned Jev versions stay unlisted.
+            if (provider == ModelProvider.OPENROUTER
+                    && SupportedMaker.fromOpenRouterPrefix(m.modelName()).orElse(null) == SupportedMaker.TYPESAFE) {
+                continue;
+            }
             merged.add(new CatalogEntry(
                     provider, m.vendor(), m.modelName(), m.displayName(), false, NO_EFFORT, null, false));
         }

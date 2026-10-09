@@ -4,7 +4,6 @@ package ai.tessary.classifier.finding.dossier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -16,15 +15,14 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler.Evidence
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Four assembler shapes, one test per shape, plus the token budget and the payload
- * fallback. Real payload fixtures rather than hand-abbreviated ones — copied verbatim from {@code
- * ToolErrorEvidence.toJson}/{@code MetricFindingEvidence.toJson}'s field lists, so a field these tests
- * do not exercise is a field the real detectors also never write, not an assembler bug.
+ * Four assembler shapes plus the token budget and payload fallback, over fixtures copied from {@code
+ * ToolErrorEvidence.toJson} and {@code MetricFindingEvidence.toJson}'s field lists.
  */
 class ClassifierDossierAssemblerTest {
 
@@ -54,8 +52,7 @@ class ClassifierDossierAssemblerTest {
                  "onset_at":"2026-08-01T00:00:00Z","window":{"opened_at":"2026-08-01T00:00:00Z","closed_at":"2026-08-02T00:00:00Z","kind":"recomputed"}}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -69,6 +66,39 @@ class ClassifierDossierAssemblerTest {
                 dossier.contains("FLAT sample, not mapped to a signature"),
                 "must declare the sample, not silently list ids");
         assertTrue(dossier.contains("population since onset: n=300, failures=54"));
+    }
+
+    @Test
+    void frustrationShapeStatesTheRateInConversationsAndPairsSessionWithTraceWitnesses() throws Exception {
+        String payload = """
+                {"call_site_id":"support-chat","direction":"up","baseline_conversations":200,
+                 "baseline_frustrated":10,"baseline_rate":0.052,"current_rate":0.25,
+                 "conversations_since_onset":600,"frustrated_since_onset":150,"delta_pp":19.8,
+                 "effect_size":0.6,"statistic":7.2,"threshold":4.94,"criticality":43.6,
+                 "onset_at":"2026-08-01T10:00:00Z","arl_target":10000,"min_decision_interval":4.0,
+                 "scorer_version":"jev-choice3-abc","jev_threshold":0.4,
+                 "cause_kind":"frustration_rate","workflow_key":"","native_cause_key":"support-chat"}
+                """;
+        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt()))
+                .thenReturn(pageOf(
+                        List.of(
+                                new FindingEvidenceRow(
+                                        "e1", PROJECT_ID, FINDING_ID, "conv-1", null, null, "witness", 0, "t0"),
+                                new FindingEvidenceRow(
+                                        "e2", PROJECT_ID, FINDING_ID, null, "trace-1", null, "witness", 1, "t0")),
+                        false));
+
+        String dossier = ClassifierDossierAssembler.assemble(
+                        MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 2, 0), payload)
+                .orElseThrow();
+
+        assertTrue(dossier.startsWith("# Frustration evidence"));
+        assertTrue(dossier.contains("5.20% learned → 25.00% since onset"));
+        assertTrue(dossier.contains("since onset: 600 conversations, 150 frustrated"));
+        assertTrue(dossier.contains("There is no baseline side"));
+        assertTrue(dossier.contains("- `witness` session=`conv-1` trace=`-`"));
+        assertTrue(dossier.contains("- `witness` trace=`trace-1`"));
     }
 
     @Test
@@ -87,8 +117,7 @@ class ClassifierDossierAssemblerTest {
                  ]}
                 """;
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), anyInt())).thenReturn(pageOf(List.of(), false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
@@ -103,64 +132,12 @@ class ClassifierDossierAssemblerTest {
     }
 
     @Test
-    void windowFindingShapeFallsBackToTheRawPayloadWhenNoRefCurPairExists() throws Exception {
-        // A window block with no ref/cur-shaped sibling field anywhere — the generic fallback's own
-        // fallback: state that plainly and include the raw payload rather than fabricate a comparison.
-        String payload = "{\"window\":{\"opened_at\":\"2026-08-01T00:00:00Z\",\"closed_at\":\"2026-08-02T00:00:00Z\"},"
-                + "\"note\":\"no comparable pair here\"}";
-        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
-
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
-
-        assertTrue(out.isPresent());
-        assertTrue(out.get().contains("No paired before/after fields found"));
-    }
-
-    @Test
-    void windowFindingShapePairsAGenericRefCurField() throws Exception {
-        String payload =
-                "{\"window\":{\"opened_at\":\"a\",\"closed_at\":\"b\"}," + "\"latency_ms\":{\"ref\":100,\"cur\":900}}";
-        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), any(), anyInt(), any()))
-                .thenReturn(pageOf(List.of(), false));
-
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 0, 0, 0, 0), payload);
-
-        assertTrue(out.isPresent());
-        assertTrue(out.get().contains("latency_ms: 100 → 900"));
-    }
-
-    @Test
-    void unrecognisedShapeFallsThroughToEmpty() throws Exception {
-        String payload = "{\"some_other_classifier\":true,\"value\":1}";
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER,
-                mock(FindingEvidenceRepository.class),
-                PROJECT_ID,
-                FINDING_ID,
-                new EvidenceCounts(0, 0, 0, 0, 0),
-                payload);
-        assertTrue(
-                out.isEmpty(),
-                "no dedicated assembler recognises this shape — caller must fall back to DossierPayload.forAgent");
-    }
-
-    @Test
     void smallEvidenceSetIsFullyEnumerated() throws Exception {
         String payload = "{\"bucket\":{\"key\":\"k\"},\"ratio\":1.0,\"window\":{}}";
         List<FindingEvidenceRow> rows =
                 List.of(row(FindingEvidenceRow.Role.MEMBER, 1), row(FindingEvidenceRow.Role.MEMBER, 2));
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(
-                        eq(PROJECT_ID),
-                        eq(FINDING_ID),
-                        any(),
-                        eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP),
-                        any()))
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
                 .thenReturn(pageOf(rows, false));
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
@@ -182,13 +159,8 @@ class ClassifierDossierAssemblerTest {
             page.add(row(FindingEvidenceRow.Role.MEMBER, i));
         }
         FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.page(
-                        eq(PROJECT_ID),
-                        eq(FINDING_ID),
-                        any(),
-                        eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP),
-                        any()))
-                .thenReturn(pageOf(page, true)); // more rows exist beyond this page
+        when(evidence.page(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
+                .thenReturn(pageOf(page, true)); // more rows exist
 
         Optional<String> out = ClassifierDossierAssembler.assemble(
                 MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 50_000, 0, 0, 0), payload);
@@ -236,16 +208,90 @@ class ClassifierDossierAssemblerTest {
         assertTrue(truncated.startsWith("line 0\n"), "the head — the claim and statistics — must survive whole");
     }
 
+    /** A non-JSON payload falls back rather than failing the run. */
     @Test
-    void budgetIsANoOpUnderTheCap() {
-        String small = "line 1\nline 2\n";
-        assertEquals(small, ClassifierDossierAssembler.budget(small));
+    void anUnparseablePayloadFallsThroughToEmpty() {
+        assertEquals(
+                Optional.empty(),
+                ClassifierDossierAssembler.assemble(
+                        MAPPER,
+                        mock(FindingEvidenceRepository.class),
+                        PROJECT_ID,
+                        FINDING_ID,
+                        new EvidenceCounts(0, 0, 0, 0, 0),
+                        "{not json"));
     }
 
-    /** Sanity on the fixture's own numeral formatting, so the "50,000" assertion above is not brittle
-     *  to locale — pinned separately here rather than relying on the test JVM's default locale. */
+    /** Each role reads its own count. */
+    @ParameterizedTest
+    @CsvSource({"exemplar, 1", "member, 2", "baseline, 3", "witness, 4", "changepoint, 5", "sample, 0"})
+    void eachRoleReadsItsOwnCount(String role, long expected) {
+        assertEquals(expected, new EvidenceCounts(1, 2, 3, 4, 5).forRole(role));
+    }
+
+    private static final String TOOL_ERROR_HEAD = "# Tool error evidence\n\n"
+            + "- tool: `search_docs`\n"
+            + "- direction: up\n"
+            + "- rate: 2.00% → 18.00% (CUSUM 6.10 past a 5.00 decision interval)\n"
+            + "- population since onset: n=300, failures=54\n"
+            + "\n## Failure patterns, grouped by error signature\n\n";
+
+    private static final String TOOL_ERROR_BASE = "\"bucket\":{\"key\":\"search_docs\"},\"direction\":\"up\","
+            + "\"rate\":{\"ref\":0.02,\"cur\":0.18},\"statistic\":6.1,\"threshold\":5.0,\"n_cur\":300,"
+            + "\"failures\":{\"cur\":54}";
+
+    /**
+     * A cut pattern list says so, and no patterns says there is no breakdown, so the agent neither misreads nor
+     * invents one.
+     */
     @Test
-    void countFormattingUsesRootLocale() {
-        assertEquals("50,000", String.format(Locale.ROOT, "%,d", 50_000));
+    void theToolErrorDossierDeclaresACutPatternListAndAMissingOne() throws Exception {
+        assertEquals(
+                TOOL_ERROR_HEAD
+                        + "Every pattern the detector tracked for this tool, ranked in the detector's own order"
+                        + " (patterns.json's own array order — not re-sorted here). `cur` is the count"
+                        + " since onset; `ref` is the same signature's count in the prior window, so a"
+                        + " signature with ref=0 is new.\n\n"
+                        + "- `timeout` (provider): 40 now, 2 before\n"
+                        + "\n(patterns_truncated=true — the detector's own pattern list was cut; the counts"
+                        + " above cover only the patterns it kept, not the tool's whole failure"
+                        + " population. `failures.cur` above is still the true total.)\n",
+                ToolErrorDossier.build(MAPPER.readTree("{" + TOOL_ERROR_BASE
+                        + ",\"patterns\":[{\"signature\":\"timeout\",\"source\":\"provider\",\"ref\":2,\"cur\":40}],"
+                        + "\"patterns_truncated\":true}")));
+        assertEquals(
+                TOOL_ERROR_HEAD
+                        + "No per-signature breakdown in this payload — only the aggregate rate above. State"
+                        + " that plainly rather than inventing signatures; get_finding_evidence still"
+                        + " pages the raw failing calls.\n",
+                ToolErrorDossier.build(MAPPER.readTree("{" + TOOL_ERROR_BASE + "}")));
+    }
+
+    /**
+     * The rolling arm's token pairs and ring are the only account of the reference side; without them the agent has
+     * no "before".
+     */
+    @Test
+    void theMetricDriftDossierCarriesTheTokenPairsAndTheReferenceRing() throws Exception {
+        String payload = "{\"bucket\":{\"key\":\"summarize\",\"kind\":\"call_site\"},\"reference\":\"previous\","
+                + "\"direction\":\"up\",\"w1_log\":0.5,\"ratio\":1.5,\"floor\":0.15,\"n_ref\":100,\"n_cur\":90,"
+                + "\"tokens\":{\"input_p50\":[500,800],\"output_p50\":[null,null]},"
+                + "\"control\":{\"days_used\":6,\"days_excluded_as_confirmed\":1,\"oldest_day\":\"2026-08-01\"}}";
+
+        assertEquals(
+                "# Metric drift evidence\n\n"
+                        + "- bucket: `summarize` (call_site)\n"
+                        + "- reference: previous\n"
+                        + "- direction: up\n"
+                        + "- effect: w1_log=0.5000 ratio=1.5000x (floor 0.1500)\n"
+                        + "- population: n_ref=100, n_cur=90\n"
+                        + "\n## Reference vs. current (the paired before/after aggregate)\n\n"
+                        + "- input_p50: 500 → 800\n"
+                        + "\nReference composition (rolling arm — no per-instance baseline rows exist for this arm,"
+                        + " only this ring): 6 day(s) used, 1 excluded as already-confirmed, oldest day 2026-08-01.\n"
+                        + "\n## Concentration: which sibling buckets this drift explains\n\n"
+                        + "This shift explains no sibling buckets (explains=[] or absent) — it did not"
+                        + " suppress any other finding, so there is nothing to concentrate over.\n",
+                MetricDriftDossier.build(MAPPER.readTree(payload)));
     }
 }

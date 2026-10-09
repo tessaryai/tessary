@@ -2,180 +2,196 @@
 /*
  * Vitals — the pulse strip's full-size page.
  *
- * Deterministic, never judged. Two headline numbers (spend · p95 turn
- * latency, 7d vs prior 7d) over a by-call-site table. Amber
- * ONLY, never red: the hottest mover per numeric column wears a
- * warning-subtle tint — a future spend-spike detector would open cases
- * instead of coloring this page. Row click → Traces filtered to the call
- * site (`?call_site=`). Unpriced-models caveat is a footnote linking
- * Settings → Models; cache/token economics stay org-level in Settings.
+ * A roll-up and nothing else: what the project spent, how many traces ran, how long they took and
+ * how many tokens they used over the window, then the same broken down by call site or by model.
+ * No comparison with an earlier window and no tint. The server still sends deltas and `flagged`,
+ * and this page deliberately reads neither: a moved number is something to open a case about, not
+ * something to color here.
  *
- * The tint comes from the server's own `flagged` flags, not a client-side max:
- * the hottest spend is the biggest MOVER, not the biggest number, and only the
- * read that holds both windows can tell those apart.
+ * Row click → Traces filtered to the call site (`?call_site=`). The unpriced-models caveat is a
+ * footnote linking Settings → Models; cache/token economics stay org-level in Settings.
  */
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState, type ReactNode } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { useTenant } from "../../tenant/TenantContext";
-import { ErrorNote, PageHeader, Skeleton, Table, TableSkeleton, TBody, TD, TH, THead, TR, cn } from "../../ui";
+import {
+  Button,
+  ErrorNote,
+  PageHeader,
+  SegmentedControl,
+  Skeleton,
+  Table,
+  TableSkeleton,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from "../../ui";
 import type { Vitals as VitalsData, VitalsGroup } from "../../api/types";
+import { usd } from "../../lib/usd";
 
-/** U+2212 minus — matches the sheet's `−3%` glyph, wider than a hyphen. */
-const MINUS = "−";
+type Days = "7" | "30";
+type Dimension = "call_site" | "model";
 
-function usd(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
-}
+/** Rows shown before "Show all". */
+const COLLAPSED_ROWS = 8;
+
+const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
 function seconds(ms: number | null | undefined): string {
   return ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`;
 }
 
-function signedPctOrDash(n: number | null | undefined): string {
-  if (n == null) return "—";
-  const rounded = Math.round(n);
-  return rounded < 0 ? `${MINUS}${Math.abs(rounded)}%` : `+${rounded}%`;
+function count(n: number): string {
+  return n.toLocaleString("en-US");
 }
 
-type ColKey = "call_site" | "spend" | "delta_spend" | "p95" | "turns";
+/** Per-trace spend is usually a fraction of a cent, which `usd`'s two places would round to $0.00. */
+function perTrace(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return n >= 1 ? usd(n) : `$${n.toFixed(3)}`;
+}
+
+function name(g: VitalsGroup): string {
+  return g.label ?? g.key ?? "unattributed";
+}
 
 type Column = {
-  key: ColKey;
+  key: string;
   label: string;
   numeric: boolean;
   sortValue: (g: VitalsGroup) => string | number;
-  format: (g: VitalsGroup) => string;
-  /** Amber when the server flagged this metric as the window's mover. Turns never tints. */
-  flagged?: (g: VitalsGroup) => boolean;
+  render: (g: VitalsGroup, total: number) => ReactNode;
 };
 
-const COLUMNS: Column[] = [
-  {
-    key: "call_site",
-    label: "Call site",
-    numeric: false,
-    sortValue: (g) => g.label ?? g.key ?? "",
-    format: (g) => g.label ?? g.key ?? "unattributed",
-  },
-  {
-    key: "spend",
-    label: "Spend",
-    numeric: true,
-    sortValue: (g) => g.cost.usd,
-    format: (g) => usd(g.cost.usd),
-    flagged: (g) => g.cost.flagged,
-  },
-  {
-    key: "delta_spend",
-    label: "\u0394 spend / turn",
-    numeric: true,
-    sortValue: (g) => g.cost.delta_pct_per_turn ?? Number.NEGATIVE_INFINITY,
-    format: (g) => signedPctOrDash(g.cost.delta_pct_per_turn),
-    flagged: (g) => g.cost.flagged,
-  },
-  {
-    key: "p95",
-    label: "p95",
-    numeric: true,
-    sortValue: (g) => g.duration.p95_ms ?? Number.NEGATIVE_INFINITY,
-    format: (g) => seconds(g.duration.p95_ms),
-    flagged: (g) => g.duration.flagged,
-  },
-  {
-    key: "turns",
-    label: "Turns",
-    numeric: true,
-    sortValue: (g) => g.duration.turns,
-    format: (g) => g.duration.turns.toLocaleString("en-US"),
-  },
-];
-
-type Sort = { key: ColKey; dir: "asc" | "desc" };
-
-/**
- * One headline stat. `delta` renders amber only when the server flagged the
- * metric — this page never decides on its own that a number is bad.
- */
-function StatCard({
-  label,
-  value,
-  delta,
-  prior,
-  flagged,
-}: {
-  label: string;
-  value: string;
-  delta: string;
-  prior: string;
-  flagged: boolean;
-}) {
+/** Spend as a share-of-total bar beside the figure: where the money goes reads without reading numbers. */
+function SpendCell({ value, total }: { value: number; total: number }) {
+  const share = total > 0 ? Math.max(1, Math.round((value / total) * 100)) : 0;
   return (
-    <div className="bg-surface border border-border py-4.5 px-5" style={{ borderRadius: "var(--radius-card)" }}>
-      <div className="text-label uppercase text-muted">{label}</div>
-      <div className="flex items-baseline mt-2.5 gap-2.5">
-        <span
-          className="font-mono text-metric text-fg tabular-nums">
-          {value}
-        </span>
-        <span className={cn("font-mono text-code", flagged ? "text-warning" : "text-muted")} >
-          {delta}
-        </span>
+    <div className="flex items-center gap-3">
+      <div className="flex-1 h-1.5 rounded-micro bg-raised" aria-hidden="true">
+        <div className="h-1.5 rounded-micro bg-muted" style={{ width: `${share}%` }} />
       </div>
-      <div className="font-mono text-subtle mt-2 text-small">
-        {prior}
-      </div>
+      <span className="w-16 text-right">{usd(value)}</span>
     </div>
   );
 }
 
-/**
- * The two headline cards, derived from the project total.
- *
- * Tool errors were the third and moved to the Classifiers page, where a moved failure rate arrives with
- * the error patterns that moved it. A bare percentage here could say that something changed but never
- * what, and two surfaces reporting one fact is how they come to disagree.
- */
-function Headline({ data }: { data: VitalsData }) {
-  const t = data.total;
+const SPEND: Column = {
+  key: "spend",
+  label: "Spend",
+  numeric: false,
+  sortValue: (g) => g.cost.usd,
+  render: (g, total) => <SpendCell value={g.cost.usd} total={total} />,
+};
+
+const COLUMNS: Record<Dimension, Column[]> = {
+  call_site: [
+    { key: "name", label: "Call site", numeric: false, sortValue: (g) => g.label ?? g.key ?? "", render: name },
+    SPEND,
+    {
+      key: "per_trace",
+      label: "Per trace",
+      numeric: true,
+      sortValue: (g) => g.cost.usd_per_turn ?? Number.NEGATIVE_INFINITY,
+      render: (g) => perTrace(g.cost.usd_per_turn),
+    },
+    {
+      key: "p95",
+      label: "p95",
+      numeric: true,
+      sortValue: (g) => g.duration.p95_ms ?? Number.NEGATIVE_INFINITY,
+      render: (g) => seconds(g.duration.p95_ms),
+    },
+    {
+      key: "traces",
+      label: "Traces",
+      numeric: true,
+      sortValue: (g) => g.duration.turns,
+      render: (g) => count(g.duration.turns),
+    },
+  ],
+  // A trace's root span carries no model, so latency and trace counts have no per-model split.
+  model: [
+    { key: "name", label: "Model", numeric: false, sortValue: (g) => g.label ?? g.key ?? "", render: name },
+    SPEND,
+    {
+      key: "llm_spans",
+      label: "LLM spans",
+      numeric: true,
+      sortValue: (g) => g.cost.calls,
+      render: (g) => count(g.cost.calls),
+    },
+    {
+      key: "tokens",
+      label: "Tokens",
+      numeric: true,
+      sortValue: (g) => g.cost.tokens,
+      render: (g) => COMPACT.format(g.cost.tokens),
+    },
+  ],
+};
+
+type Sort = { key: string; dir: "asc" | "desc" };
+
+const BY_SPEND: Sort = { key: "spend", dir: "desc" };
+
+function Total({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div className="gap-3.5" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)" }}>
-      <StatCard
-        label="Spend"
-        value={usd(t.cost.usd)}
-        delta={signedPctOrDash(t.cost.delta_pct_per_turn)}
-        prior={t.cost.baseline_usd == null ? "no prior window" : `prior ${data.window.days}d ${usd(t.cost.baseline_usd)}`}
-        flagged={t.cost.flagged}
-      />
-      <StatCard
-        label="p95 turn latency"
-        value={seconds(t.duration.p95_ms)}
-        delta={signedPctOrDash(t.duration.delta_pct)}
-        prior={
-          t.duration.baseline_p95_ms == null
-            ? "no prior window"
-            : `prior ${data.window.days}d ${seconds(t.duration.baseline_p95_ms)}`
-        }
-        flagged={t.duration.flagged}
-      />
+    <div className="bg-surface py-5 px-5 flex flex-col gap-2">
+      <div className="text-label uppercase text-muted">{label}</div>
+      <div className="font-mono text-metric text-fg tabular-nums">{value}</div>
+      {note && <div className="text-small text-muted">{note}</div>}
     </div>
+  );
+}
+
+const TOTALS_GRID = { gridTemplateColumns: "repeat(auto-fit, minmax(13rem, 1fr))" };
+
+function Totals({ data }: { data: VitalsData }) {
+  const { cost, duration } = data.total;
+  const unfinished = duration.unterminated ?? 0;
+  return (
+    <section
+      aria-label="Totals"
+      className="grid gap-px bg-border border border-border rounded-card overflow-hidden"
+      style={TOTALS_GRID}
+    >
+      <Total
+        label="Spend"
+        value={usd(cost.usd)}
+        note={cost.usd_per_turn == null ? undefined : `${perTrace(cost.usd_per_turn)} per trace`}
+      />
+      <Total
+        label="Traces"
+        value={count(duration.turns)}
+        note={unfinished > 0 ? `${count(unfinished)} did not finish` : undefined}
+      />
+      <Total
+        label="p95 latency"
+        value={seconds(duration.p95_ms)}
+        note={duration.p50_ms == null ? undefined : `median ${seconds(duration.p50_ms)}`}
+      />
+      <Total label="Tokens" value={COMPACT.format(cost.tokens)} note={`across ${count(cost.calls)} LLM spans`} />
+    </section>
   );
 }
 
 function VitalsLoading() {
   return (
     <div role="status" aria-label="Loading vitals">
-      <div className="gap-3.5" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)" }}>
-        {[0, 1].map((i) => (
-          <div key={i} className="bg-surface border border-border py-4.5 px-5" style={{ borderRadius: "var(--radius-card)" }}>
+      <div className="grid gap-px bg-border border border-border rounded-card overflow-hidden" style={TOTALS_GRID}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="bg-surface py-5 px-5">
             <Skeleton className="h-3 w-20" />
-            <Skeleton className="h-8 w-28 mt-3"  />
-            <Skeleton className="h-3 w-24 mt-2.5"  />
+            <Skeleton className="h-8 w-28 mt-3" />
+            <Skeleton className="h-3 w-24 mt-2.5" />
           </div>
         ))}
       </div>
-      <TableSkeleton rows={6} cols={5} className="mt-8" />
+      <TableSkeleton rows={COLLAPSED_ROWS} cols={5} className="mt-8" />
     </div>
   );
 }
@@ -185,18 +201,22 @@ export function Vitals() {
   const navigate = useNavigate();
   const base = `/orgs/${orgSlug}/projects/${projectSlug}`;
 
+  const [days, setDays] = useState<Days>("7");
+  const [by, setBy] = useState<Dimension>("call_site");
+  const [sort, setSort] = useState<Sort>(BY_SPEND);
+  const [showAll, setShowAll] = useState(false);
+
   const vitalsQ = useQuery({
-    queryKey: ["vitals", api.base],
-    queryFn: () => api.getVitals(7, "call_site"),
+    queryKey: ["vitals", api.base, days, by],
+    queryFn: () => api.getVitals(Number(days), by),
+    placeholderData: keepPreviousData,
   });
 
-  const [sort, setSort] = useState<Sort | null>(null);
+  const columns = COLUMNS[by];
 
-  const rows = useMemo(() => {
+  const sorted = useMemo(() => {
     const data = vitalsQ.data?.groups ?? [];
-    if (!sort) return data;
-    const col = COLUMNS.find((c) => c.key === sort.key);
-    if (!col) return data;
+    const col = columns.find((c) => c.key === sort.key) ?? SPEND;
     const flip = sort.dir === "asc" ? 1 : -1;
     return [...data].sort((a, b) => {
       const va = col.sortValue(a);
@@ -204,29 +224,49 @@ export function Vitals() {
       const d = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
       return d * flip;
     });
-  }, [vitalsQ.data, sort]);
+  }, [vitalsQ.data, sort, columns]);
+
+  const rows = showAll ? sorted : sorted.slice(0, COLLAPSED_ROWS);
 
   const toggleSort = (col: Column) => {
     setSort((prev) => {
-      // First click: biggest first for numerics, A→Z for the call-site column.
-      if (!prev || prev.key !== col.key) return { key: col.key, dir: col.numeric ? "desc" : "asc" };
+      // First click: biggest first for numbers, A→Z for names.
+      if (prev.key !== col.key) return { key: col.key, dir: col.key === "name" ? "asc" : "desc" };
       return { key: col.key, dir: prev.dir === "desc" ? "asc" : "desc" };
     });
   };
 
+  const changeBy = (next: Dimension) => {
+    setBy(next);
+    setSort(BY_SPEND);
+  };
+
   const openTraces = (callSite: string | null) => {
-    // The unattributed group has no call site to filter by — it IS the absence of one.
-    if (!callSite) return;
+    // Only call sites filter Traces, and the unattributed group IS the absence of one.
+    if (by !== "call_site" || !callSite) return;
     navigate(`${base}/traces?call_site=${encodeURIComponent(callSite)}`);
   };
 
   const data = vitalsQ.data;
+  const linked = (g: VitalsGroup) => by === "call_site" && g.key != null;
 
   return (
     <div className="pt-9 px-10 pb-14">
       <PageHeader
         kicker="Monitor"
         title="Vitals"
+        subtitle={`Last ${days} days`}
+        actions={
+          <SegmentedControl
+            ariaLabel="Window"
+            value={days}
+            onChange={setDays}
+            options={[
+              { value: "7", label: "7 days" },
+              { value: "30", label: "30 days" },
+            ]}
+          />
+        }
       />
 
       {vitalsQ.isPending && <VitalsLoading />}
@@ -234,93 +274,118 @@ export function Vitals() {
 
       {data && (
         <>
-          <Headline data={data} />
+          <Totals data={data} />
 
-          <div className="flex items-baseline gap-3 mt-7.5 mx-0 mb-2.5">
-            <h2 className="font-mono text-label uppercase text-muted">By call site</h2>
-            <span className="text-subtle text-small">
-              {data.groups.length} · movers tinted
-            </span>
-          </div>
+          <section aria-labelledby="vitals-breakdown" className="mt-8">
+            <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+              <div>
+                <h2 id="vitals-breakdown" className="text-h3 text-fg">
+                  {by === "call_site" ? "By call site" : "By model"}
+                </h2>
+                <p className="text-small text-muted">
+                  {by === "call_site"
+                    ? "Select a row to open its traces."
+                    : "Latency has no per-model view, because a trace has no single model."}
+                </p>
+              </div>
+              <SegmentedControl
+                ariaLabel="Group by"
+                value={by}
+                onChange={changeBy}
+                options={[
+                  { value: "call_site", label: "By call site" },
+                  { value: "model", label: "By model" },
+                ]}
+              />
+            </div>
 
-          <Table style={{ minWidth: 860 }}>
-            <THead>
-              <tr>
-                {COLUMNS.map((col) => {
-                  const active = sort?.key === col.key;
-                  return (
-                    <TH
-                      key={col.key}
-                      className={col.numeric ? "text-right" : undefined}
-                      aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(col)}
-                        className="cursor-pointer hover:text-fg transition-colors"
-                        style={{ font: "inherit", letterSpacing: "inherit", color: "inherit" }}
-                        title={`Sort by ${col.label}`}
-                      >
-                        {col.label}
-                        {active && (
-                          <span aria-hidden="true" className="font-mono ml-1">
-                            {sort!.dir === "desc" ? "↓" : "↑"}
-                          </span>
-                        )}
-                      </button>
-                    </TH>
-                  );
-                })}
-              </tr>
-            </THead>
-            <TBody>
-              {rows.length === 0 && (
-                <TR>
-                  <TD colSpan={COLUMNS.length} className="text-subtle py-4.5 px-3 text-small">
-                    Nothing ran in this window. Vitals counts the last {data.window.days} days. Older traces are
-                    in Traces.
-                  </TD>
-                </TR>
-              )}
-              {rows.map((row) => (
-                <TR
-                  key={row.key ?? "unattributed"}
-                  interactive={row.key != null}
-                  tabIndex={row.key != null ? 0 : undefined}
-                  onClick={() => openTraces(row.key ?? null)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openTraces(row.key ?? null);
-                    }
-                  }}
-                  aria-label={row.key ? `Open traces for ${row.key}` : undefined}
-                >
-                  {COLUMNS.map((col) => {
-                    const hot = col.flagged?.(row) ?? false;
+            <Table style={{ minWidth: 720 }}>
+              <THead>
+                <tr>
+                  {columns.map((col) => {
+                    const active = sort.key === col.key;
                     return (
-                      <TD
+                      <TH
                         key={col.key}
-                        className={cn(
-                          "font-mono text-small",
-                          col.numeric && "text-right",
-                          hot ? "text-warning bg-warning-subtle" : "text-fg",
-                        )}
-                        style={{ fontVariantNumeric: "tabular-nums" }}
+                        className={col.numeric ? "text-right" : undefined}
+                        style={col.key === "spend" ? { width: "40%" } : undefined}
+                        aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
                       >
-                        {col.format(row)}
-                      </TD>
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(col)}
+                          className="cursor-pointer hover:text-fg transition-colors"
+                          style={{ font: "inherit", letterSpacing: "inherit", color: "inherit" }}
+                          title={`Sort by ${col.label}`}
+                        >
+                          {col.label}
+                          {active && (
+                            <span aria-hidden="true" className="font-mono ml-1">
+                              {sort.dir === "desc" ? "↓" : "↑"}
+                            </span>
+                          )}
+                        </button>
+                      </TH>
                     );
                   })}
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.length === 0 && (
+                  <TR>
+                    <TD colSpan={columns.length} className="text-muted py-4.5 px-3 text-small">
+                      Nothing ran in this window. Vitals counts the last {data.window.days} days. Older traces are
+                      in Traces.
+                    </TD>
+                  </TR>
+                )}
+                {rows.map((row) => (
+                  <TR
+                    key={row.key ?? "unattributed"}
+                    interactive={linked(row)}
+                    tabIndex={linked(row) ? 0 : undefined}
+                    onClick={() => openTraces(row.key ?? null)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openTraces(row.key ?? null);
+                      }
+                    }}
+                    aria-label={linked(row) ? `Open traces for ${row.key}` : undefined}
+                  >
+                    {columns.map((col) => (
+                      <TD
+                        key={col.key}
+                        className={
+                          col.key === "name"
+                            ? row.key == null
+                              ? "font-mono text-small text-muted"
+                              : "font-mono text-small"
+                            : col.numeric
+                              ? "font-mono text-small text-right text-muted"
+                              : "font-mono text-small"
+                        }
+                        style={{ fontVariantNumeric: "tabular-nums", verticalAlign: "middle" }}
+                      >
+                        {col.render(row, data.total.cost.usd)}
+                      </TD>
+                    ))}
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+
+            {sorted.length > COLLAPSED_ROWS && (
+              <Button size="sm" className="mt-3" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "Show fewer" : `Show all ${sorted.length}`}
+              </Button>
+            )}
+          </section>
 
           {data.total.cost.unpriced_calls > 0 && (
-            <p className="text-subtle mt-3 text-small">
-              {data.total.cost.unpriced_calls.toLocaleString("en-US")} calls ran on a model with no price on file, so
-              their spend is excluded rather than counted as free.{" "}
+            <p className="text-muted mt-6 pt-4 border-t border-border text-small">
+              {count(data.total.cost.unpriced_calls)} LLM spans ran on a model with no price on file. Their spend
+              is left out, not counted as free.{" "}
               <Link to={`${base}/settings/models`} className="text-link hover:text-link-hover hover:underline">
                 Review model settings
               </Link>

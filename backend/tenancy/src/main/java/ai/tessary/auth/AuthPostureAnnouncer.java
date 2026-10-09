@@ -17,9 +17,9 @@ import org.springframework.stereotype.Component;
  * one small file than folded into the filter.
  *
  * <p>{@code tessary.auth.disabled} is checked first and is authoritative on its own, regardless of
- * which {@link AuthProvider} is active: a provider can report itself enabled while
- * {@link AuthFilter#shouldNotFilter} is bypassing everything, so checking the provider first would
- * announce "enforced" while auth is actually off.
+ * which {@link AuthProvider} is active: a provider is always configured while
+ * {@link AuthFilter#shouldNotFilter} may be bypassing everything, so announcing the provider first
+ * would say "enforced" while auth is actually off.
  */
 @Component
 public class AuthPostureAnnouncer {
@@ -43,17 +43,10 @@ public class AuthPostureAnnouncer {
                             + "correct for local development and the test suite, and is never correct on a reachable "
                             + "host.",
                     provider.getClass().getSimpleName());
-        } else if (provider.isEnabled()) {
+        } else {
             log.info(
                     "Auth: {} active; /api/** and /mcp are enforced.",
                     provider.getClass().getSimpleName());
-        } else {
-            // Only WorkOsClient can ever be unenabled here: PasswordAuthProvider has no external
-            // config to be missing, so it is unconditionally enabled. This branch is dead today,
-            // but stays: a future third AuthProvider could reintroduce a real "misconfigured, no
-            // provider works" state.
-            log.warn("No identity provider is configured, so /api/** and /mcp will answer 401. Configure one, "
-                    + "or set tessary.auth.disabled=true to serve this instance unauthenticated on purpose.");
         }
     }
 }

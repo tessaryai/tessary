@@ -26,15 +26,15 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
               │ backend (:8080)  │   │ or static build  │
               │ — JVM + Loom     │   │ React + TS       │
               └────┬─────────────┘   └──────────────────┘
-                   │ reads / writes            + classify-service (encoder
-                   ▼                             /classify heads; separate deploy)
+                   │ reads / writes            + groundedness model (serve.py on
+                   ▼                             your own GPU, outside Docker)
                 Postgres (pgvector; per-project pipeline, substrate, findings, cases)
 ```
 
 | Layer | Tech |
 |---|---|
 | Reverse proxy | Caddy (`Caddyfile`) — `/api/*`, `/auth/*`, `/mcp` → backend; rest → Vite/static |
-| Backend | Spring Boot 4.0.x, Java 25 + Loom virtual threads, an eleven-module Maven reactor (layering in [`devdocs/modules.md`](./devdocs/modules.md)), LangChain4j, Postgres via JdbcClient + Liquibase |
+| Backend | Spring Boot 4.0.x, Java 25 + Loom virtual threads, an eleven-module Maven reactor (layering in [`devdocs/modules.md`](./devdocs/modules.md)), Postgres via JdbcClient + Liquibase |
 | Frontend | React 19, Vite, TypeScript, TanStack Query, react-router-dom 7, Tailwind v4 (token-driven design system) |
 | Auth | WorkOS AuthKit (sealed cookie session); per-project bearer tokens / API keys for MCP + headless ([`devdocs/reference/auth-and-mcp.md`](./devdocs/reference/auth-and-mcp.md)) |
 
@@ -44,11 +44,10 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 |---|---|
 | [`backend/`](./backend/) | The Java backend — conventions in [`backend/AGENTS.md`](./backend/AGENTS.md), inventory in [`devdocs/reference/architecture.md`](./devdocs/reference/architecture.md), module layering in [`devdocs/modules.md`](./devdocs/modules.md) |
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
-| [`classify-service/`](./classify-service/) | Standalone encoder `/classify` service (ECS Fargate) — see its README |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| [`classifiers/`](./classifiers/) | The Python classifier tree: the shared eval framework, the `tool_error` and `metric_drift` rigs that check the open Java detectors, and the corpus emitters |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`) and the OTLP trace emitter the boot check uses (`classifiers/data_gen/`). Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
-| [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill + prompt-craft reference) |
+| [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |
 | `scripts/`, `observability/` | The shared check and deploy scripts; Grafana dashboards |
 
@@ -68,20 +67,33 @@ Config keys: [`devdocs/reference/config-keys.md`](./devdocs/reference/config-key
 - **User-visible copy follows [`handbook/voice-and-tone.md`](./handbook/voice-and-tone.md).**
   Plain words, active voice, no em-dashes, no hedging. Applies to UI strings, errors, Slack, CLI
   output and docs prose; not to code comments.
-- **Do not add or modify tests** unless explicitly requested.
 - **The schema is the source of truth.** The evals plugin owns the bundle schema; absorb changes
   in order: `contract/` → backend records → frontend types → views. The plugin still emits grader
   and quality-dimension shards this tree has nothing to run; `BundleAssembler` routes them to
   `Shard.IGNORE` rather than rejecting the bundle, and that is deliberate.
 - **Python uses uv, never pip or poetry.** `classifiers/` owns a `pyproject.toml` + `uv.lock`;
-  the gate runs `uv sync --frozen`, so a stale lockfile is a failure rather than a silent
-  re-resolve.
+  run `uv lock` after any dependency change and commit both.
 - **Node packages use pnpm, never npm.** Each has its own `pnpm-lock.yaml`; they are deliberately
   NOT a workspace, so every Dockerfile can build from its own directory. Two consequences worth
   knowing before you touch one: pnpm 11 keeps settings in `pnpm-workspace.yaml` rather than the
   `pnpm` field in `package.json` (which it ignores silently), and dependency build scripts are
   blocked unless allowlisted there under `allowBuilds`. The single exception is the in-sandbox
   `npm install` in `sandbox-runner/agent-sandbox/template.ts`, which is intentional.
+
+## Tests
+
+- **Expected values come from the requirement, never from running the code.** Derive them from
+  the issue, spec, or a hand calculation before implementing.
+- **Test first, watch it fail.** Run the test red for the right reason, then implement. A bug
+  fix's test goes red again when the fix is reverted; a test on a helper the fix didn't touch
+  doesn't count.
+- **Every test names the bug it catches.** If you can't name one, don't write it. Don't add tests
+  to code you didn't change unless asked.
+- **Never weaken a test to get green**: no deleting, skipping, loosening, or re-baselining. If a
+  test looks wrong, or breaks on a pure refactor, stop and ask.
+- **Report each new test** in your summary: the bug it catches and its red output.
+- How to write them: [`backend/AGENTS.md`](./backend/AGENTS.md#testing),
+  [`frontend/AGENTS.md`](./frontend/AGENTS.md#tests).
 
 ## Working loop
 
@@ -96,9 +108,9 @@ and the bare `task check` before merging. **CI runs the same gate on every pull 
 code** — `.github/workflows/check.yml` calls `scripts/check.sh`, the same manifest `task check` runs,
 so local green means CI green by construction. A prose-only diff is filtered out by that file's
 `paths-ignore` (prose is Mintlify's check to run, not this pipeline's), and a draft PR is skipped
-until it is marked ready. `secret-scan.yml` is armed alongside it. Those two are the only workflows
-that run on their own on PRs; `price-book-refresh.yml` is the one cron (daily), and everything
-else is `workflow_dispatch:` only.
+until it is marked ready. `secret-scan.yml` also runs on every pull request.
+Two workflows run on a cron: `price-book-refresh.yml` daily and `codeql.yml` weekly
+(Mondays 04:00 UTC). Everything else is `workflow_dispatch:` only.
 Nothing is merge-blocking (branch protection is plan-gated on this tier), so a red check still has to
 be respected by a human. Docker is required for any backend slice. Full cost model and recount commands:
 [`devdocs/reference/test-suite.md`](./devdocs/reference/test-suite.md).
@@ -127,9 +139,9 @@ Rules that keep this working:
 - **Same-PR co-update.** A code change that invalidates any of these docs updates the doc in
   the same PR (schema changes update `devdocs/reference/data-model.md`; package-set changes
   update the architecture inventory; controller/DTO changes regenerate the OpenAPI spec). The
-  classifier-quality reference page lives outside this tree; its gate
-  `scripts/check-classifier-quality-doc.sh` stays here and skips with a named reason wherever the
-  page is absent.
+  classifier-quality reference page is `devdocs/reference/classifier-quality.md`; its gate
+  `scripts/check-classifier-quality-doc.sh` pins the page's model revision and threshold to
+  `classifiers/groundedness/serve.py` and the catalog.
 - **Size budgets.** This file stays ≤ ~150 lines; a scoped `AGENTS.md` ≤ ~250. When a budget
   is blown, extract reference material to `devdocs/reference/` instead of growing the guide.
 - **New top-level code directory** → gets a `README.md`; add an `AGENTS.md` only once it
@@ -151,7 +163,8 @@ The moat is that cheap filter, which yields two rules for code in this repo:
 
 - **Anything that scales per-event LLM cost with ingest volume attacks the product directly.**
   LLM work is the *escalation*, applied to what a cheap filter already flagged — never the
-  default detection path.
+  default detection path. (`frustration` is the one recorded exception; its conditions are in
+  `devdocs/reference/principles.md`.)
 - **An unmeasured detector is a liability, not a feature.** A filter's false-positive rate at a
   stated alert budget is the asset.
 

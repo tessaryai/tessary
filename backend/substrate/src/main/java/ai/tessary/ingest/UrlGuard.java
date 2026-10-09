@@ -27,9 +27,9 @@ import java.net.UnknownHostException;
  *
  * <p>The DNS resolution happens at validation time, which means an attacker
  * could in theory bypass this with a DNS-rebinding attack (resolve to a public
- * IP now, an internal IP at fetch time). Mitigation here is upstream: the
- * SourceService persists the URL string; every fetch goes through the same
- * guard, so a rebinding-victim fetch will fail at the next call. For a
+ * IP now, an internal IP at fetch time). Mitigation here is upstream: callers
+ * persist the URL string and run every fetch through the same guard, so a
+ * rebinding-victim fetch will fail at the next call. For a
  * stronger guarantee we'd resolve once and pin the IP in the HttpClient — out
  * of scope for now.</p>
  */

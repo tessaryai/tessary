@@ -5,7 +5,9 @@ import ai.tessary.classifier.metric.MetricDriftConfig;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -26,21 +28,22 @@ public final class ClassifierDtos {
             int version,
             boolean enabled,
             String mode,
+            /** The call sites the classifier runs on, or null when it runs on every call site. */
+            @JsonProperty("call_site_ids") @Nullable List<String> callSiteIds,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt,
             /**
              * Why an enabled classifier cannot judge anything yet, or null when it can. {@link
              * #WAITING_ON_SCHEMAS} on Malformed Output while no call site declares a schema: without one there is
              * nothing to validate against, and a classifier reporting no detections would otherwise read as clean.
+             * A {@link ClassifierPause} reason on an enabled Frustration that has paused: its provider refused
+             * the org's key, no key is left, the org has no platform credit left, or the platform provider
+             * refused the deployment's key.
              */
             @Nullable String readiness) {
 
         /** Malformed Output with no call site schema to validate against. Arrives from the connected repo. */
         public static final String WAITING_ON_SCHEMAS = "waiting_on_schemas";
-
-        public static ClassifierView of(ClassifierRow r) {
-            return of(r, null);
-        }
 
         public static ClassifierView of(ClassifierRow r, @Nullable String readiness) {
             return new ClassifierView(
@@ -54,6 +57,7 @@ public final class ClassifierDtos {
                     r.version(),
                     r.enabled(),
                     r.mode(),
+                    r.callSiteIds(),
                     r.createdAt(),
                     r.updatedAt(),
                     readiness);
@@ -66,7 +70,8 @@ public final class ClassifierDtos {
      * {@link ClassifierService#events}/{@link ClassifierService#eventsForClassifier}.
      * {@code id} is the verdict id (the detection's stable id); {@code classifierId}
      * / {@code classifierVersion} come from the JOINed definition; {@code subjectId} is the finest-grain subject
-     * id named by {@code subjectKind}; {@code traceId} is the owning trace when the subject is a trace or an
+     * id named by {@code subjectKind}; {@code sessionId} is the session the subject belongs to, null for
+     * anonymous traffic (the Classifiers rail's deep-link anchor); {@code traceId} is the owning trace when the subject is a trace or an
      * observation (the Explore deep-link anchor), null for context-grain detections; {@code detectedAt} is
      * {@code verdict.created_at}. {@code severity} is
      * kept for wire-shape compatibility but is always {@code null}: no per-detection severity is persisted.
@@ -77,6 +82,7 @@ public final class ClassifierDtos {
             @JsonProperty("classifier_version") int classifierVersion,
             @JsonProperty("subject_kind") String subjectKind,
             @JsonProperty("subject_id") String subjectId,
+            @JsonProperty("session_id") @Nullable String sessionId,
             @JsonProperty("trace_id") @Nullable String traceId,
             @JsonProperty("project_version_id") @Nullable String projectVersionId,
             @Nullable String severity,
@@ -106,6 +112,11 @@ public final class ClassifierDtos {
 
     /** Set the operating point of a classifier: {@code discovery} (high recall) | {@code tracking} (precise). */
     public record SetModeRequest(@NotNull String mode) {}
+
+    /** Limit a classifier to some call sites, or {@code null} to run it on every call site again. Never empty. */
+    public record SetCallSitesRequest(
+            @JsonProperty("call_site_ids") @Nullable @Size(min = 1)
+            List<@NotBlank String> callSiteIds) {}
 
     /**
      * Sweep-job health for one classifier: makes a failing sweep observable in the product instead
@@ -209,6 +220,85 @@ public final class ClassifierDtos {
             return new TuningView(
                     c.windowTargetCount(), c.windowMaxHours(), c.minSample(), c.w1Floor(), impliedFalseAlarmRate);
         }
+    }
+
+    /**
+     * Whether the groundedness model is scoring, and what the classifier row and its setup prompts need to
+     * say so. Everything the row shows is read here, so the rules live on the server once.
+     *
+     * @param state {@code off} when the row is disabled; else {@code on}, {@code not_scoring} (it was set up
+     *     and has stopped scoring) or {@code not_set_up} (the model has never answered a sweep)
+     * @param mode {@code dev} or {@code production}, from {@code TESSARY_GROUNDEDNESS_CLASSIFIER_MODE}
+     * @param configured whether the instance has a model URL at all
+     * @param available whether the model answered its last health check with the groundedness head
+     * @param reason the health check's answer, for example {@code unreachable: ConnectException}
+     * @param checkedAt when the health check last ran; null before the first
+     * @param everSwept whether a sweep has ever moved this classifier's cursor, which only a model that
+     *     answered can do
+     * @param lastScoredAt the newest scored answer in this project; null until one is
+     * @param lastCaughtUpAt when a sweep last reached the newest observation; null until one has
+     * @param setupRef the git ref the setup prompts link to: the running release's tag, or {@code main}
+     */
+    public record GroundednessStatusView(
+            String state,
+            String mode,
+            boolean configured,
+            boolean available,
+            String reason,
+            @JsonProperty("checked_at") @Nullable String checkedAt,
+            @JsonProperty("ever_swept") boolean everSwept,
+            @JsonProperty("last_scored_at") @Nullable String lastScoredAt,
+            @JsonProperty("last_caught_up_at") @Nullable String lastCaughtUpAt,
+            @JsonProperty("setup_ref") String setupRef) {}
+
+    /**
+     * The Frustration classifier's operating point and, per call site, what its rate test has learned and where
+     * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
+     * is derived by the replay.
+     *
+     * @param unassignedConversations sessions in the replay window scored with no call site, before call sites
+     *     were picked; they are never judged, and are counted so the gap is visible
+     */
+    public record FrustrationTuningView(
+            double threshold,
+            @JsonProperty("arl_target") long arlTarget,
+            @JsonProperty("min_decision_interval") double minDecisionInterval,
+            @JsonProperty("shift_multiple") double shiftMultiple,
+            @JsonProperty("shift_floor") double shiftFloor,
+            @JsonProperty("min_baseline_conversations") int minBaselineConversations,
+            @JsonProperty("scorer_version") String scorerVersion,
+            @JsonProperty("unassigned_conversations") long unassignedConversations,
+            @JsonProperty("call_sites") List<FrustrationCallSiteView> callSites) {}
+
+    /**
+     * One call site under the Frustration rate test.
+     *
+     * @param state {@code learning} until the reference holds {@code min_baseline_conversations}, then
+     *     {@code in_control} or {@code alarming}
+     * @param learnedConversations conversations the reference holds so far: {@code n} of {@code learning n/200}
+     * @param baselineRate the learned rate, Jeffreys-smoothed; null while learning
+     * @param decisionInterval {@code h(p0)}; null while learning
+     * @param statistic the up accumulator {@code S} at the end of the last replay
+     */
+    public record FrustrationCallSiteView(
+            @JsonProperty("call_site_id") String callSiteId,
+            String state,
+            @JsonProperty("learned_conversations") long learnedConversations,
+
+            @JsonProperty("baseline_conversations") @Nullable
+            Long baselineConversations,
+
+            @JsonProperty("baseline_frustrated") @Nullable Long baselineFrustrated,
+            @JsonProperty("baseline_rate") @Nullable Double baselineRate,
+            @JsonProperty("decision_interval") @Nullable Double decisionInterval,
+            double statistic,
+            @JsonProperty("onset_at") @Nullable String onsetAt,
+            @JsonProperty("reset_at") @Nullable String resetAt,
+            @JsonProperty("reset_note") @Nullable String resetNote) {
+
+        public static final String LEARNING = "learning";
+        public static final String IN_CONTROL = "in_control";
+        public static final String ALARMING = "alarming";
     }
 
     /**

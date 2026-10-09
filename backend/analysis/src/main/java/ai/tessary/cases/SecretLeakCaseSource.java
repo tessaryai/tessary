@@ -44,11 +44,6 @@ public class SecretLeakCaseSource implements CaseSource {
     }
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.SECRET_LEAK;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return BuiltInDetector.Kind.SECRET_LEAK.equals(classifierKey);
     }

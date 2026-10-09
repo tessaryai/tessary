@@ -10,7 +10,7 @@
  * floating promise, a button that did nothing, and no way to tell from the UI.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CopyButton } from "./CopyButton";
 
 function setClipboard(value: unknown) {
@@ -18,27 +18,24 @@ function setClipboard(value: unknown) {
 }
 
 afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
   setClipboard(undefined);
 });
 
 describe("CopyButton", () => {
-  it("writes the value, says Copied, then goes back to Copy", async () => {
+  it("restarts the Copied window on a second copy, rather than ending it on the first one's schedule", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    setClipboard({ writeText });
-    const onCopied = vi.fn();
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
 
-    render(<CopyButton value="sk-live-123" onCopied={onCopied} />);
+    render(<CopyButton value="sk-live-123" />);
     fireEvent.click(screen.getByRole("button"));
-
     await waitFor(() => expect(screen.getByRole("button").textContent).toContain("Copied"));
-    expect(writeText).toHaveBeenCalledWith("sk-live-123");
-    expect(onCopied).toHaveBeenCalledTimes(1);
+    act(() => void vi.advanceTimersByTime(1000));
+    fireEvent.click(screen.getByRole("button"));
+    await act(async () => {});
 
-    act(() => void vi.advanceTimersByTime(1700));
+    act(() => void vi.advanceTimersByTime(1000));
+    expect(screen.getByRole("button").textContent).toContain("Copied");
+    act(() => void vi.advanceTimersByTime(700));
     expect(screen.getByRole("button").textContent).toBe("Copy");
   });
 

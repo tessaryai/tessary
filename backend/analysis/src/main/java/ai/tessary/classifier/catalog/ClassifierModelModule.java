@@ -3,7 +3,6 @@ package ai.tessary.classifier.catalog;
 
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.EncoderScorer;
-import ai.tessary.classifier.substrate.ConversationThreadAssembler;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,16 +16,19 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li>{@code key/name/description/version}: the catalog metadata ({@link #toBuiltIn()}).
  *   <li>{@code capability}: the flag that gates this classifier for an org. Mandatory, and the
- *       only trust dial: every module seeds enabled, and whether a classifier actually reaches an
- *       org lives entirely in that org's capability overrides.
+ *       only trust dial: whether a classifier actually reaches an org lives entirely in that org's
+ *       capability overrides.
+ *   <li>{@code defaultEnabled}: whether a freshly seeded row starts enabled. True for every module
+ *       except one whose sweep spends the org's own provider credit (Frustration), which a person
+ *       turns on knowingly. Never applied to an already-seeded row.
  *   <li>{@code defaultConfigJson}: the per-classifier operating point (e.g. an encoder's
  *       confidence-band thresholds). A band edge must not sit where scores cluster, since scores
  *       wobble a few hundredths by batch composition and a near-threshold verdict could flip between runs.
- *   <li>{@code grain}: what the classifier scores, one observation, one user-facing turn, or a whole
- *       trace (see {@link Grain}). The worker reads this to pick the sweep's candidate query.
+ *   <li>{@code grain}: what the classifier scores, one observation, one user-facing turn, or a window
+ *       of one bucket (see {@link Grain}). The worker reads this to pick the sweep's candidate query.
  *   <li>{@code detectorFactory}: builds the detector from the shared {@link Deps}. {@code null} for
- *       a classifier that is not observation-grain (behaviour-drift implements the trace-grain
- *       {@code TrajectoryDetector} seam instead) or whose detector is supplied externally through the
+ *       a classifier that is not observation-grain (a window-grain classifier is dispatched through
+ *       its {@code ClassifierSweep} instead) or whose detector is supplied externally through the
  *       {@link DetectorSupplier} seam rather than built here. {@code grainFor} still answers
  *       correctly either way, since grain comes from this manifest's {@code grain} field, not from
  *       whether a factory is present.
@@ -42,7 +44,34 @@ public record ClassifierModelModule(
         Grain grain,
         @Nullable String defaultConfigJson,
         @Nullable DetectorFactory detectorFactory,
-        String defaultMode) {
+        String defaultMode,
+        boolean defaultEnabled) {
+
+    /** A module that seeds enabled at the operating point it declares. */
+    public ClassifierModelModule(
+            String key,
+            String name,
+            String description,
+            String detectorKind,
+            int version,
+            Capability capability,
+            Grain grain,
+            @Nullable String defaultConfigJson,
+            @Nullable DetectorFactory detectorFactory,
+            String defaultMode) {
+        this(
+                key,
+                name,
+                description,
+                detectorKind,
+                version,
+                capability,
+                grain,
+                defaultConfigJson,
+                detectorFactory,
+                defaultMode,
+                true);
+    }
 
     /**
      * A module that seeds at the high-recall operating point: the catalog default, and correct for a
@@ -83,17 +112,14 @@ public record ClassifierModelModule(
      *   <li>{@link #TURN}: one user-facing turn, scored on that turn's root observation. Correct for
      *       conversation-level heads whose subject is what the user said (frustration): the user spoke
      *       once, so the classifier must fire at most once.
-     *   <li>{@link #TRACE}: one whole trace, dispatched through the {@code ClassifierSweep} seam and
-     *       its {@code TrajectoryDetector} port rather than the observation-grain {@link BuiltInDetector}.
-     *   <li>{@link #WINDOW}: one window of one bucket. Several families share it, SOP conformance,
-     *       tool errors, and the metric-drift classifiers, and the worker routes between them by
+     *   <li>{@link #WINDOW}: one window of one bucket. Several families share it, tool errors and
+     *       the metric-drift classifiers, and the worker routes between them by
      *       looking the detector kind up in {@code ClassifierSweepRegistry}, with no fallthrough.
      * </ul>
      */
     public enum Grain {
         OBSERVATION,
         TURN,
-        TRACE,
 
         /**
          * One window of one bucket: a stretch of a call site's (or a tool's) own recent traffic,
@@ -110,11 +136,7 @@ public record ClassifierModelModule(
     }
 
     /** The shared dependencies a detector is built from, injected once by the catalog. */
-    public record Deps(
-            ObjectMapper mapper,
-            EncoderScorer encoderScorer,
-            SubstrateReadRepository substrate,
-            ConversationThreadAssembler threadAssembler) {}
+    public record Deps(ObjectMapper mapper, EncoderScorer encoderScorer, SubstrateReadRepository substrate) {}
 
     /** Builds the classifier's detector from the shared dependencies. */
     @FunctionalInterface
@@ -125,6 +147,14 @@ public record ClassifierModelModule(
     /** The catalog-metadata view the seeding path consumes. */
     public BuiltInClassifierCatalog.BuiltIn toBuiltIn() {
         return new BuiltInClassifierCatalog.BuiltIn(
-                key, name, description, detectorKind, defaultConfigJson, version, capability, defaultMode);
+                key,
+                name,
+                description,
+                detectorKind,
+                defaultConfigJson,
+                version,
+                capability,
+                defaultMode,
+                defaultEnabled);
     }
 }

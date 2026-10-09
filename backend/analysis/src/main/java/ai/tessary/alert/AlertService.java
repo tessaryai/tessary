@@ -11,7 +11,6 @@ import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
@@ -24,8 +23,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AlertService {
-
-    private static final int DEFAULT_WINDOW_SECONDS = 86_400;
 
     /** What the seeded rule calls itself, in the partner's words rather than the schema's. */
     static final String DEFAULT_CASE_RULE_NAME = "A case opens";
@@ -60,7 +57,7 @@ public class AlertService {
      * Create or replace an alert rule. The natural key is the classifier (threshold) or the {@code (project,
      * rule_type)} pair (digest/brief), so re-upserting reconfigures in place and preserves {@code created_at}
      * + the lifecycle anchors ({@code last_*_at}, {@code snoozed_until}, {@code enabled}). Only the
-     * implemented rule types (threshold/digest/brief) are accepted; the reserved ones are rejected.
+     * implemented rule types (threshold/case_opened/digest/brief) are accepted; other rule types are rejected.
      */
     public AlertRuleRow upsertRule(String projectId, UpsertAlertRuleRequest req) {
         String ruleType = req.ruleType();
@@ -261,12 +258,6 @@ public class AlertService {
 
     public boolean deleteRule(String projectId, String id) {
         return rules.delete(projectId, id);
-    }
-
-    /** The threshold rule for a classifier, if configured. */
-    public Optional<AlertRuleRow> findThresholdForSignal(String projectId, String classifierId) {
-        requireSignal(projectId, classifierId);
-        return rules.findThresholdBySignal(projectId, classifierId);
     }
 
     // ---- fired alerts -----------------------------------------------------------------------------

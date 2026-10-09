@@ -33,7 +33,7 @@ final class EvidenceEnumeration {
         }
 
         int cap = ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP;
-        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, null, cap, null);
+        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, cap);
         List<FindingEvidenceRow> rows = page.rows();
         boolean complete = total <= cap && page.nextCursor() == null;
 
@@ -59,9 +59,10 @@ final class EvidenceEnumeration {
             sb.append('\n');
         }
         for (FindingEvidenceRow r : rows) {
-            sb.append("- `")
-                    .append(r.role())
-                    .append("` trace=`")
+            sb.append("- `").append(r.role()).append('`');
+            if (r.sessionId() != null)
+                sb.append(" session=`").append(r.sessionId()).append('`');
+            sb.append(" trace=`")
                     .append(r.traceId() == null ? "-" : r.traceId())
                     .append("` span=`")
                     .append(r.spanId() == null ? "-" : r.spanId())

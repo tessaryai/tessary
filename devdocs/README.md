@@ -30,7 +30,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 | [modules.md](./modules.md) | The eleven-module Maven reactor: the layering, why each package sits where it does, and the invariants the poms enforce. |
 | [reference/data-model.md](./reference/data-model.md) | The full Postgres schema as a UML/ER diagram + table inventory. |
 | [reference/prompt-craft.md](./reference/prompt-craft.md) | Where every prompt the platform sends a model lives, what belongs in markdown vs code, and how to change one without silently changing a lane's behaviour. |
-| [reference/classifier-extension-interface.md](./reference/classifier-extension-interface.md) | The public classifier extension interface: the six ports a classifier attaches through, auto-configuration discovery, packaging, versioning, failure isolation, and where an extension may run. |
+| [reference/classifier-extension-interface.md](./reference/classifier-extension-interface.md) | The public classifier extension interface: the four ports a classifier attaches through, auto-configuration discovery, packaging, versioning, failure isolation, and where an extension may run. |
 | [reference/trace-schema.md](./reference/trace-schema.md) | How heterogeneous traces normalise into the canonical substrate. |
 | [reference/ingestion-contract/](./reference/ingestion-contract/README.md) | **The wire contract**: every field producers send that the platform consumes (single table). Doc-first — change it before changing producer/ingest code. |
 | [`frontend/DESIGN_SYSTEM.md`](../frontend/DESIGN_SYSTEM.md) | Frontend design language: tokens, components, data-viz vocabulary, density modes. Lives beside `frontend/tokens.css`, which it documents, rather than being mirrored here. |
@@ -48,6 +48,10 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 |---|---|
 | [concepts/substrate-model.md](./concepts/substrate-model.md) | Why the substrate is shaped span/trace/session — producer ids, span identity, lock ordering, the settle protocol. Implemented and live since 2026-08-14. |
 | [concepts/deviation-math.md](./concepts/deviation-math.md) | The arithmetic behind the three launch classifiers: W1 on log sketches, the derived false-alarm bar, the Bernoulli CUSUM, and which numbers are measured versus assumed. |
+| [concepts/metric-drift.md](./concepts/metric-drift.md) | The Duration drift and Cost drift classifiers: buckets, where duration and cost come from, the W1 statistic, windows and epochs, suppression, evidence, and the correction loop. |
+| [concepts/tool-error.md](./concepts/tool-error.md) | The Tool error classifier: what counts as a failure, error signatures, buckets, the Bernoulli CUSUM and its derived threshold, the carried lifecycle, and evidence. |
+| [concepts/frustration.md](./concepts/frustration.md) | The Frustration classifier: which turns it sends to the decision model, the one-flag-per-conversation rule, the conversation as the rate test's trial, the learned rate and what a resolve does to it. |
+| [concepts/groundedness.md](./concepts/groundedness.md) | The Groundedness classifier: which answers it scores and against what, why an answer with no documents still counts, the trace as the rate test's trial, the learned rate, what happens while the model is down, and what a resolve does. |
 | [concepts/alerting.md](./concepts/alerting.md) | How a case reaches a human: the `case_opened` rule, why quiet hours defer rather than drop, and what the message carries. |
 | [concepts/pii-redaction.md](./concepts/pii-redaction.md) | Layered PII redaction: write-path guard, client-side option, rules playground. |
 

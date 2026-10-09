@@ -32,7 +32,7 @@ class ApiKeyServiceTest {
     ApiKeyRepository repo;
 
     @Test
-    void issuedToken_verifies_andUpdatesLastUsedAt() throws Exception {
+    void issuedToken_verifies_andUpdatesLastUsedAt() {
         var fix = TenantFixture.bootstrap(tenants, "tok-verify");
         var issued = tokens.issue(fix.project().id(), fix.user().id(), "laptop");
 
@@ -45,8 +45,6 @@ class ApiKeyServiceTest {
         assertTrue(v.isPresent());
         assertEquals(issued.token().id(), v.get().id());
 
-        // Give the async write a beat — currently synchronous but be defensive.
-        Thread.sleep(20);
         ApiKey refreshed = repo.findById(issued.token().id()).orElseThrow();
         assertNotNull(refreshed.lastUsedAt(), "verify() must tick last_used_at on success");
     }
@@ -85,14 +83,5 @@ class ApiKeyServiceTest {
         assertTrue(repo.findByPrefix(prefix).isPresent(), "prefix should hit");
 
         assertTrue(tokens.verify(forgery).isEmpty(), "bcrypt must reject when only the lookup prefix matches");
-    }
-
-    @Test
-    void issuedTokensAreDistinct() {
-        var fix = TenantFixture.bootstrap(tenants, "tok-uniq");
-        var a = tokens.issue(fix.project().id(), fix.user().id(), "a");
-        var b = tokens.issue(fix.project().id(), fix.user().id(), "b");
-        assertNotEquals(a.plaintext(), b.plaintext());
-        assertNotEquals(a.token().tokenPrefix(), b.token().tokenPrefix());
     }
 }

@@ -4,7 +4,6 @@ package ai.tessary.detection;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.regex.Pattern;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
@@ -30,8 +29,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
 
-    private static final Pattern PLAIN_IDENTIFIER = Pattern.compile("[a-z_][a-z0-9_]*");
-
     private final DetectionTableRegistry registry;
     private final ObjectProvider<DataSource> dataSource;
 
@@ -52,19 +49,6 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
     }
 
     /**
-     * Every registered table name is a compile-time constant today, so this cannot fire. It is here
-     * because the name below is concatenated into SQL rather than bound, which makes "registered in
-     * code" a property a future registrant has to keep true rather than one the type system holds.
-     * Same guard, same reason, as {@code ProjectPurgeRepository.assertKnown}, which is the other
-     * place in this codebase that interpolates an identifier.
-     */
-    private static void assertPlainIdentifier(String table) {
-        if (!PLAIN_IDENTIFIER.matcher(table).matches()) {
-            throw new IllegalArgumentException("not a plain table identifier: " + table);
-        }
-    }
-
-    /**
      * The event-time column migration {@code 0012} added to every open detection table, and which a
      * paid overlay's own tables must carry in the same release ({@code AGENTS.md}'s paired-PR rule
      * for that migration) — checked here rather than left for the writer's insert to fail on at the
@@ -73,7 +57,6 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
     private static final String SUBJECT_STARTED_AT = "subject_started_at";
 
     private void assertExists(DataSource ds, DetectionTable table) {
-        assertPlainIdentifier(table.table());
         try (Connection conn = ds.getConnection();
                 Statement stmt = conn.createStatement();
                 var rs = stmt.executeQuery("SELECT to_regclass('" + table.table() + "') IS NOT NULL")) {

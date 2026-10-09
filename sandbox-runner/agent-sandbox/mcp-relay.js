@@ -118,8 +118,6 @@ function payloadOf(result) {
  * @returns {Promise<{url: string, close: () => void}>}
  */
 function startMcpRelay({ url, token, workDir }) {
-  if (!url || !token) throw new Error('mcp relay requires an upstream mcp url and token');
-  if (!workDir) throw new Error('mcp relay requires a workDir');
   const mcpDir = path.join(workDir, 'checks', 'mcp');
   fs.mkdirSync(mcpDir, { recursive: true });
   let seq = 0;
@@ -219,4 +217,4 @@ function startMcpRelay({ url, token, workDir }) {
   });
 }
 
-module.exports = { startMcpRelay, tokenEstimate, INLINE_TOKEN_BUDGET };
+module.exports = { startMcpRelay };

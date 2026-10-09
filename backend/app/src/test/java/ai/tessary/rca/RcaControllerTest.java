@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.tessary.auth.TenantContext;
@@ -10,6 +11,7 @@ import ai.tessary.cases.CaseKey;
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.cases.CaseRow;
 import ai.tessary.cases.CaseService;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.open.errors.RcaError;
@@ -17,34 +19,23 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Web-layer acceptance for the RCA surface, driven against a real bootstrapped tenant
- * ({@code requireProject} exercised for real).
- *
- * <p><b>The press is on the CASE</b> — {@code POST /cases/{id}/rca} — and this test presses it there,
- * because the trigger this class used to call no longer exists. What it pins: the press resolves the
- * finding behind the case and NOTHING else crosses into the lane; re-presses coalesce onto one report
- * (the dedupe grain); a case whose finding has gone is a 404 rather than a fabricated report; and
- * reports are project-scoped on the way back out.
+ * The RCA surface against a real tenant. The press is on the case ({@code POST /cases/{id}/rca}): it resolves the
+ * finding behind the case and nothing else crosses into the lane, re-presses coalesce onto one report, a case whose
+ * finding is gone is a 404, and reports are project-scoped.
  */
-// Parks the scheduled drain, exactly as RcaWorkerTest does and for the same reason: scheduling is
-// live in @SpringBootTest, so the worker can claim the job this test just enqueued before the
-// `pending` assertion reads it back, turning the status into `claimed`. batch-size=0 is what parks
-// it (claimBatch's LIMIT 0 returns nothing); the long heartbeat cannot park it alone, because
-// @Scheduled(fixedDelay) has no initial delay and the first tick fires at context startup.
-//
-// Static @TestPropertySource, not @DynamicPropertySource: a dynamic registration keys the context
-// cache on the declaring Method rather than on the value, which forks a context per class instead of
-// letting this one and RcaWorkerTest share the one parked context they both want.
-@SpringBootTest
-@TestPropertySource(properties = {"tessary.rca.batch-size=0", "tessary.rca.heartbeat-ms=3600000"})
+@RcaParkedSpringBootTest
 class RcaControllerTest {
 
     @Autowired
@@ -60,7 +51,7 @@ class RcaControllerTest {
     TenantService tenants;
 
     @Autowired
-    RcaJobRepository jobs;
+    JdbcClient jdbc;
 
     @Autowired
     FindingRepository findings;
@@ -68,31 +59,42 @@ class RcaControllerTest {
     @Autowired
     RcaTriggerService trigger;
 
-    /** One open behaviour-drift finding — the subject an RCA is about. */
+    @Autowired
+    RcaJobRepository jobs;
+
+    @Autowired
+    RcaReportRepository reports;
+
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    /** One open classifier finding, the RCA's subject. */
     private String seedFinding(String projectId, String causeKey) {
-        return findings.recordFiring(
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         projectId,
-                        "profile-1",
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.SECRET_LEAK,
+                        "clf-" + causeKey,
                         causeKey,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "cs_extract",
-                        Instant.now().toString())
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
     }
 
-    /** The case a person reads before pressing — opened on the finding, exactly as triage opens it. */
+    /** The case a person reads before pressing, opened as triage opens it. */
     private String seedCase(String projectId, String findingId) {
         return caseRows.open(
                         projectId,
                         new CaseDetection(
                                 new CaseKey(
-                                        CaseRow.Detector.BEHAVIOR_DRIFT,
-                                        CaseRow.SubjectKind.BEHAVIOR_PROFILE,
+                                        CaseRow.Detector.CLASSIFIER,
+                                        CaseRow.SubjectKind.CLASSIFIER,
                                         "profile-1",
                                         "novelty"),
                                 "extraction",
@@ -122,18 +124,21 @@ class RcaControllerTest {
         assertEquals("pending", first.status());
         assertEquals("cs_extract", first.callSiteId());
 
-        // The press records who pressed — the principal the lane's ephemeral MCP key is issued to —
-        // and the finding id, which is the whole of what crosses into it.
-        var job = jobs.findById(projectId, first.jobId()).orElseThrow();
-        assertEquals(fix.user().id(), job.createdBy());
-        assertEquals(findingId, job.findingId());
+        // The press records who pressed and the finding id, the whole of what crosses into the lane.
+        var job = jdbc.sql("SELECT payload->>'created_by' AS created_by, payload->>'finding_id' AS finding_id"
+                        + " FROM job WHERE project_id = :pid AND id = :id")
+                .param("pid", projectId)
+                .param("id", first.jobId())
+                .query()
+                .singleRow();
+        assertEquals(fix.user().id(), job.get("created_by"));
+        assertEquals(findingId, job.get("finding_id"));
 
-        // Same case, second press — must resolve to the SAME report, not a duplicate analysis.
+        // A second press resolves to the same report.
         RcaReportView second = cases.runRca(projectId, caseId, fix.user().id());
         assertEquals(first.id(), second.id());
         assertEquals(first.jobId(), second.jobId());
 
-        // The report reads back by id, and the list surfaces it.
         assertEquals(
                 first.id(),
                 controller
@@ -148,8 +153,7 @@ class RcaControllerTest {
                         .size());
     }
 
-    /** Neither half of the press may invent a subject: an unknown case is a case 404, and a finding id
-     *  that resolves to nothing is an RCA 404 — never an enqueued job with nothing to analyse. */
+    /** An unknown case is a case 404, and a finding id resolving to nothing an RCA 404; never an enqueued job. */
     @Test
     void anUnknownCaseOrFindingIsRejected() {
         var fix = TenantFixture.bootstrap(tenants, "rca-api-nofinding");
@@ -167,6 +171,77 @@ class RcaControllerTest {
         assertEquals(RcaError.SUBJECT_NOT_FOUND, unknownFinding.error());
     }
 
+    /**
+     * A re-run while queued does not duplicate, a re-run of a finished report snapshots afresh, and a report whose
+     * finding is gone is not re-run.
+     */
+    @Test
+    void aRerunWaitsOnARunningReportAndSnapshotsAFinishedOneAfresh() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-rerun");
+        var ctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String projectId = fix.project().id();
+        String findingId = seedFinding(projectId, "cause-rerun");
+        RcaReportView first = cases.runRca(
+                projectId, seedCase(projectId, findingId), fix.user().id());
+
+        RcaReportView whilePending = Objects.requireNonNull(controller
+                .rerun(ctx, fix.org().slug(), fix.project().slug(), first.id())
+                .data());
+        assertEquals(first.id(), whilePending.id(), "a queued analysis is handed back, not duplicated");
+
+        jobs.markFailed(first.jobId(), "launcher down", 3);
+        RcaReportView fresh = Objects.requireNonNull(controller
+                .rerun(ctx, fix.org().slug(), fix.project().slug(), first.id())
+                .data());
+        assertNotEquals(first.id(), fresh.id());
+        assertNotEquals(first.jobId(), fresh.jobId());
+        assertEquals("pending", fresh.status());
+        assertEquals(Optional.of(findingId), reports.findingIdOf(projectId, fresh.jobId()));
+
+        jobs.markFailed(fresh.jobId(), "launcher down", 3);
+        jdbc.sql("UPDATE rca_report SET finding_id = NULL WHERE project_id = :pid AND job_id = :jobId")
+                .param("pid", projectId)
+                .param("jobId", fresh.jobId())
+                .update();
+        TessaryException orphan = assertThrows(
+                TessaryException.class,
+                () -> controller.rerun(ctx, fix.org().slug(), fix.project().slug(), fresh.id()));
+        assertEquals(RcaError.SUBJECT_NOT_FOUND, orphan.error());
+    }
+
+    /**
+     * Triage queue captions: a running analysis is not a conclusion, a finished summary reaches its case, and an
+     * empty page never reaches Postgres as {@code IN ()}.
+     */
+    @Test
+    void aCasesLeadIsItsFinishedAnalysis() {
+        var fix = TenantFixture.bootstrap(tenants, "rca-leads");
+        String projectId = fix.project().id();
+        String caseId = seedCase(projectId, seedFinding(projectId, "cause-leads"));
+        RcaReportView report = cases.runRca(projectId, caseId, fix.user().id());
+
+        assertEquals(Map.of(), reports.leadsByCase(projectId, List.of(caseId)), "a queued analysis concluded nothing");
+
+        reports.complete(
+                report.jobId(),
+                "done",
+                RcaReportRow.Verdict.MODEL_CHANGE,
+                "A canary model served the flagged traces.",
+                "[]",
+                "[{\"title\":\"A canary model\",\"confidence\":\"high\",\"evidence_trace_ids\":[]}]",
+                "## r",
+                true);
+        jobs.markDone(report.jobId());
+
+        assertEquals(
+                Map.of(
+                        caseId,
+                        new RcaReportRepository.CaseLead(
+                                RcaReportRow.Verdict.MODEL_CHANGE, "A canary model served the flagged traces.")),
+                reports.leadsByCase(projectId, List.of(caseId)));
+        assertEquals(Map.of(), reports.leadsByCase(projectId, List.of()));
+    }
+
     @Test
     void reportsAreProjectScoped() {
         var a = TenantFixture.bootstrap(tenants, "rca-api-iso-a");
@@ -177,7 +252,6 @@ class RcaControllerTest {
 
         RcaReportView report = cases.runRca(a.project().id(), caseId, a.user().id());
 
-        // Project B cannot read project A's report through its own tenant path.
         assertThrows(
                 TessaryException.class,
                 () -> controller.get(ctxB, b.org().slug(), b.project().slug(), report.id()));

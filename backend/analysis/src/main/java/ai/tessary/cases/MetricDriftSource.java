@@ -51,11 +51,6 @@ public class MetricDriftSource implements CaseSource {
     private static final double UNKNOWN_SEVERITY = 0.5;
 
     @Override
-    public String detector() {
-        return CaseRow.Detector.METRIC_DRIFT;
-    }
-
-    @Override
     public boolean owns(String classifierKey) {
         return METRIC_CLASSIFIERS.contains(classifierKey);
     }
@@ -85,9 +80,7 @@ public class MetricDriftSource implements CaseSource {
                 basis(finding, read),
                 severity(read),
                 onset(finding),
-                // The medians, in the measure's raw units: milliseconds for duration, dollars for
-                // cost. Never a percentage: `magnitudePair` in the triage list only pairs before
-                // and after for grader-degradation cases.
+                // The medians, in the measure's raw units: milliseconds for duration, dollars for cost.
                 read == null ? null : boxed(read.curP50()),
                 read == null ? null : boxed(read.refP50()),
                 delta(read));

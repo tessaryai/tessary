@@ -6,6 +6,7 @@ import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.util.RawValue;
 import java.util.List;
 import java.util.OptionalDouble;
 import org.jspecify.annotations.Nullable;
@@ -13,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * What a window's dollars were <em>made of</em> — the four token buckets and the cache-read share —
  * summarized per window slot of a {@code metric_baseline} row and reported, then versus now, inside a
- * {@code cost} finding's evidence ({@code classifiers/metric_drift/PROGRAM.md} §3.3 and §6.1).
+ * {@code cost} finding's evidence ({@code devdocs/concepts/metric-drift.md} §3.3 and §6.1).
  *
  * <h2>Why these are evidence and never findings of their own</h2>
  *
@@ -63,7 +64,7 @@ public final class MetricTokens {
     /**
      * The cache-read share of the prompt, {@code cache_read / (cache_read + input)}, in <b>percent</b>.
      *
-     * <p>The ratio rather than the raw count is what PROGRAM.md §3.3 asks cache to be watched in: the
+     * <p>The ratio rather than the raw count is what metric-drift.md §3.3 asks cache to be watched in: the
      * most common silent cost regression is a prompt-prefix edit that stops the cache hitting, and on the
      * share that reads as a clean collapse from ~80% to ~0% while the raw count is indistinguishable from
      * a quiet week, because the count moves with traffic volume and the share does not.
@@ -173,12 +174,7 @@ public final class MetricTokens {
     public String toJson() {
         ObjectNode root = MetricHistogram.JSON.createObjectNode();
         for (int i = 0; i < sketches.length; i++) {
-            try {
-                root.set(QUANTITIES.get(i), MetricHistogram.JSON.readTree(sketches[i].toJson()));
-            } catch (JsonProcessingException ex) {
-                // A sketch that cannot re-read its own output is a bug in the sketch, not a data problem.
-                throw new IllegalStateException("metric sketch produced unreadable json", ex);
-            }
+            root.putRawValue(QUANTITIES.get(i), new RawValue(sketches[i].toJson()));
         }
         return root.toString();
     }

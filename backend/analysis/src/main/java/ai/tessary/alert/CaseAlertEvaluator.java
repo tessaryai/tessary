@@ -97,7 +97,7 @@ public class CaseAlertEvaluator {
      * fails and is retried an hour later must send the message that was true when the case opened, not a
      * re-read of a case someone has since resolved.
      */
-    private @Nullable String payload(OpenedCase c) {
+    private String payload(OpenedCase c) {
         ObjectNode root = mapper.createObjectNode();
         root.put("case_id", c.id());
         root.put("case_reference", c.reference());
@@ -116,11 +116,7 @@ public class CaseAlertEvaluator {
         if (summary != null && !summary.isBlank() && !c.ruledByHuman()) root.put("ruling_summary", summary);
         String url = caseUrl(c);
         if (url != null) root.put("url", url);
-        try {
-            return mapper.writeValueAsString(root);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            return null; // the body is a convenience; a serialization slip must not withhold the alert
-        }
+        return root.toString();
     }
 
     /** Who said this was real, in the words the case page and the finding row already use. */

@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
@@ -28,6 +29,19 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class SpanPayloadRepository {
+
+    /**
+     * The exact word expression of {@code ix_span_payload_project_fts},
+     * over a payload aliased {@code p}. Postgres matches an expression index only against a syntactically identical
+     * expression: a different text-search config, a differently spelled cap or an added column still returns correct
+     * rows, by re-parsing every payload instead. The cap means search sees the first ~100 KB of each of input and
+     * output.
+     */
+    public static final String PAYLOAD_TSVECTOR =
+            "to_tsvector('simple', left(coalesce(p.input, ''), 100000) || ' ' || left(coalesce(p.output, ''), 100000))";
+
+    /** Words shorter than this match whole, since a one- or two-letter prefix matches nearly every payload. */
+    static final int MIN_PREFIX_LENGTH = 3;
 
     private static final String COLS = "project_id, trace_id, span_id, input, output, attributes::text AS attributes, "
             + "provided_usage::text AS provided_usage, event_ts, redactions::text AS redactions";
@@ -71,23 +85,68 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * One JDBC batch for a whole batch of payloads, the same statement and guard as {@link #upsert} per row.
+     * The {@code to_tsquery('simple', …)} text that matches every word of {@code text} as a prefix, or null when
+     * {@code text} holds no word at all.
+     *
+     * <p>The words come from Postgres's own {@code 'simple'} parser, the one {@link #PAYLOAD_TSVECTOR} indexed with,
+     * so a search splits {@code ORD-55812} or an email address exactly as the payload did. {@code quote_literal} makes
+     * each word a literal, so operators a user types are never read as tsquery syntax.
      */
-    public void upsertAll(List<SpanPayloadRow> rows) {
-        if (rows.isEmpty()) return;
-        int[] applied = named.batchUpdate(
-                UPSERT_SQL, rows.stream().map(SpanPayloadRepository::params).toArray(SqlParameterSource[]::new));
-        BatchCounts.requireReal(applied);
+    public @Nullable String prefixQuery(String text) {
+        return jdbc.sql("""
+                        SELECT string_agg(quote_literal(lexeme)
+                                          || CASE WHEN length(lexeme) >= :minPrefix THEN ':*' ELSE '' END, ' & ')
+                        FROM unnest(to_tsvector('simple', :text))
+                        """)
+                .param("text", text)
+                .param("minPrefix", MIN_PREFIX_LENGTH)
+                .query((rs, n) -> Optional.ofNullable(rs.getString(1)))
+                .single()
+                .orElse(null);
     }
 
     /**
-     * Last-write-wins upsert under the same {@code event_ts} guard as {@link SpanRepository#upsert}, ties
-     * to the latest arrival.
-     *
-     * @return the number of rows written: 0 when the guard rejected an older version.
+     * How many of the project's payloads hold {@code words}, counting no further than {@code cap}. Served by
+     * {@code ix_span_payload_project_fts}, which intersects the project's rows with the words' rows inside the index,
+     * so another tenant's matches are never fetched.
      */
-    public int upsert(SpanPayloadRow row) {
-        return jdbc.sql(UPSERT_SQL).paramSource(params(row)).update();
+    public int countMatches(String projectId, String words, int cap) {
+        return jdbc.sql("SELECT count(*) FROM (SELECT 1 FROM span_payload p WHERE p.project_id = :pid AND "
+                        + PAYLOAD_TSVECTOR + " @@ to_tsquery('simple', :words) LIMIT :cap) m")
+                .param("pid", projectId)
+                .param("words", words)
+                .param("cap", cap)
+                .query(Integer.class)
+                .single();
+    }
+
+    /**
+     * Prepares the rest of the caller's transaction for a search: every statement stops at {@code timeoutMs}, and is
+     * planned without looking at the searched words. Outside a transaction it does neither, so a search read must run
+     * in one.
+     *
+     * <p>The generic plan is deliberate. Shown a common word, the planner prefers reading each payload and parsing it
+     * again over the payload index, because it prices {@code to_tsvector} far below what parsing kilobytes of text
+     * costs. On a 300k-span project that made a search for {@code redacted} take 1.9 s instead of 39 ms. A plan made
+     * without the word's frequency keeps the index for the match list and the count; the walk is chosen by the
+     * count, not by the planner.
+     */
+    public void boundSearch(long timeoutMs) {
+        jdbc.sql("SELECT set_config('statement_timeout', :ms, true),"
+                        + " set_config('plan_cache_mode', 'force_generic_plan', true)")
+                .param("ms", Long.toString(timeoutMs))
+                .query()
+                .listOfRows();
+    }
+
+    /**
+     * Last-write-wins upsert of a whole batch of payloads, one JDBC batch, under the same {@code event_ts}
+     * guard as {@link SpanRepository#upsertAll}: ties go to the latest arrival.
+     */
+    public void upsertAll(List<SpanPayloadRow> rows) {
+        int[] applied = named.batchUpdate(
+                UPSERT_SQL, rows.stream().map(SpanPayloadRepository::params).toArray(SqlParameterSource[]::new));
+        BatchCounts.requireReal(applied);
     }
 
     public Optional<SpanPayloadRow> find(String projectId, String traceId, String spanId) {

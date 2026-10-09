@@ -25,10 +25,6 @@
 # scripts/check-selfhost-images.sh is the separate, Docker-and-network leg that asks a registry
 # whether the tags actually resolve; it reads its expected version from the newest git tag.
 #
-# One class of file is exempt, and only from the environment: an append-only decision ledger,
-# whose rows state what was decided and what was true when, so a row rewritten to match today's
-# tree stops being a record. See VERSION_LITERAL_EXEMPT below.
-#
 # Must go red on a reintroduced literal, proven rather than asserted: run with
 #   VERSION_SOURCE_SELFTEST=1 bash scripts/check-version-consistency.sh
 # which writes a pinned literal and a de-floated default into a scratch copy of the tree and
@@ -115,10 +111,6 @@ EXEMPT = {
     # This script's own header and self-test, which must be able to name the literal they forbid.
     "scripts/check-version-consistency.sh",
 }
-# Further exemptions come from the environment rather than from this list, because this script
-# must not name paths outside this tree directly. scripts/check.sh passes them in (`RUN_ENV:`),
-# the same mechanism check-classifier-quality-doc.sh's inputs use. Space-separated, repo-relative.
-EXEMPT |= {p for p in os.environ.get("VERSION_LITERAL_EXEMPT", "").split() if p}
 
 try:
     tracked = subprocess.run(

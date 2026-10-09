@@ -11,8 +11,8 @@
  *
  * <h2>Empty cells are not missing data</h2>
  * Tokens and cost are properties of an LLM span. A tool span has neither, so those columns are blank
- * on every tool-error row by construction — which is why the column picker exists rather than a fixed
- * column set: a duration-drift finding fills them and a tool-error one never will.
+ * on every tool-error row by construction: a duration-drift finding fills them and a tool-error one
+ * never will.
  *
  * <h2>Ten rows, then more on demand</h2>
  * The set behind this can be 27,000 rows. The page reads ten, states the total beside them, and pages
@@ -53,7 +53,6 @@ const ROLE_HINT: Record<string, string> = {
 type ColumnKey =
   | "role"
   | "name"
-  | "kind"
   | "status"
   | "key"
   | "storedAs"
@@ -71,7 +70,6 @@ type ColumnDef = { key: ColumnKey; label: string; numeric?: boolean };
 const COLUMNS: ColumnDef[] = [
   { key: "role", label: "Role" },
   { key: "name", label: "Name" },
-  { key: "kind", label: "Kind" },
   { key: "status", label: "Status" },
   { key: "key", label: "Key" },
   { key: "storedAs", label: "Stored as" },
@@ -83,19 +81,6 @@ const COLUMNS: ColumnDef[] = [
   { key: "models", label: "Models" },
   { key: "flags", label: "Flags" },
   { key: "trace", label: "Trace" },
-];
-
-const DEFAULT_VISIBLE: ColumnKey[] = [
-  "role",
-  "name",
-  "status",
-  "started",
-  "latency",
-  "tokens",
-  "cost",
-  "models",
-  "flags",
-  "trace",
 ];
 
 /** A whole-run row's rollup caveats, spelled for a reader. Never set on a single-step row. */
@@ -116,7 +101,6 @@ const STORED_AS_LABEL: Record<string, string> = {
 export function EvidenceTable({ findingId, basePath }: { findingId: string; basePath: string }) {
   const { api } = useTenant();
   const [role, setRole] = useState<string | null>(null);
-  const [visible] = useState<Set<ColumnKey>>(new Set(DEFAULT_VISIBLE));
 
   const q = useInfiniteQuery({
     queryKey: ["behavior-finding-evidence", api.base, findingId, role],
@@ -139,9 +123,9 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
       COLUMNS.filter((c) => {
         if (c.key === "key" || c.key === "storedAs") return hasSecretKeys;
         if (c.key === "violation") return hasViolations;
-        return visible.has(c.key);
+        return true;
       }),
-    [visible, hasSecretKeys, hasViolations],
+    [hasSecretKeys, hasViolations],
   );
   // Recorded counts, not live ones: the question a footer answers is "how big is the claim", and a
   // ref whose substrate aged out was still part of what the detector measured.
@@ -194,7 +178,7 @@ export function EvidenceTable({ findingId, basePath }: { findingId: string; base
         </THead>
         <TBody>
           {rows.map((row, i) => (
-            <TR key={`${row.role}-${row.traceId ?? ""}-${row.spanId ?? ""}-${i}`}>
+            <TR key={`${row.role}-${row.sessionId ?? ""}-${row.traceId ?? ""}-${row.spanId ?? ""}-${i}`}>
               {columns.map((col) => (
                 <Cell key={col.key} col={col.key} row={row} basePath={basePath} />
               ))}
@@ -271,8 +255,6 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
       );
     case "name":
       return row.name ? <span className="font-mono">{row.name}</span> : NONE;
-    case "kind":
-      return row.kind ?? NONE;
     case "key":
       return row.secretKey ? <span className="font-mono">{row.secretKey}</span> : NONE;
     case "storedAs":
@@ -315,6 +297,7 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
         NONE
       );
     }
+    // A session-grain row (a frustrated conversation) has no trace: it links to the conversation.
     case "trace":
       return row.traceId ? (
         <Link
@@ -322,10 +305,14 @@ function render(col: ColumnKey, row: EvidenceSpan, basePath: string) {
           className="font-mono text-link hover:text-link-hover transition-colors">
           {row.traceId.slice(0, 8)}…
         </Link>
+      ) : row.sessionId ? (
+        <Link
+          to={`${basePath}/sessions/${encodeURIComponent(row.sessionId)}`}
+          className="font-mono text-link hover:text-link-hover transition-colors">
+          conversation {row.sessionId.slice(0, 8)}…
+        </Link>
       ) : (
         NONE
       );
-    default:
-      return NONE;
   }
 }

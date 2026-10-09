@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
  * serves the four non-substrate node kinds it used to — {@code verdict}, {@code risk_stat},
  * {@code diff_classification} and {@code observer_alert} — along with the raw-SHA provenance shape,
  * which only {@code observer_alert.project_version_sha} ever used. What remains is the direct-FK
- * shape on {@code trace} and {@code span}, plus the session's derived MAX.
+ * shape on {@code trace}, plus the session's derived MAX.
  *
  * <p>This sits beside {@code ProjectVersionRepository} in the version slice on purpose: lineage is
  * a read concern of the version spine, and cross-table read joins are the established pattern for
@@ -74,24 +74,6 @@ public class CommitLineageRepository {
             """)
                 .param("pid", projectId)
                 .param("id", traceId)
-                .query(String.class)
-                .optional();
-    }
-
-    /**
-     * {@code span.project_version_id}, addressed by the producer PAIR.
-     *
-     * <p>{@code traceId} is required and not an optional narrowing: a producer span id is unique only
-     * within its trace, so a bare-id lookup would resolve to whichever trace happened to reuse it.
-     */
-    public Optional<String> spanVersionId(String projectId, String traceId, String spanId) {
-        return jdbc.sql("""
-            SELECT project_version_id FROM span
-            WHERE project_id = :pid AND trace_id = :tid AND id = :id
-            """)
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("id", spanId)
                 .query(String.class)
                 .optional();
     }

@@ -11,6 +11,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,8 +47,16 @@ public final class InProcessSpool implements IngestSpool {
     /** Nanotime the batch a drainer is holding was enqueued, 0 when none: the in-flight half of the oldest age. */
     private final AtomicLong inFlightEnqueuedAtNanos = new AtomicLong();
 
+    /** The monotonic clock batch ages are read from: {@link System#nanoTime} outside tests. */
+    private final LongSupplier nanoTime;
+
     public InProcessSpool(SubstrateProperties props) {
+        this(props, System::nanoTime);
+    }
+
+    InProcessSpool(SubstrateProperties props, LongSupplier nanoTime) {
         this.maxQueueBytes = Math.max(1L, props.getQueueMaxBytes());
+        this.nanoTime = nanoTime;
     }
 
     @Override
@@ -76,7 +85,7 @@ public final class InProcessSpool implements IngestSpool {
                     maxQueueBytes);
             return Admission.SHED;
         }
-        queue.add(new Claimed(projectId, List.copyOf(entries), bytes, System.nanoTime(), null));
+        queue.add(new Claimed(projectId, List.copyOf(entries), bytes, nanoTime.getAsLong(), null));
         return Admission.ACCEPTED;
     }
 
@@ -105,7 +114,7 @@ public final class InProcessSpool implements IngestSpool {
     public Stats stats() {
         // The oldest unprocessed batch is the one a drainer is holding, if any, else the queue head: a
         // hung write with an empty queue must read as a growing age, not as idle.
-        long now = System.nanoTime();
+        long now = nanoTime.getAsLong();
         long inFlight = inFlightEnqueuedAtNanos.get();
         Claimed head = queue.peek();
         long oldestNanos = inFlight != 0 ? inFlight : head == null ? 0 : head.enqueuedAtNanos();
@@ -119,17 +128,13 @@ public final class InProcessSpool implements IngestSpool {
     }
 
     /**
-     * Take {@code bytes} out of the budget, or refuse. A CAS loop rather than a read-then-add: two
+     * Take {@code bytes} out of the budget, or refuse. One atomic update rather than a read-then-add: two
      * producers reading the same headroom and both adding would both be admitted, and the queue would
      * settle above its ceiling by however much the losing thread reserved.
      */
     private boolean reserve(long bytes) {
-        while (true) {
-            long current = queuedBytes.get();
-            long next = current + bytes;
-            if (next > maxQueueBytes) return false;
-            if (queuedBytes.compareAndSet(current, next)) return true;
-        }
+        long before = queuedBytes.getAndUpdate(current -> current + bytes > maxQueueBytes ? current : current + bytes);
+        return before + bytes <= maxQueueBytes;
     }
 
     /**
@@ -148,8 +153,7 @@ public final class InProcessSpool implements IngestSpool {
                     + len(e.outputMessagesJson())
                     + len(e.name())
                     + len(e.model())
-                    + len(e.sourceExternalId())
-                    + len(e.sourceUrl());
+                    + len(e.sourceExternalId());
             Map<String, Object> metadata = e.metadata();
             if (metadata != null) {
                 for (Map.Entry<String, Object> kv : metadata.entrySet()) {

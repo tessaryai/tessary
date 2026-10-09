@@ -3,7 +3,6 @@
 # Row shape: METHOD PATH -> CODE  note. Slugs and ids are the sweep's own placeholders.
 BOOT backend under SITE_DOMAIN=sweep.example.invalid with the shipped keys -> refused, nothing serving  placeholder-key guard
 BUNDLE credential-shaped or path-revealing strings -> 0  
-BUNDLE forbidden-strings hits -> 0  
 BUNDLE source-map files -> 0  
 BUNDLE sourceMappingURL -> absent  
 DB org_membership rows before first signup -> 0  

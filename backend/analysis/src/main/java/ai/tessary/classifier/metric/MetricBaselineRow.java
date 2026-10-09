@@ -60,7 +60,6 @@ public record MetricBaselineRow(
          * describe a different window than the sketch does.
          */
         @Nullable String pinnedRefsJson,
-        @Nullable String prevTokensJson,
         @Nullable String currentTokensJson,
         /**
          * The rows folded into the window being filled, same codec as {@link #pinnedRefsJson} — the
@@ -120,20 +119,13 @@ public record MetricBaselineRow(
 
         public static final String LEARNING = "learning";
         public static final String ARMED = "armed";
-
-        /**
-         * The sketch no longer describes the bucket: its configured range stopped fitting the traffic,
-         * so the overflow bin holds the population and a comparison would be arithmetic on clipping.
-         * Idleness is not a reason to be here; a baseline does not rot because nobody called the agent.
-         */
-        public static final String STALE = "stale";
     }
 
     /** {@code metric_baseline.bucket_kind}. Persisted; never renamed. */
     public static final class BucketKind {
         private BucketKind() {}
 
-        /** The entry-point call site, resolved root-span-first exactly as behaviour drift resolves it. */
+        /** The trace's call site, read from {@code trace.call_site_id} exactly as behaviour drift reads it. */
         public static final String CALL_SITE = "call_site";
 
         /** An {@code ActionSymbol} {@code kind:normalized-name}, so tool buckets match drift's alphabet. */

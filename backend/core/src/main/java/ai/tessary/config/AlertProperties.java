@@ -25,9 +25,6 @@ public class AlertProperties {
     /** Zone in which alert crons are evaluated (per-project zones are a future extension). */
     private String cronZone = "UTC";
 
-    /** Lease duration for a claimed alert config row; a worker that dies mid-evaluation is reclaimed after this. */
-    private long leaseSeconds = 300;
-
     /**
      * Public origin of the SPA, used to put a link to the case in an alert message
      * ({@code https://app.tessary.ai}). Empty by default and in local development, where there is
@@ -49,14 +46,6 @@ public class AlertProperties {
 
     public void setCronZone(String v) {
         this.cronZone = v;
-    }
-
-    public long getLeaseSeconds() {
-        return leaseSeconds;
-    }
-
-    public void setLeaseSeconds(long v) {
-        this.leaseSeconds = v;
     }
 
     public String getAppBaseUrl() {

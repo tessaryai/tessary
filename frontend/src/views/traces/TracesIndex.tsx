@@ -4,13 +4,13 @@
  *
  * Conforming trace table — When · Name · Call site · Input · Output · Status ·
  * Latency · Cost (Verdict opt-in behind Columns, uncolored). Status is RUNTIME
- * ONLY: `ok` as plain muted text, `error` as the errored StatusPill — grader
+ * ONLY: a trace that errored carries a red dot on its name, and grader
  * verdicts never color this table. Row click → ?trace=<id>, a rail floating
  * over this same page (not a route change) so the table stays visible behind it.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Search, ChevronRight } from "lucide-react";
 import {
   PageHeader,
@@ -44,6 +44,7 @@ import {
   rangeLabel,
   resolveRange,
   useAutoRefresh,
+  useKeptTraceView,
   useTraceQueryState,
   type FacetOption,
 } from "./index-filters";
@@ -56,8 +57,11 @@ import {
   useObservedFacets,
   useTracesIndex,
   formatTokens,
+  type TraceFilters,
   type TraceListItem,
+  filterParams,
 } from "./index-data";
+import { ANY_DETECTION, DETECTED_BY_DETECTORS, DetectionMarker } from "./detection-marker";
 import { useSessionsIndex, sessionName, sessionDurationMs, type SessionListItem } from "./session-index-data";
 import { TraceRail } from "./TraceRail";
 import { SessionRail } from "./SessionRail";
@@ -82,18 +86,24 @@ const KIND_OPTIONS: FacetOption[] = [
   { value: "guardrail", label: "guardrail" },
 ];
 
+/** Puts the tab's kept filters back before the list's first fetch; see {@link useKeptTraceView}. */
 export function TracesIndex() {
+  const api = useProjectApi();
+  return useKeptTraceView(api.base) ? <TracesList /> : null;
+}
+
+function TracesList() {
+  const api = useProjectApi();
   const { visible, toggle, reset } = useColumnConfig();
-  const [query, setQuery] = useState("");
-  // Submitted separately from the typed value: `q` is a server-side filter, so
-  // firing it per keystroke would be a query per character.
-  const [submittedQuery, setSubmittedQuery] = useState("");
-  // Deep-link filters: Vitals rows land here with ?call_site=<slug>, Classifiers'
-  // "Raw detections live in Traces" with ?events=classifier. Chips mirror the URL;
-  // removing a chip removes its param.
+
+  // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
+  // the URL; removing a chip removes its param.
   const [searchParams, setSearchParams] = useSearchParams();
-  const { state, setRange, setFacet, clearAll, activeCount } = useTraceQueryState();
-  const { range, facets } = state;
+  const { state, setRange, setFacet, setCallSite, setSearch, clearAll, activeCount } = useTraceQueryState();
+  const { range, facets, callSite, q: submittedQuery } = state;
+  // The box holds what is typed; the URL holds what was submitted. `q` is a server-side filter, so
+  // firing it per keystroke would be a query per character.
+  const [query, setQuery] = useState(submittedQuery);
 
   // Bumped by ↻ and by each auto-refresh tick. Re-resolves a rolling range
   // against a fresh `now` and evicts every page already fetched, so the feed
@@ -114,7 +124,6 @@ export function TracesIndex() {
 
   const clearAllFilters = () => {
     setQuery("");
-    setSubmittedQuery("");
     clearAll();
   };
 
@@ -141,22 +150,34 @@ export function TracesIndex() {
 
   // Filtering happens server-side — the list is keyset-paginated, so narrowing
   // it in the browser would only ever filter the page that happens to be loaded.
-  const q = useTracesIndex(
-    {
-      q: submittedQuery || undefined,
-      callSite: facets.call_site ?? undefined,
-      status: facets.status ?? undefined,
-      model: facets.model ?? undefined,
-      kind: facets.kind ?? undefined,
-      from: bounds.from,
-      to: bounds.to,
-    },
-    epoch,
-    !groupBySession,
-  );
-  const sq = useSessionsIndex(epoch, groupBySession);
+  const filters: TraceFilters = {
+    q: submittedQuery || undefined,
+    callSite: typeof callSite === "object" ? callSite.id : undefined,
+    hasCallSite: callSite === "any" ? true : callSite === "none" ? false : undefined,
+    status: facets.status ?? undefined,
+    kind: facets.kind ?? undefined,
+    from: bounds.from,
+    to: bounds.to,
+    detectedBy: facets.detected_by ?? undefined,
+  };
+  const q = useTracesIndex(filters, epoch, !groupBySession);
+  const sq = useSessionsIndex(filters, epoch, groupBySession);
+
+  // The classifiers Detected by offers: those whose flags these views show.
+  const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
+  const detectors = (classifiersQ.data ?? []).filter((c) => DETECTED_BY_DETECTORS.has(c.detector));
+  const detectedByOptions = detectors.map((c) => ({ value: c.id, label: c.name }));
+  const pickedDetector = detectors.find((c) => c.id === facets.detected_by) ?? null;
 
   const filtered = activeCount > 0 || !!submittedQuery;
+  // The empty state's "filtered": a narrowed list, not a moved window. The range is a choice of
+  // window (it counts toward Clear all above), and an all-time list that is empty has nothing to clear.
+  const narrowed =
+    !!facets.status ||
+    !!facets.kind ||
+    !!facets.detected_by ||
+    (callSite !== "any" && callSite !== "all") ||
+    !!submittedQuery;
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.traces) ?? [], [q.data]);
   const sessionRows = useMemo(() => sq.data?.pages.flatMap((p) => p.sessions) ?? [], [sq.data]);
 
@@ -203,7 +224,6 @@ export function TracesIndex() {
     next.delete("trace");
     next.delete("view");
     next.delete("span");
-    next.delete("verdicts");
     setSearchParams(next);
   };
 
@@ -246,7 +266,7 @@ export function TracesIndex() {
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              setSubmittedQuery(query.trim());
+              setSearch(query.trim());
             }
           }}
           aria-label="Filter traces"
@@ -277,8 +297,31 @@ export function TracesIndex() {
           label="Call site"
           value={facets.call_site}
           options={callSiteOptions}
-          onChange={(v) => setFacet("call_site", v)}
+          onChange={(v) => setCallSite(v ? { id: v } : "any")}
+          head={[
+            { label: "All traces", short: "all", selected: callSite === "all", onSelect: () => setCallSite("all") },
+            { label: "Any call site", selected: callSite === "any", onSelect: () => setCallSite("any") },
+          ]}
+          foot={[
+            { label: "No call site", short: "none", selected: callSite === "none", onSelect: () => setCallSite("none") },
+          ]}
           emptyHint="No call site has been seen in the loaded traces yet."
+        />
+        <FacetControl
+          label="Detected by"
+          value={facets.detected_by === ANY_DETECTION ? null : facets.detected_by}
+          options={detectedByOptions}
+          onChange={(v) => setFacet("detected_by", v)}
+          head={[
+            { label: "All traces", selected: !facets.detected_by, onSelect: () => setFacet("detected_by", null) },
+            {
+              label: "Any detection",
+              short: "any",
+              selected: facets.detected_by === ANY_DETECTION,
+              onSelect: () => setFacet("detected_by", ANY_DETECTION),
+            },
+          ]}
+          emptyHint="No classifier that marks traces is set up yet."
         />
         <button
           type="button"
@@ -316,18 +359,16 @@ export function TracesIndex() {
         up here too. No running count: the range and the filters are already
         stated by the controls above, and the footer says when the list ends.
       */}
-      {(facets.call_site || submittedQuery || filtered) && (
+      {filtered && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3 mx-0 mb-0">
-          {facets.call_site && (
-            <FilterChip label={`call site: ${facets.call_site}`} onRemove={() => setFacet("call_site", null)} />
-          )}
-          {/* Model has no dropdown — the vocabulary is a span fact the list no longer reads — but a deep
-              link can still scope to one, so it needs a way back out. */}
-          {facets.model && (
-            <FilterChip label={`model: ${facets.model}`} onRemove={() => setFacet("model", null)} />
+          {callSite !== "any" && (
+            <FilterChip
+              label={`call site: ${typeof callSite === "object" ? callSite.id : callSite}`}
+              onRemove={() => setCallSite("any")}
+            />
           )}
           {submittedQuery && (
-            <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSubmittedQuery("")} />
+            <FilterChip label={`search: ${submittedQuery}`} onRemove={() => setSearch("")} />
           )}
           {filtered && (
             <button
@@ -351,11 +392,17 @@ export function TracesIndex() {
         // arrived — never a bare header-only table. Both ways out are offered
         // here, and each is hidden when it would do nothing.
         <NothingHere
-          filtered={filtered}
+          filtered={narrowed}
           allTime={range.kind === "all"}
           range={rangeLabel(range).toLowerCase()}
           onClearAll={clearAllFilters}
           onSearchAllTime={() => setRange({ kind: "all" })}
+          onShowAll={callSite === "any" ? () => setCallSite("all") : undefined}
+          offClassifier={
+            pickedDetector && !pickedDetector.enabled
+              ? { name: pickedDetector.name, href: `../classifiers/detectors?classifier=${encodeURIComponent(pickedDetector.id)}` }
+              : undefined
+          }
         />
       ) : (
         // table-layout: fixed against the <colgroup> below, not auto: a column's width must never
@@ -397,6 +444,7 @@ export function TracesIndex() {
                       onToggle={() => toggleExpanded(s.id)}
                       onOpenSession={() => openSession(s)}
                       onOpenTrace={openTraceById}
+                      filters={filters}
                     />
                   );
                 })
@@ -487,6 +535,7 @@ function SessionGroupRows({
   onToggle,
   onOpenSession,
   onOpenTrace,
+  filters,
 }: {
   session: SessionListItem;
   columns: ColumnDef[];
@@ -494,13 +543,18 @@ function SessionGroupRows({
   onToggle: () => void;
   onOpenSession: () => void;
   onOpenTrace: (traceId: string) => void;
+  filters: TraceFilters;
 }) {
   const api = useProjectApi();
   const detail = useQuery({
-    queryKey: ["session-detail-expand", api.base, session.id],
-    queryFn: () => api.getSession(session.id),
+    queryKey: ["session-detail-expand", api.base, session.id, filters],
+    queryFn: () => api.getSession(session.id, filterParams(filters)),
+    // The same search as the list: one the server stopped at its timeout would only run as long again.
+    retry: false,
     enabled: expanded,
   });
+  // Every trace of the session shows, for context; the ones the filters would not show are dimmed.
+  const matched = detail.data?.matched_trace_ids ? new Set(detail.data.matched_trace_ids) : null;
 
   return (
     <>
@@ -557,14 +611,14 @@ function SessionGroupRows({
             key={t.id}
             interactive
             tabIndex={0}
-            className="group bg-raised"
+            className={cn("group bg-raised", matched && !matched.has(t.id) && "opacity-50")}
             onClick={() => onOpenTrace(t.id)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onOpenTrace(t.id);
             }}
           >
             {columns.map((col) => (
-              <Cell key={col.key} col={col.key} row={t} />
+              <Cell key={col.key} col={col.key} row={t} outside={!!matched && !matched.has(t.id)} />
             ))}
             {/* No shadow/chevron here — the pinned treatment is a session-level affordance; a nested
                 trace row has nothing to expand, so its slice of the column just continues the row's
@@ -613,6 +667,8 @@ function SessionCell({ col, row }: { col: ColumnKey; row: SessionListItem }) {
     // Not an aggregate — the session bracketed as one interaction, the same way a book review might
     // quote the opening line and the ending rather than "averaging" the whole text. Only the first
     // trace's own input and the last trace's own output, exactly as the server sent them.
+    case "detectedBy":
+      return <Detected names={row.detected_by.map((d) => d.name)} />;
     case "input":
       return <Preview value={row.first_input_preview} />;
     case "output":
@@ -655,8 +711,6 @@ function SessionCell({ col, row }: { col: ColumnKey; row: SessionListItem }) {
       return <Text>{row.dominant_call_site_id ? sessionName(row) : "—"}</Text>;
     case "session":
       return <Text>{row.id}</Text>;
-    case "sessionExpand":
-      return null;
   }
 }
 
@@ -771,7 +825,16 @@ function Rollup({
   return <Num title={title}>{render(value)}</Num>;
 }
 
-function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
+/** The classifiers that flagged the row, by name; empty when none did. */
+function Detected({ names }: { names: string[] }) {
+  return (
+    <TD className="truncate text-small" style={{ ...CELL_PAD }}>
+      <DetectionMarker names={names} size="small" />
+    </TD>
+  );
+}
+
+function Cell({ col, row, outside = false }: { col: ColumnKey; row: TraceListItem; outside?: boolean }) {
   switch (col) {
     case "when":
       return <Text>{formatWhen(row.started_at)}</Text>;
@@ -790,6 +853,7 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
               style={{ width: 6, height: 6 }}
             />
             {row.status === "error" && <span className="sr-only">errored: </span>}
+            {outside && <span className="sr-only">outside the filters: </span>}
             <span className="min-w-0 truncate">{row.name ?? row.id}</span>
             {!row.is_settled && (
               <span className="shrink-0 text-subtle text-label"  title="Spans are still arriving">
@@ -803,6 +867,8 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
       return <Preview value={row.input_preview} />;
     case "output":
       return <Preview value={row.output_preview} />;
+    case "detectedBy":
+      return <Detected names={row.detected_by.map((d) => d.name)} />;
     case "session":
       return <Text>{row.session ?? "—"}</Text>;
     case "traceId":
@@ -862,10 +928,6 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
       return (
         <Rollup row={row} value={row.total_tokens} render={formatTokens} title={exactTokens(row.total_tokens)} />
       );
-    case "sessionExpand":
-      // Never rendered for a flat (unpinned) row — the pinned expand column only exists in grouped mode,
-      // where SessionCell/SessionGroupRows render it instead.
-      return null;
   }
 }
 
@@ -879,6 +941,10 @@ function Cell({ col, row }: { col: ColumnKey; row: TraceListItem }) {
  * actually change the result, so an all-time unfiltered blank does not suggest
  * clearing filters that are not set.
  *
+ * The default leaves out traces without a call site, and clearing filters
+ * returns to that default, so `onShowAll` is its own way out. While it is
+ * offered, the list may hold nothing only because every trace is untagged.
+ *
  * The source-connection pointer stays for the unfiltered case: with nothing
  * narrowing the list, "you have not connected anything yet" is the likeliest
  * explanation and the only one the reader cannot act on from this page.
@@ -889,39 +955,73 @@ function NothingHere({
   range,
   onClearAll,
   onSearchAllTime,
+  onShowAll,
+  offClassifier,
 }: {
   filtered: boolean;
   allTime: boolean;
   range: string;
   onClearAll: () => void;
   onSearchAllTime: () => void;
+  onShowAll?: () => void;
+  /** The classifier Detected by picked, when it is off and so has nothing to match. */
+  offClassifier?: { name: string; href: string };
 }) {
+  if (offClassifier) {
+    return (
+      <div className="text-center pt-18 px-0 pb-10">
+        <p className="text-h1 mx-auto text-fg" style={{ maxWidth: 560 }}>
+          {offClassifier.name} is off
+        </p>
+        <p className="mx-auto text-muted mt-3 text-body" style={{ maxWidth: 460, textWrap: "pretty" }}>
+          It has no detections to filter by. Turn it on to start scoring.
+        </p>
+        <p className="text-muted mt-3 text-body">
+          <Link to={offClassifier.href} relative="path" className="text-accent hover:underline">
+            Open {offClassifier.name}
+          </Link>
+          <span className="text-subtle"> · </span>
+          <button type="button" onClick={onClearAll} className="text-accent hover:underline cursor-pointer">
+            Clear all filters
+          </button>
+        </p>
+      </div>
+    );
+  }
+  const ways = [
+    !allTime && { label: "Search all time", onClick: onSearchAllTime },
+    onShowAll && { label: "Show all traces", onClick: onShowAll },
+    filtered && { label: "Clear all filters", onClick: onClearAll },
+  ].filter((w): w is { label: string; onClick: () => void } => !!w);
+
   return (
     <div className="text-center pt-18 px-0 pb-10">
       <p className="text-h1 mx-auto text-fg" style={{ maxWidth: 560 }}>
-        {filtered ? "No traces match these filters" : allTime ? "No traces yet" : "No traces in this range"}
+        {filtered
+          ? "No traces match these filters"
+          : onShowAll
+            ? allTime
+              ? "No traces with a call site yet"
+              : "No traces with a call site in this range"
+            : allTime
+              ? "No traces yet"
+              : "No traces in this range"}
       </p>
 
-      {(filtered || !allTime) && (
+      {ways.length > 0 && (
         <p className="text-muted mt-3 text-body">
-          {!allTime && (
-            <button
-              type="button"
-              onClick={onSearchAllTime}
-              className="text-accent hover:underline cursor-pointer">
-              Search all time
-            </button>
-          )}
-          {!allTime && filtered && <span className="text-subtle"> · </span>}
-          {filtered && (
-            <button type="button" onClick={onClearAll} className="text-accent hover:underline cursor-pointer">
-              Clear all filters
-            </button>
-          )}
+          {ways.map((w, i) => (
+            <Fragment key={w.label}>
+              {i > 0 && <span className="text-subtle"> · </span>}
+              <button type="button" onClick={w.onClick} className="text-accent hover:underline cursor-pointer">
+                {w.label}
+              </button>
+            </Fragment>
+          ))}
         </p>
       )}
 
-      {!filtered && (
+      {!filtered && !onShowAll && (
         <p
           className="mx-auto text-subtle mt-4 text-small"
           style={{ maxWidth: 460, textWrap: "pretty" }}

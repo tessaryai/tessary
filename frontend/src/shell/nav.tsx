@@ -37,14 +37,13 @@ import {
   Route as RouteIcon,
   Settings as SettingsIcon,
   Shield,
+  ToggleRight,
   TrendingUp,
   Users,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { CapabilityWire } from "../api/types-auth";
-// This build's settings-nav extension point; empty here, see src/paid/index.ts.
-import { paid } from "@paid";
 
 export type SurfaceState = "live" | "reserved";
 
@@ -64,7 +63,10 @@ export type NavItem = {
    * (sheets/ask-palette.md), e.g. `was "Pipeline"`. Distinct from `keywords`, which only match.
    */
   alias?: string;
-  /** Routes that should also light this item up in the sidebar (e.g. detail pages). */
+  /**
+   * Routes that should also light this item up in the sidebar (e.g. detail pages). A route named here wins over
+   * another item whose own route it sits under.
+   */
   match?: string[];
   /** "live" (default) renders in the sidebar; "reserved" is a roadmap-only palette slot. */
   state?: SurfaceState;
@@ -85,10 +87,11 @@ export type NavGroup = { label: string; items: NavItem[] };
 export const TRIAGE_NAV: NavItem = {
   id: "triage",
   label: "Triage",
-  description: "Open cases, worst first.",
-  keywords: ["cases", "inbox", "home", "overview", "worklist", "triage"],
+  description: "Open cases, worst first, and the findings that are not a case yet.",
+  keywords: ["cases", "findings", "inbox", "home", "overview", "worklist", "triage"],
   alias: 'was "Overview"',
-  match: ["cases"],
+  // A finding page lives under classifiers/, but Triage lists findings and the page's breadcrumb leads back here.
+  match: ["cases", "classifiers/findings"],
   icon: Inbox,
 };
 
@@ -110,11 +113,12 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         id: "classifiers",
         label: "Classifiers",
-        description: "The checks watching production traffic, and the findings they create.",
+        description: "What each classifier detects, charted per call site and per tool.",
         keywords: [
           "signals",
           "detections",
-          "findings",
+          "charts",
+          "configure",
           "drift",
           "behavior drift",
           "behavior",
@@ -203,8 +207,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     items: [
       { id: "organization", label: "Organization", icon: Building2 },
       { id: "members", label: "Members", icon: Users },
-      // Extra sections this build can register; empty here, see src/paid/index.ts.
-      ...(paid.settingsNav.Organization ?? []),
+      // Capabilities an operator decides for the whole org. Today only automatic triage, which starts
+      // unattended LLM spend on the org's provider.
+      { id: "features", label: "Features", icon: ToggleRight },
     ],
   },
   {
@@ -247,11 +252,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       // reads. The capability gates authoring a custom rule, inside the page, not the page itself.
       { id: "pii-redaction", label: "PII redaction", icon: Shield },
       // How long this project keeps traces and detections; the install default comes from the
-      // deployment's environment, and this page is the per-project override.
+      // deployment's environment, and this page is the per-project override, read-only when another
+      // build fixes the project's retention.
       { id: "retention", label: "Data retention", icon: Hourglass },
     ],
   },
 ];
-
-/** Every settings section, flat and in rail order. */
-export const SETTINGS_SECTIONS: SettingsSection[] = SETTINGS_GROUPS.flatMap((g) => g.items);

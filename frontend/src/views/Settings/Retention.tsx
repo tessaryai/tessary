@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useProjectApi } from "../../tenant/TenantContext";
 import { ApiError } from "../../api/types";
 import type { RetentionClassView } from "../../api/types";
-import { Button, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
+import { Button, ErrorNote, Field, Input, PageBody, PageHeader, Section, Spinner, Toggle, useToast } from "../../ui";
 
 /**
  * Settings → Data retention. How long this project keeps traces and classifier detections.
  * The install default comes from the deployment's environment (`TESSARY_RETENTION_*_TTL_DAYS`); each
  * class here can override it, and clearing the override returns to the default. 0 keeps forever.
+ * When another build fixes a project's retention (`fixed_ttl_days` above 0), the page is read-only.
  */
 
 const LABELS: Record<RetentionClassView["data_class"], { title: string; hint: string }> = {
@@ -39,6 +40,7 @@ export function Retention() {
 
   const classes = view.data?.classes ?? [];
   const canManage = view.data?.can_manage ?? false;
+  const fixed = classes.some((c) => c.fixed_ttl_days > 0);
   const draftFor = (c: RetentionClassView): string | null =>
     c.data_class in drafts ? (drafts[c.data_class] ?? null) : c.from_policy ? String(c.ttl_days) : null;
   // Dirty only when the effective value would change, so toggling an override on and off again is a no-op.
@@ -74,16 +76,22 @@ export function Retention() {
       <PageHeader
         eyebrow="Security & access"
         title="Data retention"
-        subtitle="How long this project keeps what it ingests. An hourly sweep deletes anything older. The install default is set by whoever runs the deployment; an owner or admin can override it here for this project only."
+        subtitle={
+          fixed
+            ? "How long this project keeps what it ingests. An hourly sweep deletes anything older. Your plan sets these periods, so they can't be changed here."
+            : "How long this project keeps what it ingests. An hourly sweep deletes anything older. The install default is set by whoever runs the deployment; an owner or admin can override it here for this project only."
+        }
         actions={
-          <Button
-            variant="primary"
-            disabled={!dirty || invalid || !canManage}
-            loading={save.isPending}
-            onClick={() => save.mutate()}
-          >
-            Save
-          </Button>
+          !fixed && (
+            <Button
+              variant="primary"
+              disabled={!dirty || invalid || !canManage}
+              loading={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              Save
+            </Button>
+          )
         }
       />
 
@@ -93,6 +101,8 @@ export function Retention() {
             <Spinner size="sm" />
             Loading retention…
           </div>
+        ) : view.isError ? (
+          <ErrorNote error={view.error} />
         ) : (
           <div className="rounded-card border border-border divide-y divide-border">
             {classes.map((c) => {
@@ -105,21 +115,31 @@ export function Retention() {
                       <div className="text-small text-fg">{LABELS[c.data_class].title}</div>
                       <div className="text-label text-muted mt-0.5">{LABELS[c.data_class].hint}</div>
                       <div className="text-label text-muted mt-1">
-                        Install default: <span className="text-fg">{describe(c.platform_default_days)}</span>
-                        {" · "}currently <span className="text-fg">{describe(c.ttl_days)}</span>
+                        {c.fixed_ttl_days > 0 ? (
+                          <>
+                            Set by your plan: <span className="text-fg">{describe(c.ttl_days)}</span>
+                          </>
+                        ) : (
+                          <>
+                            Install default: <span className="text-fg">{describe(c.platform_default_days)}</span>
+                            {" · "}currently <span className="text-fg">{describe(c.ttl_days)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <Toggle
-                      checked={overriding}
-                      disabled={!canManage || save.isPending}
-                      onChange={(on: boolean) =>
-                        setDrafts((d) => ({
-                          ...d,
-                          [c.data_class]: on ? String(c.from_policy ? c.ttl_days : c.platform_default_days) : null,
-                        }))
-                      }
-                      label="Override for this project"
-                    />
+                    {c.fixed_ttl_days === 0 && (
+                      <Toggle
+                        checked={overriding}
+                        disabled={!canManage || save.isPending}
+                        onChange={(on: boolean) =>
+                          setDrafts((d) => ({
+                            ...d,
+                            [c.data_class]: on ? String(c.from_policy ? c.ttl_days : c.platform_default_days) : null,
+                          }))
+                        }
+                        label="Override for this project"
+                      />
+                    )}
                   </div>
                   {overriding && (
                     <Field label="Days to keep" hint="0 keeps forever.">
@@ -127,7 +147,7 @@ export function Retention() {
                         <Input
                           {...p}
                           inputMode="numeric"
-                          value={draft ?? ""}
+                          value={draft}
                           disabled={!canManage}
                           onChange={(e) => setDrafts((d) => ({ ...d, [c.data_class]: e.target.value }))}
                           className="max-w-[160px]"

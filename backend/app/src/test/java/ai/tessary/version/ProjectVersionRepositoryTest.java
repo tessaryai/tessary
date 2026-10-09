@@ -2,10 +2,15 @@
 package ai.tessary.version;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.tessary.auth.TenantContext;
+import ai.tessary.open.errors.TessaryException;
+import ai.tessary.open.errors.VersionError;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
+import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,14 +27,17 @@ class ProjectVersionRepositoryTest {
     @Autowired
     TenantService tenants;
 
+    @Autowired
+    ProjectVersionController controller;
+
     @Test
     void findOrMaterialize_isIdempotentPerCommit() {
         String pid = TenantFixture.bootstrap(tenants, "pv-idem").project().id();
-        var a = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_BENCHMARK);
-        var b = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_OBSERVER_FINDING);
+        var a = repo.findOrMaterialize(pid, "sha-1", ProjectVersionRow.REASON_PIPELINE_SYNC);
+        var b = repo.findOrMaterialize(pid, "sha-1", "a-later-reason");
         assertEquals(a.id(), b.id(), "same commit re-materializes the same row, no duplicate");
         assertEquals(1, repo.listTimeline(pid).size());
-        assertEquals(ProjectVersionRow.REASON_BENCHMARK, b.materializedReason(), "first writer's reason wins");
+        assertEquals(ProjectVersionRow.REASON_PIPELINE_SYNC, b.materializedReason(), "first writer's reason wins");
     }
 
     @Test
@@ -40,21 +48,32 @@ class ProjectVersionRepositoryTest {
         assertEquals(ProjectVersionRow.STATUS_SYNCED, row.gradersStatus());
     }
 
+    /**
+     * The bug: the version endpoints read across projects, listing or returning a commit another project
+     * synced, instead of answering only for the project in the URL.
+     */
     @Test
-    void aspectStatus_canTransitionToStale() {
-        String pid = TenantFixture.bootstrap(tenants, "pv-aspect").project().id();
-        service.reasonObserverFinding(pid, "sha-3");
-        service.markGraders(pid, "sha-3", ProjectVersionRow.STATUS_STALE);
-        var row = repo.findByCommit(pid, "sha-3").orElseThrow();
-        assertEquals(ProjectVersionRow.STATUS_STALE, row.gradersStatus());
-    }
+    void controller_readsOnlyThisProjectsVersions() {
+        var fix = TenantFixture.bootstrap(tenants, "pv-controller");
+        var other = TenantFixture.bootstrap(tenants, "pv-controller-other");
+        service.reasonPipelineSync(fix.project().id(), "sha-own");
+        service.reasonPipelineSync(other.project().id(), "sha-other");
+        TenantContext owner = new TenantContext(fix.user().id(), null, null, null, null, null);
+        String org = fix.org().slug();
+        String project = fix.project().slug();
 
-    @Test
-    void timeline_listsMaterializedVersions() {
-        String pid = TenantFixture.bootstrap(tenants, "pv-timeline").project().id();
-        service.reasonBenchmark(pid, "sha-a");
-        service.reasonBenchmark(pid, "sha-b");
-        assertEquals(2, service.timeline(pid).size());
-        assertTrue(service.timeline(pid).stream().anyMatch(v -> v.commitSha().equals("sha-a")));
+        assertEquals(
+                List.of("sha-own"),
+                Objects.requireNonNull(controller.timeline(owner, org, project).data()).stream()
+                        .map(ProjectVersionDtos.ProjectVersionView::commitSha)
+                        .toList());
+        assertEquals(
+                "sha-own",
+                Objects.requireNonNull(
+                                controller.get(owner, org, project, "sha-own").data())
+                        .commitSha());
+        TessaryException foreign =
+                assertThrows(TessaryException.class, () -> controller.get(owner, org, project, "sha-other"));
+        assertEquals(VersionError.NOT_FOUND, foreign.error());
     }
 }

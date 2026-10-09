@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
@@ -51,24 +52,24 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
     public @Nullable Schema<?> resolve(
             AnnotatedType type, ModelConverterContext context, Iterator<ModelConverter> chain) {
         Schema<?> resolved = chain.hasNext() ? chain.next().resolve(type, context, chain) : null;
-        try {
-            applyNullability(type, resolved, context);
-        } catch (RuntimeException e) {
-            // Faithful-typing is best-effort: never fail spec generation over a reflection edge case.
-            log.debug("faithful-nullability post-processing skipped for a schema", e);
+        if (resolved != null) {
+            try {
+                applyNullability(type, resolved, context);
+            } catch (RuntimeException e) {
+                // Faithful-typing is best-effort: never fail spec generation over a reflection edge case — a
+                // type Jackson cannot map, a $ref the context never defined. Each lands here, schema untouched.
+                log.debug("faithful-nullability post-processing skipped for a schema", e);
+            }
         }
         return resolved;
     }
 
-    private void applyNullability(AnnotatedType type, @Nullable Schema<?> resolved, ModelConverterContext context) {
+    private void applyNullability(AnnotatedType type, Schema<?> resolved, ModelConverterContext context) {
         Class<?> raw = rawClass(type);
-        if (raw == null || !raw.isRecord() || !raw.getName().startsWith("ai.tessary.")) {
+        if (!raw.isRecord() || !raw.getName().startsWith("ai.tessary.")) {
             return;
         }
         Schema<?> target = objectSchema(resolved, context);
-        if (target == null || target.getProperties() == null) {
-            return;
-        }
         boolean omitNulls = raw.isAnnotationPresent(JsonInclude.class)
                 && raw.getAnnotation(JsonInclude.class).value() == JsonInclude.Include.NON_NULL;
         // A request-body DTO is deserialized from a client-supplied (often partial) JSON — the server fills
@@ -101,15 +102,15 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         }
     }
 
-    /** Resolve the concrete object {@link Schema} — following a {@code $ref} into the context's models. */
-    private static @Nullable Schema<?> objectSchema(@Nullable Schema<?> resolved, ModelConverterContext context) {
-        if (resolved == null) {
-            return null;
-        }
+    /**
+     * Resolve the concrete object {@link Schema} — following a {@code $ref} into the context's models. A
+     * {@code $ref} to a model the context never defined throws, which {@link #resolve} turns into a skip.
+     */
+    private static Schema<?> objectSchema(Schema<?> resolved, ModelConverterContext context) {
         if (resolved.get$ref() != null) {
             String ref = resolved.get$ref();
             String name = ref.substring(ref.lastIndexOf('/') + 1);
-            return context.getDefinedModels().get(name);
+            return Objects.requireNonNull(context.getDefinedModels().get(name), ref);
         }
         return resolved;
     }
@@ -168,20 +169,15 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         return rc.getName();
     }
 
-    private static @Nullable Class<?> rawClass(AnnotatedType type) {
-        if (type == null || type.getType() == null) {
-            return null;
-        }
+    /** The type's raw class. A type Jackson cannot construct (none at all, say) throws, which {@link #resolve} skips. */
+    private static Class<?> rawClass(AnnotatedType type) {
         java.lang.reflect.Type t = type.getType();
         if (t instanceof Class<?> c) {
             return c;
         }
-        try {
-            com.fasterxml.jackson.databind.JavaType jt =
-                    io.swagger.v3.core.util.Json.mapper().getTypeFactory().constructType(t);
-            return jt.getRawClass();
-        } catch (RuntimeException e) {
-            return null;
-        }
+        return io.swagger.v3.core.util.Json.mapper()
+                .getTypeFactory()
+                .constructType(t)
+                .getRawClass();
     }
 }

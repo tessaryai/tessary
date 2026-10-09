@@ -20,14 +20,7 @@
 #             is calling a paid surface. Anchored where the open edition has a same-named route at
 #             another level (the open project `/unarchive` versus the paid org `/unarchive`): the
 #             paid client builds `/api/orgs/${enc(orgSlug)}/<route>`, so the rule matches the
-#             template literal `orgs/${...}/<route>`. Derived from the paid OpenAPI spec minus the
-#             open one; `check-open-artifacts.sh --derive` reds this file when that difference
-#             gains a path whose last segment no rule names.
-#
-# What is NOT here, and why: the open capability enum carries paid keys (BEHAVIOR_DRIFT,
-# SOP_CONFORMANCE) on purpose, because the open edition must ANSWER `unavailable` for them; a
-# rule on those names would red the open image for being correct.
-path|tessary-paid|the overlay's own directory name, in any image
+#             template literal `orgs/${...}/<route>`.
 path|/app/paid|where the paid backend image mounts the overlay's jars
 entry|ai/tessary/paid/|every paid class lives under this package
 entry|db/changelog/paid/|the paid Liquibase lane

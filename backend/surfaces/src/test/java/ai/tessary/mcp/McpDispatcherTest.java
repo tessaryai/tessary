@@ -17,11 +17,12 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Protocol-level behaviour of {@link McpDispatcher}. The contract here is
- * the MCP wire — if we break the distinction between JSON-RPC errors (protocol)
- * and tool errors (application), clients can't tell whether to retry or surface.
+ * {@link McpDispatcher} on the MCP wire: JSON-RPC errors (protocol) and tool errors (application) stay distinct, or
+ * clients cannot tell whether to retry or surface.
  */
 class McpDispatcherTest {
 
@@ -50,7 +51,7 @@ class McpDispatcherTest {
         return new TenantContext("u", "u@x", "o", "p", "member", null);
     }
 
-    /** Asserts the dispatch produced a response (most methods do) and returns it non-null. */
+    /** The dispatch produced a response. */
     private static JsonRpc.Response require(JsonRpc.@Nullable Response r) {
         assertNotNull(r);
         return Objects.requireNonNull(r);
@@ -92,26 +93,10 @@ class McpDispatcherTest {
     }
 
     @Test
-    void notificationReturnsNullResponse() {
-        // id = null → notification per JSON-RPC 2.0
-        JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/initialized", null);
-        JsonRpc.Response r = dispatcher.dispatch(n, ctx());
-        assertNull(r, "notifications must not produce a response envelope");
-    }
-
-    @Test
     void notification_unknownMethod_stillSilent() {
-        // unknown methods that arrive as notifications shouldn't emit JSON-RPC errors.
+        // Unknown notifications emit no JSON-RPC error.
         JsonRpc.Request n = new JsonRpc.Request("2.0", NullNode.getInstance(), "notifications/whatever", null);
         assertNull(dispatcher.dispatch(n, ctx()));
-    }
-
-    @Test
-    void toolsList_includesEveryRegisteredTool() {
-        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/list", null), ctx()));
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> tools = (List<Map<String, Object>>) Objects.requireNonNull(result.get("tools"));
-        assertEquals(3, tools.size());
     }
 
     @Test
@@ -125,8 +110,7 @@ class McpDispatcherTest {
     void toolsCall_unknownTool_isToolErrorNotProtocolError() throws Exception {
         JsonNode params = mapper.readTree("{\"name\":\"does-not-exist\",\"arguments\":{}}");
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
-        // Spec: unknown tool is reported INSIDE the result with isError=true,
-        // not as a JSON-RPC error. Clients use this to decide retry vs UI surface.
+        // Spec: an unknown tool is an isError result, not a JSON-RPC error.
         assertNull(r.error());
         assertEquals(Boolean.TRUE, resultMap(r).get("isError"));
     }
@@ -146,7 +130,7 @@ class McpDispatcherTest {
     @Test
     void toolsCall_toolThrowsRuntime_isProtocolError() throws Exception {
         JsonNode params = mapper.readTree("{\"name\":\"kaboom\",\"arguments\":{}}");
-        // Unexpected exceptions ARE protocol errors — caller can't recover by retrying input.
+        // Unexpected exceptions are protocol errors.
         assertEquals(
                 JsonRpc.INTERNAL_ERROR,
                 error(dispatcher.dispatch(req(1, "tools/call", params), ctx())).code());
@@ -177,5 +161,71 @@ class McpDispatcherTest {
         JsonRpc.Response r = require(dispatcher.dispatch(req(1, "ping", null), ctx()));
         assertNull(r.error());
         assertEquals(Map.of(), r.result());
+    }
+
+    /**
+     * A result Jackson cannot pretty-print falls back to its string form rather than becoming a -32603 server fault.
+     */
+    @Test
+    void toolsCall_aResultJacksonCannotRenderStillReturnsTheResult() throws Exception {
+        Object opaque = new Object() {
+            @Override
+            public String toString() {
+                return "opaque result";
+            }
+        };
+        McpTool opaqueTool = new McpTool("opaque", "returns a bean with no properties", Map.of(), (c, a) -> opaque);
+        McpDispatcher withOpaque = new McpDispatcher(new McpToolRegistry(List.of(opaqueTool)), mapper);
+        JsonNode params = mapper.readTree("{\"name\":\"opaque\",\"arguments\":{}}");
+
+        Map<String, Object> result = resultMap(withOpaque.dispatch(req(1, "tools/call", params), ctx()));
+
+        assertEquals(Boolean.FALSE, result.get("isError"));
+        assertEquals(List.of(Map.of("type", "text", "text", "opaque result")), result.get("content"));
+        assertEquals(opaque, result.get("structuredContent"));
+    }
+
+    /** A {@code tools/call} whose params are not an object, or name no tool, is the caller's error (-32602). */
+    @ParameterizedTest
+    @ValueSource(strings = {"\"echo\"", "{\"arguments\":{}}"})
+    void toolsCall_paramsThatNameNoToolAreInvalidParams(String paramsJson) throws Exception {
+        assertEquals(
+                JsonRpc.INVALID_PARAMS,
+                error(dispatcher.dispatch(req(1, "tools/call", mapper.readTree(paramsJson)), ctx()))
+                        .code());
+    }
+
+    /** Arguments left out entirely are the same request as an empty object, not a -32602. */
+    @Test
+    void toolsCall_argumentsAbsent_callsHandlerWithEmptyMap() throws Exception {
+        JsonNode params = mapper.readTree("{\"name\":\"echo\"}");
+
+        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "tools/call", params), ctx()));
+
+        assertEquals(Map.of("echoed", Map.of()), result.get("structuredContent"));
+    }
+
+    /** A batch element decoding to null is an invalid request with a null id, not an NPE failing the whole batch. */
+    @Test
+    void aNullRequestIsAnInvalidRequestWithANullId() {
+        JsonRpc.Response r = require(dispatcher.dispatch(null, ctx()));
+
+        assertEquals(NullNode.getInstance(), r.id());
+        assertEquals(JsonRpc.INVALID_REQUEST, error(r).code());
+    }
+
+    /** A known method sent as a notification runs but gets no response, which clients may choke on. */
+    @Test
+    void aKnownMethodSentAsANotificationGetsNoResponse() {
+        assertNull(dispatcher.dispatch(new JsonRpc.Request("2.0", null, "ping", null), ctx()));
+        assertNull(dispatcher.dispatch(new JsonRpc.Request("2.0", NullNode.getInstance(), "ping", null), ctx()));
+    }
+
+    /** A client that names no protocol version is offered the revision this server implements. */
+    @Test
+    void initialize_withoutAClientVersionOffersTheServersOwn() {
+        Map<String, Object> result = resultMap(dispatcher.dispatch(req(1, "initialize", null), ctx()));
+
+        assertEquals("2025-06-18", result.get("protocolVersion"));
     }
 }

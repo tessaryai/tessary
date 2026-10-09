@@ -143,125 +143,6 @@ public final class ClassifierMethodCard {
             differently. Inputs that moved with the measure is the traffic changing.
             """;
 
-    private static final String BEHAVIOR_DRIFT = """
-            ## behavior_drift: a trajectory scored against a fitted n-gram model
-
-            **Measures** how surprising a trace's sequence of steps is under the call site's own fitted
-            profile: an omission, a novelty, or a high-surprisal path.
-
-            **Compares against** the profile: counts, not rows.
-
-            **The claim's numbers** are not a block of their own. This cause carries no measured shift, so
-            `get_finding` holds no `metric`, `toolError` or `armedWindow` for it. The claim is the finding's own
-            row: `causeKey` names the step or the sequence and is the claim itself, `traceCount` is how many
-            traces fired it, and `firstSeenAt` and `lastSeenAt` bound it. The profile's own counts are not on
-            this surface; what you can check is the traces.
-
-            **Evidence**
-            - `exemplar`: the trace the firing was recorded on.
-            - `member`: this cause's firings across batches, at trace grain. A cause builds its population
-              over time, so this is the union of every batch that fired it, not one batch's worth.
-
-            **Absent roles**
-            - No `baseline`, by construction. The reference is a fitted model; a model is counts, and there
-              is nothing to enumerate on that side. A zero here is the method, not a lost write.
-            - No `witness` or `changepoint`: this detector writes neither role.
-
-            ### Cause: `omission`
-
-            The listed step or steps appear in almost every other trace this call site produces, and this
-            trace performed none of them. The claim holds when the request was of the kind that gets those
-            steps and the trace skipped them anyway. A request that never needed the step is the traffic
-            differing, not the agent.
-
-            ### Cause: `novelty`
-
-            The listed action sequence is one this call site had not produced before. New is not wrong.
-            The claim holds when the trace really took that sequence and nothing in the request explains
-            why it would.
-
-            ### Cause: `surprisal`
-
-            The listed transition is one this call site makes far more rarely than its alternatives at
-            that point. Rare is not wrong. The claim holds when the trace really took it and nothing in
-            the request explains why it would.
-            """;
-
-    private static final String SOP_CONFORMANCE = """
-            ## sop_conformance: an obligation checked against the turns it applied to
-
-            **Measures** how often an SOP rule was honoured on the turns where it was in force. Two
-            different claims share this classifier, and `conformanceKind` in `get_finding` says which: a
-            `drift` finding says conformance fell, a `baseline` finding says it was never high. Both file the
-            cause `conformance_rule`, so the cause named in `finding.md` does not separate them and the kind
-            sections below are keyed on `conformanceKind`.
-
-            **Compares against** either the bundle's fitted expectation model plus a stored activation
-            count (the windowed drift test), or the very turns the fit ran on (the fit-time audit).
-
-            **The claim's numbers** sit differently for the two kinds. A `baseline` finding has a block of its
-            own in `get_finding` under `baseline`: `ruleKey`, `applicableTurns` (the activations the violations
-            were counted over), `violations`, and `fittedAt`. A `drift` finding has no block: its rates are in
-            the finding's `title`, its denominator is `traceCount`, which for this classifier counts the tested
-            window's activations rather than firings, and `causeKey` names the rule.
-
-            **Evidence**, all at trace grain, all refreshed on every pass, because the window rolls and
-            the union across sweeps is the traffic the deficit has actually been seen over.
-            - `exemplar`: the violating turns, ranked most-surprising-first. The order is part of the
-              claim.
-            - `member`: the activations the violation count is a fraction of.
-            - `baseline`: the fit-time audit's reference activations, where one exists as rows.
-            - `changepoint`: where the deficit starts concentrating. Descriptive, not a test. No other
-              classifier writes this role.
-
-            **Absent roles**
-            - No `baseline` on a windowed drift finding is correct: its reference is a fitted expectation
-              model, and no set of rows survives it.
-            - No `witness`: the violating turns are the `exemplar` rows, and this detector writes no `witness`.
-
-            ### Kind: `drift`
-
-            Conformance to the rule fell on the turns where it applied. The claim holds when the
-            `exemplar` turns really violate the rule as written and the turns where it applied are the
-            same kind of turns as before.
-
-            ### Kind: `baseline`
-
-            Conformance to the rule was never high on the turns the fit ran on. The claim holds when the
-            `exemplar` turns really violate the rule as written.
-            """;
-
-    private static final String ARMED_SIGNAL = """
-            ## {key}: a per-observation detector armed on a threshold
-
-            {measures}
-
-            One observation tripping is not the finding: it fires when enough of them do inside one window.
-
-            **Compares against** a threshold on the count, not another stretch of traffic.
-
-            **The claim's numbers** are in `get_finding` under `armedWindow`: `basis` (`event_count` or
-            `distinct_users`), `observed` against `threshold`, `windowSeconds`, the window, and
-            `confidence` where the detector bands it.
-
-            **Evidence**
-            - `member`: the observations that fired, written in the same transaction as the finding, so a
-              finding never exists without the evidence that justified it.
-
-            **Absent roles**
-            - No `baseline`: nothing here is a two-window comparison, so there is no before side to
-              enumerate.
-            - No `exemplar`: the population is the claim, and every member of it is equally a way in.
-            - No `witness` or `changepoint`: this detector writes neither role.
-
-            ### Cause: `armed_window`
-
-            Enough observations tripped the detector inside one window, and each `member` is one of them.
-            The claim holds when the flagged observations, read from the spans themselves, are what the
-            detector says they are and come from how the agent behaved rather than from what users
-            brought to it.
-            """;
-
     private static final String SECRET_LEAK = """
             ## secret_leak: a credential rule matched in one call site's output
 
@@ -333,18 +214,105 @@ public final class ClassifierMethodCard {
             asked.
             """;
 
-    /**
-     * Cards for the classifiers that write findings through a detector of their own. The armed-signal
-     * family shares one shape and is rendered from {@link #ARMED_SIGNAL} with its key substituted.
-     */
+    private static final String FRUSTRATION = """
+            ## frustration: a Bernoulli CUSUM over one call site's frustrated sessions
+
+            **Measures** the fraction of one call site's sessions in which the user became
+            frustrated with the agent. Each eligible user turn is one question to a hosted decision model:
+            a turn is eligible only when the four messages before it are user, assistant, user, assistant,
+            each with text, so a session's first two user turns are never scored. A turn is flagged
+            when its `unhappy_with_assistant` score exceeds the threshold; frustration aimed at something
+            outside the chat never flags. A session stops being scored at its first flag.
+
+            **Compares against** the rate that call site learned as its own normal over its first
+            sessions, and may keep learning for a while after judging starts; either way it is a fitted
+            number and not a stretch of traffic. A call site that was frustrating
+            from the start learned that as normal and is flagged only for getting worse. A resolve
+            restarts the accumulator and re-learns the rate from the traffic after it.
+
+            A session is one conversation on one call site. It is one trial, and a failure while it
+            holds an uncleared flag.
+
+            **The claim's numbers** are in `get_finding` under `frustration`: `rate` (`refRate` and
+            `curRate` as fractions of sessions, `nRef`, `nCur`, `failuresCur`, `statistic` against
+            `threshold`, `effectSize`, `direction`, `onsetAt`, and no pattern breakdown),
+            `baselineFrustrated`, `jevThreshold`, `arlTarget`, `minDecisionInterval` and `scorerVersion`.
+
+            **Evidence**
+            - `member` session rows: every session scored on the call site since onset, the rate's
+              denominator.
+            - `witness` session rows: every frustrated session since onset, the numerator. Read these.
+            - `witness` trace rows: the user turn that was flagged inside each of those sessions.
+
+            **Absent roles**
+            - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
+              side to enumerate.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
+
+            ### Cause: `frustration_rate`
+
+            The share of one call site's sessions in which the user was frustrated with the agent has
+            risen above the rate it learned. Some frustration is normal. The claim holds when the witness
+            sessions show the user reacting to something the agent did, and that behaviour is
+            what changed, not who the users are or what they asked.
+            """;
+
+    private static final String GROUNDEDNESS = """
+            ## groundedness: a Bernoulli CUSUM over one call site's traces with a flagged answer
+
+            **Measures** the fraction of one call site's traces with an answer the model flagged. A token
+            classifier reads the retrieved documents and the whole answer in one pass and scores each sentence
+            of the answer for P(unsupported): contradicted by the documents, or stated where they say nothing.
+            An answer is flagged when its strongest sentence scores at or above the flag threshold, the 2%
+            false-alarm point on RAGTruth's human-labelled test split. Answers with no retrieved documents, or
+            with nothing checkable in them, are not scored and are not trials. A true fact taken from a tool
+            call but absent from the retrieved documents counts as unsupported.
+
+            **Compares against** the rate that call site learned as its own normal, a fitted number and not a
+            stretch of traffic. It is judged from its first `min_baseline_traces` traces (100 by default) and
+            keeps learning until `learningUntil` (1,000 by default), then stops moving. The model's false-alarm rate depends on the domain, and the learned rate absorbs
+            it. A call site that answered badly from the start learned that as normal and is flagged only for
+            getting worse. Only a rise is reported.
+
+            A trace is one trial on each call site it had an answer scored on, and it is a failure while one
+            of those answers holds an uncleared flag, so two flagged answers in one trace are one failure.
+
+            **The claim's numbers** are in `get_finding` under `groundedness`: `rate` (`refRate` and `curRate`
+            as fractions of traces, `nRef`, `nCur`, `failuresCur`, `statistic` against `threshold`,
+            `effectSize`, `direction`, `onsetAt`, and no pattern breakdown), `flagThreshold`, `baselineTraces`,
+            `learningUntil` and `arlTarget`. `dossier/detections.md` lists the flagged answers with the
+            sentences the model marked in each.
+
+            **Evidence**
+            - `member` trace rows: every trace scored on the call site since onset, the rate's denominator.
+            - `witness` trace rows: every trace with a flagged answer since onset, the numerator. Read these.
+            - `witness` span rows: each flagged answer inside those traces.
+
+            **Absent roles**
+            - No `baseline`: the reference is a learned rate, not a window of rows, so there is no before
+              side to enumerate.
+            - No `exemplar`: nothing here is a designated way in, and every witness is equally one.
+            - No `changepoint`: this detector does not write that role.
+
+            ### Cause: `groundedness_rate`
+
+            The share of one call site's traces with a flagged answer has risen above the rate it learned.
+            Some flags are normal: at sentence level about two in three flagged sentences are really
+            unsupported. The claim holds when the witness answers really state things their retrieved
+            documents do not support, and that is what changed, not which documents were retrieved or what
+            users asked.
+            """;
+
+    /** Cards for the classifiers that write findings through a detector of their own. */
     private static final Map<String, String> BY_KEY = Map.of(
             BuiltInDetector.Kind.TOOL_ERROR, TOOL_ERROR,
             BuiltInDetector.Kind.DURATION_DRIFT, METRIC_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT, METRIC_DRIFT,
-            BuiltInDetector.Kind.BEHAVIOR_DRIFT, BEHAVIOR_DRIFT,
-            BuiltInDetector.Kind.SOP_CONFORMANCE, SOP_CONFORMANCE,
             BuiltInDetector.Kind.SECRET_LEAK, SECRET_LEAK,
-            BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT);
+            BuiltInDetector.Kind.MALFORMED_OUTPUT, MALFORMED_OUTPUT,
+            BuiltInDetector.Kind.FRUSTRATION, FRUSTRATION,
+            BuiltInDetector.Kind.GROUNDEDNESS, GROUNDEDNESS);
 
     /**
      * The card for one classifier key, or null when the key names nothing this knows about — a
@@ -353,42 +321,6 @@ public final class ClassifierMethodCard {
      */
     public static @Nullable String forClassifier(@Nullable String classifierKey) {
         if (classifierKey == null || classifierKey.isBlank()) return null;
-        String card = BY_KEY.get(classifierKey);
-        if (card != null) return card;
-        String measures = ARMED_SIGNAL_MEASURES.get(classifierKey);
-        return measures == null
-                ? null
-                : ARMED_SIGNAL.replace("{key}", classifierKey).replace("{measures}", measures);
+        return BY_KEY.get(classifierKey);
     }
-
-    /**
-     * What each armed-signal detector actually looks for, substituted into {@link #ARMED_SIGNAL}'s
-     * {@code {measures\}} slot.
-     *
-     * <p>The rest of that card is the arming shape, which the family shares. Without this the one card
-     * that never states a method would tell an agent it is auditing observations that "trip the
-     * detector" and never say what tripping it means, which is the single thing it cannot work out from
-     * the evidence in front of it.
-     */
-    private static final Map<String, String> ARMED_SIGNAL_MEASURES = Map.of(
-            BuiltInDetector.Kind.FRUSTRATION,
-            "**Measures** emotional frustration in one user turn: an encoder head scores that turn for"
-                    + " annoyance and anger, against the last exchange for context. A conversation's opening"
-                    + " turn is never scored, because the agent has not acted yet and whatever the user arrived"
-                    + " with is not something it caused. A high score is re-scored by a second head and demoted"
-                    + " unless the frustration is attributable to the agent. This catches emotional frustration"
-                    + " only: a failing or looping task with no feeling in the turn does not fire it.",
-            BuiltInDetector.Kind.GROUNDEDNESS,
-            "**Measures** whether an answer contradicts its own source: a three-way NLI head scores each"
-                    + " asserted sentence against the source the trace actually produced, the retrieved"
-                    + " documents where there are any and the prompt where the document sits in it. It fires on"
-                    + " contradiction only. A sentence the source simply does not mention is NOT a finding, and"
-                    + " an answer with nothing checkable in it abstains. Claims sourced from a tool call are out"
-                    + " of scope entirely.");
-
-    /**
-     * The built-in detectors that file through {@code ClassifierArming} rather than their own sweep,
-     * taken from {@link #ARMED_SIGNAL_MEASURES} so a key can never be in one and not the other.
-     */
-    static final java.util.Set<String> ARMED_SIGNAL_KEYS = ARMED_SIGNAL_MEASURES.keySet();
 }

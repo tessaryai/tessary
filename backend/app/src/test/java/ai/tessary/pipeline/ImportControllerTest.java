@@ -2,63 +2,54 @@
 package ai.tessary.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
+import ai.tessary.auth.TenantContext;
 import ai.tessary.model.Pipeline;
+import ai.tessary.open.errors.PipelineError;
+import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.ApiKeyService;
+import ai.tessary.tenant.OrgMembership;
+import ai.tessary.tenant.OrgMembershipRepository;
+import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Covers the sharded {@code .tessary/} import surface (v0.4+ layout).
- *
- * <p>Each upload is a multipart bundle containing the shards
- * {@code pipeline/meta.yaml}, {@code pipeline/call_sites/*.yaml},
- * {@code pipeline/failure_modes/*.yaml}, {@code graders/*.yaml}, plus optional
- * sidecars (packs, taxonomy, product_profile, datasets, report.md, etc.).
- *
- * <p>The cases below pin:
- * <ul>
- *   <li>default mode = upsert, fresh project, full diff exposed</li>
- *   <li>repeat upload counts as updated, not added</li>
- *   <li>replace removes absent graders + marks curation entries orphan</li>
- *   <li>upsert keeps absent graders</li>
- *   <li>missing {@code pipeline/meta.yaml} → 400 (meta is required)</li>
- *   <li>sidecar files (.synth-lock.yaml, datasets/*.jsonl, report.md) ignored</li>
- *   <li>{@code .tessary/} root prefix and root-relative paths both accepted</li>
- * </ul>
+ * The sharded {@code .tessary/} import surface (v0.4+): default upsert with a full diff, repeat uploads count as
+ * updated, replace removes absent graders and orphans curation entries, missing {@code pipeline/meta.yaml} is a 400,
+ * sidecars are ignored, and both the {@code .tessary/} prefix and root-relative paths are accepted.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class ImportControllerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        // Enable auth so this test exercises the real, authenticated request path -- say so
-        // directly rather than configuring a fake external-provider key as an indirect toggle.
-        // See TestAuthDisabledInitializer's javadoc.
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -75,6 +66,15 @@ class ImportControllerTest {
     @Autowired
     AuthFilter authFilter;
 
+    @Autowired
+    ImportController controller;
+
+    @Autowired
+    OrgMembershipRepository memberships;
+
+    @Autowired
+    JdbcClient jdbc;
+
     final ObjectMapper mapper = new ObjectMapper();
     MockMvc mvc;
 
@@ -83,8 +83,6 @@ class ImportControllerTest {
         this.mvc =
                 MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
     }
-
-    // ================================================================== shard fixtures
 
     private static final String META_YAML = """
         version: "0.8.0"
@@ -97,35 +95,6 @@ class ImportControllerTest {
           sites_completed: 1
           sites_total: 3
           deferred_failure_count: 2
-        """;
-
-    private static final String PACKS_YAML = """
-        packs:
-          - id: quality
-            name: Quality
-            version: 1.0.0
-            tier_hint: included
-            enabled_by: auto
-            contributes_compliance_tags: []
-            content_digest: deadbeef
-        """;
-
-    private static final String PRODUCT_PROFILE_YAML = """
-        product_profile:
-          domain: "document summarisation"
-          user_types: []
-          business_model: "B2B SaaS"
-          data_sensitivity: []
-          regulatory_context: []
-          brand_voice_signals: []
-          notable_dependencies: []
-        """;
-
-    private static final String TAXONOMY_YAML = """
-        taxonomy:
-          - id: tax::faithfulness
-            name: Faithfulness
-            description: "Answer reflects source."
         """;
 
     private static final String CALL_SITE_YAML = """
@@ -152,70 +121,6 @@ class ImportControllerTest {
             taxonomy_node_id: tax::faithfulness
             grader_deferred: false
             grader_id: cs_summarize::hallucinates::grader
-        """;
-
-    /** A v0.7 deferred failure: medium/low severity, no grader synthesised yet. */
-    private static final String DEFERRED_FAILURE_MODE_YAML = """
-        failure_modes:
-          - id: cs_summarize::verbose
-            name: verbose
-            description: "rambles past the length budget"
-            severity: low
-            scope: single_call
-            call_site_id: cs_summarize
-            layer: B
-            taxonomy_node_id: tax::faithfulness
-            grader_deferred: true
-            grader_id: null
-        """;
-
-    /** v0.8 quality-dimensions shard (one judgment axis per call site). */
-    private static final String QUALITY_DIMENSIONS_YAML = """
-        quality_dimensions:
-          - id: cs_summarize::clarity
-            call_site_id: cs_summarize
-            scope: single_call
-            name: clarity
-            description: "how clearly the summary reads"
-            why_it_matters: "unclear summaries erode trust"
-            rubric_levels:
-              "5": "crystal clear"
-              "3": "mostly clear"
-              "1": "incomprehensible"
-            grader_id: cs_summarize::clarity::grader
-        """;
-
-    /** v0.8 score grader (kind=score) bijective with the clarity quality dimension. */
-    private static final String SCORE_GRADER_YAML = """
-        id: cs_summarize::clarity::grader
-        name: "clarity"
-        quality_dimension_id: cs_summarize::clarity
-        call_site_id: cs_summarize
-        scope: single_call
-        kind: score
-        judge_prompt: "judge how clear the summary is"
-        score_scale:
-          min: 1
-          max: 5
-        rubric_levels:
-          "5": "crystal clear"
-          "3": "mostly clear"
-          "1": "incomprehensible"
-        self_tests:
-          - sample_output: "a lucid summary"
-            expected_level: 5
-            category: clear_high
-            rationale: "top anchor"
-          - sample_output: "word salad"
-            expected_level: 1
-            category: clear_low
-            rationale: "bottom anchor"
-          - sample_output: "a bit muddled"
-            expected_level: 3
-            category: near_miss
-            rationale: "mid"
-        confidence: high
-        rationale: "tracks summary quality"
         """;
 
     private static final String GRADER_YAML_1 = """
@@ -246,54 +151,9 @@ class ImportControllerTest {
         rationale: "high-impact"
         """;
 
-    /** A grader carrying NO self_tests at all (the post-v7 plugin shape). Must ingest cleanly. */
-    private static final String GRADER_YAML_NO_SELF_TESTS = """
-        id: cs_summarize::nostests::grader
-        name: "no self tests"
-        failure_mode_id: cs_summarize::nostests
-        call_site_id: cs_summarize
-        scope: single_call
-        taxonomy_node_id: tax::faithfulness
-        kind: llm_judge
-        judge_prompt: "judge factual grounding"
-        rubric: "PASS: every claim cited."
-        confidence: high
-        rationale: "no inline self-tests"
-        """;
-
-    private static final String GRADER_YAML_2 = """
-        id: cs_summarize::tone::grader
-        name: "neutral tone"
-        failure_mode_id: cs_summarize::tone
-        call_site_id: cs_summarize
-        scope: single_call
-        taxonomy_node_id: tax::tone
-        kind: llm_judge
-        applies_when: null
-        judge_prompt: "is the tone neutral"
-        rubric: "PASS: neutral. FAIL: editorialised."
-        self_tests:
-          - sample_output: "the doc says X"
-            expected_verdict: pass
-            category: clear_pass
-            rationale: "neutral"
-          - sample_output: "AMAZING insight"
-            expected_verdict: fail
-            category: clear_fail
-            rationale: "editorialised"
-          - sample_output: "noteworthy and interesting"
-            expected_verdict: fail
-            category: near_miss
-            rationale: "slipping toward editorial"
-        confidence: medium
-        rationale: "secondary check"
-        """;
-
     /**
-     * A full minimal bundle: one call site, one failure mode — and a grader shard that must be IGNORED.
-     * The grader file is deliberately still here even though this repo synthesises, runs or scores no
-     * grader: every repo written by a current plugin ships one, so "the import skips it rather than
-     * failing" is exactly what these tests have to keep proving.
+     * A minimal bundle with one call site, one failure mode, and a grader shard the import must skip: current plugins
+     * still ship one.
      */
     private MockMultipartFile[] bundle(String prefix, MockMultipartFile... extra) {
         var base = new MockMultipartFile[] {
@@ -308,8 +168,6 @@ class ImportControllerTest {
         System.arraycopy(extra, 0, combined, base.length, extra.length);
         return combined;
     }
-
-    // ================================================================== happy paths
 
     @Test
     void importDirectory_defaultMode_isUpsertAndPopulatesDiff() throws Exception {
@@ -332,55 +190,6 @@ class ImportControllerTest {
     }
 
     @Test
-    void importDirectory_roundTripsProgressAndDeferral() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-v07-fields");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "v07").plaintext();
-
-        okMultipart(
-                fix,
-                token,
-                null,
-                bundle(
-                        ".tessary/",
-                        file(".tessary/pipeline/failure_modes/_deferred.yaml", DEFERRED_FAILURE_MODE_YAML)));
-        Pipeline back = pipelineService.getPipeline(fix.project().id());
-
-        // meta.progress survives the round-trip.
-        assertNotNull(back.progress());
-        assertEquals(1, back.progress().sitesCompleted());
-        assertEquals(3, back.progress().sitesTotal());
-        assertEquals(2, back.progress().deferredFailureCount());
-
-        // Per-failure-mode deferral state survives the round-trip.
-        var deferred = back.failureModes().stream()
-                .filter(fm -> "cs_summarize::verbose".equals(fm.id()))
-                .findFirst()
-                .orElseThrow();
-        assertTrue(deferred.graderDeferred());
-        assertNull(deferred.graderId());
-
-        var graded = back.failureModes().stream()
-                .filter(fm -> "cs_summarize::hallucinates".equals(fm.id()))
-                .findFirst()
-                .orElseThrow();
-        assertFalse(graded.graderDeferred());
-        assertEquals("cs_summarize::hallucinates::grader", graded.graderId());
-    }
-
-    @Test
-    void importDirectory_acceptsRootRelativePaths() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-rooted");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "root").plaintext();
-
-        // Some browsers strip the root dir entirely from webkitRelativePath.
-        okMultipart(fix, token, null, bundle(""));
-        assertEquals(
-                1, pipelineService.getPipeline(fix.project().id()).callSites().size());
-    }
-
-    @Test
     void importDirectory_upsertTwice_secondImportShowsUpdated() throws Exception {
         var fix = TenantFixture.bootstrap(tenants, "import-twice");
         String token =
@@ -394,26 +203,9 @@ class ImportControllerTest {
         assertEquals(0, again.get("callSites").get("removed").asInt());
     }
 
-    @Test
-    void importDirectory_isProjectScoped() throws Exception {
-        var a = TenantFixture.bootstrap(tenants, "import-iso-a");
-        var b = TenantFixture.bootstrap(tenants, "import-iso-b");
-        String tokenA =
-                mcpTokens.issue(a.project().id(), a.user().id(), "tok-a").plaintext();
-        okMultipart(a, tokenA, null, bundle(".tessary/"));
-        assertEquals(
-                1, pipelineService.getPipeline(a.project().id()).callSites().size());
-        assertEquals(
-                0, pipelineService.getPipeline(b.project().id()).callSites().size());
-    }
-
-    // ================================================================== ignored siblings
-
     /**
-     * Regression — the v0.4 bundle ships sidecars (.synth-lock.yaml, report.md,
-     * index.html, datasets/*.jsonl, .tessary/packs/) alongside the
-     * shards. The classifier must drop them silently instead of routing to the
-     * grader/shard parsers and choking on the wrong shape.
+     * Regression: v0.4 bundles ship sidecars (.synth-lock.yaml, report.md, index.html, datasets/*.jsonl,
+     * .tessary/packs/) that must be dropped, not parsed as shards.
      */
     @Test
     void importDirectory_ignoresKnownSidecars() throws Exception {
@@ -444,57 +236,115 @@ class ImportControllerTest {
         assertEquals(1, back.callSites().size(), "only the real shard should land in the DB");
     }
 
-    // ================================================================== error cases
-
-    @Test
-    void importDirectory_missingMeta_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-no-meta");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "noMeta").plaintext();
-        mvc.perform(multipart(url(fix))
-                        .file(file(".tessary/graders/cs_summarize__hallucinates__grader.yaml", GRADER_YAML_1))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
+    static Stream<Arguments> malformedBundles() {
+        return Stream.of(
+                Arguments.of(
+                        "import-no-meta",
+                        "",
+                        List.of(file(".tessary/graders/cs_summarize__hallucinates__grader.yaml", GRADER_YAML_1))),
+                // Multipart needs at least one part; send a noise file the import drops.
+                Arguments.of(
+                        "import-dir-empty",
+                        "",
+                        List.of(new MockMultipartFile(
+                                "files", "README.md", "text/markdown", "# noise\n".getBytes(StandardCharsets.UTF_8)))),
+                Arguments.of(
+                        "import-dup-meta",
+                        "",
+                        List.of(file("a/pipeline/meta.yaml", META_YAML), file("b/pipeline/meta.yaml", META_YAML))),
+                Arguments.of("import-mode-bad", "?mode=nope", List.of(file(".tessary/pipeline/meta.yaml", META_YAML))));
     }
 
-    @Test
-    void importDirectory_emptyUpload_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-dir-empty");
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("malformedBundles")
+    void importDirectory_malformedBundle_400(String name, String query, List<MockMultipartFile> files)
+            throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, name);
         String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "empty").plaintext();
-        // Need at least one part for multipart to be recognised; send a noise
-        // file that the classifier will drop.
-        mvc.perform(multipart(url(fix))
-                        .file(new MockMultipartFile(
-                                "files", "README.md", "text/markdown", "# noise\n".getBytes(StandardCharsets.UTF_8)))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void importDirectory_doubleMetaShard_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-dup-meta");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "dup").plaintext();
-        mvc.perform(multipart(url(fix))
-                        .file(file("a/pipeline/meta.yaml", META_YAML))
-                        .file(file("b/pipeline/meta.yaml", META_YAML))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void importDirectory_unknownMode_400() throws Exception {
-        var fix = TenantFixture.bootstrap(tenants, "import-mode-bad");
-        String token =
-                mcpTokens.issue(fix.project().id(), fix.user().id(), "modeBad").plaintext();
-        var req = multipart(url(fix) + "?mode=nope")
-                .file(file(".tessary/pipeline/meta.yaml", META_YAML))
-                .header("Authorization", "Bearer " + token);
+                mcpTokens.issue(fix.project().id(), fix.user().id(), name).plaintext();
+        var req = multipart(url(fix) + query).header("Authorization", "Bearer " + token);
+        for (MockMultipartFile f : files) req = req.file(f);
         mvc.perform(req).andExpect(status().isBadRequest());
     }
 
-    // ================================================================== helpers
+    @Test
+    void importDirectory_replaceMode_removesWhatTheBundleNoLongerDeclares() throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, "import-replace");
+        String token =
+                mcpTokens.issue(fix.project().id(), fix.user().id(), "replace").plaintext();
+        okMultipart(fix, token, null, bundle(".tessary/"));
+
+        JsonNode data = okMultipart(fix, token, "REPLACE", file(".tessary/pipeline/meta.yaml", META_YAML));
+
+        assertEquals("replace", data.get("mode").asText());
+        assertEquals(1, data.get("callSites").get("removed").asInt());
+        assertEquals(1, data.get("failureModes").get("removed").asInt());
+        assertEquals(
+                0, pipelineService.getPipeline(fix.project().id()).callSites().size());
+    }
+
+    /** A bundle that names its commit binds the project to it, so a later PR can be diffed against it. */
+    @Test
+    void importDirectory_bindsThePipelineToTheCommitAndRepoItDeclares() throws Exception {
+        var fix = TenantFixture.bootstrap(tenants, "import-commit");
+        String token =
+                mcpTokens.issue(fix.project().id(), fix.user().id(), "commit").plaintext();
+        String meta = META_YAML + "commit_sha: 0a1b2c3d\nrepo:\n  owner: acme\n  name: summariser\n";
+
+        okMultipart(fix, token, null, file(".tessary/pipeline/meta.yaml", meta));
+
+        Map<String, Object> row = jdbc.sql(
+                        "SELECT synced_commit_sha, repo_owner, repo_name FROM pipeline_meta WHERE project_id = :pid")
+                .param("pid", fix.project().id())
+                .query()
+                .singleRow();
+        assertEquals(Map.of("synced_commit_sha", "0a1b2c3d", "repo_owner", "acme", "repo_name", "summariser"), row);
+    }
+
+    /** Only an owner (or the plugin's project token) may overwrite the pipeline; a member session may not. */
+    @Test
+    void importDirectory_aMemberSessionIsForbiddenAndChangesNothing() {
+        var fix = TenantFixture.bootstrap(tenants, "import-member");
+        Principal member = tenants.upsertUserFromWorkos(
+                "user_import_member_" + System.nanoTime(),
+                "import-member+" + System.nanoTime() + "@example.com",
+                "m",
+                null);
+        memberships.insert(OrgMembership.of(
+                fix.org().id(), member.id(), OrgMembership.MEMBER, Instant.now().toString()));
+        TenantContext session = new TenantContext(member.id(), member.email(), null, null, null, null);
+
+        ResponseStatusException e = assertThrows(
+                ResponseStatusException.class,
+                () -> controller.importDirectory(
+                        session, fix.org().slug(), fix.project().slug(), "upsert", bundle(".tessary/")));
+
+        assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+        assertEquals(
+                0, pipelineService.getPipeline(fix.project().id()).callSites().size());
+    }
+
+    /** A part whose bytes cannot be read is a named 400, not a 500 or a silently dropped shard. */
+    @Test
+    void importDirectory_aPartThatCannotBeReadIsRefusedByName() {
+        var fix = TenantFixture.bootstrap(tenants, "import-unreadable");
+        TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        MultipartFile unreadable =
+                new MockMultipartFile("files", ".tessary/pipeline/meta.yaml", "application/x-yaml", new byte[] {1}) {
+                    @Override
+                    public byte[] getBytes() throws IOException {
+                        throw new IOException("temp file gone");
+                    }
+                };
+
+        TessaryException e = assertThrows(
+                TessaryException.class,
+                () -> controller.importDirectory(
+                        owner, fix.org().slug(), fix.project().slug(), "upsert", new MultipartFile[] {unreadable}));
+
+        assertEquals(PipelineError.FILE_READ_FAILED, e.error());
+        assertEquals(PipelineError.FILE_READ_FAILED.render(".tessary/pipeline/meta.yaml"), e.getMessage());
+    }
 
     private JsonNode okMultipart(
             TenantFixture.Setup fix, String token, @Nullable String mode, MockMultipartFile... files) throws Exception {

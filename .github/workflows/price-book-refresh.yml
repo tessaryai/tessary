@@ -96,7 +96,7 @@ jobs:
 
           The file is a verbatim copy of [BerriAI/litellm's \`model_prices_and_context_window.json\`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json). Review the diff below: it is exactly what upstream published, with no transformation in between.
 
-          Entries carrying neither an input nor an output token rate are vendored but read as unpriced rather than as \$0.00 — see \`TokenPriceBook.hasTokenRate\`.
+          Entries carrying neither an input nor an output token rate are vendored but read as unpriced rather than as \$0.00 — see \`PriceSnapshot.pricesTokens\`.
 
           There is no hand-maintained correction file layered over this one (\`manual-overrides.json\` is retired) — a stale or wrong row is a bug to raise with LiteLLM upstream."
           fi

@@ -31,7 +31,7 @@ These are protobuf fields on the OTLP (OpenTelemetry Protocol) span, not attribu
 
 | Attribute | Required | Carries | Constraints |
 | --- | --- | --- | --- |
-| `tessary.call_site.id` | Yes | Binds the span to its call site, and is denormalized onto its trace. | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
+| `tessary.call_site.id` | Yes | Binds the span to its call site. The trace takes the root span's call site, else the first tagged span's ([Call sites](/concepts/call-sites#a-trace-takes-the-first-call-site-it-reached)). | The dotted spelling is the only one read. Any producer can set it, including a Collector `attributes` or `transform` rule. An id Tessary has not seen before materializes a new call site. |
 
 This is the only `tessary.*` attribute with a reader. [The call-site tag](/instrument/call-site-tag) covers what a call site is and how to choose an id.
 
@@ -124,11 +124,13 @@ A handoff between agents needs no attribute. It is already wire-encoded as an `e
 | Attribute | Required | Carries | Constraints |
 | --- | --- | --- | --- |
 | `retrieval.documents.<N>.document.id` | Optional | The retrieved document's id. | `<N>` is the index within the attribute name. Tessary stores the rank 1-based. |
-| `retrieval.documents.<N>.document.content` | Optional | The retrieved text. | |
+| `retrieval.documents.<N>.document.content` | Optional; required for groundedness | The retrieved text. | The text the groundedness classifier checks an answer against. |
 | `retrieval.documents.<N>.document.score` | Optional | The retrieval score. | |
 | `retrieval.documents.<N>.document.metadata` | Optional | Anything else about the document. | |
 
 Extraction runs on every span and does nothing when the prefix is absent, so there is no kind gate to satisfy.
+
+The groundedness classifier reads `document.content` from the answer's own trace, or from the nearest earlier trace in the same session that retrieved anything. An answer on a `rag_answer` call site with no document content to read is not scored when its session called a tool or a retriever. See [Which answers are scored](/classifiers/groundedness#which-answers-are-scored).
 
 ## Code and repository provenance
 

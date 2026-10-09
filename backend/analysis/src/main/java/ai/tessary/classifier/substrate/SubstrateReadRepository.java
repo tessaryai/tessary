@@ -45,21 +45,20 @@ import org.springframework.stereotype.Repository;
 public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteShapeReads, GroundingEvidenceReads {
 
     /**
-     * Per-row cap on evidence text. The entailment head has a finite window, so one enormous retrieved
-     * document would otherwise crowd out every other piece of evidence in the premise.
+     * Per-row cap on evidence text. The groundedness model has a finite window, so one enormous retrieved
+     * document would otherwise crowd out every other piece of evidence.
      */
     private static final int EVIDENCE_CHARS_PER_ROW = 4_000;
 
     /**
      * Cap on evidence rows per span, taken best-rank-first.
      *
-     * <p>The per-row cap alone doesn't bound the premise: a long trace can retrieve dozens of
-     * passages, and the serving path only reads what fits its window ({@code classify.js} chunks the
-     * premise at {@code PAIR_MAX_CHUNKS=4} and reduces max across chunks, roughly 6.8K characters).
-     * Past that isn't just ignored, it's dangerous: raising the chunk cap to 16 was measured taking
-     * the detector from 3/3 true positives to 0/3, since with enough windows something always
-     * entails the claim. Six documents at 4K sits inside the readable budget, and ordering by
-     * {@code rank} drops the passages the retriever itself ranked least relevant.
+     * <p>The per-row cap alone doesn't bound the evidence: a long trace can retrieve dozens of
+     * passages, and the model reads one window of {@code MAX_LENGTH=8192} tokens
+     * ({@code classifiers/groundedness/serve.py}) and cuts the end of its prompt, where the last
+     * passages sit, to fit.
+     * Ordering by {@code rank} means what falls outside the window is what the retriever itself
+     * ranked least relevant.
      */
     private static final int EVIDENCE_ROWS = 6;
 
@@ -69,35 +68,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         this.jdbc = jdbc;
     }
 
-    /** A failed tool call on a span: the tool {@code name} and its {@code error} message. */
-    public record ToolCallFailure(@Nullable String name, String error) {}
-
     /** A per-tool failure rate over a project's {@code tool_call}s: {@code failed/total} by name. */
     public record ToolErrorRate(@Nullable String toolName, long totalCalls, long failedCalls, double failureRate) {}
-
-    /**
-     * The failed tool calls on one span: {@code (name, error)} for every {@code tool_call} with a
-     * non-null {@code error}. Richer than a {@code MIN(error)} read since the per-tool {@code
-     * tool_error} built-in needs the failing tool's name in evidence; issued only by {@code
-     * ToolErrorRateDetector}, for spans that already carry an error.
-     *
-     * <p>Keyed on the producer triple, never a bare span id: {@code tool_call} rows are
-     * project-scoped and their span key is only unique within a trace. Hits {@code
-     * ix_tool_call_v2_trace}.
-     */
-    public List<ToolCallFailure> toolCallFailures(String projectId, String traceId, String spanId) {
-        return jdbc.sql("""
-                SELECT name, error_type AS error FROM tool_call
-                WHERE project_id = :pid AND trace_id = :tid AND span_id = :sid
-                  AND error_type IS NOT NULL AND is_deleted IS NOT TRUE
-                ORDER BY created_at ASC, id ASC
-                """)
-                .param("pid", projectId)
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .query((rs, n) -> new ToolCallFailure(rs.getString("name"), rs.getString("error")))
-                .list();
-    }
 
     /**
      * Per-tool failure rates over all of a project's {@code tool_call}s: grouped by tool {@code
@@ -284,6 +256,49 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .orElse(null);
     }
 
+    /**
+     * The call sites each of a batch's traces carries on any of its spans. A span with no call site of its own is
+     * scoped by these, the same any-span rule the traces list filters by. A trace with no tagged span is absent.
+     */
+    public java.util.Map<String, java.util.Set<String>> callSitesByTrace(
+            String projectId, java.util.Set<String> traceIds) {
+        if (traceIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<String, java.util.Set<String>> out = new java.util.HashMap<>();
+        jdbc.sql("SELECT DISTINCT trace_id, call_site_id FROM span"
+                        + " WHERE project_id = :pid AND trace_id = ANY(:ids) AND call_site_id IS NOT NULL")
+                .param("pid", projectId)
+                .param("ids", traceIds.toArray(String[]::new))
+                .query((rs, n) -> out.computeIfAbsent(rs.getString("trace_id"), t -> new java.util.HashSet<>())
+                        .add(rs.getString("call_site_id")))
+                .list();
+        return java.util.Map.copyOf(out);
+    }
+
+    /**
+     * Every call site a classifier can be limited to: the ones the bundle declares, and the call site of every
+     * settled trace. The trace half walks {@code ix_trace_scope_settled_started} one distinct key at a time, so it costs
+     * one index probe per call site, not a scan of the project's traces. The {@code COALESCE} is spelled exactly as the
+     * index spells it, literal and all, or the planner cannot match the expression.
+     */
+    public java.util.SortedSet<String> knownCallSiteIds(String projectId) {
+        java.util.SortedSet<String> out = new java.util.TreeSet<>(
+                jdbc.sql("""
+                WITH RECURSIVE seen(k) AS (
+                    SELECT MIN(COALESCE(call_site_id, '__unattributed__')) FROM trace
+                     WHERE project_id = :pid AND is_settled AND is_deleted IS NOT TRUE
+                    UNION ALL
+                    SELECT (SELECT MIN(COALESCE(t.call_site_id, '__unattributed__')) FROM trace t
+                             WHERE t.project_id = :pid AND t.is_settled AND t.is_deleted IS NOT TRUE
+                               AND COALESCE(t.call_site_id, '__unattributed__') > seen.k)
+                      FROM seen WHERE seen.k IS NOT NULL
+                )
+                SELECT k FROM seen WHERE k IS NOT NULL AND k <> '__unattributed__'
+                UNION
+                SELECT id FROM call_site WHERE project_id = :pid
+                """).param("pid", projectId).query(String.class).list());
+        return java.util.Collections.unmodifiableSortedSet(out);
+    }
+
     /** The declared output schemas of a batch's call sites: the Malformed Output built-in's read. */
     @Override
     public java.util.Map<String, String> callSiteOutputSchemas(String projectId, java.util.Set<String> callSiteIds) {
@@ -335,8 +350,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * retrieves once and answers several follow-ups from that context without re-retrieving;
      * scoring a follow-up against its own bare trace produced near-universal false fires (measured
      * 88% on stale-context follow-ups against an 8.6% same-trace baseline). Grouping key is
-     * {@code COALESCE(trace.thread_id, trace.session_id)}, the same key {@link
-     * #conversationObservationsUpTo} uses.
+     * {@code trace.session_id}, the same key {@link #priorTurns} uses.
      *
      * <p>Nearest-prior-retrieval, not a conversation-wide blend: a conversation's topic can shift
      * turn to turn, so ranking every candidate across the whole conversation risks stitching a
@@ -376,15 +390,14 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .map(GroundingEvidenceReads.SpanRef::spanId)
                 .distinct()
                 .toList();
-        java.util.Map<String, StringBuilder> acc = new java.util.HashMap<>();
+        java.util.Map<String, List<String>> acc = new java.util.HashMap<>();
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
-        // Grouping key mirrors ConversationThreadAssembler/conversationObservationsUpTo's
-        // COALESCE(parent_id, id) exactly. Deliberately not time-bounded here: a call site that
-        // reaches outside anywhere in the conversation, even later, still reads BLIND rather than
-        // GROUNDLESS. Only the evidence text below is time-bounded, so this never lets a future
-        // document become a premise.
+        // Grouping key mirrors priorTurns' session_id exactly. Deliberately not
+        // time-bounded here: a call site that reaches outside anywhere in the conversation, even later,
+        // still reads BLIND rather than GROUNDLESS. Only the evidence text below is time-bounded, so
+        // this never lets a future document become a premise.
         jdbc.sql("""
                 SELECT s.id AS span_id
                 FROM span s
@@ -395,11 +408,11 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                                JOIN trace xtr ON xtr.project_id = x.project_id AND xtr.id = x.trace_id
                                WHERE x.project_id = s.project_id AND x.is_deleted IS NOT TRUE
                                  AND (
-                                   COALESCE(xtr.thread_id, xtr.session_id) = COALESCE(tr.thread_id, tr.session_id)
-                                   OR (x.trace_id = s.trace_id AND COALESCE(tr.thread_id, tr.session_id) IS NULL)
+                                   xtr.session_id = tr.session_id
+                                   OR (x.trace_id = s.trace_id AND tr.session_id IS NULL)
                                  )
-                                 -- the same set ConversationThreadAssembler treats as external work;
-                                 -- omitting one makes its traces read GROUNDLESS instead of BLIND
+                                 -- the tool-like kinds that count as external work; omitting one
+                                 -- makes its traces read GROUNDLESS instead of BLIND
                                  AND x.kind IN ('tool','mcp','retrieval','reranker','embedding'))
                 """)
                 .param("pid", projectId)
@@ -424,8 +437,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                         JOIN trace r2tr ON r2tr.project_id = r2.project_id AND r2tr.id = r2.trace_id
                        WHERE rd2.project_id = s.project_id AND rd2.is_deleted IS NOT TRUE
                          AND (
-                           COALESCE(r2tr.thread_id, r2tr.session_id) = COALESCE(tr.thread_id, tr.session_id)
-                           OR (r2.trace_id = s.trace_id AND COALESCE(tr.thread_id, tr.session_id) IS NULL)
+                           r2tr.session_id = tr.session_id
+                           OR (r2.trace_id = s.trace_id AND tr.session_id IS NULL)
                          )
                          AND r2.started_at <= s.started_at
                        ORDER BY r2.started_at DESC
@@ -465,9 +478,10 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .query((rs, n) -> {
                     String txt = rs.getString("txt");
                     if (txt != null && !txt.isBlank()) {
-                        acc.computeIfAbsent(rs.getString("span_id"), k -> new StringBuilder())
-                                .append(txt)
-                                .append('\n');
+                        // One list entry per retrieved row, in rank order: the document boundary is
+                        // part of what the groundedness head reads (see Evidence#documents).
+                        acc.computeIfAbsent(rs.getString("span_id"), k -> new java.util.ArrayList<>())
+                                .add(txt.strip());
                     }
                     return Boolean.TRUE; // the row mapper's value is unused; the accumulator is the result
                 })
@@ -475,10 +489,9 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Map<String, GroundingEvidenceReads.Evidence> out = new java.util.HashMap<>();
         for (GroundingEvidenceReads.SpanRef ref : spans) {
             String id = ref.spanId();
-            StringBuilder sb = acc.get(id);
-            String text = sb == null ? "" : sb.toString().strip();
+            List<String> docs = acc.getOrDefault(id, List.of());
             boolean outside = reachedOutside.contains(id);
-            if (!text.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(text, outside));
+            if (!docs.isEmpty() || outside) out.put(id, new GroundingEvidenceReads.Evidence(docs, outside));
         }
         return java.util.Map.copyOf(out);
     }
@@ -511,122 +524,135 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                 .list();
     }
 
-    /** One row of a TURN-grain candidate window: the span, plus whether it is a turn ROOT. */
-    public record TurnCandidate(SubstrateObservation observation, boolean turnRoot) {}
+    /**
+     * One row of a TURN-grain candidate window: the span, plus whether it opens its call site's part of a
+     * turn.
+     */
+    public record TurnCandidate(SubstrateObservation observation, boolean opensCallSiteTurn) {}
 
     /**
      * The turn-grain candidate window for classifiers declaring {@link
      * ClassifierModelModule.Grain#TURN} (frustration). The same unfiltered window {@link
-     * #observationsAfter} draws, with the turn-root predicate carried as a projected boolean the
+     * #observationsAfter} draws, with the candidate predicate carried as a projected boolean the
      * worker filters in Java.
      *
      * <p>The predicate isn't a WHERE clause because the cursor advances over the window: a filtered
-     * window would be empty for any project whose traces are all nested under a parent, and an empty
-     * window advances no cursor, so every tick would re-scan the whole unswept history forever.
-     * Projecting the predicate instead keeps the window exactly {@code limit} rows wide.
+     * window would be empty for any project whose spans are all inner calls, and an empty window
+     * advances no cursor, so every tick would re-scan the whole unswept history forever. Projecting
+     * the predicate instead keeps the window exactly {@code limit} rows wide.
      *
-     * <p>Kind alone doesn't identify a turn root, since {@code gen_ai.operation.name = invoke_agent}
-     * normalizes to {@code agent} at every nesting depth and a sub-agent's span is an {@code agent}
-     * span too. Three structural facts define it instead:
+     * <p>A turn is judged once per call site, because one turn can make several model calls (a router,
+     * the reply, a memory pass) and each is its own call site with its own input. A span is a candidate
+     * when:
      * <ul>
-     *   <li>{@code tr.parent_trace_id IS NULL}: the trace isn't a sub-agent trace nested under a caller.
-     *   <li>{@code s.parent_span_id IS NULL}: the span is its trace's outermost, so its input/output
-     *       are the turn's aggregate I/O rather than an inner planner/summarizer call's. This is the
-     *       producer's own statement, stored verbatim and never repaired.
-     *   <li>{@code s.kind IN ('llm','agent')}: it carries dialogue at all. Deliberately not {@code
-     *       agent}-only, since a product with no agent wrapper emits a bare {@code llm} root that is
-     *       still its user-facing turn.
+     *   <li>its trace is not a sub-agent trace nested under a caller ({@code tr.parent_trace_id IS
+     *       NULL});
+     *   <li>it carries dialogue at all ({@code s.kind IN ('llm','agent')}) and a call site;
+     *   <li>it is the first such span of its call site in its trace, by {@code (started_at, id)}: the
+     *       call that received the user's message, before any tool round of the same call site.
      * </ul>
      *
-     * <p>A turn with several parentless root spans yields several rows; the worker keeps one per
-     * {@code trace_id} and advances the cursor on the raw window's last row.
+     * <p>Which call sites are scored is the classifier's choice, applied by the caller.
      */
     public List<TurnCandidate> turnCandidatesAfter(
             String projectId, @Nullable String afterTs, @Nullable String afterHandle, int limit) {
         return spec(SELECT_TURN_CANDIDATE, projectId, afterTs, afterHandle, limit)
-                .query((rs, n) -> new TurnCandidate(map(rs), rs.getBoolean("turn_root")))
+                .query((rs, n) -> new TurnCandidate(map(rs), rs.getBoolean("opens_call_site_turn")))
                 .list();
     }
 
     /**
-     * The most-recent {@code limit} spans for a project, newest first: the bounded sample the
-     * classifier cold-start labeling pass draws from. Bounded by count, never by truncating the span
-     * text (the labeling judge sees full input/output). Reuses the same projection as the sweep so
-     * an example is featurized identically to how it is scored.
+     * The turns of one call site before a scored turn, for the frustration classifier.
+     *
+     * @param spans the call site's {@code llm} and {@code agent} spans in the {@code turns} turns just before
+     *     the scored one, with payloads, oldest first
+     * @param count how many turns of the call site the conversation had before the scored one, all of them
      */
-    public List<SubstrateObservation> sampleObservations(String projectId, int limit) {
-        return jdbc.sql(SELECT_SPAN
-                        + " WHERE s.project_id = :pid"
-                        + " ORDER BY s.created_at DESC, s.trace_id DESC, s.id DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
+    public record PriorTurns(List<SubstrateObservation> spans, int count) {
+        public PriorTurns {
+            spans = List.copyOf(spans);
+        }
     }
 
     /**
-     * The scored span's conversation thread: the most-recent {@code limit} spans sharing the scored
-     * span's conversation grain, at or before the scored span's keyset position, newest first. The
-     * {@link ConversationThreadAssembler} reverses this to chronological order, drops the scored
-     * turn, and renders the rest as prior turns.
-     *
-     * <p>Grouping grain is the pinned {@code COALESCE(trace.thread_id, trace.session_id)}: the
-     * producer's own thread id when it sent one, else the session.
-     *
-     * <p>A trace with neither a thread nor a session id has a null conversation key, and the
-     * predicate is written in two explicit branches because of it: the equality arm matches nothing
-     * when the scored key is null (SQL equality on null is unknown, not true), and the second arm
-     * then matches the scored trace alone, so an anonymous turn is its own single-turn conversation.
-     * Writing it as {@code IS NOT DISTINCT FROM} instead would hand that turn the whole project's
-     * anonymous history as its thread.
-     *
-     * <p>Ordering is the same {@code (created_at, trace_id, id)} keyset the sweep cursor uses.
-     * Both conversational spans ({@code kind in (llm, agent)}) and tool/retrieval spans ({@code
-     * tool, mcp, retrieval, embedding, reranker}) are returned: the assembler renders one dialogue
-     * contribution per turn and each tool span as a terse outcome marker, so the agent's failure
-     * history stays visible without raw payloads polluting the thread. Kept in sync with {@code
-     * ConversationThreadAssembler.TOOL_KINDS}. Perf: one read per scored span on the async sweep
-     * (never the ingest hot path); the conversation lookup is a primary-key read on {@code trace}.
+     * {@link PriorTurns} of {@code callSiteId} for the scored trace. A turn is a top-level trace ({@code
+     * parent_trace_id IS NULL}) of the scored trace's conversation, its session, that started before it in
+     * event time, {@code (started_at, id)}, and has an {@code llm} or {@code agent} span of the call site: the
+     * definition the frustration finding page reads its earlier turns by, walked on {@code ix_trace_session}.
+     * {@code thread_id} is only a column: a producer that reuses one thread id across sessions still has one
+     * conversation per session. A turn that never reached the call site is not one of its turns, so a
+     * router or memory call beside the reply adds nothing. A sub-agent trace is not a turn. A trace in no
+     * conversation has no earlier turns: equality on a null key matches nothing.
      */
-    public List<SubstrateObservation> conversationObservationsUpTo(
-            String projectId, String scoredTraceId, String scoredSpanId, String uptoTs, int limit) {
-        return jdbc.sql(SELECT_SPAN + """
+    public PriorTurns priorTurns(String projectId, String scoredTraceId, String callSiteId, int turns) {
+        String earlier = """
+                FROM trace f
+                  JOIN trace t
+                    ON t.project_id = f.project_id
+                   AND t.parent_trace_id IS NULL
+                   AND t.session_id = f.session_id
+                   AND (t.started_at, t.id) < (f.started_at, f.id)
+                WHERE f.project_id = :pid AND f.id = :scoredTraceId
+                  AND EXISTS (SELECT 1 FROM span c
+                               WHERE c.project_id = t.project_id AND c.trace_id = t.id
+                                 AND c.call_site_id = :callSite AND c.kind IN ('llm', 'agent'))""";
+        List<SubstrateObservation> spans = jdbc.sql(
+                        "WITH turns AS MATERIALIZED (SELECT t.id " + earlier + """
 
-                        JOIN trace tr ON tr.project_id = s.project_id AND tr.id = s.trace_id
-                        WHERE s.project_id = :pid
-                          AND (
-                            -- The scored trace's conversation, when it has one …
-                            COALESCE(tr.thread_id, tr.session_id) = (
-                                SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
-                                 WHERE str.project_id = :pid AND str.id = :scoredTraceId)
-                            -- … else the scored trace alone. An anonymous turn is its own conversation;
-                            -- pooling every session-less trace in the project would be a thread made of
-                            -- unrelated strangers.
-                            OR (s.trace_id = :scoredTraceId
-                                AND (SELECT COALESCE(str.thread_id, str.session_id) FROM trace str
-                                      WHERE str.project_id = :pid AND str.id = :scoredTraceId) IS NULL)
-                          )
-                          AND s.kind IN ('llm', 'agent', 'tool', 'mcp', 'retrieval', 'embedding', 'reranker')
-                          AND (s.created_at, s.trace_id, s.id) <= (:uptoTs::timestamptz, :scoredTraceId, :scoredSpanId)
-                        ORDER BY s.created_at DESC, s.trace_id DESC, s.id DESC
-                        LIMIT :limit""")
+                          ORDER BY t.started_at DESC, t.id DESC
+                          LIMIT :turns)
+                        """ + SPAN_COLUMNS + """
+
+                        FROM turns tu
+                          JOIN span s ON s.project_id = :pid AND s.trace_id = tu.id
+                          LEFT JOIN span_payload pl
+                            ON pl.project_id = s.project_id AND pl.trace_id = s.trace_id AND pl.span_id = s.id
+                        WHERE s.kind IN ('llm', 'agent') AND s.call_site_id = :callSite
+                        ORDER BY s.started_at, s.created_at, s.trace_id, s.id""")
                 .param("pid", projectId)
                 .param("scoredTraceId", scoredTraceId)
-                .param("scoredSpanId", scoredSpanId)
-                .param("uptoTs", uptoTs)
-                .param("limit", limit)
+                .param("callSite", callSiteId)
+                .param("turns", turns)
                 .query((rs, n) -> map(rs))
                 .list();
+        int count = jdbc.sql("SELECT COUNT(*) " + earlier)
+                .param("pid", projectId)
+                .param("scoredTraceId", scoredTraceId)
+                .param("callSite", callSiteId)
+                .query(Integer.class)
+                .single();
+        return new PriorTurns(spans, count);
     }
 
-    /** One span by its producer identity within a project (the correction loop labels a specific subject). */
-    public java.util.Optional<SubstrateObservation> observationById(String projectId, String traceId, String spanId) {
-        return jdbc.sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id = :tid AND s.id = :sid")
+    /**
+     * The spans {@code spans} names, in no order: a finding page reading back the answers it cites. A span
+     * that is gone is absent. The two id halves are bound as sets and the pairs kept here, as {@link
+     * #groundingEvidence} does, so a span id that recurs in another listed trace is not read for it.
+     */
+    public List<SubstrateObservation> observationsByIds(
+            String projectId, java.util.Collection<GroundingEvidenceReads.SpanRef> spans) {
+        if (spans.isEmpty()) return List.of();
+        java.util.Set<GroundingEvidenceReads.SpanRef> wanted = new java.util.HashSet<>(spans);
+        return jdbc
+                .sql(SELECT_SPAN + " WHERE s.project_id = :pid AND s.trace_id IN (:tids) AND s.id IN (:sids)")
                 .param("pid", projectId)
-                .param("tid", traceId)
-                .param("sid", spanId)
+                .param(
+                        "tids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::traceId)
+                                .distinct()
+                                .toList())
+                .param(
+                        "sids",
+                        wanted.stream()
+                                .map(GroundingEvidenceReads.SpanRef::spanId)
+                                .distinct()
+                                .toList())
                 .query((rs, n) -> map(rs))
-                .optional();
+                .list()
+                .stream()
+                .filter(o -> wanted.contains(new GroundingEvidenceReads.SpanRef(o.traceId(), o.observationId())))
+                .toList();
     }
 
     /**
@@ -700,14 +726,18 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                         AND tc.span_id = s.id AND tc.error_type IS NOT NULL) AS tool_error,
                    s.created_at         AS created_at""";
 
-    /** The turn-root predicate, projected rather than filtered; see {@link #turnCandidatesAfter}. */
-    private static final String TURN_ROOT_COLUMN = """
+    /** The turn-candidate predicate, projected rather than filtered; see {@link #turnCandidatesAfter}. */
+    private static final String TURN_CANDIDATE_COLUMN = """
             ,
-                   (EXISTS (SELECT 1 FROM trace tr
-                             WHERE tr.project_id = s.project_id AND tr.id = s.trace_id
-                               AND tr.parent_trace_id IS NULL)
-                    AND s.parent_span_id IS NULL
-                    AND s.kind IN ('llm', 'agent'))                              AS turn_root""";
+                   (s.call_site_id IS NOT NULL
+                    AND s.kind IN ('llm', 'agent')
+                    AND EXISTS (SELECT 1 FROM trace tr
+                                 WHERE tr.project_id = s.project_id AND tr.id = s.trace_id
+                                   AND tr.parent_trace_id IS NULL)
+                    AND NOT EXISTS (SELECT 1 FROM span e
+                                     WHERE e.project_id = s.project_id AND e.trace_id = s.trace_id
+                                       AND e.call_site_id = s.call_site_id AND e.kind IN ('llm', 'agent')
+                                       AND (e.started_at, e.id) < (s.started_at, s.id))) AS opens_call_site_turn""";
 
     private static final String SPAN_FROM = """
 
@@ -717,7 +747,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
 
     private static final String SELECT_SPAN = SPAN_COLUMNS + SPAN_FROM;
 
-    private static final String SELECT_TURN_CANDIDATE = SPAN_COLUMNS + TURN_ROOT_COLUMN + SPAN_FROM;
+    private static final String SELECT_TURN_CANDIDATE = SPAN_COLUMNS + TURN_CANDIDATE_COLUMN + SPAN_FROM;
 
     private static SubstrateObservation map(ResultSet rs) throws SQLException {
         return new SubstrateObservation(

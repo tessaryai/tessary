@@ -19,7 +19,11 @@ rg -l '@SpringBootTest' backend/app/src/test --glob '*Test.java' | wc -l
 ```
 
 Also gated (not in those counts): ArchUnit under `app/src/test/.../arch/`,
-classify-service `node --test`, and live ITs (`*LiveIT.java`).
+`packages/mcp` `node --test` (the `mcp-bridge` row),
+`contract/tests` (the `vendored-plugin-rules` row), and live ITs (`*LiveIT.java`).
+`JevDecisionClientLiveIT` (the frustration classifier's decision call) is one of those live ITs: it
+skips unless `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` is set, runs each gateway only with its own
+key, and is run from `backend/` with `mvn test -pl llm-runtime -Dtest=JevDecisionClientLiveIT`.
 
 ## Running it
 
@@ -29,23 +33,21 @@ package under `ai.tessary`) or the literal `frontend`.
 
 | Command | Runs | Docker |
 |---|---|---|
-| `task check` | The full gate (15 checks in the open edition): backend `mvn verify`, frontend, classify-service, sandbox-runner, open-boundary, module-hygiene, license-headers, export-denylist, pipeline-vocabulary, contract-consistency, version-consistency, no-bedrock, price-book-contract, Caddyfile validate, compose-artifact — plus the overlay-only gates where the overlay is present. See the manifest in `scripts/check.sh` for the authoritative, edition-aware list. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header, and why `docs-links`, `connect-route`, `selfhost-health` and `required-inputs` are no longer in the pipeline. `readme-front-door` went further and was deleted, so it has no row there either | yes |
+| `task check` | The full gate (17 checks): backend `mvn verify`, frontend, groundedness-serve, groundedness-setup, sandbox-runner, mcp-bridge, vendored-plugin-rules, classifier-quality-doc, blob-links, module-hygiene, license-headers, pipeline-vocabulary, contract-consistency, version-consistency, price-book-contract, Caddyfile validate, compose-artifact. The manifest in `scripts/check.sh` is the authoritative list: 17 RUN rows of the 30 scripts it declares. **No gate reads a `.md` or `.mdx` file**: a standing rule documented in that script's header. `docs-links`, `connect-route`, `selfhost-health`, `required-inputs` and `readme-front-door` were deleted under it, so they have no row there | yes |
 | `task check -- rca` | spotless, compile, every test in `ai.tessary.rca.**` | yes |
 | `task check -- rca,metering` | both areas | yes |
-| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, open-bundle paid-leak check, plus repo-wide no-bedrock/license-headers/price-book-contract/compose-artifact and (since frontend was asked for) paid-image/paid-frontend static checks | no |
+| `task check -- frontend` | OpenAPI + route-manifest drift guards, `tsc --noEmit`, vitest, vite build, plus repo-wide license-headers/price-book-contract/compose-artifact | no |
 | `task check -- rca,frontend` | one backend area plus the frontend gate | yes |
 | `task check -- typo` | fails immediately and prints the valid slice names | no |
-| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh --edition open)` | The open pipeline on the EXPORT CANDIDATE. Gates whose subject the export deletes skip with a named reason: classifier-quality-doc (manifest `SKIP`), slack-service, classifier-parity, no-bedrock's rule 3, and the two cross-language parity tests inside the backend verify | yes |
+| `d=$(bash scripts/lib/export-simulate.sh) && (cd "$d/frontend" && pnpm install) && (cd "$d" && bash scripts/check.sh)` | The same pipeline on the EXPORT CANDIDATE | yes |
 
 An unknown slice fails before anything runs, so a typo can never silently select nothing.
 
-**The vendored-plugin gate needs host Python.** `task check` (bare) runs `contract/tests` against the
-vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest` on the host — it
-says so and stops if either is missing, rather than skipping silently. Its second half diffs the
-vendored copy against the plugin's live `main`; **offline that half warns and passes**, so a local
-gate still works on a plane, and CI (where `$CI` is set) makes it a hard failure. The plugin repo is
-public and deliberately runs no PR CI, so this is the only place that contract is enforced —
-see [`contract/tests/README.md`](../../contract/tests/README.md).
+**One gate needs host Python tooling.** `vendored-plugin-rules` runs `contract/tests` against the
+vendored evals-plugin validator, so it needs `python3` with `pyyaml` and `pytest`; it says so and
+stops if either is missing. The plugin freshness half (a diff against `tessaryai/plugins@main`) is not in `task check`:
+it runs via `task contract:plugin` and `drift-checks.yml`. See
+[`contract/tests/README.md`](../../contract/tests/README.md).
 
 **A narrowed backend slice is not full `mvn verify`.** It runs spotless + test-compile + the
 package's tests. Static analysis bound to the `verify` phase (SpotBugs, PMD, forbidden-apis),
@@ -54,7 +56,7 @@ module-hygiene
 (`scripts/check-pipeline-vocabulary.sh`), the classifier-quality doc gate
 (`scripts/check-classifier-quality-doc.sh`, which pins
 the classifier-quality reference page to the served model revisions and catalog
-thresholds, and skips with a named reason where that page is absent), and root-package tests such as `ContextLoadsTest` run
+thresholds, and fails when that page is missing), and root-package tests such as `ContextLoadsTest` run
 only on bare `task check` / `backend:check`. Error Prone and NullAway are compiler-plugin checks
 bound to the `compile` phase instead, so they run on every narrowed slice too — any
 `mvn test-compile`/`test` triggers `compile` first. Prefer the slices you touched for the inner
@@ -62,16 +64,16 @@ loop; use the full gate before merging.
 
 **CI runs the same gate on every pull request.** There is still no pre-commit hook, but
 `.github/workflows/check.yml` calls `scripts/check.sh` — the same manifest `task check` runs — on
-`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) is armed
-alongside it. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
+`pull_request:`, so local green ⇒ CI green by construction. `secret-scan.yml` (gitleaks) also
+runs on every PR, and `codeql.yml` runs weekly. Nothing is merge-blocking: branch protection and rulesets are plan-gated on this repo,
 so a red check has to be respected rather than enforced.
 
-Two gates are deliberately not on that per-PR path and live in the dispatch-only
+One gate is deliberately not on that per-PR path and lives in the dispatch-only
 `.github/workflows/drift-checks.yml`:
 
-- `conformance-parity` — regenerates the fixture pinning the Java port to the Python engine.
 - `vendored-plugin` — its freshness half fetches `tessaryai/plugins` over the network and hard-fails
-  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff.
+  on `$CI`, so per PR it reds pull requests over upstream drift unrelated to the diff. Its offline
+  rules half runs per PR as the `vendored-plugin-rules` row.
 
 Run `gh workflow run drift-checks.yml` before a risky merge, and periodically to catch drift.
 
@@ -122,6 +124,12 @@ fingerprints — most integration classes share one fingerprint (and one DB), wh
 `properties = …` or a unique `DynamicPropertySource` set pays the ~15s again. Prefer reusing the
 shared fingerprint unless the properties are the point of the test.
 
+The `app` module runs its tests in two surefire forks (`forkCount` 2, `reuseForks`), and each fork
+keeps its own context cache, so a fingerprint used on both sides boots once per fork. The shared
+`src/test/resources/config/application.yaml` parks the classifier heartbeat and the rollup reaper
+for every context, because a timer firing mid-seed changes what a test reads. A test that needs
+either one calls it directly.
+
 It also means **adding a slice is linear in distinct contexts, not in test count**: a second
 product area that reuses the shared fingerprint is nearly free; one that brings its own
 `@SpringBootTest(properties=…)` or unique `DynamicPropertySource` pays another ~15s.
@@ -150,14 +158,16 @@ inner-loop speed is not.
 ## Coverage posture (intentional coldspots)
 
 Dense today: `ingest`, `classifier`, `judge`, `mcp`, `tenant`. Frontend has a vitest runner
-(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build) — a handful of
+(`pnpm run test`, wired into `scripts/check-frontend.sh` between lint and build): component and
 unit tests plus a route-render smoke test that mounts every view in the route manifest
-and fails on a render error or un-allowlisted console.error. Coverage is thin (7 test files); the
-gate is still mostly OpenAPI/route-manifest drift + `tsc` + vitest + vite build. Auth filter/device-link paths
+(and the case, finding and RCA pages once more on real payloads, since the manifest pass only
+reaches their not-found branch) and fails on a render error or un-allowlisted console.error. Every
+frontend line is covered (`pnpm run coverage` reports it); the gate runs OpenAPI/route-manifest drift +
+`tsc` + vitest + vite build. Auth filter/device-link paths
 are covered lightly (crypto + path resolver + MCP bearer integration) rather than per-filter
 classes; treat deeper auth coverage as product work, not a docs-audit obligation. Packages with
-near-zero tests are thin wrappers or UI-facing glue —
-do not add tests unless explicitly asked (root `AGENTS.md`).
+near-zero tests are thin wrappers or UI-facing glue; a test there has to name the bug it catches
+(root `AGENTS.md` § Tests).
 
 ### JaCoCo baseline
 
@@ -168,9 +178,12 @@ is enforced anywhere, and nothing fails the build on a coverage number. The poin
 number before further module extractions continue, so a module being pulled out of the reactor can be
 checked against what it actually exercised rather than what its tests merely claim to.
 
-Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Refresh them locally
-with `task backend:coverage` (equivalent to `task backend:check:open` — same reactor, same
-profile — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
+Per-module HTML/XML reports land at `backend/<module>/target/site/jacoco/`. Each one credits only
+that module's own tests, so code the `app` module's `@SpringBootTest` suite runs shows as uncovered
+in the module that owns it. The aggregate report at `backend/app/target/site/jacoco-aggregate/`
+merges every module's exec data against every open module's classes; read that one for a module's
+real number. Refresh them locally
+with `task backend:coverage` (equivalent to `task backend:check` — same reactor — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
 CI's cadence). CI additionally uploads the reports as a build artifact
 (`backend-jacoco-coverage`), from `check.yml`'s single job, so it lands on every pull request rather
 than on the old weekly cron. `if: always()`, so a red run still leaves a baseline.

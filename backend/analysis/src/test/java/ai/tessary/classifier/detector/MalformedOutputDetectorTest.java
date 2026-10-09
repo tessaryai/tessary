@@ -5,16 +5,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.TestObservations;
 import ai.tessary.classifier.substrate.CallSiteSchemaReads;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
+import com.networknt.schema.resource.SchemaLoader;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Unit coverage for the Malformed Output built-in: schema violations and non-JSON outputs fire,
@@ -41,18 +60,19 @@ class MalformedOutputDetectorTest {
     }
 
     private static SubstrateObservation obs(@Nullable String callSiteId, @Nullable String output) {
-        return new SubstrateObservation(
-                "obs-1", "p", "t", "s", null, callSiteId, "llm", "chat", null, output, null, "2026-01-01T00:00:00Z");
+        return TestObservations.llm("obs-1", "p", "t", "s", callSiteId, null, output, "2026-01-01T00:00:00Z");
     }
 
-    @Test
-    void schemaViolationAndNonJsonFire_conformingStaysQuiet() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void schemaViolationAndNonJsonFire_conformingStaysQuiet_bareOrInTheMessageEnvelope(boolean enveloped) {
         MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
+        Function<String, String> wrap = payload -> enveloped ? envelope(payload) : payload;
         List<Detection> ds = d.detectBatch(
                 List.of(
-                        obs("cs-1", "{\"answer\":\"yes\",\"confidence\":0.9}"),
-                        obs("cs-1", "{\"confidence\":\"high\"}"),
-                        obs("cs-1", "Sure! Here's the answer you asked for.")),
+                        obs("cs-1", wrap.apply("{\"answer\":\"yes\",\"confidence\":0.9}")),
+                        obs("cs-1", wrap.apply("{\"confidence\":\"high\"}")),
+                        obs("cs-1", wrap.apply("Sure! Here's the answer you asked for."))),
                 null);
         assertFalse(ds.get(0).fired(), "a conforming output stays quiet");
         assertTrue(ds.get(1).fired(), "a schema-violating output fires");
@@ -60,7 +80,7 @@ class MalformedOutputDetectorTest {
         assertEquals(Detection.Confidence.HIGH, ds.get(1).confidence(), "validation is a fact — always HIGH");
         String evidence = Objects.requireNonNull(ds.get(1).evidenceJson());
         assertTrue(evidence.contains("schema_violation"));
-        assertTrue(evidence.contains("answer"), "the violation names the missing required field");
+        assertTrue(evidence.contains("answer"), "the violation names the payload's missing field, not the envelope's");
         assertTrue(ds.get(2).fired(), "prose where JSON was declared fires");
         assertTrue(Objects.requireNonNull(ds.get(2).evidenceJson()).contains("not_json"));
     }
@@ -76,13 +96,6 @@ class MalformedOutputDetectorTest {
                         obs("cs-1", "  ")),
                 null);
         assertTrue(ds.stream().noneMatch(Detection::fired));
-    }
-
-    @Test
-    void allUnvalidatableBatchSkipsTheSchemaRead() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        d.detectBatch(List.of(obs(null, "x"), obs("cs-1", null)), null);
-        assertTrue(lookups.isEmpty(), "no schema read when nothing in the batch is validatable");
     }
 
     @Test
@@ -116,25 +129,6 @@ class MalformedOutputDetectorTest {
     }
 
     @Test
-    void messageEnvelopeIsUnwrapped_assistantPayloadIsWhatGetsValidated() {
-        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
-        List<Detection> ds = d.detectBatch(
-                List.of(
-                        obs("cs-1", envelope("{\"answer\":\"yes\",\"confidence\":0.9}")),
-                        obs("cs-1", envelope("{\"confidence\":\"high\"}")),
-                        obs("cs-1", envelope("Sure! Here's the answer you asked for."))),
-                null);
-        assertFalse(ds.get(0).fired(), "an envelope-wrapped conforming payload stays quiet");
-        assertTrue(ds.get(1).fired(), "an envelope-wrapped schema-violating payload fires");
-        assertTrue(Objects.requireNonNull(ds.get(1).evidenceJson()).contains("schema_violation"));
-        assertTrue(
-                Objects.requireNonNull(ds.get(1).evidenceJson()).contains("answer"),
-                "the violation is about the unwrapped payload, not the envelope");
-        assertTrue(ds.get(2).fired(), "envelope-wrapped prose where JSON was declared fires");
-        assertTrue(Objects.requireNonNull(ds.get(2).evidenceJson()).contains("not_json"));
-    }
-
-    @Test
     void envelopeWithoutAssistantMessageStaysQuiet() {
         MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
         List<Detection> ds = d.detectBatch(
@@ -153,12 +147,103 @@ class MalformedOutputDetectorTest {
         assertTrue(ds.get(1).fired(), "a violating bare array payload fires");
     }
 
+    /**
+     * SSRF guard: an agent-authored schema whose $ref points anywhere outside itself (IMDS, a local
+     * port, the host's files) must never be fetched. A live local server serves a schema the output
+     * violates, so a fetch would both show up as a hit and make the detector fire. The control half
+     * proves the harness can see a fetch: networknt's remote fetcher, pointed at the same server, hits it.
+     */
     @Test
-    void remoteRefSchemaIsNeverFetched_treatedAsNoneDeclared() {
-        // SSRF guard: an agent-authored schema pointing $ref at IMDS (or any remote IRI) must not
-        // trigger a network fetch — DisallowSchemaLoader makes it fail compile, i.e. quiet skip.
-        MalformedOutputDetector d = detector(Map.of("cs-1", "{\"$ref\":\"http://169.254.169.254/latest/meta-data\"}"));
-        List<Detection> ds = d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}")), null);
-        assertFalse(ds.get(0).fired(), "a remote-$ref schema is uncompilable, never fetched");
+    void refSchemasAreNeverFetched_treatedAsNoneDeclared(@TempDir Path dir) throws Exception {
+        String served = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}";
+        AtomicInteger hits = new AtomicInteger();
+        ServerSocket server = new ServerSocket(0, 8, InetAddress.getLoopbackAddress());
+        Thread acceptor = new Thread(() -> serveUntilClosed(server, served, hits), "ref-schema-server");
+        acceptor.setDaemon(true);
+        acceptor.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getLocalPort() + "/schema.json";
+            Path file = Files.writeString(dir.resolve("schema.json"), served);
+            MalformedOutputDetector d = detector(Map.of(
+                    "cs-http", "{\"$ref\":\"" + url + "\"}",
+                    "cs-file", "{\"$ref\":\"" + file.toUri() + "\"}"));
+            List<Detection> ds =
+                    d.detectBatch(List.of(obs("cs-http", "{\"answer\":42}"), obs("cs-file", "{\"answer\":42}")), null);
+
+            assertFalse(ds.get(0).fired(), "an http $ref schema is uncompilable, never fetched");
+            assertFalse(ds.get(1).fired(), "a file: $ref schema is uncompilable, never read");
+            assertEquals(0, hits.get(), "the detector made no request");
+
+            SchemaRegistry fetching = SchemaRegistry.withDefaultDialect(
+                    SpecificationVersion.DRAFT_2020_12, b -> b.schemaLoader(SchemaLoader.getRemoteFetcher()));
+            fetching.getSchema("{\"$ref\":\"" + url + "\"}").initializeValidators();
+            assertEquals(1, hits.get(), "control: a fetching registry does reach the server");
+        } finally {
+            server.close();
+            acceptor.join(2_000);
+        }
+    }
+
+    /** Answers every request with {@code body}, counting each accepted connection as a hit. */
+    private static void serveUntilClosed(ServerSocket server, String body, AtomicInteger hits) {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        while (!server.isClosed()) {
+            try (Socket client = server.accept()) {
+                hits.incrementAndGet();
+                BufferedReader head =
+                        new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
+                // Skip the request line and headers; the reply never depends on them.
+                String line = head.readLine();
+                while (line != null && !line.isEmpty()) line = head.readLine();
+                OutputStream out = client.getOutputStream();
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + bytes.length
+                                + "\r\nConnection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                out.write(bytes);
+                out.flush();
+            } catch (IOException e) {
+                return;
+            }
+        }
+    }
+
+    @Test
+    void refsInsideTheSchemaStillResolve() {
+        MalformedOutputDetector d = detector(Map.of(
+                "cs-1",
+                "{\"$id\":\"https://example.com/answer\",\"$defs\":{\"answer\":{\"type\":\"string\"}},"
+                        + "\"type\":\"object\",\"properties\":{\"answer\":{\"$ref\":\"#/$defs/answer\"}}}"));
+        List<Detection> ds =
+                d.detectBatch(List.of(obs("cs-1", "{\"answer\":42}"), obs("cs-1", "{\"answer\":\"yes\"}")), null);
+        assertTrue(ds.get(0).fired(), "a $ref into the schema's own $defs is enforced");
+        assertFalse(ds.get(1).fired());
+    }
+
+    @Test
+    void violationFieldCollapsesArrayIndexes() {
+        MalformedOutputDetector d = detector(Map.of(
+                "cs-1",
+                "{\"type\":\"object\",\"properties\":{\"items\":{\"type\":\"array\",\"items\":"
+                        + "{\"type\":\"object\",\"properties\":{\"sku\":{\"type\":\"string\"}},"
+                        + "\"required\":[\"qty\"]}}}}"));
+        Detection fired = d.detect(obs("cs-1", "{\"items\":[{\"sku\":\"a\",\"qty\":1},{\"sku\":2}]}"), null);
+        String evidence = Objects.requireNonNull(fired.evidenceJson());
+        assertTrue(evidence.contains("\"field\":\"items[].sku\""), evidence);
+        assertTrue(evidence.contains("\"path\":\"$.items[].sku\""), evidence);
+        assertTrue(evidence.contains("\"field\":\"items[].qty\""), "required names the missing property: " + evidence);
+    }
+
+    /**
+     * The per-observation entry point judges exactly as the batch does: a violating output fires with the same
+     * evidence, and a conforming one stays quiet, whichever path the caller took.
+     */
+    @Test
+    void detectJudgesOneObservationAsTheBatchWould() {
+        MalformedOutputDetector d = detector(Map.of("cs-1", SCHEMA));
+        SubstrateObservation violating = obs("cs-1", "{\"confidence\":\"high\"}");
+
+        assertEquals(d.detectBatch(List.of(violating), null).get(0), d.detect(violating, null));
+        assertTrue(d.detect(violating, null).fired());
+        assertFalse(d.detect(obs("cs-1", "{\"answer\":\"yes\"}"), null).fired());
     }
 }

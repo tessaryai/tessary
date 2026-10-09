@@ -23,8 +23,6 @@ export type ToolStep = {
   name: string;
   args: string | null;
   result: string | null;
-  latencyMs: number | null;
-  retries: number | null;
   failed: boolean;
 };
 
@@ -85,16 +83,12 @@ export function toolStepFrom(fields: {
   name: string;
   args: string | null;
   result: string | null;
-  latencyMs?: number | null;
-  retries?: number | null;
 }): ToolStep {
   return {
     key: fields.key,
     name: fields.name,
     args: fields.args,
     result: fields.result,
-    latencyMs: fields.latencyMs ?? null,
-    retries: fields.retries ?? null,
     failed: resultFailed(fields.result),
   };
 }
@@ -129,8 +123,6 @@ export function toolStepOf(o: Span): ToolStep | null {
     name,
     args: unwrapToolPayload(call?.args ?? o.input),
     result,
-    latencyMs: call?.latency_ms ?? o.duration_ms,
-    retries: call?.retries ?? null,
     failed: o.status === "error" || call?.error != null || resultFailed(result),
   };
 }

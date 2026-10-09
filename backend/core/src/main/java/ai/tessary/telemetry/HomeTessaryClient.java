@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.telemetry;
 
+import ai.tessary.open.hash.Sha256;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -8,15 +9,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
 import org.springframework.stereotype.Component;
 
 /**
  * Thin JDK-{@link HttpClient} seam for {@code home.tessary.ai}. Mirrors the house outbound-HTTP style
- * ({@code ingest/HttpJson}, {@code llm}/{@code WorkOsClient}, and the {@code MixpanelSender} this class
+ * ({@code llm}/{@code WorkOsClient}, and the {@code MixpanelSender} this class
  * replaces): a shared client with a connect timeout and a per-request timeout, no third-party SDK.
  *
  * <p>Payloads are posted as raw JSON to whatever {@code path} the caller supplies — unlike
@@ -68,11 +67,7 @@ public class HomeTessaryClient {
     }
 
     static String sha256Hex(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required of every Java platform", e);
-        }
+        return HexFormat.of().formatHex(Sha256.digest(bytes));
     }
 
     /** A GET's status and body. The body is empty for anything but a 200. */

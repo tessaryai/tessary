@@ -5,15 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRepository;
-import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.Detection;
-import ai.tessary.plan.CapabilityService;
+import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
@@ -25,12 +26,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
- * Acceptance for alerting: the roll-ups and case notifications that are all alerting still decides.
- * Exercised against the real pgvector Postgres (Testcontainers) so the alert schema applies for real.
- * Detections are seeded straight into a per-classifier detection table — the production alert path is
- * strictly read-only over {@code classifier} and the DetectionTableRegistry-stitched union — and the
- * {@link AlertWorker} is driven to the behavior that survived the threshold path's removal: a daily
- * digest roll-up is produced when its cron is due, exactly once per period.
+ * Alerting against real Postgres: roll-ups and case notifications. Detections are seeded straight into a per-
+ * classifier detection table, and {@link AlertWorker} produces a daily digest when its cron is due, once per period.
  */
 @SpringBootTest
 class AlertingIntegrationTest {
@@ -39,7 +36,7 @@ class AlertingIntegrationTest {
     TenantService tenants;
 
     @Autowired
-    CapabilityService capabilities;
+    CapabilityFixture capabilities;
 
     @Autowired
     SessionRepository sessions;
@@ -75,29 +72,32 @@ class AlertingIntegrationTest {
     @Autowired
     AlertWorker worker;
 
-    // The three threshold tests that stood here are gone with the path they exercised. A classifier's
-    // window no longer becomes an alert_event: it opens a FINDING inside the classifier's own sweep
-    // (ClassifierArming), and a case_opened rule carries that to the same channels. What remains here is
-    // the delivery machinery — roll-ups and case notifications — which is all alerting still decides.
+    @Autowired
+    AlertRuleRepository rules;
+
+    // Classifier windows open findings now (ClassifierArming), not alert_events; what remains here is the delivery
+    // machinery.
 
     @Test
     void digestRollupProducedWhenCronDue() {
         var fix = TenantFixture.bootstrap(tenants, "alert-digest");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
         String pid = fix.project().id();
         String sigA = seedSignal(pid, "frustration");
         String sigB = seedSignal(pid, "task_failure");
 
-        // Create the schedule FIRST: the first digest's window is [rule.created_at, now), so the rolled-up
-        // detections must land AFTER the rule exists (an every-second cron is due after a >1s wait).
+        // Rule first: the digest window starts at rule.created_at, so detections must land after it.
         AlertRuleRow digestRule = alertService.upsertRule(pid, digestReq("* * * * * *"));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigA, spanIn(pid, newSession(pid)));
         seedDetection(pid, sigB, spanIn(pid, newSession(pid)));
-        sleep(1100);
+        jdbc.sql("UPDATE alert_rule SET created_at = :at WHERE id = :id")
+                .param("at", Instant.now().minusSeconds(5).toString())
+                .param("id", digestRule.id())
+                .update();
         worker.tick();
 
         List<AlertEventRow> fired = alertEvents.listByProject(pid, 100);
-        // The threshold path didn't run (no per-signal rules), so the only firing is the digest roll-up.
         assertEquals(1, fired.size(), "a due digest produces exactly one roll-up");
         AlertEventRow digest = fired.get(0);
         assertEquals(AlertRuleRow.RuleType.DIGEST, digest.ruleType());
@@ -105,12 +105,50 @@ class AlertingIntegrationTest {
         assertEquals(3, digest.value(), "the digest rolls up all 3 detections in the window");
         assertTrue(digest.classifierId() == null, "a roll-up spans all signals");
 
-        // The cron anchor advanced, so an immediate re-tick within the same second is not due again.
+        // The cron anchor advanced, so a re-tick in the same second is not due.
         worker.tick();
         assertEquals(1, alertEvents.listByProject(pid, 100).size(), "the anchor advanced — no duplicate digest");
     }
 
-    // ---- request builders -------------------------------------------------------------------------
+    /** A due period with nothing in it fires nothing but advances the anchor. */
+    @Test
+    void aDueDigestWithNoActivityAdvancesItsAnchorWithoutFiring() {
+        var fix = TenantFixture.bootstrap(tenants, "alert-digest-empty");
+        capabilities.grant(fix.org().id(), Capability.ALERTS);
+        String pid = fix.project().id();
+        String created = Instant.now().minusSeconds(5).toString();
+        String ruleId = Ids.ulid();
+        rules.insert(new AlertRuleRow(
+                ruleId,
+                pid,
+                AlertRuleRow.RuleType.DIGEST,
+                "daily",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "* * * * * *",
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                "{}",
+                created,
+                created));
+
+        worker.tick();
+
+        assertEquals(List.of(), alertEvents.listByProject(pid, 100), "no activity, no digest");
+        assertTrue(
+                rules.findById(pid, ruleId).orElseThrow().lastDigestAt() != null,
+                "the empty period is consumed, not re-read next tick");
+    }
 
     private static AlertDtos.UpsertAlertRuleRequest digestReq(String cron) {
         return new AlertDtos.UpsertAlertRuleRequest(
@@ -129,34 +167,13 @@ class AlertingIntegrationTest {
                 null);
     }
 
-    // ---- seeding helpers (the production alert path never writes these tables) ---------------------
-
     private String seedSignal(String pid, String key) {
-        String now = Instant.now().toString();
-        String id = Ids.ulid();
-        signals.insert(new ClassifierRow(
-                id,
-                pid,
-                key + "-" + id,
-                key,
-                null,
-                "keyword",
-                null,
-                false,
-                1,
-                true,
-                ClassifierRow.Mode.DISCOVERY,
-                now,
-                now));
-        return id;
+        return ClassifierRows.insertKeyedByName(signals, pid, key, "keyword");
     }
 
     /**
-     * Mint a producer session id (the "user" grain the distinct_users basis counts).
-     *
-     * <p>No row is written here. In v2 the count is {@code COUNT(DISTINCT span.session_id)} — the span
-     * carries the session as a column — so what makes a session countable is a SPAN naming it, not the
-     * existence of a session row. {@link #spanIn} writes both.
+     * A producer session id. No row is written: v2 counts {@code COUNT(DISTINCT span.session_id)}, so a span naming
+     * it is what counts.
      */
     private String newSession(String pid) {
         return SubstrateV2Fixtures.sessionId();
@@ -165,7 +182,7 @@ class AlertingIntegrationTest {
     /** The typed subject ancestry of a span-grain detection: its session, trace, and span. */
     private record Subject(String sessionId, String traceId, String spanId) {}
 
-    /** One trace with a root llm span under an existing session; returns the detection's subject ancestry. */
+    /** One trace with a root llm span; returns the detection's subject. */
     private Subject spanIn(String pid, String sessionId) {
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRef span = fx.spanSeed(pid)
@@ -181,17 +198,9 @@ class AlertingIntegrationTest {
     }
 
     /**
-     * A classifier detection in its own table — what the digest roll-up now counts. Its {@code classifier_key}
-     * is how the roll-up query resolves the signal row, with the detector's confidence band and coarse
-     * severity on their own columns rather than borrowed ones.
-     *
-     * <p><b>{@code created_at} is passed explicitly rather than left to the column's {@code DEFAULT
-     * now()}</b>, because the roll-up window's lower bound is {@code alert_rule.created_at} — a JVM
-     * instant. Letting the row default to the DATABASE clock would put the two ends of one predicate on
-     * two clocks separated by a few milliseconds, and the digest window this test opens is only a few
-     * milliseconds wide at its start: a detection stamped by a Postgres clock even slightly behind the
-     * JVM's lands before {@code windowStart} and the roll-up finds nothing. Both ends read one clock here,
-     * so the assertion is about the query and not about container clock drift.
+     * A classifier detection in its own table, what the digest counts. {@code created_at} is passed explicitly: the
+     * window's lower bound is a JVM instant, and a Postgres clock slightly behind would land the row before {@code
+     * windowStart}.
      */
     private void seedDetection(String pid, String classifierId, Subject subject) {
         String classifierKey = signals.findById(pid, classifierId).orElseThrow().classifierKey();
@@ -211,13 +220,5 @@ class AlertingIntegrationTest {
                 .param("conf", Detection.Confidence.HIGH)
                 .param("at", Instant.now().toString())
                 .update();
-    }
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }

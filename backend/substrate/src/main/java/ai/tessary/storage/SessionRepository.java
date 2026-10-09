@@ -3,20 +3,26 @@ package ai.tessary.storage;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JdbcClient repository for the v2 {@code session} table (substrate-model.md §5.2).
  *
- * <p>Two kinds of write only, and neither is an accumulation. {@link #getOrCreate} (and its batch form) is
+ * <p>Two kinds of write only, and neither is an accumulation. {@link #getOrCreateAll} is
  * {@code ON CONFLICT DO NOTHING} on the natural key, so a redelivered batch is a no-op and the row is in
  * place before any trace can reference it (§6.1 resolution order — sessions, then traces, then spans).
  * {@link #touchAll} folds a whole drained batch's window into one {@code LEAST}/{@code GREATEST} pair per
@@ -34,9 +40,12 @@ public class SessionRepository {
 
     private final NamedParameterJdbcTemplate named;
 
-    public SessionRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named) {
+    private final TraceFilters filters;
+
+    public SessionRepository(JdbcClient jdbc, NamedParameterJdbcTemplate named, TraceFilters filters) {
         this.jdbc = jdbc;
         this.named = named;
+        this.filters = filters;
     }
 
     private static final String GET_OR_CREATE_SQL = """
@@ -60,28 +69,20 @@ public class SessionRepository {
     }
 
     /**
-     * One JDBC batch of {@link #getOrCreate} inserts, in the order given (the caller sorts, see SpanBatchWriter).
-     */
-    public void getOrCreateAll(List<SessionRow> rows) {
-        if (rows.isEmpty()) return;
-        int[] applied = named.batchUpdate(
-                GET_OR_CREATE_SQL, rows.stream().map(SessionRepository::params).toArray(SqlParameterSource[]::new));
-        BatchCounts.requireReal(applied);
-    }
-
-    /**
-     * Get-or-create, identity fields only (§6.1 step 1).
+     * Get-or-create, identity fields only (§6.1 step 1), as one JDBC batch in the order given (the caller
+     * sorts, see SpanBatchWriter).
      *
      * <p><b>Identity fields only</b> is the whole contract: an arrival never writes {@code started_at} or
      * {@code last_activity_at} through this path, because whichever batch happened to create the row would
      * otherwise stamp its own window permanently — a late-arriving span of an old session dragging the
      * session's recency backwards, and an earlier span arriving later never correcting a start time that is
      * already too late. Timing belongs to {@link #touchAll} and its {@code LEAST}/{@code GREATEST}.
-     *
-     * @return true when this call created the row.
      */
-    public boolean getOrCreate(SessionRow row) {
-        return jdbc.sql(GET_OR_CREATE_SQL).paramSource(params(row)).update() > 0;
+    public void getOrCreateAll(List<SessionRow> rows) {
+        if (rows.isEmpty()) return;
+        int[] applied = named.batchUpdate(
+                GET_OR_CREATE_SQL, rows.stream().map(SessionRepository::params).toArray(SqlParameterSource[]::new));
+        BatchCounts.requireReal(applied);
     }
 
     /**
@@ -162,14 +163,13 @@ public class SessionRepository {
                 .optional();
     }
 
-    /** A project's sessions, most recently active first — served by {@code ix_session_project_active}. */
-    public List<SessionRow> listByProject(String projectId, int limit) {
-        return listByProject(projectId, limit, null, null);
-    }
-
     /**
      * A page of the project's sessions, most recently active first, keyset-paginated on
-     * {@code (last_activity_at, id)} — served entirely by {@code ix_session_project_active}.
+     * {@code (last_activity_at, id)} — served by {@code ix_session_project_active}.
+     *
+     * <p>{@code filter} is the traces list's: a session is on the page when one of its traces passes every one of
+     * its filters, one {@code EXISTS} per session row over {@code ix_trace_session}. It never filters on a session
+     * aggregate.
      *
      * <p><b>There is no sort parameter, and that is contractual (§7.5).</b> Sessions carry no rollup: a
      * trace goes quiet in seconds, whereas a session may be resumed days later, so there is no gap of
@@ -179,22 +179,41 @@ public class SessionRepository {
      * traces before the page could be chosen — a scan of the whole project per request, which is exactly
      * the read shape the v2 substrate exists to make impossible.
      */
+    @Transactional(readOnly = true)
     public List<SessionRow> listByProject(
-            String projectId, int limit, @Nullable String beforeActivityAt, @Nullable String beforeId) {
-        boolean paged = beforeActivityAt != null && beforeId != null;
-        var where = new StringBuilder("WHERE project_id = :pid AND NOT is_deleted");
-        if (paged) {
-            where.append(" AND (last_activity_at < :beforeAt::timestamptz"
-                    + " OR (last_activity_at = :beforeAt::timestamptz AND id < :beforeId))");
-        }
-        var spec = jdbc.sql("SELECT " + COLS + " FROM session " + where
-                        + " ORDER BY last_activity_at DESC, id DESC LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit);
+            String projectId,
+            TraceV2Repository.TraceQuery filter,
+            int limit,
+            @Nullable String beforeActivityAt,
+            @Nullable String beforeId) {
+        var params = new HashMap<String, Object>();
+        params.put("pid", projectId);
+        params.put("limit", limit);
+        var where = new StringBuilder("WHERE s.project_id = :pid AND NOT s.is_deleted");
         if (beforeActivityAt != null && beforeId != null) {
-            spec = spec.param("beforeAt", beforeActivityAt).param("beforeId", beforeId);
+            where.append(" AND (s.last_activity_at < :beforeAt::timestamptz"
+                    + " OR (s.last_activity_at = :beforeAt::timestamptz AND s.id < :beforeId))");
+            params.put("beforeAt", beforeActivityAt);
+            params.put("beforeId", beforeId);
         }
-        return spec.query((rs, n) -> map(rs)).list();
+        try {
+            if (TraceFilters.narrows(filter)) {
+                // A session matches when one of its traces passes every filter: the traces the traces list shows.
+                var traceWhere =
+                        new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
+                                + " AND t.session_id = s.id AND NOT t.is_deleted");
+                filters.append(projectId, traceWhere, params, filter);
+                where.append(traceWhere).append(')');
+            }
+            String cols = Arrays.stream(COLS.split(", ")).map(c -> "s." + c).collect(Collectors.joining(", "));
+            return jdbc.sql("SELECT " + cols + " FROM session s " + where
+                            + " ORDER BY s.last_activity_at DESC, s.id DESC LIMIT :limit")
+                    .params(params)
+                    .query((rs, n) -> map(rs))
+                    .list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
+        }
     }
 
     private static SessionRow map(ResultSet rs) throws SQLException {
@@ -210,10 +229,6 @@ public class SessionRepository {
 
     /** A NOT NULL timestamptz column, read back as ISO-8601. */
     static String requireIso(ResultSet rs, String column) throws SQLException {
-        String iso = Timestamps.iso(rs, column);
-        if (iso == null) {
-            throw new SQLException("NOT NULL column " + column + " read back null");
-        }
-        return iso;
+        return Objects.requireNonNull(Timestamps.iso(rs, column), column);
     }
 }

@@ -41,8 +41,6 @@ public final class GenAiAttributes {
     public static final String USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
     /** {@code gen_ai.usage.output_tokens}, completion token count. */
     public static final String USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
-    /** {@code gen_ai.usage.total_tokens}, total token count (input + output). */
-    public static final String USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
     /** {@code gen_ai.usage.cache_read.input_tokens}, cached input tokens read (semconv registry, Development). */
     public static final String USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
     /** {@code gen_ai.usage.cache_creation.input_tokens}, input tokens written to cache (semconv registry, Development). */
@@ -87,25 +85,13 @@ public final class GenAiAttributes {
     // A producer that still emits gen_ai.evaluation.result events is not an error, the events simply ride
     // the span's attribute bag into span_payload like anything else the platform does not type.
 
-    /** {@code gen_ai.response.id}, the provider's id for this generation's response. */
-    public static final String RESPONSE_ID = "gen_ai.response.id";
-
     // gen_ai.operation.name enum values (OTel; open/Development enum, see KindNormalizer).
     public static final String OP_CHAT = "chat";
-    public static final String OP_TEXT_COMPLETION = "text_completion";
-    public static final String OP_GENERATE_CONTENT = "generate_content";
     public static final String OP_EMBEDDINGS = "embeddings";
     public static final String OP_EXECUTE_TOOL = "execute_tool";
     public static final String OP_RETRIEVAL = "retrieval";
-    public static final String OP_CREATE_AGENT = "create_agent";
     public static final String OP_INVOKE_AGENT = "invoke_agent";
     public static final String OP_INVOKE_WORKFLOW = "invoke_workflow";
-    /** {@code gen_ai.operation.name = rerank}, a reranker call (OpenInference RERANKER). */
-    public static final String OP_RERANK = "rerank";
-    /** {@code gen_ai.operation.name = guardrail}, a guardrail check (OpenInference GUARDRAIL). */
-    public static final String OP_GUARDRAIL = "guardrail";
-    /** {@code gen_ai.operation.name = plan}, an agent planning step. */
-    public static final String OP_PLAN = "plan";
 
     /** {@code gen_ai.tool.type}, {@code extension} marks an MCP/plugin tool (vs a first-party function). */
     public static final String TOOL_TYPE = "gen_ai.tool.type";
@@ -155,28 +141,9 @@ public final class GenAiAttributes {
      * by hand (one span attribute, no SDK required). See devdocs/reference/ingestion-contract/README.md.
      */
     public static final String TESSARY_CALL_SITE_ID = "tessary.call_site.id";
-    /**
-     * {@code tessary.sdk}, provenance marker a producer stamps on its traffic. Kept on the persisted
-     * span attributes for lineage; call-site binding is the explicit {@code tessary.call_site.id} tag for
-     * all senders, so nothing branches on this marker.
-     */
-    public static final String TESSARY_SDK = "tessary.sdk";
 
     // Hierarchy correlation rides ONLY the standard attributes (session.id, gen_ai.conversation.id,
     // user.id), there are no tessary.* correlation overlays.
-
-    // ----- tessary.upstream.*, selective-pull provenance ------------------------------
-    // Provenance for a row landed by an on-demand upstream pull (vs. native ingest), carried INTO each
-    // RawEntry's metadata at the pull runner so it lands in the existing observation.metadata_json with
-    // zero substrate-schema change. ADDITIVE ONLY: never read on any grading/read path, synced data
-    // stays indistinguishable from native ingest. The authoritative coverage record is the pull_job row.
-
-    /** {@code tessary.upstream.source_id}, the ingestion_source this row was pulled from. */
-    public static final String TESSARY_UPSTREAM_SOURCE_ID = "tessary.upstream.source_id";
-    /** {@code tessary.upstream.provider}, the upstream vendor (langfuse / phoenix / fake / …). */
-    public static final String TESSARY_UPSTREAM_PROVIDER = "tessary.upstream.provider";
-    /** {@code tessary.upstream.pull_job_id}, the pull job that landed this row (coverage handle). */
-    public static final String TESSARY_UPSTREAM_PULL_JOB_ID = "tessary.upstream.pull_job_id";
 
     // ----- OpenLLMetry/Traceloop (gen_ai.prompt.N.* / gen_ai.completion.N.*), INGEST-ONLY flattened keys ---
     // Not canonical message keys: the OpenLLMetry/Traceloop OTLP exporter encodes messages as indexed,
@@ -217,8 +184,6 @@ public final class GenAiAttributes {
     public static final String OI_MESSAGE_CONTENT = "message.content";
     /** {@code message.contents}, OI multimodal message sub-key (array of typed parts). */
     public static final String OI_MESSAGE_CONTENTS = "message.contents";
-    /** {@code message_content.type}, OI multimodal part type. */
-    public static final String OI_MESSAGE_CONTENT_TYPE = "message_content.type";
     /** {@code message_content.text}, OI multimodal part text. */
     public static final String OI_MESSAGE_CONTENT_TEXT = "message_content.text";
     /** {@code message.tool_calls}, OI output tool-call array sub-key. */

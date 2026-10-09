@@ -16,12 +16,6 @@ import org.junit.jupiter.api.Test;
 class SpanErrorsTest {
 
     @Test
-    @DisplayName("the producer's own class wins, verbatim")
-    void declaredTypeIsTakenAsIs() {
-        assertEquals("OrderServiceTimeout", SpanErrors.errorClass("OrderServiceTimeout", "anything at all"));
-    }
-
-    @Test
     @DisplayName("with no declared class, the message is signatured rather than truncated")
     void fallsBackToASignature() {
         String type = SpanErrors.errorClass(

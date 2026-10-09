@@ -66,5 +66,3 @@ export function sessionSummary(detail: SessionDetailView | undefined, spansTrunc
   if (detail.traces_truncated || spansTruncated) parts.push("truncated");
   return parts.join(" · ");
 }
-
-export type { SessionDetailView };

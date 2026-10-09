@@ -19,12 +19,13 @@ import org.springframework.web.server.ResponseStatusException;
  * enforcing the requester's org membership. Centralises the 'this user can
  * see this project' check so every controller doesn't re-implement it.
  *
- * <p>Three resolution shapes:</p>
+ * <p>Resolution shapes:</p>
  * <ul>
  *   <li>{@link #requireOrg(TenantContext, String)} — user must belong to org</li>
- *   <li>{@link #requireProject(TenantContext, String, String)} — same + project exists</li>
- *   <li>{@code requireProjectAccess(TenantContext, String)} — for MCP tokens, where
- *       the project is already bound by the token; just validate the URL agrees</li>
+ *   <li>{@link #requireProject(TenantContext, String, String)} — same + project exists and is not
+ *       being deleted</li>
+ *   <li>{@link #requireProjectIncludingDeleting(TenantContext, String, String)} — same, but also
+ *       sees a project on its way out</li>
  * </ul>
  */
 @Service
@@ -85,20 +86,6 @@ public class TenantPathResolver {
         return new Resolved(o.org(), p, o.role());
     }
 
-    /** For controllers that only know the projectId (e.g. resolved by id elsewhere). */
-    public void requireMembershipForProject(TenantContext ctx, String projectId) {
-        Project p = projects.findById(projectId).orElseThrow(() -> notFound("project not found: " + projectId));
-        // Same gate as the slug path — a project being purged is not readable by id either.
-        if (p.isDeleting()) throw notFound("project is being deleted: " + projectId);
-        if (ctx.isMcpToken()) {
-            if (!p.id().equals(ctx.projectId())) throw forbidden("token not valid for this project");
-            return;
-        }
-        if (memberships.find(p.orgId(), ctx.userId()).isEmpty()) {
-            throw forbidden("not a member of the org owning this project");
-        }
-    }
-
     public record Resolved(Organization org, Project project, String role) {
         public boolean isOwner() {
             return "owner".equals(role);
@@ -130,10 +117,6 @@ public class TenantPathResolver {
 
         public Role roleEnum() {
             return Role.fromWireOrMember(role);
-        }
-
-        public boolean can(Permission permission) {
-            return RolePermissions.allows(roleEnum(), permission);
         }
 
         /** Throw 403 unless the resolved role holds {@code permission}. {@code action} fills the message. */

@@ -6,19 +6,9 @@ import java.util.stream.Stream;
 import org.springframework.beans.factory.ObjectProvider;
 
 /**
- * A fixed list of beans as an {@link ObjectProvider}, for the ports that are injected that way.
- *
- * <p>Three of the classifier ports take {@code ObjectProvider<T>} rather than {@code List<T>}, and the
- * reason is the state this helper makes easy to write: ZERO candidates. Spring treats a required
- * constructor {@code List<T>} with no matching bean as an unsatisfied dependency and refuses to start
- * the context, so an edition shipping no adapter for a port would fail to boot rather than degrade —
- * with no compile error and no import for the boundary check to see. {@code ObjectProvider} is what
- * makes "nobody implements this here" an ordinary answer, and {@code of(List.of())} is what lets a test
- * say it in one line.
- *
- * <p>Only the two collection accessors are implemented. Everything else on the interface throws, so a
- * production class that starts calling {@code getObject()} on one of these ports fails loudly in a test
- * rather than picking up a default nobody chose.
+ * A fixed list of beans as an {@link ObjectProvider}. Three classifier ports take {@code ObjectProvider<T>} because
+ * Spring refuses to start with a required {@code List<T>} that has no bean; this makes zero candidates one line. Only
+ * the collection accessors are implemented, so a class calling {@code getObject()} fails loudly.
  */
 public final class TestObjectProvider {
 
@@ -39,8 +29,7 @@ public final class TestObjectProvider {
 
             @Override
             public Stream<T> orderedStream() {
-                // The real provider sorts by @Order here. A test that cares about ordering passes the
-                // list in the order it wants, which is what every caller so far actually asserts.
+                // The real provider sorts by @Order; callers pass the order they want.
                 return copy.stream();
             }
         };

@@ -4,6 +4,7 @@ package ai.tessary.apidoc;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
+import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,25 +12,19 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * The OpenAPI contract drift guard: the springdoc-generated {@code /v3/api-docs} document
- * — canonicalized (recursively key-sorted, 2-space, {@code \n} line endings) — must byte-equal the
- * checked-in single source of truth at {@code backend/contract/src/main/resources/openapi/tessary-api.json}.
- *
- * <p>From here, any controller/DTO change that shifts the wire contract fails {@code task backend:check}
- * until the spec is regenerated — the intentional coupling that keeps the checked-in spec honest across
- * P2/P4/P5 edits. Regenerate with {@code task contract:openapi} (runs this test with
- * {@code -Dtessary.openapi.regenerate=true}); the guard also self-seeds the file on first run when it is
- * absent.
+ * The springdoc {@code /v3/api-docs} document, canonicalized (key-sorted, 2-space, {@code \n}), must byte-equal
+ * {@code backend/contract/src/main/resources/openapi/tessary-api.json}. A wire-contract change fails {@code task
+ * backend:check} until regenerated with {@code task contract:openapi} ({@code -Dtessary.openapi.regenerate=true});
+ * the file self-seeds when absent.
  */
-@SpringBootTest
+// This test's MockMvc adds no filters, and AuthFilter lets /v3/api-docs through regardless, so the auth-enforced
+// context documents the intended posture; it does not itself prove the endpoint is served authenticated.
+@AuthEnforcedContext
 class OpenApiSpecDriftTest {
 
     /** {@code backend/contract/src/main/resources/openapi/tessary-api.json}, relative to the app module dir. */
@@ -37,19 +32,6 @@ class OpenApiSpecDriftTest {
             Path.of("..", "contract", "src", "main", "resources", "openapi", "tessary-api.json");
 
     private static final String REGENERATE_PROP = "tessary.openapi.regenerate";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        // Matches the app's normal (auth-enforced) posture rather than the suite's global
-        // unauthenticated default -- say so directly rather than configuring a fake
-        // external-provider key as an indirect toggle. See TestAuthDisabledInitializer's javadoc.
-        // NOTE: this test's own MockMvc is built via webAppContextSetup(wac).build()
-        // with no .addFilters(...), so AuthFilter is not actually in this test's filter chain
-        // regardless of this property, and /v3/api-docs bypasses auth unconditionally in
-        // AuthFilter anyway -- this override documents the intended posture,
-        // it does not itself prove the endpoint is served authenticated.
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -72,7 +54,7 @@ class OpenApiSpecDriftTest {
         if (regenerate || !Files.exists(SPEC)) {
             Files.createDirectories(SPEC.getParent());
             Files.writeString(SPEC, canonical, StandardCharsets.UTF_8);
-            return; // self-seed / regenerate mode — the write IS the update
+            return; // self-seed or regenerate: the write is the update
         }
 
         String checkedIn = Files.readString(SPEC, StandardCharsets.UTF_8);

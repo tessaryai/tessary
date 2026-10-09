@@ -2,8 +2,8 @@
 /*
  * The figures a finding is made of.
  *
- * <h2>Why these are bespoke rather than the shared chart primitives</h2>
- * `TrendChart` and `StackedBarChart` both draw a series over time, and a finding has no time series:
+ * <h2>Why these are bespoke rather than a charting library's</h2>
+ * A time-series chart draws a series over time, and a finding has no time series:
  * its evidence is TWO WINDOWS (the reference and the one that just closed) with a handful of paired
  * readings between them. The only honest picture of that is a before/after comparison, so these draw
  * one, rather than interpolating two points into a line that would imply a trajectory nobody measured.
@@ -83,19 +83,15 @@ export function prettyKey(key: string): string {
 }
 
 /**
- * What the emphasised row means, when the caller knows.
+ * Which way the emphasised row went.
  *
  * <p>A distribution shift knows which way it went, so its driving row is drawn in the same red or
- * green the chart above it uses — one colour vocabulary per page. A caller that does not pass a tone
- * keeps the older neutral-warning treatment, which is what a rate shift still wants: `emphasiseKey`
- * there marks the row the finding is ABOUT, not a row that moved in a knowable direction.
+ * green the chart above it uses — one colour vocabulary per page.
  */
 export type EmphasisTone = "negative" | "positive";
 
 function emphasisTextClass(tone?: EmphasisTone): string {
-  if (tone === "positive") return "text-success";
-  if (tone === "negative") return "text-error";
-  return "text-warning";
+  return tone === "positive" ? "text-success" : "text-error";
 }
 
 /**
@@ -111,7 +107,6 @@ export function PairBlock({
   pairs,
   emphasiseKey,
   emphasiseTone,
-  unit,
 }: {
   title: string;
   caption?: string;
@@ -120,7 +115,6 @@ export function PairBlock({
   emphasiseKey?: string;
   /** Which way that row went, when the caller knows. See {@link EmphasisTone}. */
   emphasiseTone?: EmphasisTone;
-  unit?: string;
 }) {
   const rows = pairs.filter((p) => p.then != null || p.now != null);
   if (rows.length === 0) return null;
@@ -129,7 +123,6 @@ export function PairBlock({
     <section className="mt-6">
       <div className="flex items-baseline gap-3 mb-1">
         <h2 className="font-mono text-label uppercase text-muted">{title}</h2>
-        {unit && <span className="text-subtle text-label">{unit}</span>}
       </div>
       {caption && (
         <p className="text-subtle mt-0 mx-0 mb-2.5 text-small" style={{ maxWidth: 640 }}>
@@ -178,14 +171,6 @@ export function PairBlock({
   );
 }
 
-/**
- * The failure-signature breakdown of a rate shift, ranked by how much each signature CHANGED.
- *
- * <p>This is the one chart that answers the question a rate shift actually poses: a rise spread evenly
- * across signatures that were always there is usually the traffic moving, while one signature going from
- * rare to common is the tool breaking. Two bars per row, on a shared scale, make that difference visible
- * without reading a single count.
- */
 /**
  * The failure signatures seen in the flagged window.
  *

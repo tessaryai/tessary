@@ -10,34 +10,26 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.testsupport.ClassifierObservations;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Unit acceptance for {@link RegexDetector}: an NL phrase, compiled once to a regex, fires over the
- * selected observation field with no model call; {@code config_json} overrides the phrases, field,
- * and word-boundary. Evidence is bounded JSON. Literal keyword matching stays per-observation and
- * field-restricted (unlike the encoder classifier, which scores the whole conversation thread).
+ * {@link RegexDetector}: an NL phrase from {@code config_json}, compiled once, fires over the selected field with no
+ * model call; {@code config_json} also overrides the field and word boundary. Evidence is bounded JSON.
  */
 class RegexDetectorTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
-    private RegexDetector detector(ClassifierField field, boolean wordBoundary, String... phrases) {
+    private RegexDetector detector(ClassifierField field, boolean wordBoundary) {
         return new RegexDetector(
-                BuiltInDetector.Kind.REGEX,
-                field,
-                Detection.Severity.CRITICAL,
-                List.of(phrases),
-                wordBoundary,
-                compiler,
-                mapper);
+                BuiltInDetector.Kind.REGEX, field, Detection.Severity.CRITICAL, wordBoundary, compiler, mapper);
     }
 
     private SubstrateObservation obs(String input, String output) {
-        // Stored as ingest writes it — the gen_ai role envelope — so the detector scores the
-        // flattened text the ClassifierField view yields, not clean strings production never emits.
+        // Stored as ingest writes it (the gen_ai role envelope), so the flattened ClassifierField text is scored.
         return new SubstrateObservation(
                 "obs1",
                 "proj1",
@@ -50,39 +42,13 @@ class RegexDetectorTest {
                 input == null ? null : ClassifierObservations.userInput(input),
                 output == null ? null : ClassifierObservations.assistantOutput(output),
                 null,
-                "2026-06-11");
-    }
-
-    @Test
-    void detect_firesOnDefaultPhraseOverConfiguredField() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true, "secret key");
-        Detection fired = d.detect(obs("benign prompt", "your secret key is sk-123"), null);
-        assertTrue(fired.fired(), "the compiled regex matches the literal phrase in the output");
-        assertEquals(Detection.Severity.CRITICAL, fired.severity(), "severity is the detector's baked severity");
-    }
-
-    @Test
-    void detect_doesNotFireWhenPhraseAbsent() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true, "secret key");
-        assertFalse(d.detect(obs("benign", "all clear"), null).fired(), "no match → no fire");
-    }
-
-    @Test
-    void detect_respectsFieldSelection() {
-        RegexDetector outputOnly = detector(ClassifierField.OUTPUT, false, "leak");
-        assertFalse(
-                outputOnly
-                        .detect(obs("leak in the input", "clean output"), null)
-                        .fired(),
-                "OUTPUT field ignores a match that is only in the input");
-        assertTrue(
-                outputOnly.detect(obs("clean input", "a leak here"), null).fired(),
-                "OUTPUT field fires on a match in the output");
+                "2026-06-11",
+                null);
     }
 
     @Test
     void detect_configJsonOverridesPhrasesFieldAndBoundary() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true, "secret key");
+        RegexDetector d = detector(ClassifierField.OUTPUT, true);
         String config = "{\"phrases\":[\"cat\"],\"field\":\"INPUT\",\"word_boundary\":false}";
         assertTrue(
                 d.detect(obs("the category list", "nothing"), config).fired(),
@@ -90,16 +56,16 @@ class RegexDetectorTest {
     }
 
     @Test
-    void detect_invalidConfigFallsBackToDefaults() {
-        RegexDetector d = detector(ClassifierField.OUTPUT, true, "secret key");
+    void detect_invalidConfigMatchesNothing() {
+        RegexDetector d = detector(ClassifierField.OUTPUT, true);
         Detection fired = d.detect(obs("x", "your secret key here"), "{not valid json");
-        assertTrue(fired.fired(), "malformed config_json falls back to baked default phrases");
+        assertFalse(fired.fired(), "malformed config_json carries no phrases, so nothing fires");
     }
 
     @Test
     void detect_evidenceIsBoundedJsonWithMatchAndPattern() throws Exception {
-        RegexDetector d = detector(ClassifierField.OUTPUT, false, "api key");
-        Detection fired = d.detect(obs("x", "here is the API KEY value"), null);
+        RegexDetector d = detector(ClassifierField.OUTPUT, false);
+        Detection fired = d.detect(obs("x", "here is the API KEY value"), "{\"phrases\":[\"api key\"]}");
         assertTrue(fired.fired(), "fires");
         var evidence = mapper.readTree(fired.evidenceJson());
         assertEquals("API KEY", evidence.get("matched").asText(), "evidence carries the matched span verbatim");
@@ -109,17 +75,33 @@ class RegexDetectorTest {
 
     @Test
     void configKeysOwnedByOtherFeaturesDoNotDisableTheDetector() {
-        // `config_json` is one blob shared across features — the pre-deploy loop keys off `surfaces`
-        // in the same object. The platform mapper is a bare `new ObjectMapper()`, so
-        // FAIL_ON_UNKNOWN_PROPERTIES is ON; before ConfigShape ignored unknowns, one foreign key made
-        // the parse throw, the catch returned null, and the detector fell back to its EMPTY default
-        // phrase list. The signal then matched nothing at all, silently and with nothing logged.
-        RegexDetector detector = detector(ClassifierField.BOTH, false); // no defaults: config is the only source
+        // `config_json` is shared across features (the pre-deploy loop reads `surfaces`), and the mapper fails on
+        // unknown properties: before ConfigShape ignored them, one foreign key made the detector silently match
+        // nothing.
+        RegexDetector detector = detector(ClassifierField.BOTH, false);
         String config = "{\"surfaces\":[\"tool_definition\"],\"phrases\":[\"upstream exploded\"]}";
 
         assertTrue(
                 detector.detect(obs("q", "upstream exploded"), config).fired(),
                 "a foreign config key must not silently disable the phrases");
         assertFalse(detector.detect(obs("q", "all fine"), config).fired());
+    }
+
+    /**
+     * An unknown, blank, or missing field falls back to the detector's own; a blank phrase is skipped, not compiled
+     * to match everything.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"\"headers\"", "\"  \"", "null"})
+    void anUnknownOrBlankFieldFallsBackToTheDetectorsOwnField(String field) {
+        RegexDetector outputOnly = detector(ClassifierField.OUTPUT, true);
+        String config = "{\"phrases\":[\"leak\",\" \"],\"field\":" + field + "}";
+
+        assertFalse(
+                outputOnly
+                        .detect(obs("a leak in the input", "clean output"), config)
+                        .fired(),
+                "the detector's OUTPUT field still applies");
+        assertTrue(outputOnly.detect(obs("clean input", "a leak here"), config).fired());
     }
 }

@@ -1,51 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The pieces the Classifiers surface's three pages share: the findings queue, the detectors page and
- * a finding's own page.
- *
- * They were one file until the queue stopped being a list of everything: a page that shows findings and
- * a page that configures detectors answer different questions and are visited on different days, and the
- * verbs, the labels and the chain sentence are the only things genuinely common to both.
+ * The pieces the Classifiers surface shares: Triage's findings list, the charts page, a classifier's configure page
+ * and a finding's own page. The verbs, the labels and the chain sentence are the things genuinely common to them.
  */
-import type { BehaviorFinding, Classifier } from "../../api/types";
+import type { BehaviorFinding } from "../../api/types";
 import { cn } from "../../ui";
 
 export const CONTAINER: React.CSSProperties = { padding: "36px 40px 56px" };
 
-/** The behaviour-drift detector is the one classifier with a fitted baseline. */
-export const BEHAVIOR_DETECTOR = "behavior_drift";
-
 /**
- * SOP conformance opens findings too: one row per authored rule, served through the same findings
- * endpoint with `causeKind: "sop_conformance"` and the rule slug as its causeKey.
+ * `ClassifierView.readiness` while a classifier that calls a provider is paused: the short label beside the switch
+ * and the sentence in Status. A paused sweep sends nothing until the provider works again.
  */
-export const SOP_CONFORMANCE_DETECTOR = "sop_conformance";
+export const PROVIDER_PAUSES: Record<string, { label: string; explained: string }> = {
+  provider_rejected: {
+    label: "Provider rejected the key",
+    explained:
+      "The provider rejected the stored key, so no messages are being scored. Fix the key under Settings, Providers, then retry.",
+  },
+  request_refused: {
+    label: "Provider refused the request",
+    explained:
+      "The provider accepted the stored key but refused the request itself, so no messages are being scored. Usually the model this classifier is set to is not one the provider serves: check it under Settings, Models, then retry.",
+  },
+  no_provider: {
+    label: "No provider key",
+    explained:
+      "There is no key for the provider this classifier runs on, so no messages are being scored. Add one under Settings, Providers, then retry.",
+  },
+  no_credit: {
+    label: "No credit left",
+    explained:
+      "This organization has used all of its credit on the provider this classifier runs on, so no messages are being scored. Top up that provider, or add another key under Settings, Providers, then retry.",
+  },
+  platform_unavailable: {
+    label: "Provider unavailable",
+    explained:
+      "The provider this classifier runs on is not accepting requests, so no messages are being scored. Nothing needs to change on your side. It retries on its own.",
+  },
+};
 
-/**
- * One section of a detail rail. Sections are separated by a hairline rather than by bare
- * whitespace: five stacked blocks with only margins between them read as one long column of
- * text.
- *
- * <p>Exported here rather than kept file-private in `DetectorsPage.tsx`, so a block that renders
- * a fact grid elsewhere can reuse it. Same reason for {@link Fact}.
- */
-export function RailBlock({ label, meta, children }: { label: string; meta?: string; children: React.ReactNode }) {
-  return (
-    <section className="border-t border-border pt-4.5 mt-4.5">
-      <div className="flex items-baseline gap-2.5 mb-2.5">
-        <h3 className="font-mono text-label uppercase text-muted">{label}</h3>
-        {meta && (
-          <span className="min-w-0 truncate text-subtle text-label">
-            {meta}
-          </span>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** One label/value fact in a rail's fact grid; the `<dl>` wrapper supplies the columns. */
+/** One label/value fact in a fact grid; the `<dl>` wrapper supplies the columns. */
 export function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
@@ -56,15 +51,6 @@ export function Fact({ label, children }: { label: string; children: React.React
         {children}
       </dd>
     </>
-  );
-}
-
-export function SectionLabel({ label, meta }: { label: string; meta?: string }) {
-  return (
-    <div className="flex items-baseline gap-3 mb-2.5 mt-7.5">
-      <h2 className="font-mono text-label uppercase text-muted">{label}</h2>
-      {meta && <span className="text-small text-subtle">{meta}</span>}
-    </div>
   );
 }
 
@@ -142,38 +128,21 @@ export function RunTriageButton({
  * caller renders this only while the finding is still unruled (`!triaged`) — there is no override
  * of a standing ruling any more, machine or human; a cause that disagrees with the traffic again
  * simply opens a fresh finding, which is triaged like any other.
- *
- * <p>Conformance gets one verb. The two-verb split exists to correct a fitted reference (absorbing
- * a gram or re-pinning a baseline teaches the detector that what it saw is normal), and an SOP
- * rule has no such reference to correct: the authored SOP is the reference, and changing it is a
- * repo edit rather than a button here. So resolving simply closes the row, and a deviation that
- * persists opens a fresh one, which is why closing is never suppression.
  */
 export function ResolveVerbs({
-  causeKind,
   busy,
-  deviationLabel = "Confirm and open a case",
   onResolve,
 }: {
-  causeKind: string;
   busy: boolean;
-  deviationLabel?: string;
   onResolve: (action: "expected" | "not_expected") => void;
 }) {
-  if (causeKind === "sop_conformance") {
-    return (
-      <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("expected")}>
-        Resolve
-      </VerbButton>
-    );
-  }
   return (
     <>
       <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("expected")}>
         Absorb as legitimate
       </VerbButton>
       <VerbButton kind="outline" disabled={busy} onClick={() => onResolve("not_expected")}>
-        {deviationLabel}
+        Confirm and open a case
       </VerbButton>
     </>
   );
@@ -220,27 +189,14 @@ export function isClosedByTriage(finding: BehaviorFinding): boolean {
 }
 
 /**
- * Whether this row is the "this has always been broken" claim rather than the "this got worse" one.
- * Only an SOP-conformance finding is ever either.
- */
-export function isBaselineFinding(finding: BehaviorFinding): boolean {
-  return finding.conformanceKind === "baseline";
-}
-
-/**
  * The chain on one line: how much traffic, and what triage made of it.
- *
- * <p>A baseline finding's traffic is not firings. Its count is the population its violations were
- * counted over, once, at fit time, so "seen 257×" would report a fitted fact as a recurring event.
  *
  * <p>No recurrence count any more: a ruling freezes the finding, so a cause that fires again after
  * one opens a fresh finding rather than reopening this one — there is nothing left to count here.
  */
 export function chainWords(finding: BehaviorFinding): string {
   return [
-    isBaselineFinding(finding)
-      ? `${finding.traceCount} applicable turns when the rule was fitted`
-      : `seen ${finding.traceCount}×`,
+    `seen ${finding.traceCount}×`,
     finding.triageStatus === "done"
       ? `${finding.humanVerdictAt != null ? "a person" : "triage"} ruled ${finding.triageVerdict ?? "unknown"}`
       : finding.triageStatus === "in_flight"
@@ -253,47 +209,34 @@ export function chainWords(finding: BehaviorFinding): string {
     .join(" · ");
 }
 
-/** Key fragments that are acronyms, so the generic casing below does not render `sop` as `Sop`. */
-const ACRONYMS = new Set(["sop"]);
-
 /**
- * A detector key as a person would say it: `cost_drift` → `Cost drift`, `sop_conformance` →
- * `SOP conformance`.
+ * A detector key as a person would say it: `cost_drift` → `Cost drift`.
  *
  * <p>The key itself comes from the server on `finding.detector` and is never re-derived here. Three
  * classifiers share one findings table with no column saying which wrote a row, so the mapping is
  * reconstructed from the cause kind and the cause key, and its own javadoc says the two copies that
  * already exist must not drift. A third copy in TypeScript is exactly the drift it warns about.
- *
- * <p>{@link ACRONYMS} is not that third copy: it spells words, not detectors. A key it says nothing
- * about still gets a label, which is the property that keeps this generic: adding a detector never
- * requires touching this file, and only a detector whose name contains an initialism ever does.
  */
 export function detectorLabel(key: string): string {
   return key
     .split("_")
-    .map((word, i) => {
-      if (ACRONYMS.has(word)) return word.toUpperCase();
-      return i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
-    })
+    .map((word, i) => (i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(" ");
 }
 
-/**
- * A detector description's opening sentence, which is the one that says what it watches. The rest
- * (how the bar is set, what it deliberately does not label) belongs on the detectors page, where
- * the full text is shown untouched.
- */
-export function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const end = /[.!?](\s|$)/.exec(trimmed);
-  return end ? trimmed.slice(0, end.index + 1) : trimmed;
+/** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. A window is a story's spine, so it reads as a clock. */
+export function stamp(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${d.toLocaleTimeString(
+    undefined,
+    { hour: "2-digit", minute: "2-digit", hour12: false },
+  )}`;
 }
 
 /** Coarse age: an exact second never changes what you do next. */
 export function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return absoluteDate(iso);
+  if (ms < 0) return absoluteDate(iso);
   const mins = Math.floor(ms / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -306,9 +249,4 @@ export function ago(iso: string): string {
 /** An unambiguous date ("July 1, 2026"), never the locale's all-numeric form. */
 function absoluteDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
-}
-
-/** Detectors that are switched on, in catalog order: the summary card's whole content. */
-export function enabledDetectors(classifiers: Classifier[]): Classifier[] {
-  return classifiers.filter((c) => c.enabled);
 }

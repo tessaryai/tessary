@@ -126,7 +126,7 @@ public class ApiKeyService {
                 Ids.ulid(),
                 projectId,
                 principalId,
-                name == null || name.isBlank() ? "(unnamed)" : name,
+                name,
                 lookupPrefix,
                 hash,
                 Instant.now().toString(),

@@ -17,23 +17,15 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Media garbage collection: bytes nothing references are reclaimed, and bytes something references are
- * not. Before this existed, {@code media_object} only ever grew, and "delete this project's data" left
- * every image behind.
- *
- * <p><b>Why the sweep, and not just the statement.</b> This runs {@link RetentionSweeper#sweep()} because
- * the decision under test is not only the SQL: collection is deliberately OUTSIDE the policy classes, so
- * that a project which keeps its traces for ever still has its unreachable images collected. A test that
- * called the repository directly would pass while the sweeper skipped the project entirely — which is
- * exactly how this would break.
- *
- * <p>Every survival assertion has a twin that proves the pass reached this project at all.
+ * Media GC: unreferenced bytes are reclaimed, referenced ones are not. Before it, {@code media_object} only grew.
+ * Runs {@link RetentionSweeper#sweep()} because collection sits outside the policy classes, so a keep-forever project
+ * still gets collected; calling the repository directly would pass while the sweeper skipped the project. Every
+ * survival assertion has a twin proving the pass reached this project.
  */
 @SpringBootTest
 class MediaCollectionIntegrationTest {
 
-    /** {@link RetentionPinIntegrationTest}'s fingerprint: one context and one database for both, and
-     *  sweeps confined to the database whose other tests already expect them. */
+    /** {@link RetentionPinIntegrationTest}'s fingerprint: one context and database for both. */
     private static final String OLD = Instant.now().minus(30, ChronoUnit.DAYS).toString();
 
     @Autowired
@@ -85,7 +77,7 @@ class MediaCollectionIntegrationTest {
         sweeper.sweep();
         assertTrue(exists(p, image), "still referenced");
 
-        // The first tier of the traces class, which is what will delete this in production.
+        // The traces class's first tier, which deletes this in production.
         jdbc.sql("DELETE FROM span_payload WHERE project_id = :pid AND trace_id = 'trace-aging'")
                 .param("pid", p.id())
                 .update();
@@ -97,13 +89,11 @@ class MediaCollectionIntegrationTest {
                         + " reason retention deleting payloads first used to strand media for ever");
     }
 
-    // ---- fixtures ------------------------------------------------------------------------------
-
     private Project project(String name) {
         return TenantFixture.bootstrap(tenants, name).project();
     }
 
-    /** A trace, span and payload fresh enough that no policy tier touches them during the test. */
+    /** Fresh enough that no policy tier touches it during the test. */
     private void payload(Project p, String traceId, String spanId) {
         String at = Instant.now().toString();
         jdbc.sql("INSERT INTO trace (project_id, id, started_at, event_ts)"

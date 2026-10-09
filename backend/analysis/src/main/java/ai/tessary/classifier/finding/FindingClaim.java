@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -41,16 +42,15 @@ public record FindingClaim(
         return FindingPayload.count(evidenceCountsJson, role);
     }
 
+    /** A top-level number off the classifier's payload, 0 when absent or not a number. */
+    public double payloadNumber(String key) {
+        JsonNode node = FindingPayload.tree(payloadJson).path(key);
+        return node.isNumber() ? node.asDouble() : 0.0;
+    }
+
     /** The classifier's own cause key, with the uniqueness scope stripped back off. */
     public String nativeCauseKey() {
         String native0 = FindingPayload.text(payloadJson, "native_cause_key");
         return native0 == null ? causeKey : native0;
-    }
-
-    /** The classifier family's own name for the shape it saw, falling back to {@link #classifierKey}
-     *  for a family that has no such taxonomy — see {@link FindingRow#causeKind}. */
-    public String causeKind() {
-        String kind = FindingPayload.text(payloadJson, "cause_kind");
-        return kind == null ? classifierKey : kind;
     }
 }

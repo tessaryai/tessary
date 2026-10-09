@@ -4,18 +4,6 @@
 // Dev-only, trimmed pipeline: receive OTLP from the backend, keep the gen_ai
 // (judge) + run-root spans, push them to Langfuse. Nothing else.
 //
-// Why a separate file instead of reusing the prod config.alloy: the prod config
-// also ships to Grafana Cloud (Tempo/Loki/Prometheus) and scrapes host metrics.
-// Two of those components are *fatal config-evaluation errors* when run without
-// the prod host mounts / SSM creds — they take the whole agent down on load, not
-// "back off at runtime" as once assumed:
-//   - prometheus.exporter.unix.host  needs /host/proc + /host/sys (prod bind-mounts
-//     /proc and /sys; dev intentionally does not) → "could not read /host/proc".
-//   - otelcol.auth.basic.grafana_cloud_tempo  needs non-empty creds → "no credential
-//     source provided" when GRAFANA_CLOUD_* are blank locally.
-// Dropping both (and the unused Grafana Cloud exporters) leaves a clean local
-// pipeline that boots with just the Langfuse keys.
-//
 // Required environment (from repo-root .env, the same keys the pull-ingest adapter uses):
 //   LANGFUSE_OTLP_ENDPOINT   base OTLP URL, e.g. https://cloud.langfuse.com/api/public/otel
 //   LANGFUSE_PUBLIC_KEY      Langfuse project public key (pk-lf-...)
@@ -203,8 +191,7 @@ otelcol.exporter.otlphttp "langfuse" {
 }
 
 otelcol.auth.basic "langfuse" {
-  // coalesce()-wrapped like the endpoint above and like config.alloy's parallel block
-  // (config.alloy:155-156) — blank credentials are otherwise a FATAL
+  // coalesce()-wrapped like the endpoint above — blank credentials are otherwise a FATAL
   // config-evaluation error ("no credential source provided"), not a runtime 401,
   // taking the whole agent down on load exactly like the endpoint bug this file's own
   // header already documents. Caught by an independent live-boot re-verification with

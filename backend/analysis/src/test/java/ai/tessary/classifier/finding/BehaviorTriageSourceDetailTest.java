@@ -6,10 +6,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView.TriageStatus;
 import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
 import java.util.List;
@@ -80,42 +81,23 @@ class BehaviorTriageSourceDetailTest {
                 null,
                 null,
                 null,
-                null,
-                TestObjectProvider.of(List.of()),
-                null,
                 mock(MalformedOutputDetailService.class),
-                mock(SecretLeakDetailService.class));
+                mock(SecretLeakDetailService.class),
+                mock(FrustrationDetailService.class),
+                null,
+                mock(GroundednessDetailService.class));
     }
 
     private static FindingRow escalatedRow(String id) {
-        return new FindingRow(
-                id,
-                PROJECT,
-                BuiltInDetector.Kind.BEHAVIOR_DRIFT,
-                "cause:" + id,
-                FindingRow.SubjectKind.BEHAVIOR_PROFILE,
-                "prof_1",
-                null,
-                null,
-                FindingRow.Status.OPEN,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z",
-                null,
-                null,
-                null,
-                3,
-                "{\"cause_kind\":\"behavior_drift\"}",
-                null,
-                null,
-                "2026-08-02T00:00:00Z", // escalated_at: handed to triage
-                null,
-                null,
-                null,
-                null,
-                null, // triaged_at: no ruling came back
-                null,
-                null,
-                "2026-08-01T00:00:00Z",
-                "2026-08-02T00:00:00Z");
+        return FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .id(id)
+                .projectId(PROJECT)
+                .causeKey("cause:" + id)
+                .subject(FindingRow.SubjectKind.CLASSIFIER, "clf_1")
+                .dated("2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z")
+                .sampleCount(3)
+                .payload("{\"cause_kind\":\"behavior_drift\"}")
+                .escalatedAt("2026-08-02T00:00:00Z")
+                .build();
     }
 }

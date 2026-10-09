@@ -7,8 +7,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Runs one agentic RCA investigation in an environment that can clone the target repo, materialize
  * the finding's evidence dossier, and execute the agent over it. {@link E2bRcaSandbox} drives an E2B
- * microVM via the launcher sidecar. Selected by {@code tessary.rca.agentic.sandbox}, mirroring the
- * observer's {@code AnalysisSandbox}/{@code tessary.observer.agentic.sandbox}.
+ * microVM via the launcher sidecar. Selected by {@code tessary.rca.agentic.sandbox}.
  */
 public interface RcaSandbox {
 
@@ -16,9 +15,9 @@ public interface RcaSandbox {
     String key();
 
     /**
-     * Run the agent over the finding's evidence and (when the project has one) its repository. Unlike
-     * {@code AnalysisSandbox}'s fail-open contract, this always either returns a completed run or
-     * throws {@link ai.tessary.open.errors.TessaryException} — a user-triggered RCA must stamp
+     * Run the agent over the finding's evidence and (when the project has one) its repository. This
+     * is not fail-open: it always either returns a completed run or throws {@link
+     * ai.tessary.open.errors.TessaryException} — a user-triggered RCA must stamp
      * {@code failed} rather than silently degrade to a bogus "inconclusive" verdict.
      */
     SandboxRun run(SandboxRequest req);
@@ -49,8 +48,8 @@ public interface RcaSandbox {
             Map<String, String> files,
             String prompt,
             String jsonSchema,
-            @Nullable String mcpUrl,
-            @Nullable String mcpToken,
+            String mcpUrl,
+            String mcpToken,
             String reportId) {}
 
     /** The agent's run: {@code resultText} is its final message (the schema-constrained JSON). */

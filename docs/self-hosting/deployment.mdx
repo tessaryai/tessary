@@ -7,7 +7,7 @@ description: "Understand the single-node Docker Compose topology behind a self-h
 
 A self-hosted Tessary deployment runs as a single-node Docker Compose stack. One host runs every service, and Caddy, bundled inside the frontend container, is the only entry point.
 
-Caddy terminates TLS (Transport Layer Security) and serves the static frontend build directly. It proxies a defined set of paths to the backend: the API, auth, MCP (Model Context Protocol), webhook, GitHub callback, trace-ingest, and query-API paths. Every other request is the SPA (single-page application) itself.
+Caddy terminates TLS (Transport Layer Security) and serves the static frontend build directly. It proxies a defined set of paths to the backend: the API, auth, MCP (Model Context Protocol), GitHub callback, trace-ingest, and query-API paths. Every other request is the SPA (single-page application) itself.
 
 The backend is a Spring Boot service running on the JVM (Java Virtual Machine), using Project Loom virtual threads instead of a traditional thread pool. Postgres 16, with the pgvector extension, is the only datastore in the stack. Nothing else in the topology holds data.
 
@@ -15,7 +15,7 @@ The backend is a Spring Boot service running on the JVM (Java Virtual Machine), 
 flowchart LR
     client[Client] -->|HTTP or HTTPS| caddy[Caddy in frontend container]
     caddy -->|static build| client
-    caddy -->|API, auth, MCP, webhook,\nGitHub callback, trace-ingest,\nquery-API paths| backend[Backend: Spring Boot on JVM]
+    caddy -->|API, auth, MCP,\nGitHub callback, trace-ingest,\nquery-API paths| backend[Backend: Spring Boot on JVM]
     backend --> postgres[(Postgres 16 + pgvector)]
 ```
 

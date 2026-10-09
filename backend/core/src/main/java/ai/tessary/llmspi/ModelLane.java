@@ -8,25 +8,20 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Locale;
 
 /**
- * The distinct jobs the platform runs an LLM for, each independently pointable at a model + tier in
- * a project's settings.
+ * The distinct jobs the platform runs an LLM for, each independently pointable at a model in a
+ * project's settings.
  *
- * <p>The lanes fall into two {@link LaneGroup}s, split by how the platform reaches the model rather
- * than by what the work is for. {@link LaneGroup#LLM_CALLS} lanes are requests this codebase
- * composes and sends: we own the prompt, the tools and the response format, the call is one round
- * trip, and a Bedrock service tier rides on it. {@link LaneGroup#AGENT_VM} lanes hand an
- * inference-profile id to an agent inside an E2B microVM and never see the request: there is no
- * request of ours for a tier to attach to, and the model has to sustain a long tool-use loop over a
- * repository or a dossier, a capability bar the other group does not have.
+ * <p>The lanes fall into {@link LaneGroup}s, split by how the platform reaches the model rather than
+ * by what the work is for. {@link LaneGroup#AGENT_VM} lanes hand an inference-profile id to an agent
+ * inside an E2B microVM and never see the request: the model has to sustain a long tool-use loop over
+ * a repository or a dossier, and an AGENT_VM lane runs once per mover or per cause, so it is worth a
+ * frontier model. {@link LaneGroup#DECISION_CALLS} lanes ask a hosted decision model one typed
+ * question per observation; the provider is the whole choice there, since each serves one decision
+ * model.
  *
- * <p>That boundary is also a cost/latency boundary: an {@link LaneGroup#LLM_CALLS} lane runs per
- * trace or per keystroke and is the natural home for a cheap fast model, while an
- * {@link LaneGroup#AGENT_VM} lane runs once per mover or per cause and is worth a frontier one.
- *
- * <p>These lanes always run on the org's own credential; there is no platform-funded path. Every
- * RCA/TRIAGE run resolves an org {@code ProviderCredential} for its provider (Bedrock/mantle by
- * default, or one of the four OpenAI-compat providers) and injects it into the sandbox request; see
- * {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
+ * <p>These lanes run on the org's own credential, or on the {@code PLATFORM} provider when the
+ * deployment supplies one. Every RCA/TRIAGE/AUTHORING run resolves a credential for its provider and injects it
+ * into the sandbox request; see {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
  * lanes entirely and bills the customer's own provider credential.
  */
 public enum ModelLane {
@@ -59,7 +54,32 @@ public enum ModelLane {
             "triage",
             "Triage",
             "Rules whether a finding is a real deviation. Runs an agent per cause, in a sandbox.",
-            LaneGroup.AGENT_VM);
+            LaneGroup.AGENT_VM),
+
+    /**
+     * Writing a custom classifier from a description: the coding agent in a microVM reads the
+     * project's repository and recent traces over MCP and returns the classifier's builder and
+     * question. Runs once per authoring request, pressed by a person, so it is sized like RCA and
+     * offers exactly RCA's models in RCA's order.
+     */
+    AUTHORING(
+            "authoring",
+            "Authoring",
+            "Writes a classifier's builder and question from a description, reading the repository and recent"
+                    + " traces",
+            LaneGroup.AGENT_VM),
+
+    /**
+     * The Frustration classifier's per-turn question to TypeSafe's Jev: direct, over OpenRouter, or on
+     * the deployment's own provider. Runs once per eligible user turn, so the price per thousand turns
+     * is what matters.
+     */
+    FRUSTRATION(
+            "frustration",
+            "Frustration",
+            "Scores each eligible user turn with a decision model. Runs per turn, so price per 1k turns is what"
+                    + " matters.",
+            LaneGroup.DECISION_CALLS);
 
     private final String wire;
     private final String label;
@@ -95,16 +115,6 @@ public enum ModelLane {
     }
 
     /**
-     * Whether a {@link ServiceTier} is meaningful for this lane. Answered by the group, because it is
-     * a fact about how the platform reaches the model rather than about the job: offering a Flex
-     * dropdown on an agent lane would be a control that silently does nothing, so the settings UI
-     * hides it and writes get clamped to Standard (see {@code ProjectModelSettings#set}).
-     */
-    public boolean tiered() {
-        return group.tiered();
-    }
-
-    /**
      * Whether this lane's model has to be able to drive the coding agent in a sandbox, true exactly
      * for {@link LaneGroup#AGENT_VM}. Those sandboxes ask the model to sustain a long tool-use loop
      * over a repo or a dossier, so a model that is a fine choice for every other lane can still be an
@@ -112,6 +122,15 @@ public enum ModelLane {
      */
     public boolean agentic() {
         return group == LaneGroup.AGENT_VM;
+    }
+
+    /**
+     * Whether this lane runs a hosted decision model rather than a chat model, true exactly for
+     * {@link LaneGroup#DECISION_CALLS}. A decision lane takes only decision models and no other lane
+     * takes one; the settings validator enforces both directions.
+     */
+    public boolean decision() {
+        return group == LaneGroup.DECISION_CALLS;
     }
 
     /**

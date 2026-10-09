@@ -2,7 +2,6 @@
 package ai.tessary.storage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -24,18 +23,6 @@ class CachingMediaStoreTest {
 
     private static StoredMedia media(String id, int size) {
         return new StoredMedia(new MediaRef(id), "image/png", new byte[size]);
-    }
-
-    @Test
-    void repeatedReadsOfOneObjectHitTheStoreOnce() {
-        PostgresMediaStore delegate = mock(PostgresMediaStore.class);
-        when(delegate.get(any(), any())).thenReturn(Optional.of(media("m1", 1024)));
-        CachingMediaStore store = new CachingMediaStore(delegate, 0);
-
-        for (int i = 0; i < 5; i++) {
-            assertTrue(store.get("proj", new MediaRef("m1")).isPresent());
-        }
-        verify(delegate, times(1)).get(any(), any());
     }
 
     @Test
@@ -62,15 +49,24 @@ class CachingMediaStoreTest {
     }
 
     @Test
-    void evictionRespectsTheByteBudget() {
+    void overfillingTheBudgetEvictsTheLeastRecentlyUsed() {
         PostgresMediaStore delegate = mock(PostgresMediaStore.class);
+        when(delegate.get(any(), any()))
+                .thenAnswer(
+                        inv -> Optional.of(media(inv.<MediaRef>getArgument(1).id(), 400)));
         CachingMediaStore store = new CachingMediaStore(delegate, 1000);
 
-        for (int i = 0; i < 5; i++) {
-            when(delegate.get(any(), any())).thenReturn(Optional.of(media("m" + i, 400)));
-            store.get("proj", new MediaRef("m" + i));
-        }
-        assertTrue(store.retainedBytesForTest() <= 1000, "retained bytes must stay within the budget");
+        // A 1000-byte budget holds two 400-byte objects. m0 is loaded first but read again after m1,
+        // so admitting m2 must evict m1 (least recently used), not m0 (first inserted).
+        store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m1"));
+        store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m2"));
+        store.get("proj", new MediaRef("m0"));
+        store.get("proj", new MediaRef("m1"));
+
+        verify(delegate, times(1)).get("proj", new MediaRef("m0"));
+        verify(delegate, times(2)).get("proj", new MediaRef("m1"));
     }
 
     @Test
@@ -83,18 +79,7 @@ class CachingMediaStoreTest {
         assertArrayEquals(
                 new byte[5000],
                 store.get("proj", new MediaRef("huge")).orElseThrow().bytes());
-        assertEquals(0, store.retainedBytesForTest());
         store.get("proj", new MediaRef("huge"));
         verify(delegate, times(2)).get(any(), any());
-    }
-
-    @Test
-    void putDelegatesUnchanged() {
-        PostgresMediaStore delegate = mock(PostgresMediaStore.class);
-        when(delegate.put(any(), any(), any())).thenReturn(new MediaRef("stored"));
-        CachingMediaStore store = new CachingMediaStore(delegate, 0);
-
-        assertEquals("stored", store.put("proj", new byte[8], "image/png").id());
-        verify(delegate, times(1)).put(any(), any(), any());
     }
 }

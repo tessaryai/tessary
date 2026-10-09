@@ -22,7 +22,7 @@ CLOSED and answers 401: an unconfigured WorkOS is the normal state of a self-hos
 instance and must not be read as consent to serve it open, and the open edition always
 has a working provider (`PasswordAuthProvider`) anyway, so "no provider configured" is no longer a
 real state. The dev stack and the test suite both set the flag explicitly. In the `production`
-profile, `AuthRequiredInProdGuard` refuses to boot with no provider at all.
+profile, `AuthRequiredInProdGuard` refuses to boot without `TESSARY_AUTH_COOKIE_PASSWORD`.
 
 ## One key store
 
@@ -36,7 +36,11 @@ All project-scoped bearer tokens live in the `api_key` table and are issued/veri
 | `admin` | `tsy_a_…` | Superset: write + query + `/mcp` tools |
 
 MCP token UI (`McpTokenController`) and the plugin device-link handshake mint **admin**-scoped
-keys via `ApiKeyService.issue(...)`. `AuthFilter` / `BearerTokenAuthenticator` verify any live
+keys via `ApiKeyService.issue(...)`. So do the three agent lanes, one short-lived key per run, revoked
+in a `finally`: `rca-<job id>` (`AgenticRcaEngine`, issued to the person who pressed Run RCA),
+`triage-<finding id> (system)` (`BehaviorTriageEngine`) and `<lane>-<subject id> (system)`
+(`agentrun/AgentRunService`, `authoring-…` for the authoring lane), the last two issued to the
+project org's earliest owner because nobody pressed them. `AuthFilter` / `BearerTokenAuthenticator` verify any live
 key and populate `TenantContext`; MCP tools always read `ctx.projectId()`.
 
 **Verification is cached, and every revocation path must evict.** `ApiKeyService.verify` answers a
@@ -85,16 +89,13 @@ lanes take. It is scoped and gated exactly like `get_finding` (same service, sam
 cross-tenant id reads as not-found), and there is deliberately **no server-side sampling mode**: an
 agent that wants a stride or a draw takes it and says so in its citation.
 
-Each tool declares the capability an org must hold to be offered it (`McpTool.capability`), and
-`tools/list` answers per-token from that — so a partner is never shown a tool that cannot work for
-them, and a call to a withheld tool reads as unknown rather than forbidden. The line: the launch
-product's own output is open (project, imported taxonomy, cases and the RCA reports they carry,
-findings, query, the substrate list/read tools). The full catalogue is **19 tools, and every one of
-them is open** — `McpTool.capability` is null on all of them. It was 22 with two gated on `GRADERS`
-until grading was deleted and took three with it: `list_graders` and `get_grader` (the gated pair)
-plus the open `list_quality_dimensions`, whose axes each named a grader; the mechanism stays, because
-a paid classifier's own reads are the obvious next thing to want it. `McpCapabilityGateTest` pins the
-count alongside the read-only invariant.
+The launch product's own output is open (project, imported taxonomy, cases and the RCA reports they
+carry, findings, query, the substrate list/read tools). The full catalogue is **20 tools, and every
+one of them is open**: `tools/list` returns all of them for any valid token. It was 22 with two gated
+on `GRADERS` until grading was deleted and took three with it: `list_graders` and `get_grader` (the
+gated pair) plus the open `list_quality_dimensions`, whose axes each named a grader. The per-tool
+capability field went later, once no tool declared one. `McpCapabilityGateTest` pins the count
+alongside the read-only invariant.
 
 **No MCP tool is RCA-gated.** `Capability.RCA` used to gate five of them, for spend — `run_triage`
 started a platform-paid agent session. Now that a finished report reaches MCP inlined on the case
@@ -115,7 +116,14 @@ RCA-minted keys alone: `TenantContext` carries no marker for the key family and 
 coarse to tell them apart, and a firewall that depends on identifying its caller is a firewall with
 a bypass. What the surface loses is a ruling a human can see one click away in the UI, which reads
 these fields through `FindingController` (renamed from `BehaviorController`) and is untouched. Background:
-[`architecture.md`](./architecture.md) § *The three analysis layers*.
+[`architecture.md`](./architecture.md) § *The three analysis layers*. On a frustration finding or case, the
+`frustration` block goes out with its `conversations` list emptied (`FrustrationDetail.withoutIds()`), so
+no conversation or trace id reaches a caller through it; `get_finding_evidence` still pages the refs.
+On a groundedness finding or case, the `groundedness` block goes out the same way
+(`GroundednessDetail.withoutIds()`): `rate`, `flagThreshold`, `baselineTraces`, `learningUntil`, and
+`arlTarget` survive, and `answers` is emptied and `answersNextCursor` nulled, so no flagged answer's
+trace or span id reaches a caller through it. Its `rate.failingTraces` is always empty, because the
+groundedness rate is read off the finding's flat payload rather than enumerated.
 
 **`get_finding` carries a second, separate redaction: no sample, no trace or span id of any kind.**
 It is a complete SUMMARY of every number a finding's classifier measured — a tool-error shift's
@@ -126,16 +134,17 @@ the server, on both the RCA and the triage lane. `McpToolRegistry#agentView` is 
 same method that strips the triage ruling above); `McpFindingToolsTest` pins it. The UI's own `GET
 /findings/{id}` renders `BehaviorFindingDetailView` unstripped — a human following a link is a
 reading aid, not an undeclared sample presented as the whole population, which is what handing an
-agent a handful of ids would be. `get_finding_evidence` is where an agent gets ids on purpose, one
-row per unit the detector measured, never a sample.
+agent a handful of ids would be. `get_case` applies the same stripping to its `tool_error`,
+`malformed_output`, `secret_leak`, `frustration`, and `groundedness` blocks and returns `exemplars` empty, since those are the
+finding's evidence rows; the UI's `GET /cases/{id}` keeps every id. `get_finding_evidence` is where
+an agent gets ids on purpose, one row per unit the detector measured, never a sample.
 
 ## Known limitations
 
-- **`list_findings` truncates silently.** Each `TriageSource` (`BehaviorTriageSource`, and
-  `ConformanceTriageSource` where the paid conformance classifier is enabled) caps its own page at
-  its own `DEFAULT_FINDING_LIMIT = 200` — no `limit`/`cursor` args — and `FindingService` just
-  concatenates every source's page, so the total returned scales with the number of registered
-  sources (200 per source; up to 400 with conformance enabled). Nothing in the response marks the
+- **`list_findings` truncates silently.** Each `TriageSource` (`BehaviorTriageSource` in this tree)
+  caps its own page at its own `DEFAULT_FINDING_LIMIT = 200` — no `limit`/`cursor` args — and
+  `FindingService` just concatenates every source's page, so the total returned scales with the
+  number of registered sources (200 per source). Nothing in the response marks the
   list as partial. A project with more confirmed findings than the effective cap gets that many
   back with no signal that they aren't all of them.
 - **The resolved-case page sorts, not seeks.** `list_cases` orders open/muted cases off

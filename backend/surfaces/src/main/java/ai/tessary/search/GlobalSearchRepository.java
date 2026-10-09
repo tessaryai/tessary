@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.search;
 
+import static ai.tessary.storage.SpanPayloadRepository.PAYLOAD_TSVECTOR;
+
 import ai.tessary.search.GlobalSearchDtos.HitType;
 import ai.tessary.search.GlobalSearchDtos.SearchHit;
 import java.util.ArrayList;
@@ -27,8 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
  * keep these predicates index-assisted as content grows — most importantly on
  * {@code span_payload}, which holds the bytes.
  *
- * <p><b>The span leg's tsvector expression is copied character for character from migration 0077, and
- * must stay that way.</b> Postgres matches an expression index only against a syntactically identical
+ * <p><b>The span leg's tsvector expression is {@code SpanPayloadRepository.PAYLOAD_TSVECTOR}, shared with the
+ * traces search, and must stay the index's exact text.</b> With {@code p.project_id = :pid} it is served by
+ * {@code ix_span_payload_project_fts}. Postgres matches an expression index only against a syntactically identical
  * expression. The index is
  * {@code to_tsvector('simple', left(coalesce(input,''),100000) || ' ' || left(coalesce(output,''),100000))};
  * writing {@code 'english'} instead of {@code 'simple'}, or {@code left(…, 100_000)} spelled any other
@@ -58,23 +61,16 @@ import org.springframework.transaction.annotation.Transactional;
  * the fan-out runs inside one transaction that issues {@code set_config(…, is_local => true)} once up
  * front, so the lowered threshold is scoped to exactly this query and reset at commit.
  *
- * <p>Relevance is the composite {@code ts_rank(...) + word_similarity(:q, name) * }{@value #TRIGRAM_WEIGHT}:
+ * <p>Relevance is the composite {@code ts_rank(...) + word_similarity(:q, name) * 0.3}:
  * an exact FTS hit always outranks a pure-trigram one, since the trigram term is capped at
- * {@value #TRIGRAM_WEIGHT} while a genuine full-text match contributes a positive {@code ts_rank} on top of
- * its own (typically high) word similarity.
+ * 0.3 while a genuine full-text match contributes a positive {@code ts_rank} on top of
+ * its own (typically high) word similarity. The full-text leg ranks at most {@value #PAYLOAD_CANDIDATE_LIMIT}
+ * matching payloads, because {@code ts_rank} re-parses each one.
  *
  * <p>This is a pure READ surface — it never writes to any store.
  */
 @Repository
 public class GlobalSearchRepository {
-
-    /**
-     * Weight applied to the {@code word_similarity(:q, name)} term (range 0..1) when blending it into the
-     * composite relevance score. Kept &lt; the floor of a real {@code ts_rank} match so an exact full-text hit
-     * always sorts above a pure-trigram (typo/prefix) hit, while still ordering trigram-only hits among
-     * themselves by how close the name is.
-     */
-    static final double TRIGRAM_WEIGHT = 0.3;
 
     /**
      * Minimum {@code word_similarity(:q, name)} for a row to qualify as a trigram (typo/prefix) match.
@@ -85,6 +81,14 @@ public class GlobalSearchRepository {
      * index.
      */
     static final double TRIGRAM_THRESHOLD = 0.4;
+
+    /**
+     * How many matching payloads the full-text leg ranks. {@code ts_rank} cannot read the index: it re-parses each
+     * payload, at about 0.1 to 0.6 ms a payload, so ranking every match of a word like {@code content} (a key in
+     * every chat message) took 17.7 s on 31,000 spans. 200 bounds a broad word near 100 ms. A broad word therefore
+     * ranks the first 200 matches the scan finds, not the best 200 of all of them.
+     */
+    static final int PAYLOAD_CANDIDATE_LIMIT = 200;
 
     private final JdbcClient jdbc;
 
@@ -118,21 +122,12 @@ public class GlobalSearchRepository {
     }
 
     /**
-     * The exact indexed expression from migration 0077's {@code ix_span_payload_fts}. Any divergence —
-     * a different text-search config, a differently-spelled cap, an added column — silently drops the
-     * index and sequentially scans every payload in the project. Kept as one constant so the two places
-     * that need it (the filter and the rank) cannot drift from each other either.
-     */
-    private static final String PAYLOAD_TSVECTOR = "to_tsvector('simple', "
-            + "left(coalesce(p.input, ''), 100000) || ' ' || left(coalesce(p.output, ''), 100000))";
-
-    /**
      * Trace matches over the substrate: the payload full-text leg plus the span-name trigram leg, scoped
      * to {@code projectId}. Both {@code span} and {@code span_payload} carry their own {@code project_id},
      * so the tenant boundary is a direct filter on each — no join upward.
      *
      * <p><b>Two statements, not one OR.</b> The full-text predicate is served by
-     * {@code ix_span_payload_fts} on {@code span_payload} and the trigram predicate by
+     * {@code ix_span_payload_project_fts} on {@code span_payload} and the trigram predicate by
      * {@code ix_span_name_trgm} on {@code span}. OR-ing them across the join gives the planner a choice
      * between two indexes on two different tables and it resolves that by scanning; issued separately,
      * each leg is driven by its own index and the results merge here.
@@ -157,16 +152,22 @@ public class GlobalSearchRepository {
         return hits.size() > limit ? List.copyOf(hits.subList(0, limit)) : List.copyOf(hits);
     }
 
-    /** The full-text leg: {@code span_payload} matched through {@code ix_span_payload_fts}. */
+    /**
+     * The full-text leg: {@code span_payload} matched through {@code ix_span_payload_project_fts}, and only the first
+     * {@link #PAYLOAD_CANDIDATE_LIMIT} matches ranked. The inner {@code LIMIT} is what bounds the cost; ranking in the
+     * same statement as the match would rank every match before the outer {@code LIMIT} applies.
+     */
     private List<SearchHit> searchSpansByPayloadText(String projectId, String query, int limit) {
         return jdbc.sql("SELECT s.trace_id, s.name, p.input,"
                         + " ts_rank(" + PAYLOAD_TSVECTOR + ", plainto_tsquery('simple', :q))"
                         + " + word_similarity(:q, coalesce(s.name, '')) * 0.3 AS score"
+                        + " FROM (SELECT p.project_id, p.trace_id, p.span_id, p.input, p.output"
                         + " FROM span_payload p"
-                        + " JOIN span s ON s.project_id = p.project_id AND s.trace_id = p.trace_id"
-                        + " AND s.id = p.span_id"
                         + " WHERE p.project_id = :pid"
                         + " AND " + PAYLOAD_TSVECTOR + " @@ plainto_tsquery('simple', :q)"
+                        + " LIMIT " + PAYLOAD_CANDIDATE_LIMIT + ") p"
+                        + " JOIN span s ON s.project_id = p.project_id AND s.trace_id = p.trace_id"
+                        + " AND s.id = p.span_id"
                         + " ORDER BY score DESC, s.trace_id ASC"
                         + " LIMIT :lim")
                 .param("pid", projectId)

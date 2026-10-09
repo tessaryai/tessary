@@ -73,9 +73,7 @@ public class DetectionTableRegistry {
         return tables().stream()
                 .map(this::arm)
                 .reduce((a, b) -> a + " UNION ALL " + b)
-                .orElse("SELECT NULL"
-                        + " WHERE false"); // no registered tables (a degenerate classpath): an empty, well-typed
-        // relation
+                .orElseThrow();
     }
 
     private String arm(DetectionTable t) {

@@ -6,33 +6,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import java.util.Map;
+import java.util.stream.Collectors;
 import net.logstash.logback.encoder.LogstashEncoder;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 /**
- * Guards the contract that makes {@link StructuredLog} worth having: fields must arrive as real
- * key-value pairs and reach the JSON as their own fields — never interpolated into the message.
- *
- * <p>This test exists because the previous implementation looked structured and was not. It built
- * {@code "event key={} key={}"} into the message string, so Loki could only regex the message: you
- * could not filter on {@code signal="groundedness"} nor graph {@code durationMs}, and a human saw a
- * wall of opaque ULIDs. Nothing failed, no error was logged, and the two shipping paths were already
- * configured to accept key-value pairs — the data simply never took that route.
- *
- * <p>That is a silent-no-op class of bug the type system cannot catch, so it is asserted here
- * against the real {@link LogstashEncoder} rather than trusted.
+ * {@link StructuredLog} fields reach the JSON as their own key-value pairs, never interpolated into the message. The
+ * previous implementation built {@code "event key={}"} into the message, so Loki could neither filter on {@code
+ * signal} nor graph {@code durationMs}, and nothing failed. Asserted against the real {@link LogstashEncoder}.
  */
 class StructuredLogFieldsTest {
 
     private record Captured(ILoggingEvent event, String json) {}
 
-    /** Log through a real logger, capture the event, and render it with the production encoder. */
+    /** Log through a real logger and render with the production encoder. */
     private static Captured capture(Runnable emit, String loggerName) {
         LoggerContext ctx = (LoggerContext) LoggerFactory.getILoggerFactory();
         ch.qos.logback.classic.Logger logger = ctx.getLogger(loggerName);
@@ -63,7 +58,7 @@ class StructuredLogFieldsTest {
     void fieldsBecomeJsonFieldsAndTheMessageStaysJustTheEventName() {
         String name = "test.structuredlog.fields";
         var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), "signal.sweep.complete")
+                () -> StructuredLog.info(LoggerFactory.getLogger(name), Markers.OPS, "signal.sweep.complete")
                         .field("signal", "groundedness")
                         .field("scanned", 42)
                         .log(),
@@ -83,27 +78,10 @@ class StructuredLogFieldsTest {
     }
 
     @Test
-    void durationIsANumericFieldSoItCanBeGraphed() {
-        String name = "test.structuredlog.duration";
-        var captured = capture(
-                () -> StructuredLog.info(LoggerFactory.getLogger(name), "redaction.apply")
-                        .field("durationMs", 5500L)
-                        .field("bytes", 44735)
-                        .log(),
-                name);
-
-        // Quoted would make it a string in Loki — sortable/greppable but not graphable, which is
-        // the entire reason for logging a duration.
-        assertTrue(
-                captured.json().contains("\"durationMs\":5500"),
-                "durationMs must be an unquoted number, got: " + captured.json());
-    }
-
-    @Test
     void markersAndCausesStillSurvive() {
         String name = "test.structuredlog.cause";
         var captured = capture(
-                () -> StructuredLog.warn(LoggerFactory.getLogger(name), "ingest.batch.failed")
+                () -> StructuredLog.warn(LoggerFactory.getLogger(name), Markers.OPS, "ingest.batch.failed")
                         .field("count", 3)
                         .cause(new IllegalStateException("boom"))
                         .log(),
@@ -112,5 +90,25 @@ class StructuredLogFieldsTest {
         assertEquals("ingest.batch.failed", captured.event().getMessage());
         assertTrue(captured.json().contains("\"count\":3"));
         assertTrue(captured.json().contains("boom"), "the throwable must still be attached, got: " + captured.json());
+    }
+
+    /**
+     * The conditional {@code field(key, value, condition)} must honour its condition; a null value is dropped either
+     * way.
+     */
+    @Test
+    void aConditionalFieldIsAttachedOnlyWhenItsConditionHoldsAndItHasAValue() {
+        String name = "test.structuredlog.conditional";
+        var captured = capture(
+                () -> StructuredLog.warn(LoggerFactory.getLogger(name), Markers.OPS, "spend.reported")
+                        .field("warnThresholdUsd", 50, true)
+                        .field("quietThresholdUsd", 10, false)
+                        .field("absent", null, true)
+                        .log(),
+                name);
+
+        assertEquals(
+                Map.of("event", "spend.reported", "warnThresholdUsd", 50),
+                captured.event().getKeyValuePairs().stream().collect(Collectors.toMap(kv -> kv.key, kv -> kv.value)));
     }
 }

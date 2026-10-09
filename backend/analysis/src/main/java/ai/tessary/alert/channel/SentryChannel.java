@@ -3,7 +3,6 @@ package ai.tessary.alert.channel;
 
 import ai.tessary.alert.AlertChannelKind;
 import ai.tessary.alert.AlertEventRow;
-import ai.tessary.alert.AlertRuleRow;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -57,18 +56,13 @@ public class SentryChannel implements AlertChannel {
         body.put("timestamp", event.occurredAt());
         body.put("platform", "other");
         body.put("logger", "tessary.alert");
-        body.put("level", AlertRuleRow.RuleType.THRESHOLD.equals(event.ruleType()) ? "warning" : "info");
+        body.put("level", "info");
         body.put("message", AlertPayload.summary(event, mapper));
         ArrayNode fp = body.putArray("fingerprint");
         fp.add(AlertPayload.dedupKey(event));
         body.set("extra", AlertPayload.envelope(event, mapper));
 
-        String json;
-        try {
-            json = mapper.writeValueAsString(body);
-        } catch (Exception e) {
-            return DeliveryResult.failure(null, "could not serialize sentry event");
-        }
+        String json = body.toString();
 
         // Sentry classic auth header. The secret key is optional for event ingestion.
         String auth = "Sentry sentry_version=7, sentry_client=tessary/1.0, sentry_key=" + publicKey;

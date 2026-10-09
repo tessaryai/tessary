@@ -16,13 +16,20 @@
  *                                                    -> { raw: "<agent stdout>" }  Layer-2 ruling over
  *                                                    the finding's dossier + the platform's MCP surface.
  *                                                    The one agentic route with NO clone — see runTriage.
+ *   POST /authoring { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
+ *                     timeout_ms }
+ *                                                    -> { raw: "<agent stdout>" }  a generic agent run:
+ *                                                    the caller's files + system prompt, the platform's
+ *                                                    MCP surface, and ./repo/ (read-only) when a
+ *                                                    clone_url is sent. Behind the backend's
+ *                                                    AgentRunService (the AUTHORING lane) — see runAuthoring.
  *   GET  /healthz                                    -> 200
  *
  * FIVE ROUTES WERE REMOVED, and the list is worth keeping because the shape of what remains is
  * the argument for the rename: /grade and /lint ran user-authored grader code, /synthesize and
  * /codegen authored it, and /analyze served the git observer. All five went with grading and the
- * observer. What is left — /rca and /triage — is OUR agent ruling on the surviving classifier
- * product, which is why this service is no longer named for graders.
+ * observer. What is left — /rca, /triage and /authoring — is OUR agent working on the surviving
+ * classifier product, which is why this service is no longer named for graders.
  *
  * Failure contract: every orchestration failure answers 502 with
  *   { error: 'sandbox orchestration failed',            // unchanged, always present
@@ -34,9 +41,8 @@
  * `detail` is launcher-authored or scrubbed SDK metadata ONLY — never the clone URL, sandbox
  * output, model output, or repo content (see "Failure diagnostics" below).
  *
- * Encoder classification (POST /classify) is NOT served here — it lives in the
- * standalone classify-service (../../classify-service), which runs on ECS Fargate
- * in production and as the `classify` service in docker-compose.dev.yml locally.
+ * Encoder classification (POST /classify) is NOT served here — the groundedness head is served
+ * by classifiers/groundedness/serve.py.
  *
  * Env:
  *   PORT                  (default 8080)
@@ -134,13 +140,23 @@
  *     api_key, base_url?, custom_model_name? }             -- an OpenAI-compat provider's own key,
  *                                                             optional base-URL override, and (CUSTOM
  *                                                             only) the free-text model id
+ *   { provider: "ANTHROPIC", egress_secret }              -- no key at all: the name of a secret in
+ *                                                             E2B's own store, which E2B's egress proxy
+ *                                                             injects as the provider's x-api-key outside
+ *                                                             the microVM (e2b backend only; see
+ *                                                             egressNetwork)
+ *   platform_funded (either shape)                         -- backend-only ledger flag; ignored here
  *
  *   MANTLE_PROJECT_ID             the Bedrock Project (proj_…) mantle inference is attributed to
  *                                 and authorized against; blank = the account default project. Not a
  *                                 secret (an attribution scope, not a credential) and not
  *                                 per-request — stays a deployment-wide env var.
  *   OPENCODE_SMALL_MODEL          provider/model for background work (title generation
- *                                 and the like); unset means OpenCode uses the primary
+ *                                 and the like); unset means OpenCode uses the primary.
+ *                                 An egress credential's run ignores it and uses its own model.
+ *   EGRESS_EXTRA_ALLOW            comma-separated hosts an egress-credential run may reach besides
+ *                                 the model provider, the MCP door and the clone host; every other
+ *                                 host is denied for those runs (default: none)
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -153,6 +169,23 @@ function Sandbox() {
   if (!_Sandbox) ({ Sandbox: _Sandbox } = require('e2b'));
   return _Sandbox;
 }
+let _Secret = null;
+function Secret() {
+  if (!_Secret) ({ Secret: _Secret } = require('e2b'));
+  return _Secret;
+}
+
+// An egress credential (`credential.egress_secret`) names a secret in E2B's own store instead of
+// carrying a key: E2B's egress proxy adds it to the model provider's requests OUTSIDE the microVM, so
+// the key is never in the agent's env, config or filesystem. OpenCode still needs a non-empty key to
+// start, so it gets this placeholder, which the injected header overrides on the wire. The open
+// backend never sends an egress credential; Tessary Cloud's does, for its Tessary AI provider, so
+// every run here keeps its current path.
+const EGRESS_PLACEHOLDER_KEY = 'injected-at-egress';
+// Extra hosts an egress-credential run may reach besides the model provider, the MCP door and the
+// clone host (comma-separated). Everything else is denied for those runs only; an org's own-key run
+// keeps unrestricted egress.
+const EGRESS_EXTRA_ALLOW = (process.env.EGRESS_EXTRA_ALLOW || '').split(',').map((h) => h.trim()).filter(Boolean);
 
 const PORT = Number(process.env.PORT || 8080);
 // Docker is the open default so the triage/RCA flow needs zero Tessary cloud credentials
@@ -337,10 +370,8 @@ function defaultBaseUrlFor(mode) {
       // appends only `/messages`, so a bare host POSTs to https://api.anthropic.com/messages and
       // 404s — and in SERVER mode OpenCode folds that into an empty assistant turn rather than an
       // error, so the run surfaces as "opencode produced no usable reply" with a valid key and
-      // zero tokens. The backend's langchain4j client behaves the SAME way: its own default is
-      // "https://api.anthropic.com/v1/" and DefaultAnthropicClient appends the bare path
-      // "messages". PlatformCatalog now carries the /v1 form for that reason, so this line really
-      // does mirror the backend — one correct form for both consumers.
+      // zero tokens. The backend's PlatformCatalog carries the same /v1 form, and
+      // scripts/check-sandbox-runner-launcher.sh holds the two equal.
       return 'https://api.anthropic.com/v1';
     default:
       return null;
@@ -363,8 +394,7 @@ function openAiCompatCredentials(mode, credential) {
 // scopes inference by project the way bedrock-runtime scopes it by inference profile, so the
 // production IAM policy grants `bedrock-mantle:CreateInference` on a project ARN. A request
 // without this header lands in the account's `default` project, which that policy does not
-// cover — a 403, not a mis-filed line item. Mirrors llm/MantleHttpClient, which adds the same
-// header before signing.
+// cover — a 403, not a mis-filed line item.
 const MANTLE_PROJECT_HEADER = 'OpenAI-Project';
 
 // The provider config OpenCode runs with, injected per run rather than baked into the image so
@@ -435,7 +465,7 @@ function providerConfig(credential, qualifiedModel) {
     // Declares its model for the same reason every OpenAI-compat block does: 'bedrock-mantle-gpt'
     // is not a models.dev provider id (only plain 'amazon-bedrock' is), so without this the run
     // dies at model resolution before any request. BEDROCK itself needs no such block — its key IS
-    // a catalog id and the ids ModelCatalog uses ('anthropic.claude-sonnet-5' and friends) all
+    // a catalog id and the ids ModelCatalog uses ('anthropic.claude-sonnet-5-5' and friends) all
     // resolve under it.
     const mantleBlock = { npm: '@ai-sdk/amazon-bedrock/mantle', options: mantleOptions };
     if (bareModel) mantleBlock.models = { [bareModel]: {} };
@@ -447,7 +477,7 @@ function providerConfig(credential, qualifiedModel) {
       npm: '@ai-sdk/anthropic',
       options: {
         baseURL: (credential.base_url || defaultBaseUrlFor(ANTHROPIC_MODE) || '').trim(),
-        apiKey: (credential.api_key || '').trim(),
+        apiKey: credentialKey(credential),
       },
     };
   } else {
@@ -456,6 +486,9 @@ function providerConfig(credential, qualifiedModel) {
     if (extra) Object.assign(config.provider, extra);
   }
   if (process.env.OPENCODE_SMALL_MODEL) config.small_model = process.env.OPENCODE_SMALL_MODEL;
+  // An egress credential pays for one model: background work (titles) runs on it too, never on a
+  // second model OpenCode would otherwise pick.
+  if (credential.egress_secret && qualifiedModel) config.small_model = qualifiedModel;
   return config;
 }
 
@@ -511,7 +544,7 @@ function containerEnvFor(posture, credential, qualifiedModel) {
 // @ai-sdk packages honour the env var vs. the options object varies by version and both travel the
 // same channel (no added exposure; the value is identical either way).
 function openAiCompatEnvVars(mode, credential) {
-  const apiKey = (credential.api_key || '').trim();
+  const apiKey = credentialKey(credential);
   switch (mode) {
     case OPENAI_COMPAT_MODE:
       return { OPENAI_API_KEY: apiKey };
@@ -529,9 +562,40 @@ function openAiCompatEnvVars(mode, credential) {
       return { MOONSHOT_API_KEY: apiKey };
     case ANTHROPIC_MODE:
       return { ANTHROPIC_API_KEY: apiKey };
-    default:
-      return {};
   }
+}
+
+// The key the agent is handed: the placeholder for an egress credential, whose real key E2B injects
+// outside the microVM, and the credential's own key otherwise.
+function credentialKey(credential) {
+  return credential.egress_secret ? EGRESS_PLACEHOLDER_KEY : (credential.api_key || '').trim();
+}
+
+function hostOf(url) {
+  try {
+    return url ? new URL(url).hostname : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `network` option for Sandbox.create, set only for an egress credential: E2B's proxy injects the
+ * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the MCP
+ * door, the clone host and EGRESS_EXTRA_ALLOW. A rule's host must also be allowed, or the provider is
+ * unreachable, which is why it leads `allowOut`.
+ */
+function egressNetwork(credential, payload) {
+  if (!credential.egress_secret) return {};
+  const modelHost = hostOf((credential.base_url || '').trim() || defaultBaseUrlFor(ANTHROPIC_MODE));
+  const hosts = [modelHost, hostOf(payload.mcp && payload.mcp.url), hostOf(payload.clone_url), ...EGRESS_EXTRA_ALLOW];
+  return {
+    network: {
+      allowOut: [...new Set(hosts.filter(Boolean))],
+      denyOut: ['0.0.0.0/0'],
+      rules: { [modelHost]: [{ transform: { headers: { 'x-api-key': Secret().fill(credential.egress_secret) } } }] },
+    },
+  };
 }
 
 /**
@@ -594,7 +658,7 @@ function toProviderModel(model, credential) {
 // toAnthropicModel (Bedrock inference-profile id -> first-party Anthropic model id) lived here
 // until the removal of AGENT_PROVIDER=anthropic, its one caller. It is not coming back: ANTHROPIC
 // is a per-request-selectable provider again, but it now carries its OWN model names
-// ("claude-sonnet-5", from ModelCatalog) rather than a Bedrock inference-profile id needing
+// ("claude-sonnet-5-5", from ModelCatalog) rather than a Bedrock inference-profile id needing
 // translation, so toProviderModel qualifies it like every other non-Bedrock provider.
 
 // ---------------------------------------------------------------------------
@@ -1063,14 +1127,10 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   // workDir is a path INSIDE this container, under the shared LAUNCHER_WORK_DIR mount — see that
   // constant's comment for why it cannot be os.tmpdir() here.
   let workDir;
+  const cleanupDir = () => { try { if (workDir) fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ } };
   try {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
     workDir = fs.mkdtempSync(path.join(LAUNCHER_WORK_DIR, 'run-'));
-  } catch (e) {
-    throw withMeta(e);
-  }
-  const cleanupDir = () => { try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* best effort */ } };
-  try {
     fs.writeFileSync(path.join(workDir, 'input.json'), JSON.stringify(payload));
   } catch (e) {
     cleanupDir();
@@ -1232,6 +1292,11 @@ function requireCredential(credential, scriptName) {
   };
   if (!credential || typeof credential !== 'object') bad('no credential object on the request');
   if (!KNOWN_CREDENTIAL_PROVIDERS.has(credential.provider)) bad(`unknown provider '${credential.provider}'`);
+  if (credential.egress_secret !== undefined) {
+    if (credential.provider !== 'ANTHROPIC') bad('egress_secret is only supported on an ANTHROPIC credential');
+    if (!(credential.egress_secret || '').trim()) bad('egress_secret is blank');
+    return;
+  }
   if (credential.provider === 'BEDROCK' || credential.provider === 'BEDROCK_MANTLE') {
     if (!(credential.aws_region || '').trim()) bad('BEDROCK/BEDROCK_MANTLE credential is missing aws_region');
     if (!(credential.aws_access_key || '').trim() || !(credential.aws_secret_key || '').trim()) {
@@ -1246,6 +1311,19 @@ function requireCredential(credential, scriptName) {
   // baseURL of '' reaching the SDK, which throws ERR_INVALID_URL deep inside the agent run.
   if (credential.provider === 'CUSTOM' && !(credential.base_url || '').trim()) {
     bad('CUSTOM credential is missing base_url — there is no default endpoint to assume');
+  }
+}
+
+// The post-mortem the failure path above logs: whether E2B still reports the sandbox running, and
+// the lifetime it was given. A sandbox already gone, or at its endAt, is the deadline rather than
+// the script. Best-effort: a failed lookup is logged and never replaces the run's own error.
+async function logSandboxDiagnostics(sandboxId) {
+  try {
+    const info = await Sandbox().getInfo(sandboxId, { apiKey: E2B_API_KEY });
+    const at = (d) => (d instanceof Date ? d.toISOString() : String(d));
+    console.error(`sandbox ${sandboxId} post-mortem: state=${info.state} started=${at(info.startedAt)} end=${at(info.endAt)}`);
+  } catch (e) {
+    console.error(`sandbox ${sandboxId} post-mortem unavailable: ${(e && e.name) || 'Error'}`);
   }
 }
 
@@ -1268,23 +1346,24 @@ async function runAgenticScript(scriptName, rawPayload) {
   // and a wrong provider prefix surfaces as an agent-side 404 with no clue where it came from.
   // A model id is neither a secret nor model output, so it is safe on this console.
   console.log(`${scriptName}: model ${rest.model} -> ${payload.model} (provider ${credential.provider})`);
+  if (credential.egress_secret && BACKEND !== 'e2b') {
+    const e = new Error(`${scriptName}: an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
+    e.launcherKind = 'bad_request';
+    throw e;
+  }
   if (BACKEND === 'docker') return runScriptInDocker(scriptName, payload, timeoutMs, AGENT_POSTURE, credential);
   // Both surviving scripts carry an `mcp.url` (see the endpoint doc comment at the top of this
   // file). Reject a missing or localhost-pointed callback URL BEFORE spending an E2B sandbox create
   // call: on this backend the microVM cannot reach the host's localhost at all, so letting the run
-  // proceed only guarantees a slower, more expensive version of the same failure. The guard is kept
-  // conditional rather than unconditional so a future clone-only agentic route does not inherit an
-  // MCP requirement it has no use for.
-  if (scriptName === 'rca.js' || scriptName === 'triage.js') {
-    const mcpUrl = payload.mcp && payload.mcp.url;
-    if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
-      const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
-        + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
-        + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
-        + 'SANDBOX_BACKEND to docker for development');
-      e.launcherKind = 'bad_request';
-      throw e;
-    }
+  // proceed only guarantees a slower, more expensive version of the same failure.
+  const mcpUrl = payload.mcp && payload.mcp.url;
+  if (!mcpUrl || pointsAtLocalhost(mcpUrl)) {
+    const e = new Error(`${scriptName}: mcp.url is missing or unreachable from an E2B microVM `
+      + `(got ${mcpUrl ? JSON.stringify(mcpUrl) : 'unset'}) — set a publicly reachable `
+      + 'tessary.rca.agentic.mcp-base-url / tessary.classifier.triage-mcp-base-url, or switch '
+      + 'SANDBOX_BACKEND to docker for development');
+    e.launcherKind = 'bad_request';
+    throw e;
   }
   const startedAt = Date.now();
   // Diagnostics ride on the thrown error (see buildErrorBody) so the backend stops seeing a
@@ -1293,7 +1372,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   const fail = (e) => stampFailure(e, { launcherMeta: { ...meta, elapsed_ms: Date.now() - startedAt } });
   let sbx;
   try {
-    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs });
+    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs, ...egressNetwork(credential, payload) });
   } catch (e) {
     // No microVM ever existed (quota, missing template, E2B outage). Previously indistinguishable
     // from an agent that ran and crashed, since both ended as the same bare 502.
@@ -1332,21 +1411,10 @@ async function runAgenticScript(scriptName, rawPayload) {
       if (stdout) console.error('--- sandbox stdout ---\n' + scrubToken(stdout).slice(0, 2000));
       await logSandboxDiagnostics(sandboxId);
       // F1: same failure-envelope extraction as the other two backends — CommandExitError is the
-      // NORMAL shape a triage/rca non-zero exit takes here (see the defensive res.exitCode branch
-      // below for the abnormal one), so this is the primary site for the E2B backend, not a fallback.
+      // only shape a triage/rca non-zero exit takes here, so this is the primary site for the E2B
+      // backend, not a fallback.
       const usage = usageFromFailureStdout(stdout);
       if (usage && e && typeof e === 'object') e.usage = usage;
-      throw e;
-    }
-    if (res.exitCode !== 0) {
-      // Defensive: E2B normally throws CommandExitError on a non-zero exit. stderr stays on this
-      // console — the error's message is now published as `detail`.
-      console.error(`${scriptName} exit ${res.exitCode} after ${Date.now() - startedAt}ms (sandbox ${sandboxId})`);
-      if (res.stderr) console.error('--- sandbox stderr ---\n' + scrubToken(res.stderr).slice(-4000));
-      const e = new Error(`${scriptName} exit ${res.exitCode}`);
-      e.exitCode = res.exitCode;
-      const usage = usageFromFailureStdout(res.stdout);
-      if (usage) e.usage = usage;
       throw e;
     }
     return parseScriptOutput(scriptName, res.stdout);
@@ -1375,6 +1443,22 @@ function runRca(payload) {
 function runTriage(payload) {
   return runAgenticScript('triage.js', payload);
 }
+
+// The generic agent run: one fresh microVM materializes the caller's files, clones the repo at the
+// requested commit when payload.clone_url is sent (read-only, quarantined like RCA's), and runs the
+// agent under the caller's own system prompt, wired to the platform's MCP surface via the short-lived
+// key in payload.mcp (scrubbed from all output, never returned to the backend). json_schema is
+// optional here: without one the agent answers in prose.
+function runAuthoring(payload) {
+  return runAgenticScript('authoring.js', payload);
+}
+
+// The whole route table: a POST anywhere else is 404 before the body is read.
+const AGENTIC_ROUTES = new Map([
+  ['/rca', runRca],
+  ['/triage', runTriage],
+  ['/authoring', runAuthoring],
+]);
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -1405,8 +1489,7 @@ function send(res, status, obj) {
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/healthz') return send(res, 200, { ok: true });
 
-  if (req.method !== 'POST'
-      || (req.url !== '/rca' && req.url !== '/triage')) {
+  if (req.method !== 'POST' || !AGENTIC_ROUTES.has(req.url)) {
     return send(res, 404, { error: 'not found' });
   }
   const auth = req.headers['authorization'] || '';
@@ -1415,9 +1498,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     const payload = await readBody(req);
-    let out;
-    if (req.url === '/rca') out = await runRca(payload);
-    else out = await runTriage(payload);
+    const out = await AGENTIC_ROUTES.get(req.url)(payload);
     return send(res, 200, out);
   } catch (e) {
     // Transport/orchestration failure.

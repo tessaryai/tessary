@@ -219,3 +219,89 @@ test('a GET is rejected with 405 and never reaches upstream', async (t) => {
   const res = await fetch(relay.url, { method: 'GET' });
   assert.equal(res.status, 405);
 });
+
+/** A relay in front of an upstream that answers every call with `respond(reqBody)` as the raw body. */
+async function relayOver(t, respond, status = 200) {
+  const upstream = await startStubUpstream((reqBody, req, res) => {
+    res.writeHead(status, { 'content-type': 'application/json' }).end(respond(reqBody));
+  });
+  t.after(() => upstream.close());
+  const workDir = tempWorkDir();
+  const relay = await startMcpRelay({ url: upstream.url, token: 't', workDir });
+  t.after(() => relay.close());
+  return { relay, workDir };
+}
+
+const textResult = (id, text) => JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
+
+test('a small text-only result that is a bare array or a scalar is kept whole, never dropped', async (t) => {
+  const answers = [[{ id: 1 }, { id: 2 }], 42];
+  const { relay } = await relayOver(t, (req) => textResult(req.id, JSON.stringify(answers[req.id - 1])));
+
+  const array = await callTool(relay.url, 1, 'list_traces');
+  const scalar = await callTool(relay.url, 2, 'count_traces');
+
+  assert.deepEqual(JSON.parse(array.body.result.content[0].text), { file: path.join('checks', 'mcp', '001-list_traces.json'), rows: [{ id: 1 }, { id: 2 }] });
+  assert.deepEqual(JSON.parse(scalar.body.result.content[0].text), { file: path.join('checks', 'mcp', '002-count_traces.json'), value: 42 });
+  assert.equal(array.body.result.structuredContent, undefined, 'no structuredContent is invented for a text-only result');
+});
+
+test('a large bare-array result is summarised by its rows like a paged one', async (t) => {
+  const rows = Array.from({ length: 500 }, (_, i) => ({ id: i, span_id: `s${i}`, model: 'sonnet-5' }));
+  const { relay } = await relayOver(t, (req) => textResult(req.id, JSON.stringify(rows)));
+
+  const summary = JSON.parse((await callTool(relay.url, 1, 'list_spans')).body.result.content[0].text);
+
+  assert.equal(summary.row_count, 500);
+  assert.deepEqual(summary.fields, ['id', 'span_id', 'model']);
+  assert.equal(summary.cursor, undefined);
+});
+
+test('a tool result whose text is not JSON passes through untouched and nothing is saved', async (t) => {
+  const { relay, workDir } = await relayOver(t, (req) => textResult(req.id, 'Trace not found.'));
+
+  const { body } = await callTool(relay.url, 1, 'get_trace');
+
+  assert.deepEqual(body.result.content, [{ type: 'text', text: 'Trace not found.' }]);
+  assert.deepEqual(fs.readdirSync(path.join(workDir, 'checks', 'mcp')), []);
+});
+
+test('an upstream answer that is not JSON-RPC is forwarded verbatim with its status', async (t) => {
+  const { relay } = await relayOver(t, () => '<html>bad gateway</html>', 502);
+
+  const res = await fetch(relay.url, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+
+  assert.equal(res.status, 502);
+  assert.equal(await res.text(), '<html>bad gateway</html>');
+});
+
+test('a request body that is not JSON is refused with 400 and never reaches upstream', async (t) => {
+  let reached = false;
+  const { relay } = await relayOver(t, () => { reached = true; return '{}'; });
+
+  const res = await fetch(relay.url, { method: 'POST', body: '{not json' });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'invalid json' });
+  assert.equal(reached, false);
+});
+
+test('an unreachable upstream is a 502 the agent can read, not a dropped connection', async (t) => {
+  const relay = await startMcpRelay({ url: 'http://127.0.0.1:1/mcp', token: 't', workDir: tempWorkDir() });
+  t.after(() => relay.close());
+
+  const { status, body } = await callTool(relay.url, 1, 'get_trace');
+
+  assert.deepEqual({ status, body }, { status: 502, body: { error: 'fetch failed' } });
+});
+
+test('a large single-object result is replaced by its field names and where it was saved', async (t) => {
+  const finding = { id: 'f1', narrative: 'x'.repeat(20_000), evidence_counts: { exemplar: 3 } };
+  const { relay, workDir } = await relayOver(t, (req) => JSON.stringify(jsonRpcToolResult(req.id, finding)));
+
+  const summary = JSON.parse((await callTool(relay.url, 1, 'get_finding')).body.result.content[0].text);
+
+  const file = path.join('checks', 'mcp', '001-get_finding.json');
+  assert.deepEqual(summary, { file, note: 'result saved to file; too large to inline', fields: ['id', 'narrative', 'evidence_counts'] });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(workDir, file), 'utf8')), finding);
+});

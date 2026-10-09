@@ -2,6 +2,7 @@
 package ai.tessary.pricing;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,7 +25,7 @@ import org.springframework.stereotype.Component;
  * authority.
  *
  * <p><b>A region prefix is a pricing dimension, so stripping it stops there.</b> Bedrock and
- * Vertex prefix the same model with a routing scope ({@code global.anthropic.claude-sonnet-5},
+ * Vertex prefix the same model with a routing scope ({@code global.anthropic.claude-sonnet-5-5},
  * {@code us.anthropic....}), and the regional profiles bill a premium: +10% for
  * {@code us./eu./au./jp.} and +20% for {@code us-gov.}, on 28 keys in the current snapshot. Once
  * a region prefix has been consumed, only a key that still carries it can be trusted; falling
@@ -31,14 +33,14 @@ import org.springframework.stereotype.Component;
  * non-regional rate and under-report that spend by 10%, silently. Unresolved is the better
  * answer: the substrate records it as unpriced and counts it.
  *
- * <p><b>A vendor prefix is naming, so stripping it is safe, but only when no region prefix was
- * consumed first.</b> Producers emit undated Bedrock-style ids the snapshot does not always carry
- * verbatim: {@code anthropic.claude-haiku-4-5} is absent while both {@code claude-haiku-4-5} and
- * the dated {@code anthropic.claude-haiku-4-5-20251001-v1:0} are present, so before this fallback
- * a real project's entire spend read as unpriced. Across every vendor-prefixed key in the
- * snapshot that has a bare counterpart, none differs in price, a property pinned by {@code
- * PriceSnapshotTest}, so a future snapshot that introduces a divergence fails there rather than
- * quietly mispricing here.
+ * <p><b>A vendor prefix is stripped only when the book lacks the prefixed key and no region prefix
+ * was consumed first.</b> Producers emit undated Bedrock-style ids the snapshot does not always
+ * carry verbatim: {@code anthropic.claude-haiku-4-5} is absent while both {@code claude-haiku-4-5}
+ * and the dated {@code anthropic.claude-haiku-4-5-20251001-v1:0} are present, so before this
+ * fallback a real project's entire spend read as unpriced. Vendors may price the same model
+ * differently ({@code anthropic.claude-mythos-preview} on Bedrock is not {@code
+ * claude-mythos-preview} direct), which is why the exact key always wins; the fallback answers
+ * only for a spelling the book does not carry.
  */
 @Component
 public class ModelResolver {
@@ -61,11 +63,20 @@ public class ModelResolver {
 
     private final PriceBookRepository books;
 
+    private final Clock clock;
+
     private volatile CacheCreationMemo memo =
             new CacheCreationMemo(List.of(), Instant.EPOCH, new ConcurrentHashMap<>());
 
+    @Autowired
     public ModelResolver(PriceBookRepository books) {
+        this(books, Clock.systemUTC());
+    }
+
+    /** The clock as a seam, so a test can step past the books recheck without waiting it out. */
+    ModelResolver(PriceBookRepository books, Clock clock) {
         this.books = books;
+        this.clock = clock;
     }
 
     /**
@@ -148,7 +159,7 @@ public class ModelResolver {
 
     private CacheCreationMemo currentMemo() {
         CacheCreationMemo current = memo;
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         if (now.isBefore(current.checkedAt().plus(BOOKS_RECHECK))) return current;
         List<String> inForce =
                 books.currentBooks().stream().map(PriceBook::version).toList();

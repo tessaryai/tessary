@@ -19,7 +19,6 @@ import org.jspecify.annotations.Nullable;
  */
 public record CaseRow(
         String id,
-        String projectId,
         long seq,
         String detector,
         String subjectKind,
@@ -51,9 +50,10 @@ public record CaseRow(
         @Nullable String resolution,
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
+        /** What a person said a resolved frustration or groundedness case was ({@link Disposition}); null otherwise. */
+        @Nullable String disposition,
         @Nullable String mutedAt,
-        @Nullable String mutedBy,
-        String updatedAt) {
+        @Nullable String mutedBy) {
 
     /** The display id a human quotes: {@code C-118}. */
     public String reference() {
@@ -65,9 +65,6 @@ public record CaseRow(
     public static final class Detector {
         private Detector() {}
 
-        /** A behaviour-drift finding that survived triage ({@code classifier/Behavior*}). */
-        public static final String BEHAVIOR_DRIFT = "behavior_drift";
-
         /**
          * A user classifier's detections over its configured threshold ({@code classifier/}). A
          * per-span finding's case is named for the classifier that filed it.
@@ -78,25 +75,17 @@ public record CaseRow(
          * A metric-drift finding that survived triage ({@code classifier/MetricDrift*}): one
          * bucket's duration or cost distribution sitting measurably away from its own earlier one.
          *
-         * <p>Same gate as {@link #BEHAVIOR_DRIFT}. Metric-drift findings stream with no alert
-         * budget, so Triage only sees the subset a repo-grounded run called a deviation, plus what
-         * a human ruled one directly.
+         * <p>Metric-drift findings stream with no alert budget, so Triage only sees the subset a
+         * repo-grounded run called a deviation, plus what a human ruled one directly.
          */
         public static final String METRIC_DRIFT = "metric_drift";
 
         /**
-         * A tool's failure rate that survived triage. Same gate as {@link #METRIC_DRIFT} and
-         * {@link #BEHAVIOR_DRIFT}: the detector's findings stream unbudgeted, and only a triage
-         * ruling of {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
+         * A tool's failure rate that survived triage. Same gate as {@link #METRIC_DRIFT}: the detector's
+         * findings stream unbudgeted, and only a triage ruling of {@code positive}, or a human pressing
+         * <em>Real deviation</em>, reaches Triage.
          */
         public static final String TOOL_ERROR = "tool_error";
-
-        /**
-         * An SOP-conformance finding that survived triage: an authored rule the agent satisfies
-         * measurably less often than its own reference period. Same gate as the other triaged
-         * detectors: only a Layer-2 ruling of deviation reaches Triage.
-         */
-        public static final String SOP_CONFORMANCE = "sop_conformance";
 
         /**
          * A secret-leak finding ruled positive, at arming and without triage when it is high
@@ -112,13 +101,26 @@ public record CaseRow(
          * {@code positive}, or a human pressing <em>Real deviation</em>, reaches Triage.
          */
         public static final String MALFORMED_OUTPUT = "malformed_output";
+
+        /**
+         * A call site whose share of conversations frustrated with the agent rose above the rate it learned.
+         * No triage gate: each spell's finding is ruled positive when it is filed, and opens or joins this case
+         * in the same transaction. See {@link FrustrationCaseSource}.
+         */
+        public static final String FRUSTRATION = "frustration";
+
+        /**
+         * A call site whose share of traces with a flagged answer rose above the rate it learned. Same gate
+         * as {@link #MALFORMED_OUTPUT}: triage rules on the finding, and only a ruling of {@code positive},
+         * or a human pressing <em>Real deviation</em>, reaches Triage. See {@link GroundednessCaseSource}.
+         */
+        public static final String GROUNDEDNESS = "groundedness";
     }
 
     /** {@code subject_kind} values: what the case is about. */
     public static final class SubjectKind {
         private SubjectKind() {}
 
-        public static final String BEHAVIOR_PROFILE = "behavior_profile";
         public static final String CLASSIFIER = "classifier";
 
         /**
@@ -135,13 +137,6 @@ public record CaseRow(
          * explain but one thing to page about, so both collapse onto one live case.
          */
         public static final String TOOL = "tool";
-
-        /**
-         * One authored SOP rule, keyed by its slug ({@code conformance_rule.rule_key}). The RULE rather
-         * than the finding, for the tool-error reason: a drift, a recovery and a later re-drift are
-         * causes to explain, but one obligation to page about.
-         */
-        public static final String SOP_RULE = "sop_rule";
 
         /**
          * A call site whose outputs are failing their declared schema — {@code malformed_rate}'s
@@ -173,9 +168,6 @@ public record CaseRow(
     public static final class Resolution {
         private Resolution() {}
 
-        /** The detection stopped firing for a full window; closed silently by the reconciler. */
-        public static final String RECOVERED = "recovered";
-
         /** A human closed it, with a required one-line reason. */
         public static final String HUMAN = "human";
 
@@ -188,6 +180,20 @@ public record CaseRow(
          * {@code absorbed} says the bar moved, and it will not.
          */
         public static final String ABSORBED = "absorbed";
+    }
+
+    /**
+     * {@code disposition} values: what a person said a resolved frustration or groundedness case turned out to
+     * be, either {@code fixed} (the agent was changed; the rate after the resolve is the normal to learn) or
+     * {@link #FALSE_ALARM}. Both restart the call site's CUSUM and re-learn its normal rate from the traffic
+     * after the resolve; {@link #FALSE_ALARM} also clears the flag on every conversation, or every answer, the
+     * case cites.
+     */
+    public static final class Disposition {
+        private Disposition() {}
+
+        /** The cited conversations or answers were not what was flagged: they stop counting as failures. */
+        public static final String FALSE_ALARM = "false_alarm";
     }
 
     public boolean isLive() {

@@ -80,6 +80,11 @@
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers/findings/:findingId"
   },
   {
+    "path": "classifiers/:classifierId",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/classifiers/:classifierId"
+  },
+  {
     "path": "vitals",
     "kind": "view",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/vitals"
@@ -173,6 +178,11 @@
     "path": "workspace",
     "kind": "redirect",
     "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/workspace"
+  },
+  {
+    "path": "features",
+    "kind": "view",
+    "fullPath": "/orgs/:orgSlug/projects/:projectSlug/settings/features"
   },
   {
     "path": "appearance",

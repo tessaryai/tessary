@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.auth;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -23,20 +24,13 @@ import org.springframework.web.context.WebApplicationContext;
  * {@code POST /auth/signup} and {@code POST /auth/login} driven through the real
  * {@link PasswordAuthProvider} bean (no WorkOS configured -- the open-edition default posture),
  * plus the {@code GET /auth/login} degrade-to-redirect guard. Container-free on the
- * {@code OpenApiSpecDriftTest} precedent for the property setup; the isolated Postgres database
+ * {@code OpenApiSpecDriftTest} precedent for the property setup; the real Postgres database
  * each {@code @SpringBootTest} context gets (via {@code TestcontainersPostgresInitializer}) is what
  * makes an end-to-end signup/login round trip meaningful here, unlike {@link PasswordAuthProviderTest}'s
  * mocked-repository unit coverage.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class AuthControllerTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        r.add("workos.api-key", () -> "");
-        r.add("workos.client-id", () -> "");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -44,24 +38,19 @@ class AuthControllerTest {
     @Autowired
     AuthProvider provider;
 
+    @Autowired
+    AuthFilter authFilter;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).build();
+        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
     }
 
     private String body(String email, String password) throws Exception {
         return mapper.writeValueAsString(Map.of("email", email, "password", password));
-    }
-
-    @Test
-    void signupHappyPath() throws Exception {
-        mvc.perform(post("/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body("signup-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
     }
 
     @Test
@@ -71,10 +60,19 @@ class AuthControllerTest {
                         .content(body("login-happy@example.com", "a-good-password")))
                 .andExpect(status().isOk());
 
-        mvc.perform(post("/auth/login")
+        Cookie session = mvc.perform(post("/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body("login-happy@example.com", "a-good-password")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getCookie("tessary-session");
+        assertNotNull(session, "a successful login sets the session cookie");
+
+        // The cookie is the sign-in: it must resolve to the account that just logged in.
+        mvc.perform(get("/auth/me").cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value("login-happy@example.com"));
     }
 
     @Test
@@ -105,7 +103,7 @@ class AuthControllerTest {
 
     @Test
     void getLoginDegradesToRedirectRatherThan500() throws Exception {
-        // With PasswordAuthProvider active (isEnabled()=true, supportsRedirectFlow()=false), the
+        // With PasswordAuthProvider active (supportsRedirectFlow()=false), the
         // OAuth GET must degrade to the dev-shortcut redirect, not call authorizationUrl() on a
         // provider that has no OAuth dance -- verifies the AuthController guard added in step 5.
         // The bounce target is the frontend's own /login screen, not the app root -- the app root
@@ -121,8 +119,8 @@ class AuthControllerTest {
 
         mvc.perform(get("/auth/login")).andExpect(status().is3xxRedirection()).andExpect(result -> {
             String location = result.getResponse().getRedirectedUrl();
-            org.junit.jupiter.api.Assertions.assertNotNull(location);
-            org.junit.jupiter.api.Assertions.assertTrue(
+            assertNotNull(location);
+            assertTrue(
                     location.endsWith("/login"),
                     "expected the redirect to land on the frontend's own /login screen, got: " + location);
         });
@@ -130,7 +128,7 @@ class AuthControllerTest {
 
     @Test
     void getAuthModeReportsPasswordPosture() throws Exception {
-        // PasswordAuthProvider (this file's whole posture, per the class javadoc) is enabled but
+        // PasswordAuthProvider (this file's whole posture, per the class javadoc) is active but
         // has no OAuth dance, so /auth/mode must report redirectFlow=false -- the signal the
         // Login/Signup views poll to decide whether to render a form or bounce to WorkOS.
         // firstRun is the second half of that answer: an account exists by the time this

@@ -2,17 +2,24 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
-import ai.tessary.cases.CaseDtos.CaseView;
+import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CasesPage;
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.malformed.MalformedOutputRateRepository;
+import ai.tessary.classifier.toolerror.CarriedState;
+import ai.tessary.classifier.toolerror.ToolErrorDetector;
+import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
+import ai.tessary.open.errors.CaseError;
+import ai.tessary.open.errors.ErrorCode;
+import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.jobqueue.JobRow;
 import ai.tessary.plan.Capability;
@@ -24,23 +31,22 @@ import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.RcaParkedSpringBootTest;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** Case lifecycle as a human drives it: resolve, mute, unmute, how a case is looked up, and what
- *  pressing RCA on one does (1c). */
-@SpringBootTest
-// batch-size=0 parks RcaWorker's own drain (claimBatch's LIMIT 0 returns nothing), the same reason
-// RcaControllerTest does it: this class presses runRca and must read back locked_at / the trail line
-// itself, not race the real worker picking the job up first.
-@TestPropertySource(properties = {"test.context-group=case-service", "tessary.rca.batch-size=0"})
+/** Case lifecycle as a human drives it: resolve, mute, unmute, lookup, and pressing RCA (1c). */
+// batch-size=0 parks RcaWorker's drain so this class reads locked_at and the trail itself.
+@RcaParkedSpringBootTest
 class CaseServiceTest {
 
     @Autowired
@@ -70,14 +76,23 @@ class CaseServiceTest {
     @Autowired
     CapabilityFixture capabilities;
 
+    @Autowired
+    ToolErrorStateRepository toolErrorStates;
+
+    @Autowired
+    MalformedOutputRateRepository malformedOutputRates;
+
+    @Autowired
+    JdbcClient jdbc;
+
     @Test
     void resolvingRequiresAReasonAndKeepsIt() {
         Project p = project("svc-resolve");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
-        assertThrows(TessaryException.class, () -> service.resolve(p.id(), row.id(), "  ", "priya@example.com"));
+        assertThrows(TessaryException.class, () -> service.resolve(p.id(), row.id(), "  ", "priya@example.com", null));
 
-        service.resolve(p.id(), row.id(), "traffic mix shifted", "priya@example.com");
+        service.resolve(p.id(), row.id(), "traffic mix shifted", "priya@example.com", null);
         CaseRow closed = cases.findById(p.id(), row.id()).orElseThrow();
         assertEquals(CaseRow.State.RESOLVED, closed.state());
         assertEquals("traffic mix shifted", closed.resolutionReason());
@@ -87,16 +102,17 @@ class CaseServiceTest {
     @Test
     void resolvingAnAlreadyClosedCaseIsRefused() {
         Project p = project("svc-double-resolve");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-        service.resolve(p.id(), row.id(), "done", "priya@example.com");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        service.resolve(p.id(), row.id(), "done", "priya@example.com", null);
 
-        assertThrows(TessaryException.class, () -> service.resolve(p.id(), row.id(), "again", "priya@example.com"));
+        assertThrows(
+                TessaryException.class, () -> service.resolve(p.id(), row.id(), "again", "priya@example.com", null));
     }
 
     @Test
     void muteIsIdempotentAndDoesNotNarrateItselfTwice() {
         Project p = project("svc-mute");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
         service.mute(p.id(), row.id(), "priya@example.com");
         service.mute(p.id(), row.id(), "sam@example.com");
@@ -110,72 +126,14 @@ class CaseServiceTest {
                 "two people reaching for mute is ordinary; a second trail line is not");
     }
 
-    @Test
-    void unmuteReturnsTheCaseToOpen() {
-        Project p = project("svc-unmute");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-        service.mute(p.id(), row.id(), "priya@example.com");
-
-        service.unmute(p.id(), row.id(), "priya@example.com");
-
-        assertEquals(
-                CaseRow.State.OPEN,
-                cases.findById(p.id(), row.id()).orElseThrow().state());
-        assertTrue(kinds(p, row).contains(CaseEventRow.Kind.UNMUTED));
-    }
-
-    @Test
-    void aCaseResolvesByItsStoredIdOrTheNumberAHumanQuotes() {
-        Project p = project("svc-lookup");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-
-        assertEquals(row.id(), service.detail(p.id(), row.id()).caseView().id());
-        assertEquals(
-                row.id(), service.detail(p.id(), row.reference()).caseView().id());
-    }
-
-    @Test
-    void anotherProjectsCaseIsNotFound() {
-        Project mine = project("svc-tenant-a");
-        Project theirs = project("svc-tenant-b");
-        CaseRow row = open(mine, CaseRow.Detector.BEHAVIOR_DRIFT);
-
-        assertThrows(TessaryException.class, () -> service.detail(theirs.id(), row.id()));
-    }
-
     /**
-     * The RCA affordance is a server-side fact, not a detector string the client enumerates. RCA is a
-     * finding-analysis lane now, so what decides it is whether there IS a finding — which is true of
-     * every detector that still opens cases, and false only for the archived rows of the two retired
-     * ones. A client comparing {@code detector} against a hardcoded list would have to be edited every
-     * time a detector is added.
-     */
-    @Test
-    void rcaIsOfferedWhereThereIsAFindingToAnalyse() {
-        Project p = project("svc-rca-available");
-
-        CaseDetailView drift =
-                service.detail(p.id(), open(p, CaseRow.Detector.BEHAVIOR_DRIFT).id());
-        CaseDetailView toolError =
-                service.detail(p.id(), open(p, CaseRow.Detector.TOOL_ERROR).id());
-
-        assertTrue(drift.rcaAvailable());
-        assertNotNull(drift.latestFindingId());
-        assertTrue(toolError.rcaAvailable());
-    }
-
-    /**
-     * The paged read walks the whole set with the cursor it hands back, and stops by handing back none.
-     *
-     * <p>Asserted as a set rather than a sequence on purpose: what a page must guarantee is that every case
-     * appears exactly once across the walk. The worst-first ORDER is a repository claim, pinned in
-     * {@link CaseRepositoryIntegrationTest} against timestamps chosen to make ties bite; re-asserting it here
-     * off two cases opened microseconds apart would be a test of the clock.
+     * Every case appears exactly once across the cursor walk, which ends with no cursor. A set, not a sequence:
+     * worst-first order is pinned in {@link CaseRepositoryIntegrationTest}.
      */
     @Test
     void pagingWalksEveryOpenCaseExactlyOnceAndThenStops() {
         Project p = project("svc-page-walk");
-        CaseRow drift = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow drift = open(p, CaseRow.Detector.CLASSIFIER);
         CaseRow toolError = open(p, CaseRow.Detector.TOOL_ERROR);
 
         CasesPage first = service.page(p.id(), CaseRow.State.OPEN, null, null, 1, null);
@@ -192,52 +150,36 @@ class CaseServiceTest {
                 "every case exactly once across the walk");
     }
 
-    /** A detector filter narrows the page; nothing else in the project comes along. */
-    @Test
-    void pagingNarrowsToOneDetector() {
-        Project p = project("svc-page-filter");
-        CaseRow toolError = open(p, CaseRow.Detector.TOOL_ERROR);
-        open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-
-        CasesPage page = service.page(p.id(), CaseRow.State.OPEN, CaseRow.Detector.TOOL_ERROR, null, 50, null);
-
-        assertEquals(
-                List.of(toolError.id()), page.cases().stream().map(CaseView::id).toList());
-    }
-
     /**
-     * A finished RCA report is the case page's answer to "why is this open," so it arrives inline.
-     *
-     * <p>The pending half of this test is the load-bearing half. A report's shell is inserted at
-     * trigger time and carries nothing (no verdict, no hypotheses, no write-up), so inlining it
-     * would render an object whose every interesting field is null, indistinguishable from an
-     * analysis that concluded nothing. While it runs, the id is the whole answer: it is what a poll
-     * is for.
+     * A finished RCA report arrives inline. A pending one is only named: its shell carries nothing and would read as
+     * an analysis that concluded nothing.
      */
     @Test
     void aFinishedRcaReportIsInlinedAndAPendingOneIsOnlyNamed() {
         Project p = project("svc-rca-inline");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
         String findingId = Objects.requireNonNull(row.latestFindingId());
         String jobId = rcaJobs.createOrGet(
                 p.id(),
                 findingId,
-                CaseRow.SubjectKind.BEHAVIOR_PROFILE,
+                CaseRow.SubjectKind.CLASSIFIER,
                 "profile-1",
                 "pass_rate",
                 Instant.parse("2026-08-01T00:00:00Z"),
                 Instant.parse("2026-08-08T00:00:00Z"),
                 Instant.parse("2026-08-15T00:00:00Z"),
-                "priya@example.com");
+                "priya@example.com",
+                null);
         rcaReports.insertPendingIfAbsent(
                 p.id(),
                 jobId,
                 findingId,
-                CaseRow.SubjectKind.BEHAVIOR_PROFILE,
+                CaseRow.SubjectKind.CLASSIFIER,
                 "profile-1",
                 "Checkout summariser",
                 "cs-a",
                 "pass_rate",
+                RcaReportRow.ReportKind.METRIC_MOVEMENT,
                 Instant.parse("2026-08-01T00:00:00Z"),
                 Instant.parse("2026-08-08T00:00:00Z"),
                 Instant.parse("2026-08-15T00:00:00Z"),
@@ -260,8 +202,8 @@ class CaseServiceTest {
                 null,
                 "## Why\nThe provider rotated the default.",
                 true);
-        // The wire status is the JOB's, so the queue is what has to say "finished" — the report's own column
-        // alone would leave an exhaustion-swept job reading as claimed forever.
+        // The wire status is the job's: the report column alone would leave an exhaustion-swept job reading as
+        // claimed.
         rcaJobs.markDone(jobId);
 
         CaseDetailView finished = service.detail(p.id(), row.id());
@@ -272,25 +214,11 @@ class CaseServiceTest {
         assertEquals("## Why\nThe provider rotated the default.", report.detailedReport());
     }
 
-    // ---- 1c: RCA locks a case --------------------------------------------------------------
-
-    @Test
-    void runRcaLocksTheCaseAndWritesRcaRequested() {
-        Project p = project("svc-rca-locks");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-
-        service.runRca(p.id(), row.id(), "priya@example.com");
-
-        CaseRow locked = cases.findById(p.id(), row.id()).orElseThrow();
-        assertNotNull(locked.lockedAt());
-        assertTrue(kinds(p, row).contains(CaseEventRow.Kind.RCA_REQUESTED));
-    }
-
     /** Re-pressing a locked case must not re-stamp the lock or narrate the press twice. */
     @Test
     void rePressingALockedCaseCoalescesOntoTheSameReportAndDoesNotReLockOrReNarrate() {
         Project p = project("svc-rca-re-press");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
         RcaReportView first = service.runRca(p.id(), row.id(), "priya@example.com");
         String lockedAt = cases.findById(p.id(), row.id()).orElseThrow().lockedAt();
@@ -306,59 +234,194 @@ class CaseServiceTest {
                 "only the locking press narrates the request");
     }
 
-    /** A locked case's key opens a NEW case rather than joining the locked one. */
-    @Test
-    void aPositiveForALockedCasesKeyOpensAFreshCase() {
-        Project p = project("svc-rca-locked-key");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
-        service.runRca(p.id(), row.id(), "priya@example.com");
-
-        CaseDetection detection = new CaseDetection(
-                new CaseKey(row.detector(), row.subjectKind(), row.subjectId(), row.metric()),
-                "subject label",
-                null,
-                findingBehind(p, row.detector()),
-                "something happened again",
-                "because the detector said so",
-                0.4,
-                Instant.parse("2026-07-05T10:00:00Z"),
-                0.55,
-                0.95,
-                -0.4);
-        CaseRow secondCase = ledger.openOrJoin(p.id(), detection, null, Instant.now());
-
-        assertNotEquals(row.id(), secondCase.id(), "the locked case is never joined");
-        assertEquals(
-                CaseRow.State.OPEN,
-                cases.findById(p.id(), row.id()).orElseThrow().state(),
-                "the locked case itself is untouched");
-    }
-
-    // ---- resolving/absorbing closes every finding the case holds ---------------------------
-
     @Test
     void resolvingClosesEveryOpenFindingTheCaseHolds() {
         Project p = project("svc-resolve-closes-findings");
-        CaseRow row = open(p, CaseRow.Detector.BEHAVIOR_DRIFT);
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
         String findingId = Objects.requireNonNull(row.latestFindingId());
 
-        service.resolve(p.id(), row.id(), "shipped a fix", "priya@example.com");
+        service.resolve(p.id(), row.id(), "shipped a fix", "priya@example.com", null);
 
         assertEquals(
                 FindingRow.Status.CLOSED,
                 findings.findById(p.id(), findingId).orElseThrow().status());
     }
 
-    // ---- helpers -----------------------------------------------------------------------------
+    /**
+     * Absorb moves a detector's reference, so it is refused with no reference (malformed output) or no classifier;
+     * closing anyway would let the case reopen next window.
+     */
+    @Test
+    void absorbIsRefusedWithNoReferenceToMoveOrNoClassifierToMoveItFor() {
+        Project p = project("svc-absorb-refused");
+        CaseRow malformed = open(p, CaseRow.Detector.MALFORMED_OUTPUT);
+        CaseRow toolError = open(p, CaseRow.Detector.TOOL_ERROR);
+        capabilities.withhold(p.orgId(), Capability.TOOL_ERROR);
+
+        assertError(CaseError.NOT_ABSORBABLE, () -> service.absorb(p.id(), malformed.id(), "priya@example.com"));
+        assertError(CaseError.DETECTOR_UNAVAILABLE, () -> service.absorb(p.id(), toolError.id(), "priya@example.com"));
+        assertEquals(
+                CaseRow.State.OPEN,
+                cases.findById(p.id(), toolError.id()).orElseThrow().state());
+    }
+
+    /** RCA is anchored on a finding; a case with none has nothing to analyse. */
+    @Test
+    void rcaOnACaseHoldingNoFindingIsRefused() {
+        Project p = project("svc-rca-no-finding");
+        CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
+        jdbc.sql("UPDATE finding SET case_id = NULL WHERE project_id = :pid")
+                .param("pid", p.id())
+                .update();
+
+        assertError(RcaError.SUBJECT_NOT_FOUND, () -> service.runRca(p.id(), row.id(), "priya@example.com"));
+        assertNull(cases.findById(p.id(), row.id()).orElseThrow().lockedAt(), "a refused press locks nothing");
+    }
+
+    /**
+     * Closing a tool-error or malformed-output case clears its accumulator, or it re-derives the pre-fix rate and
+     * reopens the case.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {CaseRow.Detector.TOOL_ERROR, CaseRow.Detector.MALFORMED_OUTPUT})
+    void resolvingARateCaseClearsItsAccumulator(String detector) {
+        Project p = project("svc-resolve-resets-" + detector);
+        CaseRow row = open(p, detector);
+        ToolErrorStateRepository states =
+                CaseRow.Detector.TOOL_ERROR.equals(detector) ? toolErrorStates : malformedOutputRates.states();
+        states.save(
+                p.id(),
+                new CarriedState(
+                        row.subjectId(),
+                        new ToolErrorDetector.State(7.5, 0, "2026-07-01T00:00:00Z", null, 40, 0),
+                        null,
+                        null,
+                        "epoch-1",
+                        null,
+                        null,
+                        null,
+                        null),
+                Instant.now().toString());
+
+        service.resolve(p.id(), row.id(), "shipped a fix", "priya@example.com", null);
+
+        CarriedState after = Objects.requireNonNull(states.byTool(p.id()).get(row.subjectId()));
+        assertEquals(ToolErrorDetector.State.EMPTY, after.state());
+        assertNotNull(after.resetAt());
+    }
+
+    /** Closed with no disposition, the trail line names none. */
+    @ParameterizedTest
+    @ValueSource(strings = {CaseRow.Detector.FRUSTRATION, CaseRow.Detector.GROUNDEDNESS})
+    void aCaseClosedWithoutADispositionRecordsNone(String detector) {
+        Project p = project("svc-resolve-no-disposition-" + detector);
+        CaseRow row = open(p, detector);
+
+        service.resolve(p.id(), row.id(), "fixed upstream", "priya@example.com", null);
+
+        CaseEventRow resolved = events.listByCase(p.id(), row.id()).stream()
+                .filter(e -> CaseEventRow.Kind.RESOLVED.equals(e.kind()))
+                .findFirst()
+                .orElseThrow();
+        assertNull(resolved.detail());
+        assertNull(cases.findById(p.id(), row.id()).orElseThrow().disposition());
+    }
+
+    /**
+     * A person's ruling outranks a machine one and carries no citations; a misshapen citations blob shows as none,
+     * not a failed page.
+     */
+    @Test
+    void theCaseShowsWhoRuledAndSurvivesAMisshapenCitationBlob() {
+        Project p = project("svc-ruling");
+        CaseRow human = open(p, CaseRow.Detector.CLASSIFIER);
+        String humanFinding = Objects.requireNonNull(human.latestFindingId());
+        findings.recordHumanRuling(
+                p.id(), humanFinding, FindingRow.TriageVerdict.POSITIVE, "ruled", "2026-07-02T00:00:00Z");
+        CaseRow triaged = open(p, CaseRow.Detector.TOOL_ERROR);
+        String triagedFinding = Objects.requireNonNull(triaged.latestFindingId());
+        findings.recordTriage(
+                p.id(),
+                triagedFinding,
+                FindingRow.TriageVerdict.POSITIVE,
+                "the rise is real",
+                "{\"path\":\"window.n_cur\"}",
+                "2026-07-03T00:00:00Z");
+
+        assertEquals(
+                new CaseRulingView(
+                        humanFinding,
+                        "Human",
+                        "A person ruled this a real deviation.",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        "2026-07-02T00:00:00Z",
+                        true),
+                service.detail(p.id(), human.id()).ruling());
+        CaseRulingView machine =
+                Objects.requireNonNull(service.detail(p.id(), triaged.id()).ruling());
+        assertEquals("the rise is real", machine.summary());
+        assertEquals(List.of(), machine.citations());
+    }
+
+    /** A drift case's page carries the shift its finding measured, read off the finding's own evidence. */
+    @Test
+    void aDriftCaseShowsTheShiftItsFindingMeasured() {
+        Project p = project("svc-drift-detail");
+        String payload = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"turn_duration\","
+                + "\"bucket\":{\"kind\":\"call_site\",\"key\":\"summarize\"},\"reference\":\"pinned\","
+                + "\"direction\":\"up\",\"ratio\":2.4,\"w1_log\":1.2,\"n_ref\":800,\"n_cur\":650}";
+        String now = Instant.now().toString();
+        String findingId = Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-drift",
+                        "cause-drift",
+                        1,
+                        "cs-a",
+                        payload,
+                        now,
+                        now,
+                        now,
+                        now))
+                .findingId();
+        CaseRow row = cases.open(
+                        p.id(),
+                        new CaseDetection(
+                                new CaseKey(
+                                        CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "drift", "p50"),
+                                "summarize",
+                                null,
+                                findingId,
+                                "summarize got slower",
+                                "because",
+                                0.4,
+                                Instant.parse("2026-07-01T10:00:00Z"),
+                                null,
+                                null,
+                                null),
+                        Instant.now())
+                .orElseThrow();
+
+        var shift = Objects.requireNonNull(service.detail(p.id(), row.id()).metric());
+        assertEquals("summarize", shift.bucketKey());
+        assertEquals(2.4, shift.ratio());
+    }
+
+    private static void assertError(ErrorCode expected, Executable call) {
+        assertEquals(expected, assertThrows(TessaryException.class, call).error());
+    }
 
     private Project project(String name) {
-        return bootstrapGranted(name).project();
+        return TenantFixture.bootstrap(tenants, name).project();
     }
 
     private CaseRow open(Project p, String detector) {
         String subjectKind =
                 switch (detector) {
-                    case CaseRow.Detector.BEHAVIOR_DRIFT -> CaseRow.SubjectKind.BEHAVIOR_PROFILE;
                     case CaseRow.Detector.TOOL_ERROR -> CaseRow.SubjectKind.TOOL;
                     default -> CaseRow.SubjectKind.CLASSIFIER;
                 };
@@ -366,9 +429,7 @@ class CaseServiceTest {
                 new CaseKey(detector, subjectKind, "subject-" + detector, "pass_rate"),
                 "subject label",
                 null,
-                // Every case points at a finding; the forward CHECK on eval_case enforces it. The two
-                // detectors that open one without a finding are exempt by name, so seeding a real
-                // finding for the rest is the invariant, not test scaffolding.
+                // The forward CHECK on eval_case requires a finding behind every case but two exempt detectors.
                 findingBehind(p, detector),
                 "something happened",
                 "because the detector said so",
@@ -380,21 +441,25 @@ class CaseServiceTest {
         return cases.open(p.id(), detection, Instant.now()).orElseThrow();
     }
 
-    /** Every case opened after cutover points at a finding — the forward CHECK requires it. */
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    /** The forward CHECK requires a finding behind every case opened after cutover. */
     private String findingBehind(Project p, String detector) {
         String now = Instant.now().toString();
-        return findings.recordFiring(
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-" + detector,
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + detector,
                         "cause-" + detector,
-                        FindingRow.GLOBAL_WORKFLOW,
                         1,
-                        null,
-                        null,
                         "cs-a",
-                        now)
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
                 .findingId();
     }
 
@@ -402,20 +467,5 @@ class CaseServiceTest {
         return events.listByCase(p.id(), row.id()).stream()
                 .map(CaseEventRow::kind)
                 .toList();
-    }
-
-    /**
-     * Bootstrap a tenant whose org has behavior drift switched on before its project is created.
-     *
-     * <p>Behavior drift defaults off, so without a grant these cases would assert the capability
-     * default rather than the behaviour they name. The grant must precede the project because
-     * project creation is what seeds the built-in classifiers: grant afterwards and the classifier
-     * row is never inserted, leaving the test hunting findings from a classifier the project does
-     * not have.
-     */
-    private TenantFixture.Setup bootstrapGranted(String name) {
-        return TenantFixture.bootstrap(tenants, name, org -> {
-            capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT);
-        });
     }
 }

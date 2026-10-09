@@ -45,7 +45,7 @@ public class AlertWorker {
     private final AlertAssembler assembler;
     private final CaseAlertEvaluator caseAlerts;
     private final ObjectMapper mapper;
-    /** The capability gate for the classifier a rule points at — see {@link #classifierStillReaches}. */
+    /** Names the detectors this project's org no longer has, so a case-opened alert can skip their cases. */
     private final ClassifierService classifiers;
 
     private final AlertProperties props;
@@ -88,19 +88,6 @@ public class AlertWorker {
         return projects.findById(projectId)
                 .map(p -> capabilities.isEnabled(p.orgId(), Capability.ALERTS))
                 .orElse(false);
-    }
-
-    /**
-     * Whether a rule still has a classifier behind it that this org has.
-     *
-     * <p>A rule counts one classifier's detections over a rolling window: if the classifier's
-     * capability goes off, the rule keeps breaching, and can page someone about a detector their
-     * org no longer has, until the window rolls past the last detection (which can take days).
-     * Rules with no {@code classifier_id} are unaffected.
-     */
-    private boolean classifierStillReaches(AlertRuleRow rule) {
-        String classifierId = rule.classifierId();
-        return classifierId == null || classifiers.reachesProject(rule.projectId(), classifierId);
     }
 
     @Scheduled(fixedDelayString = "${tessary.alert.heartbeat-ms:60000}")
@@ -183,7 +170,6 @@ public class AlertWorker {
         }
         for (AlertRuleRow rule : enabled) {
             if (!entitledForAlerts(rule.projectId())) continue; // org lacks the alerts capability
-            if (!classifierStillReaches(rule)) continue; // its classifier is flagged off for this org
             try (LogContext ignored = LogContext.with(LogContext.PROJECT_ID, rule.projectId())) {
                 maybeRollup(rule, now);
             } catch (RuntimeException e) {
@@ -233,11 +219,7 @@ public class AlertWorker {
 
     private Instant parseAnchor(@Nullable String lastAt, String createdAt) {
         String anchor = (lastAt != null && !lastAt.isBlank()) ? lastAt : createdAt;
-        try {
-            return Instant.parse(anchor);
-        } catch (RuntimeException e) {
-            return Instant.EPOCH; // unparseable anchor → treat as long overdue (fire once, then it self-corrects)
-        }
+        return Instant.parse(anchor);
     }
 
     private boolean isDue(String cron, Instant anchor, Instant now, String projectId) {
@@ -246,12 +228,7 @@ public class AlertWorker {
             ZonedDateTime next = CronExpression.parse(cron).next(anchor.atZone(zone));
             return next != null && !now.isBefore(next.toInstant());
         } catch (RuntimeException e) {
-            log.warn(
-                    Markers.OPS,
-                    "alert skipping project={} — bad cron/anchor ({}): {}",
-                    projectId,
-                    cron,
-                    e.getMessage());
+            log.warn(Markers.OPS, "alert skipping project={} — bad cron ({}): {}", projectId, cron, e.getMessage());
             return false;
         }
     }

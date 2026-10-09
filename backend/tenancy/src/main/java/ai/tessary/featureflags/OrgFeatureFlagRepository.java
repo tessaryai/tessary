@@ -4,7 +4,6 @@ package ai.tessary.featureflags;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -41,14 +40,6 @@ public class OrgFeatureFlagRepository {
                 .list()
                 .stream()
                 .collect(Collectors.toMap(Row::flagKey, Row::enabled));
-    }
-
-    /** The raw rows for an org, in key order: the admin read surface. */
-    public List<Row> listByOrg(String orgId) {
-        return jdbc.sql("SELECT flag_key, enabled FROM org_feature_flag WHERE org_id = :oid ORDER BY flag_key")
-                .param("oid", orgId)
-                .query(OrgFeatureFlagRepository::map)
-                .list();
     }
 
     /** Insert or update (by {@code (org_id, flag_key)}) one override, preserving {@code created_at} on update. */

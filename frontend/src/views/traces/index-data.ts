@@ -15,6 +15,7 @@
  */
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
+import type { TraceFilterParams } from "../../api/client";
 import type { TraceListItemView as TraceListItem } from "../../api/types";
 import { useProjectApi } from "../../tenant/TenantContext";
 
@@ -22,12 +23,29 @@ export type TraceFilters = {
   q?: string;
   status?: string;
   callSite?: string;
-  model?: string;
+  /** true keeps traces with any call site, false only those with none. */
+  hasCallSite?: boolean;
   kind?: string;
   /** Absolute ISO-8601 bounds. Resolved by the picker, never a relative token — see index-filters. */
   from?: string | null;
   to?: string | null;
+  /** A classifier id, or "any": traces a classifier flagged. */
+  detectedBy?: string;
 };
+
+/** The filters as the traces and sessions reads take them. */
+export function filterParams(filters: TraceFilters): TraceFilterParams {
+  return {
+    q: filters.q,
+    status: filters.status,
+    callSite: filters.callSite,
+    hasCallSite: filters.hasCallSite,
+    kind: filters.kind,
+    fromTimestamp: filters.from ?? undefined,
+    toTimestamp: filters.to ?? undefined,
+    detectedBy: filters.detectedBy,
+  };
+}
 
 /**
  * 50 a page: the server's own default, and small enough that the first screen
@@ -53,20 +71,11 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
   return useInfiniteQuery({
     queryKey: ["traces-index", api.base, filters, epoch],
     queryFn: ({ pageParam }) =>
-      api.listTraces({
-        limit: PAGE_SIZE,
-        sort: "when",
-        cursor: pageParam ?? undefined,
-        q: filters.q,
-        status: filters.status,
-        callSite: filters.callSite,
-        model: filters.model,
-        kind: filters.kind,
-        fromTimestamp: filters.from ?? undefined,
-        toTimestamp: filters.to ?? undefined,
-      }),
+      api.listTraces({ limit: PAGE_SIZE, sort: "when", cursor: pageParam ?? undefined, ...filterParams(filters) }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_cursor ?? null,
+    // A search the server stopped at its timeout would only run as long again, three more times.
+    retry: false,
     enabled,
   });
 }
@@ -77,7 +86,7 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
  * There is no facets endpoint on the project API — `/v1/query/facets` is
  * token-scoped for MCP, not session-scoped for the UI — so the honest source is
  * what the list has actually served. The call site is on the trace row (copied
- * down from its root span by the rollup), which is why it can still be harvested
+ * down from its spans by the rollup), which is why it can still be harvested
  * this way and the model and kind vocabularies cannot: those are span facts, and
  * the list no longer reads spans at all.
  *

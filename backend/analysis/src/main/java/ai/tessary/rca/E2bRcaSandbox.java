@@ -8,12 +8,14 @@ import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -36,10 +38,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Drives one agentic RCA run through the Node launcher sidecar ({@code POST /rca}) — the same
- * one-request-one-fresh-microVM shape as the observer's {@code E2bAnalysisSandbox}: the sidecar
- * clones the repo, materializes the evidence dossier as files, runs the agent (optionally wired
- * to the platform's MCP surface via a short-lived key), and tears the sandbox down.
+ * Drives one agentic RCA run through the Node launcher sidecar ({@code POST /rca}), one request
+ * to one fresh microVM: the sidecar clones the repo, materializes the evidence dossier as files, runs
+ * the agent (wired to the platform's MCP surface via a short-lived key), and tears the sandbox down.
  *
  * <p><b>Model credentials are resolved and decrypted HERE</b> (via {@link
  * AgenticCredentialResolver}), not in the launcher — the launcher reads no provider secret from
@@ -51,7 +52,7 @@ import org.springframework.stereotype.Service;
  *
  * <pre>
  * POST /rca { clone_url, head_sha, files, prompt, json_schema, model, provider, credential,
- *             mcp: {url, token}|null, timeout_ms }
+ *             mcp: {url, token}, timeout_ms }
  *   -&gt; { "raw": "&lt;result envelope&gt;", "turns": [...], "startMs": n }
  * </pre>
  *
@@ -121,24 +122,22 @@ public class E2bRcaSandbox implements RcaSandbox {
      * rca_report} row this run investigated (see that field's javadoc), so the ledger can now say what
      * an RCA run cost the same way {@code E2bTriageSandbox} already says it for a triage ruling.
      */
-    private void bookUsage(@Nullable String projectId, @Nullable String reportId, String envelopeJson) {
+    private void bookUsage(String projectId, String reportId, String envelopeJson, boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
-        if (projectId == null || u == null) return;
+        if (u == null) return;
         usage.recordSandboxRun(
                 projectId,
                 ModelLane.RCA.wire(),
                 model(projectId),
                 pricingId(projectId),
-                // Never platform-funded any more — the run carries the org's own injected
-                // credential (AgenticCredentialResolver), so this lane's spend belongs to the org's
-                // bill, not the platform's.
-                false,
+                // Whose bill: the credential the run carried says so (AgenticCredentialResolver).
+                platformFunded,
                 u.inputTokens(),
                 u.outputTokens(),
                 u.cacheReadTokens(),
                 u.cacheWriteTokens(),
                 u.costUsd(),
-                reportId == null ? null : new LlmUsageAccountant.Subject(SUBJECT_KIND, reportId));
+                new LlmUsageAccountant.Subject(SUBJECT_KIND, reportId));
     }
 
     /**
@@ -190,8 +189,8 @@ public class E2bRcaSandbox implements RcaSandbox {
         return KEY;
     }
 
-    /** Boot-time guard, mirroring {@code E2bAnalysisSandbox}: the sandbox is now RCA's only analysis
-     *  path, so a blank launcher URL fails every RCA at run time; say so once at startup instead. */
+    /** Boot-time guard: the sandbox is RCA's only analysis path, so a blank launcher URL fails every
+     *  RCA at run time; say so once at startup instead. */
     @PostConstruct
     void warnIfUnconfigured() {
         Agentic cfg = props.getAgentic();
@@ -214,6 +213,8 @@ public class E2bRcaSandbox implements RcaSandbox {
                 .setNoParent()
                 .setSpanKind(SpanKind.CLIENT)
                 .startSpan();
+        // Released in the finally below however the run ends; see AgenticCredentialResolver#release.
+        AgenticCredentialResolver.@Nullable Credential credential = null;
         try (var _ = span.makeCurrent()) {
             span.setAttribute("langfuse.trace.name", "agentic-rca");
             span.setAttribute("tessary.project.id", req.projectId());
@@ -221,7 +222,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             span.setAttribute("tessary.rca.subject_id", req.subjectId());
             span.setAttribute("tessary.head_sha", req.headSha() == null ? "" : req.headSha());
             // One clone+analyze run == invoke_agent; without the discriminator Langfuse never types
-            // this as a generation and the Alloy langfuse branch drops it (see E2bAnalysisSandbox).
+            // this as a generation and the Alloy langfuse branch drops it.
             span.setAttribute("gen_ai.operation.name", AgentSpanTelemetry.OP_INVOKE_AGENT);
             span.setAttribute("gen_ai.request.model", model(req.projectId()));
 
@@ -251,12 +252,11 @@ public class E2bRcaSandbox implements RcaSandbox {
             // still key off it to pick which OpenCode provider block to build.
             ModelProvider provider = providerFor(req.projectId());
             body.put("provider", provider.name());
-            body.set("credential", mapper.valueToTree(credentials.resolve(req.projectId(), provider)));
-            if (req.mcpUrl() != null && req.mcpToken() != null) {
-                ObjectNode mcp = body.putObject("mcp");
-                mcp.put("url", req.mcpUrl());
-                mcp.put("token", req.mcpToken());
-            }
+            credential = credentials.resolve(req.projectId(), provider);
+            body.set("credential", mapper.valueToTree(credential));
+            ObjectNode mcp = body.putObject("mcp");
+            mcp.put("url", req.mcpUrl());
+            mcp.put("token", req.mcpToken());
             body.put("timeout_ms", cfg.getTimeoutMs());
             // A soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
             // (not yet live-verified) caveat.
@@ -268,10 +268,10 @@ public class E2bRcaSandbox implements RcaSandbox {
             JsonNode node = mapper.readTree(respBody);
             String raw = node.path("raw").asText("");
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
-            bookUsage(req.projectId(), req.reportId(), raw);
+            bookUsage(req.projectId(), req.reportId(), raw, credential.platformFunded());
             // `structured_output` is the schema-constrained object the sandbox ALREADY extracted and
-            // validated: agent-stream.js's runAgent refuses to exit 0 under `rejectOn: 'error'` unless
-            // every key the response schema requires is present in it. `result` is the SAME answer in
+            // validated: agent-stream.js's runAgent refuses to exit 0 unless every key the response
+            // schema requires is present in it. `result` is the SAME answer in
             // the model's own raw reply text, which may arrive wrapped in a markdown fence or a
             // sentence of prose. Reading `result` first is what discarded a complete 4m48s / $0.80
             // investigation at its last step: RcaSynthesisOutput binds it strictly, so one fence or one
@@ -302,6 +302,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             span.recordException(e);
             throw new TessaryException(RcaError.UPSTREAM_FAILED, e, "agentic RCA failed: " + e.getMessage());
         } finally {
+            if (credential != null) credentials.release(credential);
             span.end();
         }
     }
@@ -316,7 +317,20 @@ public class E2bRcaSandbox implements RcaSandbox {
      * buildErrorBody} carries a {@code usage} object whenever rca.js's failure envelope reached it,
      * and {@code bookUsage} already no-ops on a body with nothing usable.
      */
-    String postLauncher(String bodyJson, Agentic cfg, @Nullable String projectId, @Nullable String reportId) {
+    @ExcludeFromJacocoGeneratedReport(
+            "parses the body this class serialized one call earlier, so the checked catch cannot fire")
+    private boolean platformFunded(String bodyJson) {
+        try {
+            return mapper.readTree(bodyJson)
+                    .path("credential")
+                    .path("platform_funded")
+                    .asBoolean(false);
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
+    String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/rca"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
                 .header("Authorization", "Bearer " + cfg.getLauncherApiKey())
@@ -369,7 +383,9 @@ public class E2bRcaSandbox implements RcaSandbox {
             // F1: book what the run spent before it failed (a launcher outage carries no usage —
             // bookUsage no-ops on a body with nothing parseable — but today's always-502 run failure
             // does, whenever rca.js reached its catch block).
-            bookUsage(projectId, reportId, resp.body());
+            // postLauncher's signature is pinned by its test overrides, so the funding flag is read
+            // back from the body this run actually sent rather than threaded as a parameter.
+            bookUsage(projectId, reportId, resp.body(), platformFunded(bodyJson));
             throw new TessaryException(
                     RcaError.UPSTREAM_FAILED,
                     "agentic RCA launcher HTTP " + resp.statusCode() + (diag.isBlank() ? "" : " (" + diag + ")"));

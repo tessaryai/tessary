@@ -4,6 +4,7 @@ package ai.tessary.classifier;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog.BuiltIn;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierModelModule;
 import ai.tessary.classifier.catalog.ClassifierSeedListener;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
@@ -16,15 +17,24 @@ import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.config.ClassifierProperties;
+import ai.tessary.config.GroundednessProperties;
+import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformCreditExhausted;
+import ai.tessary.llm.decisions.DecisionProviderResolver;
+import ai.tessary.llm.decisions.DecisionTarget;
+import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
+import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.pipeline.CallSiteFact;
 import ai.tessary.plan.CapabilityService;
+import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -34,7 +44,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -63,6 +75,15 @@ public class ClassifierService {
     private final ClassifierProperties props;
     private final CapabilityService capabilities;
     private final ProjectRepository projects;
+    private final DecisionProviderResolver decisionProviders;
+    private final EncoderAvailability encoder;
+    private final GroundednessProperties groundedness;
+
+    /**
+     * The last reason each encoder-backed classifier's enqueue was skipped, so the DEBUG line is
+     * written when the reason changes rather than once a minute for as long as the model is down.
+     */
+    private final Map<String, String> lastEncoderSkip = new ConcurrentHashMap<>();
 
     public ClassifierService(
             ClassifierRepository signals,
@@ -74,8 +95,14 @@ public class ClassifierService {
             ClassifierProperties props,
             CapabilityService capabilities,
             ProjectRepository projects,
-            MetricBaselineRepository baselines) {
+            MetricBaselineRepository baselines,
+            DecisionProviderResolver decisionProviders,
+            EncoderAvailability encoder,
+            GroundednessProperties groundedness) {
+        this.encoder = encoder;
+        this.groundedness = groundedness;
         this.baselines = baselines;
+        this.decisionProviders = decisionProviders;
         this.signals = signals;
         this.detections = detections;
         this.jobs = jobs;
@@ -89,8 +116,9 @@ public class ClassifierService {
 
     /**
      * Seed the built-in catalog into a project, idempotently: a missing built-in is inserted
-     * enabled; an existing one whose catalog version advanced has its definition re-synced
-     * (enable/disable state preserved). Returns the number newly inserted.
+     * enabled, or disabled when its module says so (Frustration); an existing one whose catalog
+     * version advanced has its definition re-synced (enable/disable state preserved). Returns the
+     * number newly inserted.
      *
      * <p>Two triggers: {@link ClassifierSeedListener} on project creation, and {@link
      * #resyncBuiltIns} from {@code ClassifierCatalogWorker} for every active project, which
@@ -112,7 +140,7 @@ public class ClassifierService {
      * form the periodic reconcile calls, so one project costs a bounded number of queries rather
      * than one per catalog module.
      *
-     * <p>The row set is read once and indexed by key here, replacing a {@code findByKey} per
+     * <p>The row set is read once and indexed by key here, replacing a per-key lookup per
      * built-in. The steady-state cost of a project whose catalog is already correct is one
      * {@code classifier} read and one {@code org_plan} read, and it writes nothing.
      */
@@ -136,17 +164,18 @@ public class ClassifierService {
                         b.defaultConfigJson(),
                         true,
                         b.version(),
-                        // Every built-in seeds ON. A classifier whose numbers we do not trust is
-                        // held back by its capability flag, not by a second switch in the
-                        // catalog; see BuiltIn.
-                        true,
+                        // Every built-in seeds ON except one that spends the org's own provider
+                        // credit; a classifier whose numbers we do not trust is held back by its
+                        // capability flag instead. See BuiltIn.
+                        b.defaultEnabled(),
                         // The operating point the catalog declares for this built-in: DISCOVERY
                         // (high recall) is right for a classifier nobody has characterised yet;
                         // frustration declares TRACKING once it has been. See
                         // BuiltInClassifierCatalog for the measurement.
                         b.defaultMode(),
                         now,
-                        now));
+                        now,
+                        null));
                 inserted++;
             } else if (existing.builtIn() && existing.version() < b.version()) {
                 signals.updateDefinition(new ClassifierRow(
@@ -162,7 +191,8 @@ public class ClassifierService {
                         existing.enabled(),
                         existing.mode(), // preserve the tenant's operating point across a re-seed
                         existing.createdAt(),
-                        now));
+                        now,
+                        existing.callSiteIds()));
             }
         }
         if (inserted > 0) {
@@ -186,16 +216,11 @@ public class ClassifierService {
      * {@code classifier_key} is no longer in the catalog is disabled, never deleted, so its
      * detection history stays listable.
      *
+     * <p>Takes the {@link Project} row the periodic reconcile already holds from {@code findActive()},
+     * rather than re-reading it per project purely to recover the {@code org_id} the capability lookup
+     * needs.
+     *
      * @return how many built-ins this pass newly inserted (0 in the steady state)
-     */
-    public int resyncBuiltIns(String projectId) {
-        return resync(projectId, withheldBuiltInKeys(projectId));
-    }
-
-    /**
-     * {@link #resyncBuiltIns} for a caller that already holds the {@link Project} row: the periodic
-     * reconcile, which got it from {@code findActive()} and would otherwise re-read it per project purely
-     * to recover the {@code org_id} the capability lookup needs.
      */
     public int resyncBuiltIns(Project project) {
         return resync(project.id(), withheldForOrg(project.orgId()));
@@ -273,21 +298,6 @@ public class ClassifierService {
      */
     private static boolean reaches(ClassifierRow row, Set<String> withheldBuiltInKeys) {
         return !row.builtIn() || !withheldBuiltInKeys.contains(row.classifierKey());
-    }
-
-    /**
-     * Whether one stored classifier reaches this project's org: the boolean form of {@link #get}'s
-     * guard, for callers outside this slice that must skip rather than 404.
-     *
-     * <p>The caller that needs it is alerting: a rule pointing at a classifier the org no longer
-     * has must stop evaluating by being passed over rather than by an exception, so one bad rule
-     * cannot take the whole heartbeat's rule loop down with it. Returns {@code false} for a
-     * classifier id that does not exist, for the same reason.
-     */
-    public boolean reachesProject(String projectId, String classifierId) {
-        return signals.findById(projectId, classifierId)
-                .filter(row -> reaches(row, withheldBuiltInKeys(projectId)))
-                .isPresent();
     }
 
     /**
@@ -419,6 +429,12 @@ public class ClassifierService {
      * schema's arrival rewinds to check.
      */
     public @Nullable String readiness(String projectId, ClassifierRow row) {
+        if (BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) {
+            if (!row.enabled()) return null;
+            return signals.findPause(projectId, row.id())
+                    .map(ClassifierPause::reason)
+                    .orElse(null);
+        }
         if (!BuiltInDetector.Kind.MALFORMED_OUTPUT.equals(row.detector())) return null;
         return substrate.anyOutputSchema(projectId) ? null : ClassifierDtos.ClassifierView.WAITING_ON_SCHEMAS;
     }
@@ -439,13 +455,52 @@ public class ClassifierService {
     /**
      * Enable or disable a signal definition. Guarded by {@link #get} first, so a withheld
      * built-in 404s instead of being written and then 404ing on the read back.
+     *
+     * <p>Frustration calls a provider, so enabling it without one its lane can run on is refused with
+     * {@link ClassifierError#PROVIDER_REQUIRED} rather than accepted and paused on the first sweep. Credit is
+     * not asked about: on and able to run are separate, and a provider with no credit left pauses the sweep
+     * as {@code no_credit}. Any enable clears a pause: it is how a person says "try again", and the next
+     * sweep pauses again if the provider still refuses.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
-        get(projectId, id); // tenant + existence + capability guard
+        ClassifierRow row = get(projectId, id); // tenant + existence + capability guard
+        if (enabled
+                && BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
+                && !decisionProviders.hasProvider(projectId, ModelLane.FRUSTRATION)) {
+            throw new TessaryException(ClassifierError.PROVIDER_REQUIRED, row.name());
+        }
         if (signals.setEnabled(projectId, id, enabled) == 0) {
             throw new TessaryException(ClassifierError.NOT_FOUND, id);
         }
+        if (enabled) signals.unpause(projectId, id);
         return get(projectId, id);
+    }
+
+    /**
+     * Lift the pause on every paused classifier in {@code orgId} whose lane now runs on {@code provider}:
+     * the org just saved that provider's key, so the next sweep tries it instead of waiting out
+     * {@code tessary.frustration.credential-retry-seconds}. A classifier whose lane resolves elsewhere, or
+     * still to nothing, stays paused. Returns how many were lifted.
+     */
+    public int unpauseForProvider(String orgId, ModelProvider provider) {
+        int lifted = 0;
+        for (Project project : projects.findByOrg(orgId)) {
+            for (ClassifierRow row : signals.listByProject(project.id())) {
+                if (!BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())) continue;
+                if (signals.findPause(project.id(), row.id()).isEmpty()) continue;
+                Optional<DecisionTarget> target;
+                try {
+                    target = decisionProviders.resolve(project.id(), ModelLane.FRUSTRATION);
+                } catch (TessaryException e) {
+                    // Out of platform credit: the lane still runs there, not on the key just saved.
+                    if (!(e instanceof PlatformCreditExhausted)) throw e;
+                    continue;
+                }
+                if (target.isEmpty() || target.get().provider() != provider) continue;
+                lifted += signals.unpause(project.id(), row.id());
+            }
+        }
+        return lifted;
     }
 
     /**
@@ -462,6 +517,63 @@ public class ClassifierService {
             throw new TessaryException(ClassifierError.NOT_FOUND, id);
         }
         return get(projectId, id);
+    }
+
+    /**
+     * Limit the classifier to {@code callSiteIds}, or run it on every call site again with {@code null}. Each id must
+     * be one {@link SubstrateReadRepository#knownCallSiteIds} lists.
+     *
+     * <p>A change that adds a call site rewinds the cursor of a classifier that scores spans with no model, so the
+     * added call site's history is checked rather than read as clean: the same reason as {@link
+     * #rewindForCallSiteFact}. A classifier that sends each span or turn to a model is not rewound, because the rewind
+     * would send the whole history again; it checks the added call site from now on. A window classifier is not
+     * rewound either: its cursor feeds fitted state, and replaying it would count traffic twice.
+     */
+    public ClassifierRow setCallSiteIds(String projectId, String id, @Nullable List<String> callSiteIds) {
+        ClassifierRow before = get(projectId, id);
+        if (BuiltInDetector.Kind.TOOL_ERROR.equals(before.detector())) {
+            throw new TessaryException(ClassifierError.CALL_SITE_SCOPE_UNSUPPORTED, before.classifierKey());
+        }
+        List<String> scope = callSiteIds == null
+                ? null
+                : callSiteIds.stream().distinct().sorted().toList();
+        if (scope != null) {
+            Set<String> known = substrate.knownCallSiteIds(projectId);
+            List<String> unknown =
+                    scope.stream().filter(c -> !known.contains(c)).toList();
+            if (!unknown.isEmpty()) {
+                throw new TessaryException(ClassifierError.UNKNOWN_CALL_SITE, String.join("', '", unknown));
+            }
+        }
+        if (signals.setCallSiteIds(projectId, id, scope) == 0) {
+            throw new TessaryException(ClassifierError.NOT_FOUND, id);
+        }
+        List<String> was = before.callSiteIds();
+        boolean widened = was != null && (scope == null || !was.containsAll(scope));
+        boolean rewound = widened && rewindsOnWiden(before.detector()) && jobs.rewindCursor(projectId, id) > 0;
+        StructuredLog.info(log, Markers.OPS, "classifier.call-sites.set")
+                .message(
+                        "%s now runs on %s%s",
+                        before.classifierKey(),
+                        scope == null ? "every call site" : scope.size() + " call site(s)",
+                        rewound ? ", cursor rewound" : "")
+                .field("project", projectId)
+                .field("signal", before.classifierKey())
+                .field("callSites", scope == null ? -1 : scope.size())
+                .field("widened", widened)
+                .field("rewound", rewound)
+                .log();
+        return get(projectId, id);
+    }
+
+    /** The call sites a classifier in this project can be limited to, sorted. */
+    public List<String> knownCallSiteIds(String projectId) {
+        return List.copyOf(substrate.knownCallSiteIds(projectId));
+    }
+
+    private boolean rewindsOnWiden(String detector) {
+        return catalog.grainFor(detector) == ClassifierModelModule.Grain.OBSERVATION
+                && !BuiltInDetector.Kind.ENCODER_BACKED.contains(detector);
     }
 
     /**
@@ -552,11 +664,6 @@ public class ClassifierService {
 
     public List<ClassifierDtos.ClassifierEventView> events(String projectId, int limit) {
         return detections.listByProject(projectId, limit);
-    }
-
-    public List<ClassifierDtos.ClassifierEventView> eventsForClassifier(
-            String projectId, String classifierId, int limit) {
-        return eventsForClassifier(projectId, classifierId, null, limit);
     }
 
     /**
@@ -658,12 +765,66 @@ public class ClassifierService {
      * the flag flipping, on existing projects and not only newly created ones. Its
      * {@code enabled} column is untouched, so the flag coming back on resumes exactly the sweep
      * the project had configured.
+     *
+     * <p>An encoder-backed classifier is also skipped while {@link #encoderSkipReason} gives a
+     * reason: its model is down, or it is sleeping after a caught-up sweep in production mode. A skip
+     * is not a failure and touches nothing; the next tick asks again, and the sweep resumes from its
+     * cursor once the model answers.
      */
     public void enqueueEnabled(String projectId) {
         Set<String> withheld = withheldBuiltInKeys(projectId);
+        Instant now = Instant.now();
         for (ClassifierRow s : signals.listEnabled(projectId)) {
             if (!reaches(s, withheld)) continue;
+            if (BuiltInDetector.Kind.ENCODER_BACKED.contains(s.detector())) {
+                Optional<String> skip = encoderSkipReason(projectId, s.id(), now);
+                if (skip.isPresent()) {
+                    logEncoderSkip(projectId, s, skip.get());
+                    continue;
+                }
+                lastEncoderSkip.remove(s.id());
+            }
             jobs.enqueue(projectId, s.id(), props.getDeadLetterCooldownSeconds());
         }
+    }
+
+    /**
+     * Why an encoder-backed classifier should not be swept right now, or empty when it should. Two
+     * reasons: the model does not answer ({@link EncoderAvailability}), or the instance runs in
+     * production mode and this classifier's last sweep reached the head less than {@code
+     * tessary.groundedness.production-sleep-minutes} ago, which is what lets the GPU instance go idle
+     * and stop between scheduled runs. Dev mode never sleeps.
+     */
+    Optional<String> encoderSkipReason(String projectId, String classifierId, Instant now) {
+        if (!encoder.available())
+            return Optional.of("model down: " + encoder.snapshot().reason());
+        if (groundedness.mode() != GroundednessProperties.Mode.PRODUCTION) return Optional.empty();
+        Optional<Instant> caughtUp = jobs.caughtUpAt(projectId, classifierId);
+        if (caughtUp.isPresent()
+                && now.isBefore(caughtUp.get().plus(Duration.ofMinutes(groundedness.getProductionSleepMinutes())))) {
+            return Optional.of("sleeping after the sweep that caught up at " + caughtUp.get());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Whether a claimed sweep of {@code row} should be handed back unrun because its model is down.
+     * The worker asks this after the enqueue gate, for a job that was pending before the model went
+     * away.
+     */
+    public boolean encoderDown(ClassifierRow row) {
+        return BuiltInDetector.Kind.ENCODER_BACKED.contains(row.detector()) && !encoder.available();
+    }
+
+    private void logEncoderSkip(String projectId, ClassifierRow row, String reason) {
+        if (reason.equals(lastEncoderSkip.put(row.id(), reason))) return;
+        StructuredLog.debug(log, "groundedness.sweep.skipped")
+                .message("not sweeping %s: %s", row.classifierKey(), reason)
+                .field("project", projectId)
+                .field("signal", row.classifierKey())
+                .field("classifierId", row.id())
+                .field("mode", groundedness.getClassifierMode())
+                .field("reason", reason)
+                .log();
     }
 }

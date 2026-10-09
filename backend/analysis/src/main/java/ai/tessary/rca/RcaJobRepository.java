@@ -9,7 +9,6 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -26,9 +25,7 @@ public class RcaJobRepository {
     private static final String COLS = "id, project_id, payload->>'finding_id' AS finding_id, "
             + "payload->>'subject_kind' AS subject_kind, "
             + "payload->>'subject_id' AS subject_id, payload->>'metric' AS metric, "
-            + "payload->>'window_from' AS window_from, payload->>'window_split' AS window_split, "
-            + "payload->>'window_to' AS window_to, payload->>'created_by' AS created_by, "
-            + "status, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at";
+            + "payload->>'created_by' AS created_by";
 
     private final JdbcClient jdbc;
 
@@ -45,6 +42,11 @@ public class RcaJobRepository {
      * with a fresh attempt budget — {@code markFailed} is terminal on this queue (the claim SQL never
      * reclaims {@code failed}), so without the revival a transient LLM blip would lock the whole
      * finding behind its dedupe key. A {@code done} report stays immutable.
+     *
+     * <p>An optional {@code runNonce} is appended to the dedupe key. A null nonce is the normal
+     * coalescing trigger. A non-null one deliberately opts OUT of the coalesce — it is how an explicit
+     * re-run gets a second analysis of a finding whose report already exists, instead of silently
+     * resolving back to the first (immutable) report.
      */
     public String createOrGet(
             String projectId,
@@ -55,36 +57,7 @@ public class RcaJobRepository {
             Instant windowFrom,
             Instant windowSplit,
             Instant windowTo,
-            @Nullable String createdBy) {
-        return createOrGet(
-                projectId,
-                findingId,
-                subjectKind,
-                subjectId,
-                metric,
-                windowFrom,
-                windowSplit,
-                windowTo,
-                createdBy,
-                null);
-    }
-
-    /**
-     * As {@link #createOrGet}, with an optional {@code runNonce} appended to the dedupe key. A null
-     * nonce is the normal coalescing trigger. A non-null one deliberately opts OUT of the coalesce —
-     * it is how an explicit re-run gets a second analysis of a finding whose report already exists,
-     * instead of silently resolving back to the first (immutable) report.
-     */
-    public String createOrGet(
-            String projectId,
-            String findingId,
-            String subjectKind,
-            String subjectId,
-            String metric,
-            Instant windowFrom,
-            Instant windowSplit,
-            Instant windowTo,
-            @Nullable String createdBy,
+            String createdBy,
             @Nullable String runNonce) {
         String dedupeKey = projectId + ":finding:" + findingId + (runNonce == null ? "" : ":" + runNonce);
         String now = Instant.now().toString();
@@ -117,15 +90,6 @@ public class RcaJobRepository {
                 .param("now", now)
                 .query(String.class)
                 .single();
-    }
-
-    public Optional<RcaJobRow> findById(String projectId, String id) {
-        return jdbc.sql("SELECT " + COLS + " FROM job WHERE kind = :kind AND project_id = :pid AND id = :id")
-                .param("kind", JobRow.Kind.RCA)
-                .param("pid", projectId)
-                .param("id", id)
-                .query((rs, n) -> map(rs))
-                .optional();
     }
 
     /** Claim up to {@code batch} due jobs via {@code FOR UPDATE SKIP LOCKED}, reclaiming expired-lease jobs
@@ -178,16 +142,6 @@ public class RcaJobRepository {
                 rs.getString("subject_kind"),
                 rs.getString("subject_id"),
                 rs.getString("metric"),
-                rs.getString("window_from"),
-                rs.getString("window_split"),
-                rs.getString("window_to"),
-                rs.getString("created_by"),
-                rs.getString("status"),
-                rs.getString("lease_owner"),
-                rs.getString("lease_expires_at"),
-                rs.getInt("attempts"),
-                rs.getString("last_error"),
-                rs.getString("created_at"),
-                rs.getString("updated_at"));
+                rs.getString("created_by"));
     }
 }

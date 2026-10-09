@@ -1,0 +1,90 @@
+---
+title: "Data Handling"
+description: "Where your trace data and repository content go when Tessary Cloud runs triage and root-cause analysis, how it stores your credentials, and how retention and deletion work."
+---
+
+When Tessary Cloud runs triage or RCA (root-cause analysis), an agent reads your trace content and passes what it reads to a model provider. Which provider that is depends on whether your organization has stored its own key.
+
+## Which model provider sees your data
+
+Triage and RCA hand your evidence to an agent that runs on a large language model. Each run uses one provider credential, chosen when the run starts:
+
+| Your organization | Triage and RCA run on |
+| --- | --- |
+| Has a key stored for the provider | Your key, billed to your provider account. Your key is used even while credit remains. |
+| Has no key, and the [model credit](/cloud/usage-and-credit#the-model-credit) is not used up | A provider account Tessary holds, paid for by the credit. |
+| Has no key, and the credit is used up | Nothing. Triage and RCA do not run until you add a key under **Settings → Providers**. |
+
+Everything the agent reads during a run, trace content included, becomes part of the model's context. It therefore reaches whichever provider serves that run. If you want your trace content to reach only a provider you have an agreement with, store a key for that provider before you run triage or RCA.
+
+The `frustration` classifier is separate. It scores user messages on your own OpenRouter or TypeSafe key and never falls back to the credit. See [Watch for frustrated users](/classifiers/frustration).
+
+## Where the agent runs
+
+Every triage and RCA run gets a fresh sandbox of its own, which is torn down when the run ends. A sandbox is never reused across runs or across organizations.
+
+The agent works from three inputs:
+
+- **The finding's dossier**, written into the sandbox as files.
+- **Evidence read on demand** over MCP (Model Context Protocol), with a short-lived key minted for the run and revoked when it ends. The agent fetches the traces it needs rather than receiving trace rows in its prompt.
+- **Your repository**, for RCA only, when the project has one connected. Triage never receives a clone.
+
+RCA clones the repository at the default branch's head and only reads it. Tessary writes nothing back to your repository.
+
+The provider credential travels with the run request and reaches the agent as environment configuration. It is not written into the sandbox's input files, not added to the agent's prompt, and not logged.
+
+[Root-cause analysis](/concepts/root-cause-analysis) covers what the agent reads, what it is deliberately not told, and what the report returns.
+
+## How credentials are stored
+
+**Model provider keys.** Keys you add under **Settings → Providers** belong to the organization, and every project in it shares them. Tessary seals each key with AES-256-GCM before storing it and uses it only to call that provider. Once a key is stored, the page shows **Key stored** but never displays the key again.
+
+**Repository access.** You connect a repository under **Settings → Git integration**, either with a GitHub access token or through a GitHub App installation. Tessary seals what it stores the same way: the access token, or the installation reference. With a GitHub App, Tessary asks GitHub for a short-lived installation token when it needs repository access and caches that token only until it expires. The token used to clone a repository for RCA is scrubbed from the agent's output.
+
+**API keys.** Tessary stores a bcrypt hash of each project API key, never the secret itself. [API keys](/reference/api-keys) covers scopes, rotation, and revocation.
+
+## Retention
+
+Each project keeps traces and detections for a set number of days. An hourly sweep deletes anything older.
+
+Tessary Cloud sets a maximum retention period, and no project can keep data longer than that. The number is on the [pricing page](https://tessary.ai/pricing). You can shorten it for one project under **Settings → Data retention**: for **Traces**, **Detections**, or both, turn on **Override for this project**, enter **Days to keep**, and select **Save**. Changing retention requires the owner or admin role.
+
+Tessary refuses a value above the maximum with `Retention of <days> days is above the <maximum>-day ceiling for this project`. It also refuses `0`, which would mean keeping data forever, with `Retention of forever is above the <maximum>-day ceiling for this project`.
+
+Two rules decide what the sweep leaves in place:
+
+- **A trace's content can expire before the trace does.** The trace stays on every list, count, and chart, and its detail view shows the content as expired.
+- **Evidence for an open finding is kept regardless of age.** That includes a finding whose case is not yet resolved. Once the finding closes, its traces age out like any other.
+
+## Delete data
+
+| To remove | Where |
+| --- | --- |
+| A model provider key | **Settings → Providers**, then **Remove** on the provider |
+| A connected repository | **Settings → Git integration**, then **Disconnect** |
+| An API key | **Settings → API keys**, then **Revoke** on the key |
+| A project and its data | **Settings → Organization**, then **Delete project** |
+| An organization and everything in it | **Settings → Organization**, under **Danger zone** |
+
+Disconnecting a repository, deleting a project, and deleting an organization require the owner role.
+
+**Disconnect** removes the integration from Tessary. To withdraw access on GitHub's side as well, revoke the access token or uninstall the GitHub App in your GitHub settings.
+
+**Delete project** permanently deletes the project and its data. Its API keys stop working immediately, and the data is deleted in the background. The organization's default project cannot be deleted; select **Make default** on another project first.
+
+<Warning>
+  Deleting an organization permanently deletes its projects, traces, findings, and members. Select **Archive organization** first, then **Delete organization**. Tessary refuses to delete the only organization you belong to.
+</Warning>
+
+To delete your only organization, email [support@tessary.ai](mailto:support@tessary.ai) with its Organization ID, which is under **Settings → Organization**.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Root-cause analysis" icon="magnifying-glass" href="/concepts/root-cause-analysis">
+    What the RCA agent reads, what it is not told, and what its report contains.
+  </Card>
+  <Card title="API keys" icon="key" href="/reference/api-keys">
+    Key scopes, how keys are stored, and how to rotate or revoke one.
+  </Card>
+</CardGroup>

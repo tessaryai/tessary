@@ -12,7 +12,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useProjectApi } from "../tenant/TenantContext";
 
-export function useCaseCounts(): { open: number; isLoading: boolean } {
+export function useCaseCounts(): { open: number } {
   const api = useProjectApi();
   const q = useQuery({
     queryKey: ["cases", api.base],
@@ -20,5 +20,5 @@ export function useCaseCounts(): { open: number; isLoading: boolean } {
     retry: false,
     staleTime: 30_000,
   });
-  return { open: q.data?.cases.length ?? 0, isLoading: q.isLoading };
+  return { open: q.data?.cases.length ?? 0 };
 }

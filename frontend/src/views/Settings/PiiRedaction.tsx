@@ -7,6 +7,7 @@ import type { RedactionRuleView } from "../../api/types";
 import {
   Badge,
   Button,
+  ErrorNote,
   Field,
   Input,
   Modal,
@@ -138,6 +139,8 @@ export function PiiRedaction() {
             <Spinner size="sm" />
             Loading rules…
           </div>
+        ) : rulesQuery.isError ? (
+          <ErrorNote error={rulesQuery.error} />
         ) : (
           <div className="overflow-hidden rounded-card border border-border">
             <div className="flex items-center gap-3 px-4 py-2.5 bg-surface border-b border-border text-column-header text-muted">

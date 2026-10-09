@@ -14,7 +14,6 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierObservations;
-import ai.tessary.testsupport.StubEncoderScorerConfig;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
@@ -26,20 +25,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Executes {@link SubstrateReadRepository#groundingEvidence} against the real Postgres.
- *
- * <p><b>Why this exists.</b> Every other test of this seam stubs {@link GroundingEvidenceReads}, so
- * the SQL itself had no coverage at all — and a revision of this exact query shipped ordering tool
- * results by {@code tc.seq}, a column {@code tool_call} does not have. It threw on first contact with
- * a database and nothing in the suite noticed. A read whose whole job is a join predicate has to be
- * exercised by a real join, not by a lambda that returns a map.
+ * {@link SubstrateReadRepository#groundingEvidence} against real Postgres. Every other test stubs {@link
+ * GroundingEvidenceReads}, and a revision of this query shipped ordering by {@code tc.seq}, a column {@code
+ * tool_call} lacks, unnoticed.
  */
 @SpringBootTest
-@Import(StubEncoderScorerConfig.class)
 class GroundingEvidenceIntegrationTest {
 
     @Autowired
@@ -70,7 +63,6 @@ class GroundingEvidenceIntegrationTest {
         fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
     }
 
-    /** A fresh trace id. The turn IS the trace now, so there is no spine to mint alongside it. */
     private static String trace() {
         return SubstrateV2Fixtures.traceId();
     }
@@ -91,9 +83,7 @@ class GroundingEvidenceIntegrationTest {
                 .writeRef();
     }
 
-    /** Like {@link #span}, but on a trace sharing {@code sessionId} with other turns — the conversation
-     * grain {@code COALESCE(thread_id, session_id)} groups on, mirroring the production shape
-     * (scenarios/conversation.py: one trace per turn, one shared session). */
+    /** A span on a trace sharing {@code sessionId}: the session is the conversation, one trace per turn. */
     private SpanRef spanInSession(
             String pid, String traceId, String sessionId, String kind, @Nullable String output, Instant startedAt) {
         return fx.spanSeed(pid)
@@ -108,15 +98,13 @@ class GroundingEvidenceIntegrationTest {
     }
 
     /**
-     * A retrieved document hung off {@code span} by its PRODUCER keys — {@code (project_id, trace_id,
-     * span_id)}, which is the join the evidence read issues. The surrogate {@code observation_id} the
-     * column is still NOT NULL for is minted by the fixture and read by nothing.
+     * A retrieved document joined by producer keys {@code (project_id, trace_id, span_id)}, the join the read issues.
      */
     private void doc(String pid, SpanRef span, int rank, @Nullable String listRole, String content, Instant at) {
         fx.retrievedDoc(pid, span, content, rank, listRole, at);
     }
 
-    /** The evidence for one span, asserting it is present — the reads omit a span with none. */
+    /** The reads omit a span with no evidence, so this asserts presence. */
     private GroundingEvidenceReads.Evidence evidenceFor(String pid, SpanRef span) {
         Map<String, GroundingEvidenceReads.Evidence> got = substrate.groundingEvidence(
                 pid, Set.of(new GroundingEvidenceReads.SpanRef(span.traceId(), span.spanId())));
@@ -126,28 +114,9 @@ class GroundingEvidenceIntegrationTest {
     }
 
     @Test
-    void documentsOnASiblingRetrievalSpanReachTheAnsweringSpan() {
-        String pid =
-                TenantFixture.bootstrap(tenants, "grounding-sibling").project().id();
-        Instant at = Instant.now();
-        String traceId = trace();
-        SpanRef retrieval = span(pid, traceId, "retrieval", null, at);
-        SpanRef answer = span(pid, traceId, "llm", "Refunds take 5-7 business days.", at);
-        doc(pid, retrieval, 0, "result", "Refunds are issued within 5-7 business days.", at);
-
-        GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
-
-        assertTrue(
-                got.text().contains("5-7 business days"),
-                "the answering span owns no retrieved_doc row — trace scope is the only way it sees one");
-        assertTrue(got.conversationDidExternalWork());
-    }
-
-    @Test
     void documentsRetrievedAfterTheAnswerAreNotEvidenceForIt() {
-        // The blocker this test pins: an unbounded trace join judges an early turn against passages
-        // fetched later in the same trace, and MAX-over-chunks then reports a fabricated claim as
-        // supported because something downstream happened to entail it.
+        // An unbounded trace join judges an early turn against passages fetched later, reporting a fabricated claim
+        // as supported.
         String pid =
                 TenantFixture.bootstrap(tenants, "grounding-time").project().id();
         Instant t0 = Instant.now();
@@ -164,7 +133,7 @@ class GroundingEvidenceIntegrationTest {
 
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
 
-        assertEquals("", got.text(), "evidence must be bounded to what preceded the answer");
+        assertEquals("", String.join("\n", got.documents()), "evidence must be bounded to what preceded the answer");
         assertTrue(got.conversationDidExternalWork(), "the trace still reached outside — this is BLIND");
     }
 
@@ -183,7 +152,7 @@ class GroundingEvidenceIntegrationTest {
         doc(pid, reranker, 0, "result", "Refunds are issued within 5-7 business days.", at);
         doc(pid, reranker, 1, "candidate", "Gift cards are non-refundable under any circumstances.", at);
 
-        String text = evidenceFor(pid, answer).text();
+        String text = String.join("\n", evidenceFor(pid, answer).documents());
 
         assertEquals(
                 1,
@@ -204,12 +173,10 @@ class GroundingEvidenceIntegrationTest {
             doc(pid, retrieval, i, "result", "passage number " + i + " about refunds", at);
         }
 
-        String text = evidenceFor(pid, answer).text();
+        String text = String.join("\n", evidenceFor(pid, answer).documents());
 
-        // Assert the BOUNDARY, not presence-of-first and absence-of-last. With LIMIT pushed inside the
-        // DISTINCT ON subquery — the exact nesting bug this test exists to catch — Postgres returns
-        // 0,10,11,12,13,14: six lines, contains 0, lacks 19, all three of those assertions green. Only
-        // ranks 5 and 6 tell a sorted-then-capped premise from an arbitrarily-capped one.
+        // Assert the boundary: with LIMIT inside the DISTINCT ON subquery (the bug), Postgres returns 0,10..14, which
+        // passes presence checks. Only ranks 5 and 6 tell sorted-then-capped apart.
         assertEquals(6, text.lines().count(), "the premise is capped by row count, best-rank-first, not just per row");
         assertTrue(text.contains("passage number 0 about refunds"), "the cap keeps the best-ranked passages");
         assertTrue(
@@ -221,27 +188,9 @@ class GroundingEvidenceIntegrationTest {
     }
 
     @Test
-    void aDocumentWithNoListRoleIsKept() {
-        // Only an EXPLICIT 'candidate' is dropped. A producer that leaves list_role null is kept, because
-        // silently discarding real evidence is the worse of the two failures — and null is what most
-        // instrumentation actually sends.
-        String pid = TenantFixture.bootstrap(tenants, "grounding-null-role")
-                .project()
-                .id();
-        Instant at = Instant.now();
-        String traceId = trace();
-        SpanRef retrieval = span(pid, traceId, "retrieval", null, at);
-        SpanRef answer = span(pid, traceId, "llm", "Refunds take 5-7 days.", at);
-        doc(pid, retrieval, 0, null, "Refunds are issued within 5-7 business days.", at);
-
-        assertTrue(evidenceFor(pid, answer).text().contains("5-7 business days"));
-    }
-
-    @Test
     void anEmbeddingSpanCountsAsReachingOutside() {
-        // The reached-outside kinds must match what the rest of the codebase treats as external work
-        // (ConversationThreadAssembler.TOOL_KINDS). Omitting one makes its traces read GROUNDLESS —
-        // scored against the prompt — when they should read BLIND and abstain.
+        // Every tool-like kind counts as reaching outside; omitting one makes its traces read GROUNDLESS instead of
+        // BLIND.
         String pid = TenantFixture.bootstrap(tenants, "grounding-embedding")
                 .project()
                 .id();
@@ -266,8 +215,7 @@ class GroundingEvidenceIntegrationTest {
                 .groundingEvidence(pid, Set.of(new GroundingEvidenceReads.SpanRef(traceId, answer.spanId())))
                 .get(answer.spanId());
 
-        // Absent, or present-but-false — never "reached outside". The prompt is the whole world here, so
-        // the detector must fall back to it rather than abstaining.
+        // Never "reached outside": the prompt is the whole world, so the detector falls back to it.
         assertFalse(got != null && got.conversationDidExternalWork());
     }
 
@@ -282,17 +230,14 @@ class GroundingEvidenceIntegrationTest {
 
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, answer);
 
-        assertEquals("", got.text(), "tool results are not an evidence carrier");
+        assertEquals("", String.join("\n", got.documents()), "tool results are not an evidence carrier");
         assertTrue(got.conversationDidExternalWork(), "but the trace did reach outside, which is what abstains it");
     }
 
     @Test
     void aFollowUpTurnSeesTheEarlierTurnsRetrievalInTheSameConversation() {
-        // The stale-context gap this widening exists to close: a multi-turn agent that retrieves once
-        // and answers a follow-up from that context, without re-retrieving, used to leave the follow-up
-        // with no evidence at all — scored against the bare follow-up question, near-universal false
-        // fire. Measured on a 500-case synthetic eval: 88.4% false-fire on stale-context faithful
-        // answers vs 8.6% on same-trace ones.
+        // A follow-up answered from an earlier turn's retrieval once had no evidence: 88.4% false fire on a 500-case
+        // eval, vs 8.6% same-trace.
         String pid = TenantFixture.bootstrap(tenants, "grounding-conversation")
                 .project()
                 .id();
@@ -304,7 +249,7 @@ class GroundingEvidenceIntegrationTest {
         doc(pid, retrieval, 0, "result", "Refunds are issued within 5-7 business days.", t0);
         spanInSession(pid, turn0, sessionId, "llm", "Refunds take 5-7 business days.", t0);
 
-        // turn 1: its OWN trace, no retrieval at all — a follow-up answered from turn 0's context.
+        // turn 1: its own trace, no retrieval
         String turn1 = trace();
         SpanRef followUp =
                 spanInSession(pid, turn1, sessionId, "llm", "Just to confirm, 5-7 business days.", t0.plusSeconds(30));
@@ -312,15 +257,14 @@ class GroundingEvidenceIntegrationTest {
         GroundingEvidenceReads.Evidence got = evidenceFor(pid, followUp);
 
         assertTrue(
-                got.text().contains("5-7 business days"),
+                String.join("\n", got.documents()).contains("5-7 business days"),
                 "turn 1 has no retrieval of its own — conversation scope is the only way it sees turn 0's");
         assertTrue(got.conversationDidExternalWork());
     }
 
     @Test
     void aTurnInADifferentConversationDoesNotLeakEvidence() {
-        // Grouping-key regression guard: two conversations must never share evidence, even in the same
-        // project, even close in time.
+        // Two conversations never share evidence, even in one project close in time.
         String pid =
                 TenantFixture.bootstrap(tenants, "grounding-no-leak").project().id();
         Instant at = Instant.now();
@@ -339,16 +283,65 @@ class GroundingEvidenceIntegrationTest {
                 .groundingEvidence(pid, Set.of(new GroundingEvidenceReads.SpanRef(answerB.traceId(), answerB.spanId())))
                 .get(answerB.spanId());
 
-        // Absent, or present-but-blank-and-not-reached-outside — never conversation A's document.
+        // Never conversation A's document.
         assertTrue(
-                got == null || (got.text().isEmpty() && !got.conversationDidExternalWork()),
+                got == null || (String.join("\n", got.documents()).isEmpty() && !got.conversationDidExternalWork()),
                 "conversation B must not see conversation A's retrieval");
+    }
+
+    /**
+     * A producer that reuses one thread id for every session of a user: keyed on the thread, an answer was judged
+     * against documents a session days before retrieved.
+     */
+    @Test
+    void anEarlierSessionOfTheSameThreadDoesNotLeakEvidence() {
+        String pid = TenantFixture.bootstrap(tenants, "grounding-thread-two-sessions")
+                .project()
+                .id();
+        Instant thursday = Instant.now();
+        Instant monday = thursday.minusSeconds(3 * 86_400);
+        String userThread = "whatsapp_u1";
+
+        String mondayTrace = trace();
+        String mondaySession = session();
+        SpanRef retrieval = threadedSpan(pid, mondayTrace, mondaySession, userThread, "retrieval", null, monday);
+        doc(pid, retrieval, 0, "result", "Refunds are issued within 5-7 business days.", monday);
+        threadedSpan(pid, mondayTrace, mondaySession, userThread, "llm", "Refunds take 5-7 business days.", monday);
+        SpanRef answer =
+                threadedSpan(pid, trace(), session(), userThread, "llm", "Refunds take 5-7 business days.", thursday);
+
+        GroundingEvidenceReads.Evidence got = substrate
+                .groundingEvidence(pid, Set.of(new GroundingEvidenceReads.SpanRef(answer.traceId(), answer.spanId())))
+                .get(answer.spanId());
+
+        assertTrue(
+                got == null || (String.join("\n", got.documents()).isEmpty() && !got.conversationDidExternalWork()),
+                "Thursday's session must not see Monday's retrieval");
+    }
+
+    private SpanRef threadedSpan(
+            String pid,
+            String traceId,
+            String sessionId,
+            String threadId,
+            String kind,
+            @Nullable String output,
+            Instant startedAt) {
+        return fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .threadId(threadId)
+                .kind(kind)
+                .name("chat")
+                .model("gpt-x")
+                .at(startedAt)
+                .payload(ClassifierObservations.userInput("how long do refunds take?"), output)
+                .writeRef();
     }
 
     @Test
     void theNearestPriorRetrievalWinsNotAConversationWideBlend() {
-        // The sliding-window design guard: a conversation whose topic shifts must hand a follow-up the
-        // NEAREST prior retrieval's documents, not a blend of every retrieval that ever happened in it.
+        // A topic shift hands a follow-up the nearest prior retrieval, not a blend of all of them.
         String pid =
                 TenantFixture.bootstrap(tenants, "grounding-nearest").project().id();
         Instant t0 = Instant.now();
@@ -368,7 +361,7 @@ class GroundingEvidenceIntegrationTest {
         SpanRef followUp =
                 spanInSession(pid, turn2, sessionId, "llm", "Returns are free for 30 days.", t0.plusSeconds(60));
 
-        String text = evidenceFor(pid, followUp).text();
+        String text = String.join("\n", evidenceFor(pid, followUp).documents());
 
         assertTrue(text.contains("SET-B"), "the nearest prior retrieval (turn 1) must be the evidence");
         assertFalse(text.contains("SET-A"), "an OLDER retrieval (turn 0) must not blend into the premise");

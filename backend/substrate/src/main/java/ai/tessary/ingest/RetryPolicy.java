@@ -2,15 +2,8 @@
 package ai.tessary.ingest;
 
 /**
- * Per-call retry/back-off policy for {@link HttpJson}. Controls how a transient
- * upstream failure (a 429 rate-limit, a 5xx, or a network blip) is retried.
- *
- * <p>It is the seam that lets each path pick its own trade-off: a background run
- * or export wants {@link #DEFAULT} — patient, seconds-scale back-off that rides
- * out a per-minute rate-limit window — while an interactive preview wants
- * {@link #INTERACTIVE} so a long upstream {@code Retry-After} can never hang a UI
- * request; it surfaces the 429 fast instead. A new source with different
- * rate-limit semantics plugs in here rather than forking {@link HttpJson}.
+ * Retry/back-off policy for a transient upstream failure (a 429 rate-limit, a 5xx, or a
+ * network blip).
  *
  * @param maxAttempts   total attempts including the first (≥ 1; 1 disables retry)
  * @param baseBackoffMs first-retry back-off when the upstream gives no hint; doubles each retry
@@ -24,13 +17,6 @@ public record RetryPolicy(int maxAttempts, long baseBackoffMs, long maxBackoffMs
      * Langfuse's 30 req/min on Hobby): a sub-second retry would land in the same window.
      */
     public static final RetryPolicy DEFAULT = new RetryPolicy(5, 2000, 60_000);
-
-    /**
-     * Interactive preview: at most one quick retry with a short cap, so a request a
-     * user is waiting on never blocks on a long {@code Retry-After}. A persistent
-     * rate-limit surfaces as a 429 in ~half a second rather than after a minute.
-     */
-    public static final RetryPolicy INTERACTIVE = new RetryPolicy(2, 500, 2000);
 
     public RetryPolicy {
         if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be >= 1");

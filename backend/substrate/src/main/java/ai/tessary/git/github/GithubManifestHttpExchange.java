@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** The real {@link GithubManifestExchange}: an actual HTTPS call to {@code api.github.com}. */
@@ -21,17 +22,28 @@ import org.springframework.stereotype.Component;
 public class GithubManifestHttpExchange implements GithubManifestExchange {
 
     private final ObjectMapper mapper;
-    private final HttpClient http =
-            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient http;
+    private final String apiOrigin;
 
+    @Autowired
     public GithubManifestHttpExchange(ObjectMapper mapper) {
+        this(
+                mapper,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                "https://" + GithubAppProperties.DEFAULT_API_HOST);
+    }
+
+    /** The transport and the api.github.com origin as seams, so a test can answer without DNS or a network. */
+    GithubManifestHttpExchange(ObjectMapper mapper, HttpClient http, String apiOrigin) {
         this.mapper = mapper;
+        this.http = http;
+        this.apiOrigin = apiOrigin;
     }
 
     @Override
     public JsonNode convert(String code) {
-        URI uri = UrlGuard.requirePublicHttp("https://api.github.com/app-manifests/"
-                + URLEncoder.encode(code, StandardCharsets.UTF_8) + "/conversions");
+        URI uri = UrlGuard.requirePublicHttp(
+                apiOrigin + "/app-manifests/" + URLEncoder.encode(code, StandardCharsets.UTF_8) + "/conversions");
         HttpRequest req = HttpRequest.newBuilder(uri)
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .header("Accept", "application/vnd.github+json")

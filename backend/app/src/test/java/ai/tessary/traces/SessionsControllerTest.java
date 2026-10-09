@@ -8,17 +8,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.auth.TenantContext;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierService;
+import ai.tessary.plan.Capability;
+import ai.tessary.storage.RetrievedDocRepository;
+import ai.tessary.storage.RetrievedDocRow;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.SpanRow;
+import ai.tessary.storage.ToolCallRepository;
+import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.storage.TraceV2Row;
+import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import ai.tessary.web.ApiResponse;
-import java.lang.reflect.Method;
 import java.time.Instant;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,20 +40,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The sessions read API (substrate-model.md §7.5).
- *
- * <p>Two contracts are under test, and the second is the unusual one:
- *
- * <ol>
- *   <li>A session's totals are the SUM of its traces' already-materialized rollup columns, and the
- *       response reports how many of those traces are still unsettled — because a sum over moving
- *       addends is a lower bound and has to say so.
- *   <li><b>There is no way to sort sessions by cost or tokens, and there is a test for its absence.</b>
- *       That is not an oversight waiting to be filled in: serving it would mean summing every session in
- *       the project before a page could be chosen. A future parameter would need a session
- *       materialization with its own staleness contract behind it, and this assertion is what makes
- *       adding one an explicit decision rather than a small convenience.
- * </ol>
+ * The sessions read API (substrate-model.md §7.5). A session's totals sum its traces' rollups and report how many are
+ * unsettled, since that sum is a lower bound. And there is no cost or token sort, with a test for its absence: it
+ * would sum every session before a page could be chosen, so adding one must be an explicit decision.
  */
 @SpringBootTest(
         properties = {
@@ -73,6 +72,18 @@ class SessionsControllerTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    ToolCallRepository toolCalls;
+
+    @Autowired
+    RetrievedDocRepository retrievedDocs;
+
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    ClassifierService classifierService;
+
     private SubstrateV2Fixtures fx;
     private TenantContext ctx;
     private String org;
@@ -81,7 +92,7 @@ class SessionsControllerTest {
 
     @BeforeEach
     void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
         var fix = TenantFixture.bootstrap(tenants, "sessions-api");
         ctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
         org = fix.org().slug();
@@ -101,28 +112,21 @@ class SessionsControllerTest {
                 fx.withUsage(
                         fx.span(pid, first, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1)),
                         200L,
-                        50L,
-                        null,
-                        null,
-                        null),
+                        50L),
                 "0.01",
                 "0.02",
                 null,
                 null,
                 "inferred");
-        rollUp(first, t0);
+        fx.rollup(pid, first, t0, null, true);
 
         String second = SubstrateV2Fixtures.traceId();
         fx.trace(pid, second, sessionId, t0.plusSeconds(60));
         fx.withUsage(
-                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null),
-                10L,
-                5L,
-                null,
-                null,
-                null);
+                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "llm", t0.plusSeconds(60), null), 10L, 5L);
 
-        var detail = ok(controller.detail(ctx, org, proj, sessionId));
+        var detail =
+                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
         assertEquals(sessionId, detail.id());
         assertEquals(2, detail.traceCount());
         assertEquals(1, detail.unsettledTraces(), "one trace is still receiving spans, so the sum is a lower bound");
@@ -139,7 +143,22 @@ class SessionsControllerTest {
 
         assertEquals(
                 HttpStatus.NOT_FOUND,
-                assertThrows(ResponseStatusException.class, () -> controller.detail(ctx, org, proj, "no-such-session"))
+                assertThrows(
+                                ResponseStatusException.class,
+                                () -> controller.detail(
+                                        ctx,
+                                        org,
+                                        proj,
+                                        "no-such-session",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null))
                         .getStatusCode());
     }
 
@@ -152,7 +171,8 @@ class SessionsControllerTest {
         fx.session(pid, older, t0);
         fx.session(pid, newer, t0.plusSeconds(600));
 
-        var first = ok(controller.list(ctx, org, proj, 1, null, null));
+        var first = ok(
+                controller.list(ctx, org, proj, 1, null, null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(newer),
                 first.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
@@ -160,7 +180,8 @@ class SessionsControllerTest {
         assertNotNull(first.nextCursor());
         assertNull(first.sessions().get(0).traceCount(), "totals are not computed unless include=totals is asked for");
 
-        var second = ok(controller.list(ctx, org, proj, 1, first.nextCursor(), null));
+        var second = ok(controller.list(
+                ctx, org, proj, 1, first.nextCursor(), null, null, null, null, null, null, null, null, null, null));
         assertEquals(
                 List.of(older),
                 second.sessions().stream().map(SessionDtos.SessionListItem::id).toList());
@@ -173,7 +194,7 @@ class SessionsControllerTest {
         Instant t0 = Instant.parse("2026-08-12T11:00:00Z");
         String sessionId = SubstrateV2Fixtures.sessionId();
 
-        // Two traces at "cyrano", one at "otto" — cyrano is dominant by count.
+        // cyrano is dominant by count.
         String t1 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t1, sessionId, t0);
         fx.withUsage(
@@ -186,11 +207,8 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(1))
                         .write(),
                 100L,
-                50L,
-                null,
-                null,
-                null);
-        rollUp(t1, t0);
+                50L);
+        fx.rollup(pid, t1, t0, null, true);
 
         String t2 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t2, sessionId, t0.plusSeconds(30));
@@ -204,11 +222,8 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(31))
                         .write(),
                 200L,
-                75L,
-                null,
-                null,
-                null);
-        rollUp(t2, t0.plusSeconds(30));
+                75L);
+        fx.rollup(pid, t2, t0.plusSeconds(30), null, true);
 
         String t3 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t3, sessionId, t0.plusSeconds(60));
@@ -222,13 +237,11 @@ class SessionsControllerTest {
                         .endedAt(t0.plusSeconds(61))
                         .write(),
                 10L,
-                5L,
-                null,
-                null,
-                null);
-        rollUp(t3, t0.plusSeconds(60));
+                5L);
+        fx.rollup(pid, t3, t0.plusSeconds(60), null, true);
 
-        var page = ok(controller.list(ctx, org, proj, 50, null, "totals"));
+        var page = ok(controller.list(
+                ctx, org, proj, 50, null, "totals", null, null, null, null, null, null, null, null, null));
         SessionDtos.SessionListItem item = page.sessions().stream()
                 .filter(s -> s.id().equals(sessionId))
                 .findFirst()
@@ -243,39 +256,338 @@ class SessionsControllerTest {
         assertEquals(2, item.callSiteCount(), "two distinct call sites touched this session");
     }
 
-    /**
-     * The §7.5 contract, asserted as an absence.
-     *
-     * <p>Reflection rather than prose because prose does not fail a build. If someone adds a {@code sort}
-     * parameter to this endpoint, this test tells them the design decision they are overturning before
-     * the query that scans every session in the project reaches production.
-     */
     @Test
-    @DisplayName("no surface may list sessions sorted by cost or tokens — the endpoint has no such parameter")
-    void theSessionsListHasNoCostOrTokenSortParameter() {
-        Method list = Arrays.stream(SessionsController.class.getDeclaredMethods())
-                .filter(m -> "list".equals(m.getName()))
-                .findFirst()
-                .orElseThrow();
-        List<String> params = Arrays.stream(list.getParameters())
-                .map(p -> p.getName().toLowerCase(java.util.Locale.ROOT))
-                .toList();
-        assertTrue(
-                params.stream().noneMatch(p -> p.contains("sort") || p.contains("cost") || p.contains("token")),
-                "sessions carry no rollup; ordering them by a summed quantity needs a materialization with "
-                        + "its own staleness contract, not a request parameter. Parameters were: " + params);
+    @DisplayName(
+            "a session's spans come back across all its traces, each carrying only its own tool calls and documents")
+    void spansAssembleEverySpanOfTheSessionWithItsOwnSideTableRows() {
+        Instant t0 = Instant.parse("2026-08-12T11:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String first = SubstrateV2Fixtures.traceId();
+        String second = SubstrateV2Fixtures.traceId();
+        String outside = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, first, sessionId, t0);
+        fx.trace(pid, second, sessionId, t0.plusSeconds(60));
+        SpanRow llm = fx.span(pid, first, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(1));
+        SpanRow tool = fx.span(pid, first, SubstrateV2Fixtures.spanId(), llm.id(), "tool", t0.plusSeconds(2), null);
+        SpanRow retrieval =
+                fx.span(pid, second, SubstrateV2Fixtures.spanId(), null, "retriever", t0.plusSeconds(60), null);
+        SpanRow stranger = fx.span(pid, outside, SubstrateV2Fixtures.spanId(), null, "tool", t0, null);
+        fx.payload(llm, "hi", "hello", null);
+
+        String at = t0.plusSeconds(2).toString();
+        toolCalls.insertAll(List.of(
+                new ToolCallRow(
+                        "tc-s1-" + tool.id(),
+                        pid,
+                        "search",
+                        null,
+                        null,
+                        null,
+                        "{\"q\": \"x\"}",
+                        "raw-ignored",
+                        "{\"ok\": true}",
+                        "Timeout",
+                        null,
+                        true,
+                        2,
+                        40L,
+                        null,
+                        at,
+                        false,
+                        null,
+                        at,
+                        at,
+                        first,
+                        tool.id()),
+                new ToolCallRow(
+                        "tc-s2-" + tool.id(),
+                        pid,
+                        "fetch",
+                        null,
+                        null,
+                        null,
+                        null,
+                        "url=a",
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null,
+                        at,
+                        false,
+                        null,
+                        t0.plusSeconds(3).toString(),
+                        at,
+                        first,
+                        tool.id()),
+                new ToolCallRow(
+                        "tc-s3-" + stranger.id(),
+                        pid,
+                        "elsewhere",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null,
+                        at,
+                        false,
+                        null,
+                        at,
+                        at,
+                        outside,
+                        stranger.id())));
+        retrievedDocs.insertAll(List.of(new RetrievedDocRow(
+                "rd-s1-" + retrieval.id(),
+                pid,
+                0,
+                "result",
+                1,
+                "doc-7",
+                null,
+                "passage",
+                0.5,
+                null,
+                null,
+                null,
+                null,
+                at,
+                false,
+                at,
+                second,
+                retrieval.id())));
+
+        var got = ok(controller.spans(ctx, org, proj, sessionId));
+
+        assertEquals(
+                List.of(llm.id(), tool.id(), retrieval.id()),
+                got.spans().stream().map(TracesController.SpanView::id).toList(),
+                "every span of both session traces, oldest first, and none of a trace outside the session");
+        assertEquals(false, got.spansTruncated());
+        var llmView = got.spans().get(0);
+        assertEquals("hi", llmView.input(), "the payload is joined onto its own span");
+        assertEquals(List.of(), llmView.toolCalls());
+        assertEquals(
+                List.of(
+                        new TracesController.ToolCallView(
+                                "search", "{\"q\": \"x\"}", "{\"ok\": true}", "Timeout", 2, 40L),
+                        new TracesController.ToolCallView("fetch", "url=a", null, null, null, null)),
+                got.spans().get(1).toolCalls(),
+                "structured args win over the raw string, and the raw string stands in when there are none");
+        assertEquals(List.of(), got.spans().get(1).retrievalDocuments());
+        assertEquals(
+                List.of(new TracesController.RetrievalDocumentView(0, "doc-7", "passage", 0.5)),
+                got.spans().get(2).retrievalDocuments());
+
+        String empty = SubstrateV2Fixtures.sessionId();
+        fx.session(pid, empty, t0);
+        assertEquals(
+                new SessionDtos.SessionSpans(List.of(), false),
+                ok(controller.spans(ctx, org, proj, empty)),
+                "a session whose traces are gone is an empty read, not a missing session");
+        assertEquals(
+                HttpStatus.NOT_FOUND,
+                assertThrows(ResponseStatusException.class, () -> controller.spans(ctx, org, proj, "no-such-session"))
+                        .getStatusCode());
     }
 
-    private void rollUp(String traceId, Instant startedAt) {
-        traces.applyBatchTimers(
-                pid, List.of(new TraceV2Repository.TimerUpdate(traceId, startedAt.toString(), null, true)));
-        jdbc.sql("UPDATE trace SET rollup_due_at = now() - interval '1 second'"
-                        + " WHERE project_id = :pid AND id = :id")
-                .param("pid", pid)
+    @Test
+    @DisplayName("a session over the trace and span caps returns the first slice of each and says it was cut")
+    void sessionReadsCapTracesAndSpansAndSayTheyDid() {
+        // Recent, so the shared context's retention sweep leaves it.
+        Instant t0 =
+                Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(7200);
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        fx.session(pid, sessionId, t0);
+        int cap = SessionReadService.SESSION_TRACE_CAP;
+        List<TraceV2Row> traceRows = new ArrayList<>();
+        List<SpanRow> spanRows = new ArrayList<>();
+        // Minted here: the fixture's counter ids repeat within a few thousand draws.
+        for (int i = 0; i <= cap; i++) {
+            String traceId = java.util.UUID.randomUUID().toString().replace("-", "");
+            String startedAt = t0.plusSeconds(i).toString();
+            traceRows.add(TraceV2Row.of(pid, traceId, sessionId, null, null, null, null, startedAt, startedAt));
+            // Five spans each for the first thousand traces hits the span cap; one more pushes them over. The trimmed
+            // trace's span starts first, so an unnarrowed read would put it first.
+            int spansHere = i == cap ? 1 : i == 0 ? 6 : 5;
+            for (int k = 0; k < spansHere; k++) {
+                String spanAt =
+                        (i == cap ? t0.minusSeconds(1) : t0.plusSeconds(i).plusMillis(k)).toString();
+                spanRows.add(SubstrateV2Fixtures.spanRow(
+                        pid,
+                        traceId,
+                        String.format(java.util.Locale.ROOT, "%016x", k),
+                        null,
+                        "llm",
+                        spanAt,
+                        null,
+                        spanAt));
+            }
+        }
+        traces.getOrCreateAll(traceRows);
+        spans.upsertAll(spanRows);
+        String trimmedTrace = traceRows.get(cap).id();
+
+        var detail =
+                ok(controller.detail(ctx, org, proj, sessionId, null, null, null, null, null, null, null, null, null));
+        assertEquals(cap, detail.traces().size());
+        assertTrue(detail.tracesTruncated(), "one trace past the cap is a truncated session, not a full one");
+
+        var got = ok(controller.spans(ctx, org, proj, sessionId));
+        assertEquals(SessionReadService.SESSION_SPAN_CAP, got.spans().size());
+        assertTrue(got.spansTruncated(), "one span past the cap is a truncated read, not a full one");
+        assertTrue(
+                got.spans().stream().noneMatch(s -> trimmedTrace.equals(s.traceId())),
+                "the spans describe the same capped traces the detail read lists");
+    }
+
+    @Test
+    @DisplayName("a session matches the filters only when one of its traces passes every one of them")
+    void aSessionMatchesOnlyWhenOneTracePassesEveryFilter() {
+        var fix = TenantFixture.bootstrap(
+                tenants, "sessions-filtered", o -> capabilities.grant(o.id(), Capability.FRUSTRATION));
+        var fctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String fpid = fix.project().id();
+        String forg = fix.org().slug();
+        String fproj = fix.project().slug();
+        ClassifierRow frustration = frustrationClassifier(fpid);
+        Instant t0 = Instant.parse("2026-08-14T10:00:00Z");
+
+        // Session A: one trace both errored and flagged.
+        String sessionA = SubstrateV2Fixtures.sessionId();
+        String a1 = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, a1, sessionA, t0);
+        errors(fpid, a1, 1);
+        flag(fpid, frustration.id(), a1, "span-a1");
+
+        // Session B: the error and the flag are on different traces.
+        String sessionB = SubstrateV2Fixtures.sessionId();
+        String b1 = SubstrateV2Fixtures.traceId();
+        String b2 = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, b1, sessionB, t0.plusSeconds(60));
+        fx.trace(fpid, b2, sessionB, t0.plusSeconds(120));
+        errors(fpid, b1, 1);
+        errors(fpid, b2, 0);
+        flag(fpid, frustration.id(), b2, "span-b2");
+
+        var label = new TraceDtos.DetectionLabel(frustration.id(), frustration.name());
+        var flagged = ok(controller.list(
+                fctx,
+                forg,
+                fproj,
+                50,
+                null,
+                "totals",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(sessionB, sessionA),
+                flagged.sessions().stream().map(SessionDtos.SessionListItem::id).toList(),
+                "both sessions hold a flagged trace");
+        assertEquals(
+                List.of(List.of(label), List.of(label)),
+                flagged.sessions().stream()
+                        .map(SessionDtos.SessionListItem::detectedBy)
+                        .toList());
+
+        var erroredAndFlagged = ok(controller.list(
+                fctx,
+                forg,
+                fproj,
+                50,
+                null,
+                "totals",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "error",
+                null,
+                frustration.id()));
+        assertEquals(
+                List.of(sessionA),
+                erroredAndFlagged.sessions().stream()
+                        .map(SessionDtos.SessionListItem::id)
+                        .toList(),
+                "B's error and flag sit on different traces, so no one trace of B passes both filters");
+    }
+
+    @Test
+    @DisplayName("a session's detail names the traces that pass the filters and the spans a classifier flagged")
+    void sessionDetailNamesMatchedTracesAndFlaggedSpans() {
+        var fix = TenantFixture.bootstrap(
+                tenants, "session-detail-filtered", o -> capabilities.grant(o.id(), Capability.FRUSTRATION));
+        var fctx = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
+        String fpid = fix.project().id();
+        String forg = fix.org().slug();
+        String fproj = fix.project().slug();
+        ClassifierRow frustration = frustrationClassifier(fpid);
+        Instant t0 = Instant.parse("2026-08-14T11:00:00Z");
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String quiet = SubstrateV2Fixtures.traceId();
+        String flaggedTrace = SubstrateV2Fixtures.traceId();
+        fx.trace(fpid, quiet, sessionId, t0);
+        fx.trace(fpid, flaggedTrace, sessionId, t0.plusSeconds(60));
+        flag(fpid, frustration.id(), flaggedTrace, "span-scored");
+
+        var mark = new TraceDtos.DetectionMark(frustration.id(), frustration.name(), flaggedTrace, "span-scored");
+        var filtered = ok(controller.detail(
+                fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, frustration.id()));
+        assertEquals(List.of(flaggedTrace), filtered.matchedTraceIds());
+        assertEquals(List.of(mark), filtered.detections());
+        assertEquals(2, filtered.traces().size(), "the detail still lists every trace of the session");
+
+        var unfiltered = ok(
+                controller.detail(fctx, forg, fproj, sessionId, null, null, null, null, null, null, null, null, null));
+        assertNull(unfiltered.matchedTraceIds(), "no filter, so nothing to match against");
+        assertEquals(List.of(mark), unfiltered.detections());
+    }
+
+    private ClassifierRow frustrationClassifier(String projectId) {
+        classifierService.seedBuiltIns(projectId);
+        return classifierService.list(projectId).stream()
+                .filter(c -> c.classifierKey().equals("frustration"))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void errors(String projectId, String traceId, int errorCount) {
+        jdbc.sql("UPDATE trace SET error_count = :n WHERE project_id = :pid AND id = :id")
+                .param("n", errorCount)
+                .param("pid", projectId)
                 .param("id", traceId)
                 .update();
-        traces.claimDue(500);
-        traces.recompute(pid, traceId);
+    }
+
+    private void flag(String projectId, String classifierId, String traceId, String spanId) {
+        jdbc.sql("INSERT INTO frustration_detection"
+                        + " (id, project_id, classifier_id, classifier_key, subject_session_id, subject_trace_id,"
+                        + " subject_span_id, severity, confidence, evidence)"
+                        + " VALUES (:id, :pid, :cid, 'frustration', :trace, :trace, :span, 'warn', 'high',"
+                        + " CAST('{\"score\":0.71}' AS jsonb))")
+                .param("id", Ids.ulid())
+                .param("pid", projectId)
+                .param("cid", classifierId)
+                .param("trace", traceId)
+                .param("span", spanId)
+                .update();
     }
 
     private static <T> T ok(ApiResponse<T> response) {

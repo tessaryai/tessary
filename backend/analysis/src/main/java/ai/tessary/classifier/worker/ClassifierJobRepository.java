@@ -10,6 +10,8 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,7 +38,7 @@ public class ClassifierJobRepository {
     // classifier_id is sourced from the payload jsonb; the rest are the shared job columns (cursor_at/cursor_id
     // stay first-class for the keyset sweep).
     private static final String COLS = "id, project_id, payload->>'classifier_id' AS classifier_id, status, cursor_at, "
-            + "cursor_id, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at";
+            + "cursor_id, lease_owner, lease_expires_at, attempts, last_error, created_at, updated_at, page_retries";
 
     private final JdbcClient jdbc;
 
@@ -151,7 +153,7 @@ public class ClassifierJobRepository {
             UPDATE job SET status = 'done',
                            cursor_at = COALESCE(:cursorAt, cursor_at),
                            cursor_id = COALESCE(:cursorId, cursor_id),
-                           attempts = 0,
+                           attempts = 0, page_retries = 0,
                            last_error = NULL, updated_at = :now
             WHERE id = :id
             """)
@@ -160,6 +162,19 @@ public class ClassifierJobRepository {
                 .param("now", Instant.now().toString())
                 .param("id", id)
                 .update();
+    }
+
+    /**
+     * Finish the job without moving its cursor and count one more hold of the page past it: the page's
+     * provider calls mostly failed, so the next tick sends it again. A healthy sweep's attempt budget is
+     * untouched, since a provider outage is not the sweep failing; {@link #markSwept} resets the count.
+     */
+    public void holdPage(String id) {
+        jdbc.sql("""
+            UPDATE job SET status = 'done', page_retries = page_retries + 1,
+                           attempts = 0, last_error = NULL, updated_at = :now
+            WHERE id = :id
+            """).param("now", Instant.now().toString()).param("id", id).update();
     }
 
     /**
@@ -174,7 +189,7 @@ public class ClassifierJobRepository {
      */
     public boolean advanceCursor(String id, String leaseOwner, String cursorAt, String cursorId, long leaseSeconds) {
         Instant now = Instant.now();
-        return jdbc.sql("UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId,"
+        return jdbc.sql("UPDATE job SET cursor_at = :cursorAt, cursor_id = :cursorId, page_retries = 0,"
                         + " lease_expires_at = :expires, updated_at = :now"
                         + " WHERE id = :id AND lease_owner = :owner AND status = 'claimed'"
                         + " RETURNING id")
@@ -187,6 +202,69 @@ public class ClassifierJobRepository {
                 .query(String.class)
                 .optional()
                 .isPresent();
+    }
+
+    /**
+     * Hand a claimed job back without spending the attempt its claim took: the encoder-backed sweep
+     * found the model down, which is the model asleep or stopped rather than the sweep failing, so
+     * {@link #markFailed}'s cap must not count it. The cursor stays where the last page landed.
+     *
+     * <p>The job finishes {@code done} rather than {@code pending}, as {@link #holdPage} does: a
+     * pending job would be claimed again by the same tick's claim loop and handed straight back, over
+     * and over. {@link ClassifierService#enqueueEnabled} re-pends it once the model answers.
+     *
+     * <p>Guarded on {@code lease_owner}: a worker that no longer holds the job changes nothing.
+     */
+    public void releaseWithoutAttempt(String id, String leaseOwner) {
+        jdbc.sql("""
+            UPDATE job SET status = 'done', lease_owner = NULL, lease_expires_at = NULL,
+                           attempts = GREATEST(attempts - 1, 0), updated_at = :now
+            WHERE id = :id AND lease_owner = :owner
+            """)
+                .param("now", Instant.now().toString())
+                .param("id", id)
+                .param("owner", leaseOwner)
+                .update();
+    }
+
+    /**
+     * Record that this sweep reached the head of the stream at {@code at}, as {@code caught_up_at} in
+     * the job's {@code payload}. Merged into the payload, so {@code classifier_id} stays. In production
+     * mode an encoder-backed classifier is not enqueued again until the sleep after this has passed,
+     * and the groundedness status reads it as the last run. Guarded on {@code lease_owner}, like every
+     * write a sweep makes to its own job.
+     */
+    public void recordCaughtUp(String id, String leaseOwner, Instant at) {
+        jdbc.sql("""
+            UPDATE job SET payload = COALESCE(payload, '{}'::jsonb)
+                                     || jsonb_build_object('caught_up_at', CAST(:at AS text))
+            WHERE id = :id AND lease_owner = :owner
+            """)
+                .param("at", at.toString())
+                .param("id", id)
+                .param("owner", leaseOwner)
+                .update();
+    }
+
+    /** The {@code caught_up_at} {@link #recordCaughtUp} last wrote for this classifier's job, if any. */
+    public Optional<Instant> caughtUpAt(String projectId, String classifierId) {
+        return jdbc.sql("""
+            SELECT payload->>'caught_up_at' FROM job
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            """).param("pid", projectId).param("sid", classifierId).query(String.class).list().stream()
+                .filter(Objects::nonNull)
+                .findFirst()
+                .map(Instant::parse);
+    }
+
+    /** This classifier's sweep job, if it has ever been enqueued. */
+    public Optional<ClassifierJobRow> findByClassifier(String projectId, String classifierId) {
+        return jdbc.sql("SELECT " + COLS + " FROM job WHERE kind = :kind AND project_id = :pid AND dedupe_key = :sid")
+                .param("kind", JobRow.Kind.CLASSIFIER)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .query((rs, n) -> map(rs))
+                .optional();
     }
 
     /**
@@ -223,6 +301,54 @@ public class ClassifierJobRepository {
                 .update();
     }
 
+    /** What {@link #restart} did to the classifier's sweep job. */
+    public enum Restart {
+        /** The cursor is back at the start and the job is due. */
+        RESTARTED,
+        /** No job row yet: the first sweep starts from the beginning anyway. */
+        NO_JOB,
+        /** A worker holds the job, so nothing changed. */
+        SWEEP_RUNNING
+    }
+
+    /**
+     * A person's reset: the cursor goes back to the start, and the job is due now with a clean failure
+     * record and no {@code caught_up_at}, as if it had never run.
+     *
+     * <p>Unlike {@link #rewindCursor} this revives a {@code dead} job: the dead-letter floor stops the
+     * heartbeat from looping on a failing sweep, and a person who confirmed a reset twice is asking for
+     * exactly one more try.
+     *
+     * <p>Call it inside the transaction that clears the classifier's output. The row stays locked until
+     * that transaction commits, and {@link #claimBatch} skips locked rows, so no sweep can start between
+     * this check and the deletes that follow it.
+     */
+    public Restart restart(String projectId, String classifierId) {
+        Optional<String> status = jdbc.sql("""
+            SELECT status FROM job
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            FOR UPDATE
+            """)
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .query(String.class)
+                .optional();
+        if (status.isEmpty()) return Restart.NO_JOB;
+        if (ClassifierJobRow.CLAIMED.equals(status.get())) return Restart.SWEEP_RUNNING;
+        jdbc.sql("""
+            UPDATE job SET cursor_at = NULL, cursor_id = NULL, status = 'pending',
+                           attempts = 0, page_retries = 0, last_error = NULL,
+                           lease_owner = NULL, lease_expires_at = NULL,
+                           payload = COALESCE(payload, '{}'::jsonb) - 'caught_up_at', updated_at = :now
+            WHERE kind = 'classifier' AND project_id = :pid AND dedupe_key = :sid
+            """)
+                .param("now", Instant.now().toString())
+                .param("pid", projectId)
+                .param("sid", classifierId)
+                .update();
+        return Restart.RESTARTED;
+    }
+
     /**
      * Mark a sweep failure. Below {@code maxAttempts}, the job stays {@code failed} — retryable, resurrected
      * by the next {@link #enqueue} call like any other terminal state. At or over the cap, it moves to the
@@ -257,6 +383,7 @@ public class ClassifierJobRepository {
                 rs.getInt("attempts"),
                 rs.getString("last_error"),
                 rs.getString("created_at"),
-                rs.getString("updated_at"));
+                rs.getString("updated_at"),
+                rs.getInt("page_retries"));
     }
 }

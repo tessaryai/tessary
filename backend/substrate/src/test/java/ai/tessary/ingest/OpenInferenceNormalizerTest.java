@@ -11,12 +11,15 @@ import ai.tessary.ingest.export.TraceSpanMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Proves the normalizer round-trip: an OpenInference ({@code llm.*}) span and a native
- * {@code gen_ai.*} span carrying the same content normalize to the <em>same</em> canonical {@link RawEntry},
- * which re-emits via {@link TraceSpanMapper} to the same {@code gen_ai.*} span.
+ * An OpenInference ({@code llm.*}) span and a native {@code gen_ai.*} span with the same content normalize to the
+ * same {@link RawEntry} and re-emit the same span via {@link TraceSpanMapper}.
  */
 class OpenInferenceNormalizerTest {
 
@@ -27,43 +30,9 @@ class OpenInferenceNormalizerTest {
     }
 
     @Test
-    void detection_isDormantWithoutOpenInferenceKeys() throws Exception {
-        assertFalse(OpenInferenceNormalizer.isOpenInference(attrs("{\"foo\":\"bar\",\"model\":\"gpt-4o\"}")));
-        assertTrue(OpenInferenceNormalizer.isOpenInference(attrs("{\"llm.model_name\":\"gpt-4o\"}")));
-        assertNull(OpenInferenceNormalizer.normalize(attrs("{\"foo\":1}")));
-    }
-
-    @Test
-    void llmSpan_normalizesToCanonicalFields() throws Exception {
-        JsonNode oi = attrs("""
-                {
-                  "openinference.span.kind": "LLM",
-                  "llm.model_name": "claude-sonnet-4-6",
-                  "llm.system": "anthropic",
-                  "llm.input_messages": [
-                    {"message.role":"system","message.content":"You are a planner"},
-                    {"message.role":"user","message.content":"plan X"}
-                  ],
-                  "llm.output_messages": [{"message.role":"assistant","message.content":"the plan"}],
-                  "llm.token_count.prompt": 11,
-                  "llm.token_count.completion": 3,
-                  "session.id": "sess-9"
-                }
-                """);
-
-        OpenInferenceNormalizer.Canonical c = OpenInferenceNormalizer.normalize(oi);
-        assertNotNull(c);
-        assertEquals(KindNormalizer.LLM, c.operationKind());
-        assertEquals("claude-sonnet-4-6", c.model());
-        assertEquals("anthropic", c.system());
-        assertEquals(11L, c.usage().get(GenAiAttributes.USAGE_INPUT_TOKENS));
-        assertEquals(3L, c.usage().get(GenAiAttributes.USAGE_OUTPUT_TOKENS));
-
-        JsonNode in = M.readTree(c.input());
-        assertEquals(2, in.size());
-        assertEquals("system", in.get(0).get("role").asText());
-        assertEquals("You are a planner", in.get(0).get("content").asText());
-        assertEquals("user", in.get(1).get("role").asText());
+    void detection_isDormantWithoutOpenInferenceKeys() {
+        assertFalse(OpenInferenceNormalizer.isOpenInference(Map.of("foo", "bar", "model", "gpt-4o")));
+        assertTrue(OpenInferenceNormalizer.isOpenInference(Map.of("llm.model_name", "gpt-4o")));
     }
 
     @Test
@@ -75,9 +44,16 @@ class OpenInferenceNormalizerTest {
                 KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("RETRIEVER")));
         assertEquals(
                 KindNormalizer.WORKFLOW, KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("CHAIN")));
-        // No gen_ai analogue → unknown kind.
+        // No gen_ai analogue: unknown kind.
         assertNull(GenAiAttributes.operationNameForSpanKind("GUARDRAIL"));
         assertNull(GenAiAttributes.operationNameForSpanKind(null));
+    }
+
+    @Test
+    void embeddingSpanKind_isItsOwnKindNotARetrieval() {
+        assertEquals(
+                KindNormalizer.EMBEDDING,
+                KindNormalizer.normalize(GenAiAttributes.operationNameForSpanKind("embedding")));
     }
 
     @Test
@@ -101,29 +77,8 @@ class OpenInferenceNormalizerTest {
     }
 
     @Test
-    void outputToolCall_isKeptAsText() throws Exception {
-        JsonNode oi = attrs("""
-                {
-                  "openinference.span.kind": "LLM",
-                  "llm.model_name": "gpt-4o",
-                  "llm.output_messages": [
-                    {"message.role":"assistant","message.content":"",
-                     "message.tool_calls":[{"tool_call.function.name":"get_weather",
-                        "tool_call.function.arguments":"{\\"city\\":\\"NYC\\"}"}]}
-                  ]
-                }
-                """);
-        OpenInferenceNormalizer.Canonical c = OpenInferenceNormalizer.normalize(oi);
-        assertNotNull(c);
-        JsonNode out = M.readTree(c.output());
-        String content = out.get(0).get("content").asText();
-        assertTrue(content.contains("get_weather"), "tool call name preserved");
-        assertTrue(content.contains("NYC"), "tool call arguments preserved (never truncated)");
-    }
-
-    @Test
     void messagesAsJsonEncodedStrings_areAccepted() throws Exception {
-        // OTLP often delivers the message arrays as JSON-encoded string attribute values.
+        // OTLP often delivers message arrays as JSON-encoded strings.
         JsonNode oi = attrs("""
                 {
                   "openinference.span.kind": "LLM",
@@ -138,20 +93,18 @@ class OpenInferenceNormalizerTest {
     }
 
     /**
-     * The acceptance round-trip: a native gen_ai.* RawEntry and the OpenInference-normalized RawEntry for the
-     * same content emit the SAME gen_ai.* span (same system, operation.name, model, message structure, usage).
+     * Native and OpenInference entries for the same content emit the same gen_ai.* span: system, operation, model,
+     * messages, and usage.
      */
     @Test
     void openInferenceAndNative_emitSameCanonicalSpan() throws Exception {
-        // Multi-message input so the parity assertion below exercises every message position, not just index 0.
+        // Several messages, so parity checks every position.
         String inputMessages =
                 "[{\"role\":\"system\",\"content\":\"be terse\"},{\"role\":\"user\",\"content\":\"plan X\"}]";
         String outputText = "the plan";
 
-        // Native gen_ai.* RawEntry (the shape Langfuse/upload already produce).
         RawEntry native_ = new RawEntry(
                 "span-1",
-                "https://src/1",
                 "chat",
                 inputMessages,
                 outputText,
@@ -162,7 +115,6 @@ class OpenInferenceNormalizerTest {
                 "2026-05-22T10:00:00Z",
                 KindNormalizer.LLM);
 
-        // OpenInference span carrying the same content.
         JsonNode oi = attrs("""
                 {
                   "openinference.span.kind":"LLM",
@@ -174,15 +126,14 @@ class OpenInferenceNormalizerTest {
                 }
                 """);
         RawEntry fromOi = OpenInferenceNormalizer.toRawEntry(
-                oi, "span-1", "https://src/1", "chat", "parent-1", "trace-1", "2026-05-22T10:00:00Z", null);
+                oi, "span-1", "chat", "parent-1", "trace-1", "2026-05-22T10:00:00Z", null);
         assertNotNull(fromOi);
 
-        // Same canonical RawEntry fields.
         assertEquals(native_.operationKind(), fromOi.operationKind());
         assertEquals(native_.model(), fromOi.model());
 
-        ObjectNode nativeSpan = TraceSpanMapper.toSpan(native_, "svc");
-        ObjectNode oiSpan = TraceSpanMapper.toSpan(fromOi, "svc");
+        ObjectNode nativeSpan = TraceSpanMapper.toSpan(native_, "svc", null, null);
+        ObjectNode oiSpan = TraceSpanMapper.toSpan(fromOi, "svc", null, null);
 
         JsonNode na = nativeSpan.get("attributes");
         JsonNode oa = oiSpan.get("attributes");
@@ -193,8 +144,7 @@ class OpenInferenceNormalizerTest {
         assertEquals(11L, oa.get(GenAiAttributes.USAGE_INPUT_TOKENS).asLong());
         assertEquals(3L, oa.get(GenAiAttributes.USAGE_OUTPUT_TOKENS).asLong());
 
-        // Same input/output message structure — assert the FULL arrays are structurally equal (every position),
-        // not just index 0, so a regression in a later message would be caught.
+        // The full arrays, so a regression in a later message is caught.
         JsonNode inN = M.readTree(na.get(GenAiAttributes.INPUT_MESSAGES).asText());
         JsonNode inO = M.readTree(oa.get(GenAiAttributes.INPUT_MESSAGES).asText());
         assertEquals(2, inO.size(), "both input messages normalized");
@@ -206,9 +156,8 @@ class OpenInferenceNormalizerTest {
     }
 
     /**
-     * A declared OpenInference provider/system must survive to the canonical {@code gen_ai.system} even when the
-     * model name is NOT recognizable by {@code inferSystem} — otherwise the declared provider would silently
-     * collapse to {@code "other"}. Uses a deliberately unknown model so {@code inferSystem} cannot recover it.
+     * A declared provider survives to {@code gen_ai.system} even for a model {@code inferSystem} cannot recognize,
+     * instead of collapsing to "other".
      */
     @Test
     void declaredSystem_survivesWhenModelNotInferable() throws Exception {
@@ -220,17 +169,16 @@ class OpenInferenceNormalizerTest {
                   "llm.input_messages":[{"message.role":"user","message.content":"hi"}]
                 }
                 """);
-        // inferSystem alone would yield "other" for this model name.
         assertEquals("other", TraceSpanMapper.inferSystem("acme-frontier-7"));
 
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "chat", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "chat", null, "t", null, null);
         assertNotNull(e);
         java.util.Map<String, Object> md = e.metadata();
         assertNotNull(md);
         assertEquals("anthropic", md.get(GenAiAttributes.SYSTEM));
         assertEquals("anthropic", md.get(GenAiAttributes.PROVIDER_NAME));
 
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         assertEquals(
                 "anthropic",
                 span.get("attributes").get(GenAiAttributes.SYSTEM).asText(),
@@ -238,8 +186,8 @@ class OpenInferenceNormalizerTest {
     }
 
     /**
-     * The OpenInference tool-call name + id must land STRUCTURALLY (`gen_ai.tool.name` / `gen_ai.tool.call.id`),
-     * so `TraceSpanMapper.emitUsageAndTool` re-emits them as span attributes — not only folded into output text.
+     * The tool name and id land structurally, so {@code TraceSpanMapper.emitUsageAndTool} re-emits them as
+     * attributes.
      */
     @Test
     void toolCall_landsAsStructuredGenAiToolAttributes() throws Exception {
@@ -255,18 +203,18 @@ class OpenInferenceNormalizerTest {
                   ]
                 }
                 """);
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "chat", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "chat", null, "t", null, null);
         assertNotNull(e);
         java.util.Map<String, Object> md = e.metadata();
         assertNotNull(md);
         assertEquals("get_weather", md.get(GenAiAttributes.TOOL_NAME));
         assertEquals("call_42", md.get(GenAiAttributes.TOOL_CALL_ID));
 
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         JsonNode a = span.get("attributes");
         assertEquals("get_weather", a.get(GenAiAttributes.TOOL_NAME).asText());
         assertEquals("call_42", a.get(GenAiAttributes.TOOL_CALL_ID).asText());
-        // Full arguments are still preserved in the output-message text (never truncated).
+        // Full arguments stay in the output text, never truncated.
         JsonNode out = M.readTree(a.get(GenAiAttributes.OUTPUT_MESSAGES).asText());
         assertTrue(
                 out.get(0).get("parts").get(0).get("content").asText().contains("NYC"),
@@ -282,12 +230,33 @@ class OpenInferenceNormalizerTest {
                   "llm.input_messages":[{"message.role":"user","message.content":"do the task"}]
                 }
                 """);
-        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "u", "agent", null, "t", null, null);
+        RawEntry e = OpenInferenceNormalizer.toRawEntry(oi, "s", "agent", null, "t", null, null);
         assertNotNull(e);
         assertEquals(KindNormalizer.AGENT, e.operationKind());
-        ObjectNode span = TraceSpanMapper.toSpan(e, "svc");
+        ObjectNode span = TraceSpanMapper.toSpan(e, "svc", null, null);
         assertEquals(
                 GenAiAttributes.OP_INVOKE_AGENT,
                 span.get("attributes").get(GenAiAttributes.OPERATION_NAME).asText());
+    }
+
+    /**
+     * The first self-naming tool call is carried structurally, even past unnamed ones; non-array or non-JSON output
+     * carries none rather than failing the span.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            nullValues = "null",
+            value = {
+                "[{\"message.tool_calls\":[{}]},{\"message.tool_calls\":[{\"tool_call.function.name\":\"lookup\"}]}] | lookup",
+                "[{\"message.tool_calls\":[{}]}] | null",
+                "\"not json\" | null",
+                "5 | null"
+            })
+    void firstNamedToolCall_isCarriedStructurally(String outputMessages, @Nullable String toolName) throws Exception {
+        var canonical = OpenInferenceNormalizer.normalize(
+                attrs("{\"openinference.span.kind\":\"LLM\",\"llm.output_messages\":" + outputMessages + "}"));
+
+        assertEquals(toolName, canonical.usage().get(GenAiAttributes.TOOL_NAME));
     }
 }

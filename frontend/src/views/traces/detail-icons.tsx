@@ -23,8 +23,8 @@ import {
 /**
  * Every kind the substrate emits. The backend's vocabulary is
  * `llm | agent | tool | mcp | retrieval | embedding | reranker` — it appears
- * as that exact set in six places, from `TrajectoryAssembler` to the read
- * repositories — and this map used to cover four of them. The other three fell
+ * as that exact set across the backend, down to the read repositories — and
+ * this map used to cover four of them. The other three fell
  * through to {@link Circle}, so 39,308 MCP spans in one project alone read as
  * "some step we have no word for" next to the wrench of an ordinary tool call.
  *

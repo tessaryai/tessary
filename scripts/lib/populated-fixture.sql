@@ -67,6 +67,13 @@ INSERT INTO classifier (id, project_id, classifier_key, name, detector, config_j
 VALUES ('cls_fix', 'prj_fix', 'fixture_classifier', 'Fixture Classifier', 'user_classifier', '{}', 'discovery',
         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
 
+-- An enabled built-in Frustration row, the shape an install that ran the paid overlay has: 0022
+-- turns it off, because the scorer that replaces the encoder spends the org's own provider credit.
+INSERT INTO classifier (id, project_id, classifier_key, name, detector, config_json, built_in, version,
+                        enabled, mode, created_at, updated_at)
+VALUES ('cls_fix_frustration', 'prj_fix', 'frustration', 'Frustration', 'frustration', '{}', true, 8,
+        true, 'tracking', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+
 -- job.kind is a CHECK-backed enumeration, so a rename of one of its arms aborts on the row.
 INSERT INTO job (id, project_id, kind, status, dedupe_key, payload, created_at, updated_at)
 VALUES ('job_fix', 'prj_fix', 'classifier', 'done', 'fixture-classifier-job',

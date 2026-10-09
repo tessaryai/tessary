@@ -8,6 +8,7 @@ import type { AlertChannel, AlertRule } from "../../api/types";
 import {
   Badge,
   Button,
+  ErrorNote,
   Field,
   Input,
   PageBody,
@@ -164,6 +165,8 @@ export function Notifications() {
       <Section title="When a case opens">
         {rulesQ.isLoading ? (
           <Loading />
+        ) : rulesQ.isError ? (
+          <ErrorNote error={rulesQ.error} />
         ) : !rule ? (
           <p className="text-small text-muted">
             This project has no case-opened rule yet. It is created with the project; if this persists,
@@ -175,7 +178,7 @@ export function Notifications() {
               <Toggle
                 checked={rule.enabled}
                 onChange={(next) => toggleRule.mutate(next)}
-                aria-label="Notify when a case opens"
+                label="Notify when a case opens"
               />
               <div>
                 <p className="text-small text-fg">Notify when a case opens</p>
@@ -242,6 +245,8 @@ export function Notifications() {
         </p>
         {channelsQ.isLoading ? (
           <Loading />
+        ) : channelsQ.isError ? (
+          <ErrorNote error={channelsQ.error} />
         ) : (
           <>
             {channels.length > 0 && (
@@ -327,9 +332,5 @@ function Loading() {
 
 /** The browser's own zone as the starting guess — right far more often than UTC is. */
 function browserZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }

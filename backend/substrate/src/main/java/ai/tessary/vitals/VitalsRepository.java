@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
  * grouped by a dimension.
  *
  * <p><b>Two, not three.</b> Tool errors used to be the third and left with the surface that showed them:
- * they are a classifier now ({@code classifiers/tool_error/PROGRAM.md}), watched per tool against that
+ * they are a classifier now ({@code devdocs/concepts/tool-error.md}), watched per tool against that
  * tool's own past. Nothing in this package reads {@code tool_call} any more.
  *
  * <p><b>Everything here is a read.</b> The slice writes no rows and enqueues no jobs, which is what
@@ -26,7 +26,7 @@ import org.springframework.stereotype.Repository;
  * <h2>What the v2 substrate changed here</h2>
  *
  * <p>This used to ship every {@code llm} observation in the window to the application, parse each one's
- * {@code usage} jsonb in Java, and price it against {@link TokenPriceBook} at read time. Three things were
+ * {@code usage} jsonb in Java, and price it against a vendored price book at read time. Three things were
  * wrong with that and all three are gone:
  *
  * <ul>
@@ -94,8 +94,6 @@ public class VitalsRepository {
         String dim = "COALESCE(s." + by.column() + ", '" + UNATTRIBUTED + "')";
         return jdbc.sql("SELECT " + dim + " AS dim,"
                         + " sum(s.total_tokens) AS tokens,"
-                        + " sum(s.input_tokens) AS input_tokens,"
-                        + " sum(s.output_tokens) AS output_tokens,"
                         + " sum(s.total_cost) AS usd,"
                         + " count(*) FILTER (WHERE s.total_tokens IS NOT NULL) AS calls,"
                         + " count(*) FILTER (WHERE s.cost_source = '" + UNPRICED + "'"
@@ -116,8 +114,6 @@ public class VitalsRepository {
                 .query((rs, n) -> new UsageRow(
                         rs.getString("dim"),
                         longOrZero(rs, "tokens"),
-                        longOrZero(rs, "input_tokens"),
-                        longOrZero(rs, "output_tokens"),
                         usd(rs),
                         rs.getLong("calls"),
                         rs.getLong("unpriced_calls"),
@@ -129,9 +125,9 @@ public class VitalsRepository {
      * Turn durations in a window, grouped by dimension — one row per completed turn.
      *
      * <p>The duration is {@code trace.latency_ms}, a stored column derived from the trace's own
-     * start and end. The dimension comes from the turn's entry point: for {@code call_site} that is the
-     * trace's own {@code call_site_id}, copied down from the root span by the rollup (implementation plan
-     * §2.2), which is one column read instead of a LATERAL per trace. For {@code model} it is the root
+     * start and end. For {@code call_site} the dimension is the trace's own {@code call_site_id}, copied
+     * down by the rollup (implementation plan §2.2) from the root span, else the earliest tagged span,
+     * which is one column read instead of a LATERAL per trace. For {@code model} it is the root
      * span's model, which root spans do not carry — so that view buckets everything as
      * {@code __unattributed__}, exactly as it did before, and the cost statistic is the one that
      * discriminates by model.
@@ -149,7 +145,7 @@ public class VitalsRepository {
                         + "   WHERE rs.project_id = t.project_id AND rs.trace_id = t.id"
                         + "     AND rs.parent_span_id IS NULL AND NOT rs.is_deleted"
                         + "   ORDER BY rs.started_at, rs.id LIMIT 1) r ON TRUE";
-        return jdbc.sql("SELECT " + dim + " AS dim, t.id AS trace_id, t.latency_ms AS ms"
+        return jdbc.sql("SELECT " + dim + " AS dim, t.latency_ms AS ms"
                         + " FROM trace t" + rootJoin
                         + " WHERE t.project_id = :pid"
                         + "   AND NOT t.is_deleted"
@@ -158,7 +154,7 @@ public class VitalsRepository {
                 .param("pid", projectId)
                 .param("from", at(from))
                 .param("to", at(to))
-                .query((rs, n) -> new DurationRow(rs.getString("dim"), rs.getString("trace_id"), rs.getDouble("ms")))
+                .query((rs, n) -> new DurationRow(rs.getString("dim"), rs.getDouble("ms")))
                 .list();
     }
 
@@ -174,9 +170,11 @@ public class VitalsRepository {
      * bucket here and the two must agree regardless.
      */
     public List<UnterminatedRow> unterminatedTurnsIn(String projectId, Instant from, Instant to, Dimension by) {
+        // The model view buckets every turn as unattributed (see turnDurationsIn). Cast, not a bare literal:
+        // Postgres refuses a non-integer constant in GROUP BY, and it reads the cast as an expression.
         String dim = by == Dimension.CALL_SITE
                 ? "COALESCE(t.call_site_id, '" + UNATTRIBUTED + "')"
-                : "'" + UNATTRIBUTED + "'";
+                : "CAST('" + UNATTRIBUTED + "' AS text)";
         return jdbc.sql("SELECT " + dim + " AS dim, GROUPING(" + dim + ") AS is_total,"
                         + " COUNT(*) AS turns"
                         + " FROM trace t"
@@ -210,8 +208,7 @@ public class VitalsRepository {
                 .query((rs, n) -> java.util.Map.entry(rs.getString("id"), rs.getString("use_case")))
                 .list()
                 .stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        java.util.Map.Entry::getKey, java.util.Map.Entry::getValue, (a, b) -> a));
+                .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
     }
 
     /** The bucket for traffic that resolved no dimension value — named, not dropped. */
@@ -241,17 +238,10 @@ public class VitalsRepository {
      * total — root spans carry no model.
      */
     public record UsageRow(
-            String dimension,
-            long tokens,
-            long inputTokens,
-            long outputTokens,
-            BigDecimal usd,
-            long calls,
-            long unpricedCalls,
-            long spendingTraces) {}
+            String dimension, long tokens, BigDecimal usd, long calls, long unpricedCalls, long spendingTraces) {}
 
     /** One completed turn's wall-clock duration, read off the trace's stored {@code latency_ms}. */
-    public record DurationRow(String dimension, String traceId, double millis) {}
+    public record DurationRow(String dimension, double millis) {}
 
     /**
      * Turns that never ended. {@code total} marks the grand-total row from the GROUPING SET.

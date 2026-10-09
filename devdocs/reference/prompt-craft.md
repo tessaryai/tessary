@@ -7,6 +7,7 @@ Every prompt the platform sends to a model lives as markdown under
 |---|---|---|
 | `analysis` · `triage/` | `classifier/finding/BehaviorTriageEngine` | Layer-2: is a detector's claim about production traffic true? |
 | `analysis` · `rca/` | `rca/AgenticRcaEngine` | Layer-3: what change caused it? |
+| `analysis` · `rca/frustration/` | `rca/AgenticRcaEngine` | Layer-3 on a frustration finding: what did the agent do that frustrated these users? |
 
 ## What belongs there, and what does not
 
@@ -41,6 +42,3 @@ document that described the path they served are gone.
 Drop in `prompt-craft/<purpose>/` in your own module's resources, read it with `PromptCraft.text("<purpose>", "file.md")`, and add
 the constants to `PromptResourceParityTest#pinned`. Resources resolve across the whole classpath, so
 a module ships its own prompts without any other module knowing they exist.
-
-Placeholders are `{{name}}`, substituted by `PromptCraft.text(purpose, file, vars)`. Prefer composing
-whole files over threading many variables: a prompt with fifteen holes in it is code again.

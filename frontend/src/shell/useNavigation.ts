@@ -51,8 +51,6 @@ export interface Navigation {
   settingsSections: SettingsSection[];
   /** Roadmap slots. Never gated: "coming soon" is a statement about us, not about this org. */
   reserved: NavItem[];
-  /** Whether a surface id (a route segment under the project base) is reachable by this org. */
-  isReachable: (id: string) => boolean;
   /**
    * Whether an absolute in-app path still leads somewhere this org can go. Anything that isn't a
    * known gated surface passes — a case or trace deep link is not the IA's business.
@@ -91,7 +89,6 @@ export function useNavigation(): Navigation {
       settingsGroups,
       settingsSections,
       reserved: RESERVED_NAV,
-      isReachable: (id: string) => reachable.has(id),
       isPathReachable: (path: string) => {
         const parts = path.split("/").filter(Boolean);
         // /orgs/:org/projects/:project/<surface>[/<settings-section>]

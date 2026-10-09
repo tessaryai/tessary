@@ -77,7 +77,7 @@
           "value": ".*",
           "text": "all"
         },
-        "query": ".*,observer,synth,signal,grader-run,rca,embed,slack,alert-deliver,behavior-triage,dataset-run,analytics",
+        "query": ".*,observer,synth,signal,grader-run,rca,embed,alert-deliver,behavior-triage,dataset-run,analytics",
         "options": [
           {
             "text": "all",
@@ -112,11 +112,6 @@
           {
             "text": "embed",
             "value": "embed",
-            "selected": false
-          },
-          {
-            "text": "slack",
-            "value": "slack",
             "selected": false
           },
           {
@@ -1103,7 +1098,7 @@
     {
       "type": "logs",
       "title": "Backend WARN/ERROR during this window",
-      "description": "Scoped to the dashboard time range, so narrowing to the spike narrows these logs. Exception type/message/stacktrace ride as structured metadata (see the loki.process stage in config.alloy) \u2014 expand a line to see them.\n\nVerified against production 2026-07-31: Grafana Cloud's Loki indexes the UN-suffixed `deployment_environment` (the OSS default list documents `deployment.environment.name`; the hosted config differs). Severity IS indexed as lowercase `detected_level`. Both were checked against the live label set rather than the docs, because getting either wrong returns EMPTY rather than erroring.",
+      "description": "Scoped to the dashboard time range, so narrowing to the spike narrows these logs. Exception type/message/stacktrace ride as structured metadata \u2014 expand a line to see them.\n\nVerified against production 2026-07-31: Grafana Cloud's Loki indexes the UN-suffixed `deployment_environment` (the OSS default list documents `deployment.environment.name`; the hosted config differs). Severity IS indexed as lowercase `detected_level`. Both were checked against the live label set rather than the docs, because getting either wrong returns EMPTY rather than erroring.",
       "gridPos": {
         "h": 10,
         "w": 24,

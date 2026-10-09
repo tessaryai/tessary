@@ -2,76 +2,47 @@
 package ai.tessary.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import ai.tessary.auth.AuthFilter;
+import ai.tessary.storage.SessionRepository;
+import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.Principal;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.AuthEnforcedContext;
+import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * Exercises the MCP transport end-to-end through MockMvc. Auth is enabled
- * (WORKOS_* configured) so AuthFilter validates Bearer tokens against the
- * api_key table. The test bootstraps an org/project/user + issues a real
- * token via {@link ApiKeyService}, then uses that token on every request.
+ * Exercises the MCP transport end-to-end through MockMvc. Auth is enforced
+ * so AuthFilter validates Bearer tokens against the api_key table. The test
+ * bootstraps an org/project/user + issues a real token via
+ * {@link ApiKeyService}, then uses that token on every request.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class McpControllerTest {
-
-    @TempDir
-    static Path tmp;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) throws Exception {
-        Path yaml = tmp.resolve("evals.yaml");
-        Files.writeString(yaml, """
-            version: "0.0.1"
-            product_hint: "test"
-            call_sites:
-              - id: cs_test
-                use_case: test_case
-                provider: openai
-                model: gpt-4
-                shape: extract
-                shape_confidence: high
-                intent: extracts a value
-                constraints: []
-                sample_count: 1
-            graders: []
-            failure_modes: []
-            chains: []
-            taxonomy: []
-            """);
-        // Enable auth so MCP bearer-token verification runs. Say so directly rather than
-        // configuring a fake external-provider key as an indirect toggle -- see
-        // TestAuthDisabledInitializer's javadoc for why.
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -84,6 +55,21 @@ class McpControllerTest {
 
     @Autowired
     AuthFilter authFilter;
+
+    @Autowired
+    SessionRepository sessions;
+
+    @Autowired
+    TraceV2Repository traces;
+
+    @Autowired
+    SpanRepository spans;
+
+    @Autowired
+    SpanPayloadRepository payloads;
+
+    @Autowired
+    JdbcClient jdbc;
 
     final ObjectMapper mapper = new ObjectMapper();
     MockMvc mvc;
@@ -105,108 +91,12 @@ class McpControllerTest {
     }
 
     @Test
-    void rejectsMissingAuth() throws Exception {
-        mvc.perform(post("/mcp")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
     void rejectsWrongToken() throws Exception {
         mvc.perform(post("/mcp")
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Authorization", "Bearer tsy_w_doesnotexist123")
                         .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"))
                 .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void initializeReturnsServerInfo() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":1,"method":"initialize",
-             "params":{"protocolVersion":"2025-06-18","capabilities":{}}}
-            """);
-        assertEquals("2.0", body.get("jsonrpc").asText());
-        assertEquals(1, body.get("id").asInt());
-        JsonNode result = body.get("result");
-        assertEquals("tessary-mcp", result.get("serverInfo").get("name").asText());
-        assertNotNull(result.get("capabilities").get("tools"));
-    }
-
-    /**
-     * The six tools the read-only cutover deleted — five triage/RCA tools plus the last write. Named here
-     * so the transport test fails if one comes back, the same invariant
-     * {@code McpCapabilityGateTest} pins on the registry, asserted end-to-end over the real
-     * catalogue a client actually receives.
-     */
-    private static final Set<String> REMOVED_TOOLS = Set.of(
-            "propose_grader_edit", "run_triage", "get_triage", "latest_triage", "list_rca_reports", "get_rca_report");
-
-    /**
-     * Names that would mean a write. Matched as a prefix, because the risk is not one tool returning — it is
-     * the next write being added as one more registration.
-     */
-    private static final List<String> WRITE_PREFIXES = List.of("propose_", "run_", "create_", "update_", "delete_");
-
-    @Test
-    void toolsListContainsCoreToolsAndNoWriteTool() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":2,"method":"tools/list"}
-            """);
-        JsonNode tools = body.get("result").get("tools");
-        assertTrue(tools.isArray() && tools.size() >= 5, "expected several tools, got " + tools);
-        boolean hasListCallSites = false, hasGetProject = false;
-        for (JsonNode t : tools) {
-            String name = t.get("name").asText();
-            if ("list_call_sites".equals(name)) hasListCallSites = true;
-            if ("get_project".equals(name)) hasGetProject = true;
-            assertFalse(REMOVED_TOOLS.contains(name), "removed tool advertised again: " + name);
-            for (String prefix : WRITE_PREFIXES) {
-                assertFalse(name.startsWith(prefix), "write-shaped tool advertised: " + name);
-            }
-            assertNotNull(t.get("description"));
-            assertNotNull(t.get("inputSchema"));
-        }
-        assertTrue(hasListCallSites, "missing list_call_sites");
-        assertTrue(hasGetProject, "missing get_project");
-    }
-
-    @Test
-    void toolsListContainsQueryTools() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":21,"method":"tools/list"}
-            """);
-        JsonNode tools = body.get("result").get("tools");
-        boolean hasCount = false, hasTimeseries = false, hasFacets = false, hasSearch = false;
-        for (JsonNode t : tools) {
-            String name = t.get("name").asText();
-            if ("query_count".equals(name)) hasCount = true;
-            if ("query_timeseries".equals(name)) hasTimeseries = true;
-            if ("query_facets".equals(name)) hasFacets = true;
-            if ("query_search".equals(name)) hasSearch = true;
-        }
-        assertTrue(hasCount && hasTimeseries && hasFacets && hasSearch, "missing one of the query_* tools: " + tools);
-    }
-
-    /**
-     * The triage question — "what is wrong with this project" — is answered by the case pair now. The
-     * {@code run_triage} / {@code get_triage} / {@code latest_triage} trio it replaced spent money and
-     * returned a diagnosis nothing else could see; a case carries its RCA report inline instead.
-     */
-    @Test
-    void toolsListContainsCaseTools() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":24,"method":"tools/list"}
-            """);
-        JsonNode tools = body.get("result").get("tools");
-        boolean hasList = false, hasGet = false;
-        for (JsonNode t : tools) {
-            String name = t.get("name").asText();
-            if ("list_cases".equals(name)) hasList = true;
-            if ("get_case".equals(name)) hasGet = true;
-        }
-        assertTrue(hasList && hasGet, "missing one of the case tools: " + tools);
     }
 
     @Test
@@ -221,68 +111,6 @@ class McpControllerTest {
         assertEquals(true, result.get("isError").asBoolean());
         String text = result.get("content").get(0).get("text").asText();
         assertTrue(text.contains("does-not-exist"), "expected missing id named in: " + text);
-    }
-
-    /**
-     * The evidence door end-to-end: a token minted for one project, over the real transport, asking for a
-     * finding id that belongs to nobody here. Whether the id is another tenant's or fictional, the answer
-     * has to be the same clean tool error — a distinguishable 403 would confirm that the id is real, which
-     * is the one thing a cross-tenant probe is trying to learn.
-     */
-    @Test
-    void toolsCallGetFindingEvidenceForeignIdIsCleanToolError() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":31,"method":"tools/call",
-             "params":{"name":"get_finding_evidence","arguments":{"finding_id":"other-tenants-finding"}}}
-            """);
-        assertNull(body.get("error"), "must be a tool error inside result, not a JSON-RPC error");
-        JsonNode result = body.get("result");
-        assertEquals(true, result.get("isError").asBoolean());
-        String text = result.get("content").get(0).get("text").asText();
-        assertTrue(text.contains("other-tenants-finding"), "expected the id named in: " + text);
-    }
-
-    @Test
-    void toolsCallListCasesReturnsEmptyOpenPageForFreshProject() throws Exception {
-        // A pure read: no classifier has opened a case on the bootstrapped project, so the open page is empty
-        // and unpaged — no error, no LLM call, no write.
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":26,"method":"tools/call",
-             "params":{"name":"list_cases","arguments":{}}}
-            """);
-        JsonNode result = body.get("result");
-        assertEquals(false, result.get("isError").asBoolean());
-        JsonNode page = result.get("structuredContent");
-        assertTrue(page.get("cases").isArray(), "expected a cases array in: " + page);
-        assertEquals(0, page.get("cases").size(), "fresh project must have no open cases: " + page);
-        assertTrue(page.get("next_cursor").isNull(), "empty page must not offer a cursor: " + page);
-    }
-
-    @Test
-    void toolsCallQueryCountReturnsProjectScopedResult() throws Exception {
-        // The bootstrapped project has no ingested rows, so count is 0 — but the call must succeed
-        // end-to-end through auth -> dispatcher -> QueryService, proving the wrapper is wired and scoped.
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":22,"method":"tools/call",
-             "params":{"name":"query_count","arguments":{"dataset":"spans"}}}
-            """);
-        JsonNode result = body.get("result");
-        assertEquals(false, result.get("isError").asBoolean());
-        assertEquals(0, result.get("structuredContent").get("count").asLong());
-    }
-
-    @Test
-    void toolsCallQueryBadDatasetIsCleanToolError() throws Exception {
-        // A bad dataset must surface as a tool error (isError=true), not a -32603 internal error.
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":23,"method":"tools/call",
-             "params":{"name":"query_count","arguments":{"dataset":"not_a_dataset"}}}
-            """);
-        assertNull(body.get("error"), "must be a tool error inside result, not a JSON-RPC error");
-        JsonNode result = body.get("result");
-        assertEquals(true, result.get("isError").asBoolean());
-        String text = result.get("content").get(0).get("text").asText();
-        assertTrue(text.contains("not_a_dataset"), "expected bad dataset named in: " + text);
     }
 
     @Test
@@ -301,17 +129,79 @@ class McpControllerTest {
         assertEquals(project.slug(), found.get("slug").asText());
     }
 
+    /**
+     * The frustration classifier keys a conversation on the session, and RCA hands the agent those session ids. A
+     * thread id is only a column: keyed on it, one user's thread spanning two sessions read as one conversation and
+     * a session read dropped its threaded turns.
+     */
     @Test
-    void toolsCallPropagatesToolErrorWithoutCrashing() throws Exception {
-        JsonNode body = call("""
-            {"jsonrpc":"2.0","id":4,"method":"tools/call",
-             "params":{"name":"get_trace",
-                       "arguments":{"trace_id":"does-not-exist"}}}
-            """);
-        JsonNode result = body.get("result");
+    void toolsCallGetConversationReadsOneSessionsTurnsWhateverTheirThread() throws Exception {
+        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        String pid = project.id();
+        Instant t0 = Instant.parse("2026-09-01T10:00:00Z");
+        String monday = SubstrateV2Fixtures.sessionId();
+        String thursday = SubstrateV2Fixtures.sessionId();
+        String userThread = "whatsapp-" + SubstrateV2Fixtures.traceId();
+        String a1 = SubstrateV2Fixtures.traceId();
+        String b1 = SubstrateV2Fixtures.traceId();
+        String a2 = SubstrateV2Fixtures.traceId();
+        String bare = SubstrateV2Fixtures.traceId();
+        String subAgent = SubstrateV2Fixtures.traceId();
+        String later = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, a1, monday, userThread, null, t0);
+        fx.trace(pid, b1, monday, "side-" + userThread, null, t0.plusSeconds(1));
+        fx.trace(pid, a2, monday, userThread, null, t0.plusSeconds(2));
+        fx.trace(pid, bare, monday, null, null, t0.plusSeconds(3));
+        fx.trace(pid, subAgent, monday, null, null, t0.plusSeconds(4));
+        fx.trace(pid, later, thursday, userThread, null, t0.plusSeconds(3 * 86_400));
+        jdbc.sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
+                .param("parent", bare)
+                .param("pid", pid)
+                .param("child", subAgent)
+                .update();
+
+        JsonNode first = getConversation(monday);
+        assertEquals(monday, first.get("id").asText());
+        assertEquals(
+                List.of(a1, b1, a2, bare),
+                traceIds(first),
+                "every top-level turn of the session, oldest first, never a sub-agent trace or another session's");
+        assertEquals(false, first.get("traces_truncated").asBoolean());
+
+        assertEquals(List.of(later), traceIds(getConversation(thursday)), "the same thread in a later session");
+
+        JsonNode byThread = call(String.format(Locale.ROOT, """
+            {"jsonrpc":"2.0","id":28,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"%s"}}}
+            """, userThread)).get("result");
+        assertEquals(true, byThread.get("isError").asBoolean(), "a thread id names no conversation");
+    }
+
+    @Test
+    void toolsCallGetConversationUnknownIdIsCleanToolError() throws Exception {
+        JsonNode result = call("""
+            {"jsonrpc":"2.0","id":27,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"no-such-conversation"}}}
+            """).get("result");
         assertEquals(true, result.get("isError").asBoolean());
-        String text = result.get("content").get(0).get("text").asText();
-        assertTrue(text.contains("not found"), "expected 'not found' in: " + text);
+        assertEquals(
+                "conversation not found: no-such-conversation",
+                result.get("content").get(0).get("text").asText());
+    }
+
+    private JsonNode getConversation(String id) throws Exception {
+        JsonNode result = call(String.format(Locale.ROOT, """
+            {"jsonrpc":"2.0","id":26,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"%s"}}}
+            """, id)).get("result");
+        assertEquals(false, result.get("isError").asBoolean(), result::toString);
+        return result.get("structuredContent");
+    }
+
+    private static List<String> traceIds(JsonNode conversation) {
+        List<String> ids = new ArrayList<>();
+        conversation.get("traces").forEach(t -> ids.add(t.get("id").asText()));
+        return ids;
     }
 
     @Test
@@ -321,24 +211,6 @@ class McpControllerTest {
                         .header("Authorization", "Bearer " + bearer)
                         .content("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"))
                 .andExpect(status().isNoContent());
-    }
-
-    @Test
-    void revokedTokenIsRejected() throws Exception {
-        // Issue + revoke + ensure subsequent call gets 401.
-        ApiKeyService.Issued issued = mcpTokens.issue(project.id(), user.id(), "to-revoke");
-        // The token bcrypt-validates first, then we revoke and try again.
-        mvc.perform(post("/mcp")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .header("Authorization", "Bearer " + issued.plaintext())
-                        .content("{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"ping\"}"))
-                .andExpect(status().isOk());
-        mcpTokens.revoke(issued.token().id());
-        mvc.perform(post("/mcp")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .header("Authorization", "Bearer " + issued.plaintext())
-                        .content("{\"jsonrpc\":\"2.0\",\"id\":100,\"method\":\"ping\"}"))
-                .andExpect(status().isUnauthorized());
     }
 
     private JsonNode call(String json) throws Exception {

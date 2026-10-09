@@ -15,7 +15,7 @@
 # check globs `scripts/check-*.sh` and `scripts/lib/check-*.sh` and hard-fails if either set has a
 # row the manifest does not, including scripts excluded from `task check` itself. A file under
 # scripts/lib/ not matching `check-*.sh` needs no such row, the same reason dev-compose.sh and
-# open-boot-lib.sh live here rather than at the top level. `task check`/`check:open` run in CI on
+# open-boot-lib.sh live here rather than at the top level. `task check` runs in CI on
 # every PR with no Docker and no elevated network capability, so wiring this into the manifest as
 # a bare check-egress-capture.sh would need a permanent carve-out for a script nothing in CI can
 # run yet.
@@ -259,5 +259,3 @@ fi
     exit 1
 }
 echo "$P: PASS — telemetry on reaches exactly {$ALLOWED_HOST_WHEN_ON}; telemetry off reaches nothing."
-echo "$P: record this result (date, destinations, kill-switch outcome) as a line near clause 9's" \
-     "evidence in tessary-paid/OPEN-CORE.md — no separate dated sign-off artifact, per the ruling on this issue."

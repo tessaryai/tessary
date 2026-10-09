@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,16 +33,10 @@ import org.springframework.stereotype.Component;
  * {@code media_object}. Readers re-hydrate by id: the judge boundary via {@link MediaStore#get}
  * just-in-time, the frontend via the media serve endpoint.
  *
- * <p>Two entry points for the two content shapes the substrate persists:
- * <ul>
- *   <li>{@link #externalizeJson} — rewrites a raw OpenAI/Anthropic content <em>payload string</em>
- *       ({@code span_payload.input/output}, {@code tool_call} args/result) in place, replacing inline
- *       base64 image/document nodes with {@code image_ref}/{@code document_ref} nodes. Non-JSON or
- *       media-free payloads are returned byte-identical.</li>
- *   <li>{@link #externalizeBlocks} — replaces every {@code image_b64}/{@code document_b64} (and inline
- *       {@code data:} URI {@code image_url}) {@link ContentBlock} with its {@code _ref} counterpart,
- *       for a caller that already holds typed blocks rather than a payload string.</li>
- * </ul>
+ * <p>The entry point, {@link #externalizeJson}, rewrites a raw OpenAI/Anthropic content <em>payload
+ * string</em> ({@code span_payload.input/output}, {@code tool_call} args/result) in place, replacing inline
+ * base64 image/document nodes with {@code image_ref}/{@code document_ref} nodes. Non-JSON or media-free
+ * payloads are returned byte-identical.
  *
  * <p><b>Every call reports the media it minted.</b> The ids are the only thing that can tie a
  * {@code media_object} row back to the span that carries it: the reference itself is a string inside the
@@ -122,31 +115,8 @@ public class MediaExternalizer {
         JsonNode rewritten = rewrite(projectId, root, minted);
         // No base64 media → identical bytes, avoid a needless re-serialize.
         if (minted.ids.isEmpty()) return Externalized.unchanged(payload);
-        try {
-            return new Externalized(mapper.writeValueAsString(rewritten), List.copyOf(minted.ids));
-        } catch (Exception e) {
-            // The rewrite cannot be persisted, so neither can its refs: reporting ids for a payload that
-            // still carries the base64 would file media_ref rows for a reference the payload does not have.
-            return Externalized.unchanged(payload);
-        }
+        return new Externalized(rewritten.toString(), List.copyOf(minted.ids));
     }
-
-    /**
-     * Replace every base64 image/document block (and inline {@code data:} URI {@code image_url} block)
-     * in {@code blocks} with its {@code _ref} counterpart. Text/URL/already-ref blocks pass through
-     * unchanged. A block whose bytes cannot be stored is kept as-is (never dropped).
-     */
-    public ExternalizedBlocks externalizeBlocks(String projectId, List<ContentBlock> blocks) {
-        List<ContentBlock> out = new ArrayList<>(blocks.size());
-        Minted minted = new Minted();
-        for (ContentBlock b : blocks) {
-            out.add(externalizeBlock(projectId, b, minted));
-        }
-        return new ExternalizedBlocks(out, List.copyOf(minted.ids));
-    }
-
-    /** {@link Externalized}, for the typed-block entry point. */
-    public record ExternalizedBlocks(List<ContentBlock> blocks, List<String> mediaIds) {}
 
     /** The ids minted while rewriting one payload, deduplicated in first-seen order. */
     private static final class Minted {
@@ -155,46 +125,6 @@ public class MediaExternalizer {
         void add(MediaRef ref) {
             ids.add(ref.id());
         }
-    }
-
-    private ContentBlock externalizeBlock(String projectId, ContentBlock b, Minted minted) {
-        if (b == null || b.type() == null) return b;
-        return switch (b.type()) {
-            case ContentBlock.TYPE_IMAGE_B64 -> {
-                MediaRef ref = putBase64(projectId, b.data(), b.mediaType(), "image/png");
-                if (ref == null) yield b;
-                minted.add(ref);
-                yield ContentBlock.imageRef(ref.id(), b.mediaType());
-            }
-            case ContentBlock.TYPE_IMAGE_URL -> {
-                DataUri du = parseDataUri(b.url());
-                if (du == null) yield b; // a real http(s) URL stays a URL — nothing to externalize
-                MediaRef ref = putBytes(projectId, du.bytes(), du.mime());
-                if (ref == null) yield b;
-                minted.add(ref);
-                yield ContentBlock.imageRef(ref.id(), du.mime());
-            }
-            case ContentBlock.TYPE_DOCUMENT_B64 -> {
-                byte[] bytes = decodeBase64(b.data());
-                if (bytes.length == 0) yield b;
-                MediaRef ref = putBytes(projectId, bytes, b.mediaType());
-                if (ref == null) yield b;
-                minted.add(ref);
-                yield documentRefWithExtractedText(ref.id(), b.mediaType(), bytes);
-            }
-            // document_url (a real http(s) URL, or a data: URI carried in `url`): only the data: URI
-            // form is inlined bytes worth externalizing; a real URL stays a URL — never fetched, same
-            // posture as image_url.
-            case ContentBlock.TYPE_DOCUMENT_URL -> {
-                DataUri du = parseDataUri(b.url(), "application/pdf");
-                if (du == null) yield b;
-                MediaRef ref = putBytes(projectId, du.bytes(), du.mime());
-                if (ref == null) yield b;
-                minted.add(ref);
-                yield documentRefWithExtractedText(ref.id(), du.mime(), du.bytes());
-            }
-            default -> b;
-        };
     }
 
     // --- JSON tree rewrite ----------------------------------------------------

@@ -15,6 +15,4 @@ public record OrgInvitation(
         @JsonProperty("accepted_at") String acceptedAt,
         @JsonProperty("revoked_at") String revokedAt) {
     public static final String PENDING = "pending";
-    public static final String ACCEPTED = "accepted";
-    public static final String REVOKED = "revoked";
 }

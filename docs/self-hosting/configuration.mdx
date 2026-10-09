@@ -32,7 +32,7 @@ Compose builds the Postgres connection from these values. You only set `TESSARY_
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `TESSARY_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as source credentials and provider API keys. | A placeholder, published in `docker-compose.yml` |
+| `TESSARY_SECRET_KEY` | AES-256-GCM key Tessary uses to seal secrets it stores, such as provider API keys. | A placeholder, published in `docker-compose.yml` |
 
 Generate a key with:
 
@@ -85,7 +85,7 @@ Between the OTLP endpoint and the database sits a buffer. The default needs noth
 | --- | --- | --- |
 | `TESSARY_INGEST_SPOOL_MODE` | `memory`: a 200 means the batch is queued in the backend process, the buffer sheds with `503 + Retry-After` when its byte budget is full, and a restart loses what was queued (stock exporters retry a 503, so a shed costs latency, not data). `kafka`: a 200 means the batch is persisted by a Kafka-API broker before the response, and nothing acknowledged is lost on restart. | `memory` |
 | `TESSARY_INGEST_SPOOL_KAFKA_BOOTSTRAP_SERVERS` | The broker, in `kafka` mode. The bundled single-node Redpanda answers at the default. | `redpanda:9092` |
-| `TESSARY_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to — set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
+| `TESSARY_INGEST_SPOOL_KAFKA_REPLICATION_FACTOR` | Copies the broker keeps of each accepted batch, applied when the spool creates its topics. The bundled single-node Redpanda can only satisfy `1`. Against your own multi-broker cluster this is what decides whether `kafka` mode's promise survives a broker failure: at `1`, an acknowledged batch is on one machine's disk, and losing that machine loses data the API already answered `200` to. Set `3` there. The broker is told to wait for two copies whenever this is above `1`. | `1` |
 | `TESSARY_INGEST_SPOOL_KAFKA_CONSUMERS` | Drainer threads in `kafka` mode, each with its own consumer; the broker spreads the eight partitions across them, and one project's batches stay on one partition so they never run concurrently. Raise it with cores, up to the eight partitions (a ninth consumer would sit idle); `memory` mode always runs one. | `4` |
 
 To use the bundled broker, set the mode and start the stack with its profile:
@@ -120,6 +120,8 @@ An owner or admin can override either period for one project under **Settings �
 
 LLM providers have no environment variables. Configure them in-app, under **Settings** then **Providers**. Tessary seals whatever you enter there with `TESSARY_SECRET_KEY`.
 
+A TypeSafe key serves only the frustration classifier. An OpenRouter key serves triage, RCA, and the frustration classifier.
+
 The one exception is an ambient region for Bedrock:
 
 | Variable | Description | Default |
@@ -130,10 +132,27 @@ The one exception is an ambient region for Bedrock:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `TESSARY_OBSERVER_ENCODER_URL` | URL of the classify-service encoder endpoint. | Blank |
-| `TESSARY_OBSERVER_ENCODER_API_KEY` | API key for the encoder endpoint. | Blank |
+| `TESSARY_OBSERVER_ENCODER_URL` | URL of the groundedness model server. | Blank |
+| `TESSARY_OBSERVER_ENCODER_API_KEY` | API key for the groundedness model server. | Blank |
+| `TESSARY_GROUNDEDNESS_CLASSIFIER_MODE` | `dev` scores whenever the model answers. `production` is a GPU instance that wakes on a schedule and stops when idle, so Tessary waits 30 minutes after it catches up before scoring again. | `dev` |
+| `TESSARY_OBSERVER_ENCODER_PROBE_INTERVAL_MS` | How often the backend checks the model server's `/healthz`. While it doesn't answer, groundedness pauses and picks up where it left off once it does. | `60000` |
 
-Both ship blank, and in the open edition they stay blank: the model weights classify-service loads are gated and not published, so the frustration and groundedness classifiers are unavailable rather than merely unconfigured. See [Encoder-based classifiers are unavailable in the open edition](/self-hosting/setup#encoder-based-classifiers-are-unavailable-in-the-open-edition) in Setup, and the classifier section of [Troubleshooting](/self-hosting/troubleshooting).
+## Frustration shadow model
+
+Optional. A second decision model every Frustration turn is re-sent to after the configured provider has scored it, with both answers kept side by side in `frustration_shadow` and nothing a customer sees changed. It is how a self-hosted model is measured against the provider on real traffic before it replaces anything.
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `TESSARY_FRUSTRATION_SHADOW_URL` | Base URL of a server that speaks TypeSafe's `/v1/systemone` wire format (Eikos, Kev, Winnow and the like) and answers `GET /health`. Blank disables the shadow. | Blank |
+| `TESSARY_FRUSTRATION_SHADOW_API_KEY` | Bearer key sent with each request, if the server wants one. | Blank |
+| `TESSARY_FRUSTRATION_SHADOW_MODEL` | The `model` field of each request; whatever the server expects. | `decider` |
+| `TESSARY_FRUSTRATION_SHADOW_SWEEP_MS` | How often the backend probes the server and drains the backlog. A server that stops itself when idle must stay up longer than this. | `300000` |
+| `TESSARY_FRUSTRATION_SHADOW_BATCH` | Turns fetched and sent per batch. | `100` |
+| `TESSARY_FRUSTRATION_SHADOW_BUDGET_MS` | The most one sweep runs before it yields to the next. | `1200000` |
+
+The backlog is every assessment whose request body retention has not yet removed and that has no shadow row; a server that is down just leaves it waiting. To read the comparison, count `frustration_shadow` rows by `frustrated` against `reference_frustrated`; the sweep also logs the running totals as `frustration.shadow.sweep`.
+
+The groundedness model needs a GPU: a Mac with Apple silicon for development, or a GPU instance on AWS for production. The setup file your coding agent follows sets these on a Mac, or prints them for you to add on AWS: [on a Mac](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-mac.md) or [on AWS](https://github.com/tessaryai/tessary/blob/main/classifiers/groundedness/setup/groundedness-setup-aws.md). The frustration classifier does not use this server; it needs an OpenRouter or TypeSafe key, stored under **Settings** then **Providers**. See [Groundedness needs a GPU](/self-hosting/setup#groundedness-needs-a-gpu) in Setup.
 
 ## Agentic launcher and sandbox-runner
 
@@ -160,7 +179,7 @@ Connecting a GitHub repository needs no environment variables. Connect one in-ap
 </Tip>
 
 A default deployment has exactly one outbound destination: `home.tessary.ai`. There is no Google
-Fonts call, no analytics SDK, and no other third-party host a default install reaches — the
+Fonts call, no analytics SDK, and no other third-party host a default install reaches. The
 product's one non-Geist typeface (the wordmark) ships as a local font file, not a call to Google's
 CDN. Nothing else in this section is an exception to that; it exists to say precisely what the
 backend sends there and fetches from there.
@@ -202,18 +221,18 @@ The complete set of destinations a self-hosted instance may reach, and when. Any
 | Nothing from the bundled Redpanda | Only with `--profile kafka` | Redpanda's metrics reporter (`enable_metrics_reporter`, the one setting that phones home) is off in the flags the profile starts it with. |
 | `acme-v02.api.letsencrypt.org` | Only when `SITE_DOMAIN` names a real host | Caddy's certificate issuance. Unset, Caddy serves plain HTTP and contacts nobody. |
 | The provider, alert and Git endpoints you configure | Only after you enter a credential in Settings | Your own integrations. A default boot has none. |
+| The groundedness model server you set up | Only when `TESSARY_OBSERVER_ENCODER_URL` is set: a health check every `TESSARY_OBSERVER_ENCODER_PROBE_INTERVAL_MS`, and a scoring request for each answer while the groundedness classifier is on | Your own Mac or AWS instance. Tessary sends each answer with its retrieved documents and the user's question, or with its prompt when it has no documents. The variable ships blank, so a default boot never contacts it. |
+
+The machine that runs the groundedness model makes its own downloads, separate from Tessary's containers: `serve.py` from GitHub, the Python packages it runs on, and the model's weights from Hugging Face. See [What is sent, and to whom](/classifiers/groundedness#what-is-sent-and-to-whom).
 
 **Turning it off costs one thing: price updates between releases.** `TESSARY_TELEMETRY_ENABLED=false`
 gives Tessary no install-count or activation visibility into your deployment, and your instance stops
 checking for newer model prices, so it prices from the book bundled in the release you run until you
 upgrade. There is no license check, feature gate, or other in-app behavior that depends on reaching us.
 
-**Tessary will never use your conversations to train or improve any model — no exceptions, no
+**Tessary will never use your conversations to train or improve any model. No exceptions, no
 toggle.** This is an absolute guarantee, not a default you could accidentally switch off. See
-`devdocs/reference/principles.md` § "Product & positioning" for the full argument, backed by two
-guard tests in the codebase
-(`NoSharedModelTrainingGuaranteeTest`, `PriorContributionGuardTest`) that fail the build if this
-ever stops being true.
+`devdocs/reference/principles.md` § "Product & positioning" for the full argument.
 
 ## Ingest and OTLP
 

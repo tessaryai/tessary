@@ -180,3 +180,42 @@ test("drains in-flight responses when stdin closes before the server answers", a
     server.close();
   }
 });
+
+test("an unreachable origin answers each request with a JSON-RPC error under that request's own id", async () => {
+  const child = spawn(process.execPath, [BIN_PATH, "--origin", "http://127.0.0.1:1/", "--token", "tsy_a_token"]);
+  try {
+    const failed = { code: -32000, message: "tessary-mcp: request to http://127.0.0.1:1/mcp failed: fetch failed" };
+
+    let line = waitForLine(child.stdout);
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" }) + "\n");
+    assert.deepEqual(JSON.parse(await line), { jsonrpc: "2.0", id: 7, error: failed }, "the client can match the failure to its call");
+
+    line = waitForLine(child.stdout);
+    child.stdin.write("{not json\n");
+    assert.deepEqual(JSON.parse(await line), { jsonrpc: "2.0", id: null, error: failed }, "an unparseable line still gets an answer");
+  } finally {
+    child.kill();
+  }
+});
+
+test("with no origin configured the bridge exits 1 and says how to set one", async () => {
+  const { TESSARY_ORIGIN: _origin, TESSARY_TOKEN: _token, ...env } = process.env;
+  const child = spawn(process.execPath, [BIN_PATH, "--token", "tsy_a_token"], { env });
+  let stderr = "";
+  child.stderr.on("data", (d) => {
+    stderr += d;
+  });
+
+  const code = await new Promise((resolve) => child.on("exit", resolve));
+
+  assert.equal(code, 1);
+  assert.equal(stderr, "tessary-mcp: missing origin. Pass --origin <url> or set TESSARY_ORIGIN.\n");
+});
+
+test("the --flag=value spelling configures the bridge the same as --flag value", () => {
+  const { parseArgs } = require(BIN_PATH);
+  assert.deepEqual(parseArgs(["--origin=https://tessary.example", "--token=tsy_a_token"]), {
+    origin: "https://tessary.example",
+    token: "tsy_a_token",
+  });
+});

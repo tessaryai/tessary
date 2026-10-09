@@ -2,14 +2,19 @@
 package ai.tessary.auth;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -28,8 +33,15 @@ import org.springframework.mock.web.MockHttpServletResponse;
  */
 class RateLimitFilterTest {
 
-    private static RateLimitFilter filter() {
-        return new RateLimitFilter(new ObjectMapper());
+    private static final String HEALTH_PROBE =
+            "the three public health probes remain exempt -- the load-balancer path: polled by orchestrators before"
+                    + " anything holds a credential";
+
+    /** The filter's monotonic clock. It moves only when a test advances it, so no bucket refills mid-burst. */
+    private final AtomicLong nanos = new AtomicLong();
+
+    private RateLimitFilter filter() {
+        return new RateLimitFilter(new ObjectMapper(), nanos::get);
     }
 
     /**
@@ -46,101 +58,67 @@ class RateLimitFilterTest {
         return req;
     }
 
-    @Test
-    @DisplayName("/api/** and /mcp remain rate-limited")
-    void apiAndMcpAreRateLimited() {
-        assertFalse(
-                filter().shouldNotFilter(request("GET", "/api/orgs/acme/projects/web/traces")),
-                "/api/** must stay rate-limited");
-        assertFalse(filter().shouldNotFilter(request("POST", "/mcp")), "/mcp must stay rate-limited");
+    static Stream<Arguments> postures() {
+        Stream<Arguments> fixed = Stream.of(
+                Arguments.of("/api/** must stay rate-limited", "GET", "/api/orgs/acme/projects/web/traces", false),
+                Arguments.of("/mcp must stay rate-limited", "POST", "/mcp", false),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health", true),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health/liveness", true),
+                Arguments.of(HEALTH_PROBE, "GET", "/actuator/health/readiness", true),
+                Arguments.of(
+                        "/actuator/health is matched exactly by isPublicActuatorPath; a same-prefix sibling must not"
+                                + " inherit the exemption",
+                        "GET",
+                        "/actuator/healthz",
+                        false),
+                // POST /auth/signup and /auth/login are the two credential-checking routes the
+                // dependency-free password provider adds. They must now be rate-limited by IP, since they
+                // have no TenantContext to key on -- and every OTHER /auth/** path must stay exempt exactly
+                // as before.
+                Arguments.of("/auth/signup must be rate-limited", "POST", "/auth/signup", false),
+                Arguments.of("/auth/login must be rate-limited", "POST", "/auth/login", false),
+                Arguments.of(
+                        "the OAuth GET dance shares a path with the new POST credential route but must not be "
+                                + "swept into rate limiting by it",
+                        "GET",
+                        "/auth/login",
+                        true));
+        Stream<Arguments> guardedActuator = Stream.of(
+                        "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus")
+                .map(path -> Arguments.of(
+                        "a guarded actuator path must be rate-limited: AuthFilter runs first (@Order(10) vs this"
+                                + " filter's @Order(20)) and now requires PlatformStaff.isStaff for this path, so"
+                                + " anything reaching here carries a real principal, same as /api/** and /mcp",
+                        "GET",
+                        path,
+                        false));
+        return Stream.concat(fixed, guardedActuator);
+    }
+
+    @ParameterizedTest(name = "{1} {2}: {0}")
+    @MethodSource("postures")
+    void shouldNotFilterFollowsThePostureTable(String rule, String method, String path, boolean exempt) {
+        assertEquals(exempt, filter().shouldNotFilter(request(method, path)), rule);
     }
 
     @Test
-    @DisplayName("the three public health probes remain exempt -- the load-balancer path")
-    void publicHealthProbesAreExempt() {
-        for (String path :
-                new String[] {"/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"}) {
-            assertTrue(
-                    filter().shouldNotFilter(request("GET", path)),
-                    path + " is polled by orchestrators before anything holds a credential and must stay exempt");
-        }
-    }
-
-    @Test
-    @DisplayName("a guarded actuator path is NOT exempt -- it now carries a staff-verified ctx")
-    void guardedActuatorPathsAreRateLimited() {
-        for (String path : new String[] {
-            "/actuator", "/actuator/env", "/actuator/loggers", "/actuator/heapdump", "/actuator/prometheus"
-        }) {
-            assertFalse(
-                    filter().shouldNotFilter(request("GET", path)),
-                    path + " must be rate-limited: AuthFilter runs first (@Order(10) vs this filter's "
-                            + "@Order(20)) and now requires PlatformStaff.isStaff for this path, so anything "
-                            + "reaching here carries a real principal, same as /api/** and /mcp");
-        }
-    }
-
-    @Test
-    @DisplayName("a health-prefixed sibling is not exempt by name")
-    void healthPrefixedSiblingIsNotExempt() {
-        assertFalse(
-                filter().shouldNotFilter(request("GET", "/actuator/healthz")),
-                "/actuator/health is matched exactly by isPublicActuatorPath; a same-prefix sibling must not "
-                        + "inherit the exemption");
-    }
-
-    // -----------------------------------------------------------------------------------------
-    // POST /auth/signup and /auth/login are the two credential-checking routes the
-    // dependency-free password provider adds. They must now be rate-limited by IP, since they
-    // have no TenantContext to key on -- and every OTHER /auth/** path must stay exempt exactly
-    // as before.
-    // -----------------------------------------------------------------------------------------
-
-    @Test
-    @DisplayName("POST /auth/signup and /auth/login are no longer exempt")
-    void credentialRoutesAreNotExempt() {
-        assertFalse(filter().shouldNotFilter(request("POST", "/auth/signup")), "/auth/signup must be rate-limited");
-        assertFalse(filter().shouldNotFilter(request("POST", "/auth/login")), "/auth/login must be rate-limited");
-    }
-
-    @Test
-    @DisplayName("GET /auth/login (the OAuth redirect) stays exempt -- same path, different method")
-    void oauthLoginGetStaysExempt() {
-        assertTrue(
-                filter().shouldNotFilter(request("GET", "/auth/login")),
-                "the OAuth GET dance shares a path with the new POST credential route but must not be "
-                        + "swept into rate limiting by it");
-    }
-
-    @Test
-    @DisplayName("every other /auth/** path stays exempt")
-    void otherAuthPathsStayExempt() {
-        for (String path : new String[] {"/auth/callback", "/auth/logout", "/auth/me", "/auth/link/start"}) {
-            assertTrue(filter().shouldNotFilter(request("GET", path)), path + " must remain exempt");
-        }
-        assertTrue(filter().shouldNotFilter(request("POST", "/auth/logout")), "/auth/logout must remain exempt");
-    }
-
-    @Test
-    @DisplayName("an unauthenticated burst against POST /auth/login from one IP is throttled")
-    void credentialRouteBurstIsThrottled() throws ServletException, IOException {
+    @DisplayName("an exhausted credential bucket refills one attempt every five seconds")
+    void anExhaustedCredentialBucketRefillsOneAttemptPerFiveSeconds() throws ServletException, IOException {
         RateLimitFilter f = filter();
-        int rejected = 0;
-        // Burst capacity is 5; six rapid requests from the same IP must trip the limiter.
-        for (int i = 0; i < 6; i++) {
-            MockHttpServletRequest req = request("POST", "/auth/login");
-            req.setRemoteAddr("203.0.113.7");
-            MockHttpServletResponse res = new MockHttpServletResponse();
-            MockFilterChain chain = new MockFilterChain();
-            f.doFilterInternal(req, res, chain);
-            if (res.getStatus() == 429) rejected++;
-        }
-        assertTrue(rejected >= 1, "at least one of six rapid unauthenticated logins from one IP must 429");
+        String ip = "203.0.113.9";
+        for (int i = 0; i < 5; i++) login(f, ip);
+        assertEquals(429, login(f, ip).getStatus(), "the burst is spent");
+
+        // 0.2 tokens a second for 5 seconds is exactly one token: one more login, then throttled again.
+        nanos.addAndGet(5_000_000_000L);
+
+        assertEquals(200, login(f, ip).getStatus(), "five seconds buys back one attempt");
+        assertEquals(429, login(f, ip).getStatus(), "and only one");
     }
 
     @Test
     @DisplayName("a full pool evicts the coldest buckets and keeps the ones being spent")
-    void fullPoolEvictsByAgeRatherThanLockingOutNewCallers() throws Exception {
+    void fullPoolEvictsByAgeRatherThanLockingOutNewCallers() throws ServletException, IOException {
         RateLimitFilter f = filter();
 
         // Both of these exhaust their burst, so either one still holding its bucket answers 429 and
@@ -150,6 +128,7 @@ class RateLimitFilterTest {
         // that check passes whether or not a single byte was ever reclaimed.
         String cold = "203.0.113.10";
         for (int i = 0; i < 6; i++) login(f, cold);
+        nanos.addAndGet(1_000);
         assertEquals(429, login(f, cold).getStatus(), "the cold caller starts out at its limit");
 
         // Fill past the cap with addresses that are all being SPENT, so the idle sweep can free
@@ -157,13 +136,15 @@ class RateLimitFilterTest {
         // shape a caller minting addresses out of an IPv6 /64 produces, and the reason a full pool must
         // evict rather than refuse — refusing would turn every later sign-in from an address not
         // already in the map away for as long as that caller cared to continue.
+        // Each filler is a microsecond younger than the last, so the pass has an age order to cut on.
         for (int i = 0; i < 10_050; i++) {
             login(f, "198.51.100." + (i / 250) + "." + (i % 250));
+            nanos.addAndGet(1_000);
         }
         // Past the reclaim interval, so the next new key actually runs a pass instead of returning
         // early. Without this the fill completes inside one interval and the eviction arm is never
         // entered at all.
-        Thread.sleep(1_100);
+        nanos.addAndGet(1_100_000_000L);
 
         // Establishing this caller is the first new key after the interval, so it is what triggers the
         // pass — and reclaim runs BEFORE the insert, so this bucket cannot be evicted by the pass it
@@ -200,12 +181,22 @@ class RateLimitFilterTest {
         assertEquals("5", limited.getHeader("Retry-After"));
     }
 
+    /**
+     * One login, checked for the one thing a status code cannot show: a 429 must stop the request
+     * before the controller, and anything else must reach it.
+     */
     private static MockHttpServletResponse login(RateLimitFilter f, String remoteAddr)
             throws ServletException, IOException {
         MockHttpServletRequest req = request("POST", "/auth/login");
         req.setRemoteAddr(remoteAddr);
         MockHttpServletResponse res = new MockHttpServletResponse();
-        f.doFilterInternal(req, res, new MockFilterChain());
+        MockFilterChain chain = new MockFilterChain();
+        f.doFilterInternal(req, res, chain);
+        if (res.getStatus() == 429) {
+            assertNull(chain.getRequest(), "a throttled login must not reach the controller");
+        } else {
+            assertNotNull(chain.getRequest(), "an admitted login must reach the controller");
+        }
         return res;
     }
 
@@ -221,7 +212,38 @@ class RateLimitFilterTest {
                 MockFilterChain chain = new MockFilterChain();
                 f.doFilterInternal(req, res, chain);
                 assertEquals(200, res.getStatus(), path + " must never be throttled by this filter");
+                assertNotNull(chain.getRequest(), path + " must reach the controller");
             }
         }
+    }
+
+    @Test
+    @DisplayName("an authenticated caller gets its own 60-request burst, keyed by user, not shared")
+    void authenticatedCallersAreThrottledPerUser() throws ServletException, IOException {
+        RateLimitFilter f = filter();
+        for (int i = 0; i < 60; i++) {
+            assertEquals(200, apiCall(f, "usr_busy").getStatus(), "call " + (i + 1) + " is inside the burst");
+        }
+        MockHttpServletResponse limited = apiCall(f, "usr_busy");
+        assertEquals(429, limited.getStatus(), "the 61st rapid call must 429");
+        assertEquals("1", limited.getHeader("Retry-After"), "the per-user pool refills ten a second");
+        assertEquals(200, apiCall(f, "usr_quiet").getStatus(), "another user's allowance is untouched");
+    }
+
+    private static MockHttpServletResponse apiCall(RateLimitFilter f, String userId)
+            throws ServletException, IOException {
+        MockHttpServletRequest req = request("GET", "/api/orgs/acme/projects/web/traces");
+        // Same address for everyone: the per-user pool must not fall back to keying by IP.
+        req.setRemoteAddr("203.0.113.50");
+        req.setAttribute(TenantContext.ATTRIBUTE, new TenantContext(userId, null, null, null, null, null));
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        f.doFilterInternal(req, res, chain);
+        if (res.getStatus() == 429) {
+            assertNull(chain.getRequest(), "a throttled call must not reach the controller");
+        } else {
+            assertNotNull(chain.getRequest(), "an admitted call must reach the controller");
+        }
+        return res;
     }
 }

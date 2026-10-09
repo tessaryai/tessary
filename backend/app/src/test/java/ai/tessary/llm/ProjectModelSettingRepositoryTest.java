@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.llmspi.ServiceTier;
@@ -69,25 +68,25 @@ class ProjectModelSettingRepositoryTest {
     }
 
     @Test
-    void settingsAreScopedToTheirProject() {
-        var a = TenantFixture.bootstrap(tenants, "model-setting-scope-a");
-        var b = TenantFixture.bootstrap(tenants, "model-setting-scope-b");
+    void deleteDropsOnlyThatLaneOfThatProject() {
+        var fix = TenantFixture.bootstrap(tenants, "model-setting-delete");
+        var sibling = TenantFixture.bootstrap(tenants, "model-setting-delete-sibling");
+        String pid = fix.project().id();
+        repo.upsert(pid, ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(pid, ModelLane.TRIAGE, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
+        repo.upsert(sibling.project().id(), ModelLane.RCA, "anthropic.claude-haiku-4-5", ServiceTier.STANDARD, null);
 
-        repo.upsert(a.project().id(), ModelLane.RCA, "amazon.nova-2-lite", ServiceTier.FLEX, null);
+        repo.delete(pid, ModelLane.RCA);
+        repo.delete(pid, ModelLane.RCA); // a no-op when there is no row
 
         assertEquals(
-                "amazon.nova-2-lite",
-                repo.findByProject(a.project().id()).stream()
-                        .filter(r -> r.lane() == ModelLane.RCA)
-                        .findFirst()
-                        .orElseThrow()
-                        .modelKey());
-        // B gets no row at all, which is the stronger form of the same claim: a row exists only
-        // because someone chose a model on that project, so a write to A cannot leave one behind on
-        // its sibling. B's own RCA lane still runs — resolved from its org's configured providers —
-        // it simply has nothing stored to resolve against.
-        assertTrue(
-                repo.findByProject(b.project().id()).stream().noneMatch(r -> r.lane() == ModelLane.RCA),
-                "the write must not have reached the sibling project");
+                List.of(ModelLane.TRIAGE),
+                repo.findByProject(pid).stream().map(ProjectModelSetting::lane).toList());
+        assertEquals(
+                List.of(ModelLane.RCA),
+                repo.findByProject(sibling.project().id()).stream()
+                        .map(ProjectModelSetting::lane)
+                        .toList(),
+                "the sibling project's choice for the same lane is untouched");
     }
 }

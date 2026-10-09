@@ -62,12 +62,7 @@ public class LinearChannel implements AlertChannel {
         body.put("query", MUTATION);
         body.set("variables", variables);
 
-        String json;
-        try {
-            json = mapper.writeValueAsString(body);
-        } catch (Exception e) {
-            return DeliveryResult.failure(null, "could not serialize linear mutation");
-        }
+        String json = body.toString();
         try {
             HttpResponse<String> res = ChannelHttp.post(url, Map.of("Authorization", apiKey), json);
             int code = res.statusCode();
@@ -103,11 +98,7 @@ public class LinearChannel implements AlertChannel {
         sb.append("Fired alert from tessary.\n\n");
         sb.append("- **kind**: ").append(e.ruleType()).append('\n');
         sb.append("- **project**: ").append(e.projectId()).append('\n');
-        if (e.classifierId() != null)
-            sb.append("- **classifier**: ").append(e.classifierId()).append('\n');
         if (e.value() != null) sb.append("- **observed**: ").append(e.value()).append('\n');
-        if (e.threshold() != null)
-            sb.append("- **threshold**: ").append(e.threshold()).append('\n');
         sb.append("- **window**: ")
                 .append(e.windowStart())
                 .append(" … ")

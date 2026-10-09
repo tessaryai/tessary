@@ -25,7 +25,6 @@ public class ErrorCatalog {
 
     private static final List<Class<? extends ErrorCode>> REGISTERED = List.of(
             CommonError.class,
-            JudgeError.class,
             IngestError.class,
             ModelConfigError.class,
             VersionError.class,
@@ -39,25 +38,27 @@ public class ErrorCatalog {
             MeteringError.class,
             CapabilityError.class,
             RcaError.class,
-            SlackError.class,
             CaseError.class,
-            AuthError.class);
+            AuthError.class,
+            DecisionError.class,
+            RetentionError.class,
+            AgentRunError.class);
 
-    /**
-     * The registered enums, for a caller outside this module that needs to check codes against them.
-     * Returns the same immutable {@code List.of} the validator walks, so the two can never drift.
-     */
-    public static List<Class<? extends ErrorCode>> registered() {
-        return REGISTERED;
+    private final List<Class<? extends ErrorCode>> registered;
+
+    public ErrorCatalog() {
+        this(REGISTERED);
+    }
+
+    /** A catalog over {@code registered} in place of {@link #REGISTERED}, for a test to build a collision. */
+    ErrorCatalog(List<Class<? extends ErrorCode>> registered) {
+        this.registered = registered;
     }
 
     @PostConstruct
     public void validate() {
         Map<String, ErrorCode> byCode = new HashMap<>();
-        for (Class<? extends ErrorCode> cls : REGISTERED) {
-            if (!cls.isEnum()) {
-                throw new IllegalStateException("ErrorCode impls must be enums: " + cls.getName());
-            }
+        for (Class<? extends ErrorCode> cls : registered) {
             ErrorCode[] constants = cls.getEnumConstants();
             for (ErrorCode ec : constants) {
                 ErrorCode prev = byCode.put(ec.code(), ec);
@@ -71,6 +72,6 @@ public class ErrorCatalog {
                 }
             }
         }
-        log.info("error catalog: {} unique codes across {} domains", byCode.size(), REGISTERED.size());
+        log.info("error catalog: {} unique codes across {} domains", byCode.size(), registered.size());
     }
 }

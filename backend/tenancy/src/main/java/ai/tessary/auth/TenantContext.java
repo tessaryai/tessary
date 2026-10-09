@@ -53,10 +53,6 @@ public record TenantContext(
         return mcpTokenId != null;
     }
 
-    public boolean isOwner() {
-        return "owner".equals(role);
-    }
-
     /**
      * Whether this context (when it is a bearer-key context) is allowed to act on the surface that
      * {@code required} guards. User sessions are not key-scoped, so they always pass — surface-level RBAC
@@ -65,9 +61,5 @@ public record TenantContext(
      */
     public boolean keyPermits(KeyScope required) {
         return keyScope == null || keyScope.permits(required);
-    }
-
-    public TenantContext withProject(String orgId, String projectId, String role) {
-        return new TenantContext(userId, userEmail, orgId, projectId, role, mcpTokenId, keyScope);
     }
 }

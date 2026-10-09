@@ -30,10 +30,8 @@ public record AuditLog(
     /** The lifecycle actions we record. The wire value is the lowercase name. */
     public enum Action {
         CREATED,
-        UPDATED,
         ROTATED,
-        REVOKED,
-        DELETED;
+        REVOKED;
 
         public String wire() {
             return name().toLowerCase(java.util.Locale.ROOT);

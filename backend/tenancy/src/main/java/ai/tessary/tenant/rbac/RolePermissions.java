@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.tenant.rbac;
 
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.Map;
@@ -9,14 +8,13 @@ import java.util.Set;
 
 /**
  * The single source of truth mapping {@link Role} → the {@link Permission}s it grants.
- * Server-side guards (and the {@code /api/me/orgs} affordance hints reflected in the UI)
- * both read from here, so the enforced policy and the displayed affordances can never drift.
+ * Server-side guards read the policy from here.
  *
  * <p>Policy summary:</p>
  * <ul>
  *   <li><b>owner</b> — everything, including irreversible organization lifecycle and billing.</li>
  *   <li><b>admin</b> — manage members, organization content/settings, and which capabilities the org
- *       has turned on, but not owner-only lifecycle (delete/transfer) or billing.</li>
+ *       has turned on, but not owner-only lifecycle (delete) or billing.</li>
  *   <li><b>member</b> — view + manage organization content (create/curate), but no member,
  *       capability or billing management.</li>
  *   <li><b>viewer</b> — read-only; can view but mutate nothing.</li>
@@ -53,20 +51,11 @@ public final class RolePermissions {
         m.put(Role.MEMBER, EnumSet.of(Permission.ORG_VIEW, Permission.ORG_MANAGE));
         m.put(Role.VIEWER, EnumSet.of(Permission.ORG_VIEW));
         m.put(Role.BILLING, EnumSet.of(Permission.BILLING_MANAGE));
-        // Defensive: a freshly added role with no explicit entry grants nothing.
-        for (Role r : Role.values()) {
-            m.putIfAbsent(r, EnumSet.noneOf(Permission.class));
-        }
         return m;
     }
 
     /** True if the given role holds the given permission. */
     public static boolean allows(Role role, Permission permission) {
         return MATRIX.getOrDefault(role, Set.of()).contains(permission);
-    }
-
-    /** The immutable set of permissions a role holds — useful for UI affordance hints. */
-    public static Set<Permission> permissionsFor(Role role) {
-        return Collections.unmodifiableSet(MATRIX.getOrDefault(role, EnumSet.noneOf(Permission.class)));
     }
 }

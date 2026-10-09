@@ -11,6 +11,8 @@ import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
+import ai.tessary.storage.TraceDetectionRepository;
+import ai.tessary.storage.TraceFilters;
 import ai.tessary.storage.TraceV2Repository;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -70,6 +72,7 @@ public class SessionReadService {
     private final SpanPayloadRepository payloads;
     private final ToolCallRepository toolCalls;
     private final RetrievedDocRepository retrievalDocuments;
+    private final TraceDetectionRepository detections;
 
     public SessionReadService(
             SessionRepository sessions,
@@ -77,7 +80,9 @@ public class SessionReadService {
             SpanRepository spans,
             SpanPayloadRepository payloads,
             ToolCallRepository toolCalls,
-            RetrievedDocRepository retrievalDocuments) {
+            RetrievedDocRepository retrievalDocuments,
+            TraceDetectionRepository detections) {
+        this.detections = detections;
         this.sessions = sessions;
         this.traces = traces;
         this.spans = spans;
@@ -99,9 +104,14 @@ public class SessionReadService {
      *     first-input/last-output preview (four grouped/DISTINCT ON queries for the whole page, never one per
      *     row) and carry them on each {@code SessionListItem}; when false (existing callers, including MCP),
      *     those fields stay null and no extra query runs.
+     * @param filter the traces list's filters: a session is on the page when one of its traces passes every one.
      */
     public SessionDtos.SessionsPage page(
-            String projectId, int pageSize, @Nullable String cursor, boolean includeTotals) {
+            String projectId,
+            int pageSize,
+            @Nullable String cursor,
+            boolean includeTotals,
+            TraceV2Repository.TraceQuery filter) {
         String beforeAt = null;
         String beforeId = null;
         String token = PreviewCursor.decode(cursor).token();
@@ -117,7 +127,7 @@ public class SessionReadService {
             }
         }
 
-        List<SessionRow> rows = sessions.listByProject(projectId, pageSize + 1, beforeAt, beforeId);
+        List<SessionRow> rows = sessions.listByProject(projectId, filter, pageSize + 1, beforeAt, beforeId);
         String nextCursor = null;
         if (rows.size() > pageSize) {
             SessionRow last = rows.get(pageSize - 1);
@@ -152,6 +162,19 @@ public class SessionReadService {
             }
         }
 
+        Map<String, List<TraceDtos.DetectionLabel>> labelsById = new HashMap<>();
+        if (!rows.isEmpty()) {
+            for (TraceDetectionRepository.SessionMark m : detections.forSessions(
+                    projectId, rows.stream().map(SessionRow::id).toList())) {
+                List<TraceDtos.DetectionLabel> labels =
+                        labelsById.computeIfAbsent(m.sessionId(), k -> new ArrayList<>());
+                TraceDtos.DetectionLabel label = new TraceDtos.DetectionLabel(m.classifierId(), m.classifierName());
+                if (!labels.contains(label)) {
+                    labels.add(label);
+                }
+            }
+        }
+
         Map<String, TraceV2Repository.SessionTotalsRow> finalTotalsById = totalsById;
         Map<String, String> finalDominantCallSiteById = dominantCallSiteById;
         Map<String, Integer> finalCallSiteCountById = callSiteCountById;
@@ -183,7 +206,8 @@ public class SessionReadService {
                                         null,
                                         null,
                                         null,
-                                        null);
+                                        null,
+                                        labelsById.getOrDefault(s.id(), List.of()));
                             }
                             TraceV2Repository.SessionTotalsRow t = finalTotalsById.get(s.id());
                             return new SessionDtos.SessionListItem(
@@ -208,7 +232,8 @@ public class SessionReadService {
                                     t == null ? null : t.inputCost(),
                                     t == null ? null : t.outputCost(),
                                     finalFirstInputById.get(s.id()),
-                                    finalLastOutputById.get(s.id()));
+                                    finalLastOutputById.get(s.id()),
+                                    labelsById.getOrDefault(s.id(), List.of()));
                         })
                         .toList(),
                 nextCursor);
@@ -218,8 +243,11 @@ public class SessionReadService {
      * One session: identity, the summed rollups of its traces, and those traces oldest first. Empty when the
      * project holds no such session — the project scoping IS the lookup, so a cross-tenant id is absent
      * rather than forbidden.
+     *
+     * @param filter the traces list's filters; when it narrows, {@code matched_trace_ids} names the traces that pass.
      */
-    public Optional<SessionDtos.SessionDetail> detail(String projectId, String sessionId) {
+    public Optional<SessionDtos.SessionDetail> detail(
+            String projectId, String sessionId, TraceV2Repository.TraceQuery filter) {
         Optional<SessionRow> found = sessions.findById(projectId, sessionId);
         if (found.isEmpty()) {
             return Optional.empty();
@@ -233,6 +261,8 @@ public class SessionReadService {
         if (truncated) {
             rows = rows.subList(0, SESSION_TRACE_CAP);
         }
+        List<TraceDetectionRepository.Mark> marks = detections.forTraces(
+                projectId, rows.stream().map(TraceV2Repository.Summary::id).toList());
         return Optional.of(new SessionDtos.SessionDetail(
                 session.id(),
                 session.userId(),
@@ -246,7 +276,31 @@ public class SessionReadService {
                 totals.totalCost(),
                 totals.unpricedSpans(),
                 truncated,
-                rows.stream().map(TraceDtos::item).toList()));
+                TraceDtos.items(rows, marks),
+                TraceDtos.marks(marks),
+                TraceFilters.narrows(filter)
+                        ? traces.idsInSessionMatching(projectId, sessionId, filter, SESSION_TRACE_CAP)
+                        : null));
+    }
+
+    /**
+     * One session's turns, oldest first, capped like {@link #detail}: its top-level traces whatever their
+     * {@code thread_id}, without the sub-agent traces and totals {@link #detail} carries. Empty when no turn
+     * carries the session.
+     */
+    public Optional<SessionDtos.ConversationDetail> conversation(String projectId, String conversationId) {
+        List<TraceV2Repository.Summary> rows =
+                traces.listByConversation(projectId, conversationId, SESSION_TRACE_CAP + 1);
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        boolean truncated = rows.size() > SESSION_TRACE_CAP;
+        if (truncated) {
+            rows = rows.subList(0, SESSION_TRACE_CAP);
+        }
+        List<TraceDetectionRepository.Mark> marks = detections.forTraces(
+                projectId, rows.stream().map(TraceV2Repository.Summary::id).toList());
+        return Optional.of(new SessionDtos.ConversationDetail(conversationId, truncated, TraceDtos.items(rows, marks)));
     }
 
     /**

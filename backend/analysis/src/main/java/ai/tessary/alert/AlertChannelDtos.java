@@ -42,13 +42,7 @@ public final class AlertChannelDtos {
             String updatedAt) {
         public static ChannelView from(AlertChannelRow r) {
             return new ChannelView(
-                    r.id(),
-                    r.kind(),
-                    r.name(),
-                    r.enabled(),
-                    r.configEnc() != null && !r.configEnc().isBlank(),
-                    r.createdAt(),
-                    r.updatedAt());
+                    r.id(), r.kind(), r.name(), r.enabled(), !r.configEnc().isBlank(), r.createdAt(), r.updatedAt());
         }
     }
 

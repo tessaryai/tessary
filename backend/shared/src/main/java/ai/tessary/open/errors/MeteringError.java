@@ -9,7 +9,7 @@ public enum MeteringError implements ErrorCode {
     INVALID_RANGE(HttpStatus.UNPROCESSABLE_ENTITY, "Usage query requires both a 'from' and a 'to' bound"),
     UNKNOWN_UNIT(
             HttpStatus.UNPROCESSABLE_ENTITY,
-            "Unknown usage unit '%s' (expected ingested_spans, l1_evals, l2_evals, llm_tokens, "
+            "Unknown usage unit '%s' (expected ingested_spans, ingested_traces, l1_evals, l2_evals, llm_tokens, "
                     + "llm_cost_micro_usd_platform, llm_cost_micro_usd_byo, or storage)"),
     UNKNOWN_BUCKET_UNIT(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown usage bucket unit '%s' (expected hour or day)"),
     UNKNOWN_SERIES_GRAIN(

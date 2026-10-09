@@ -13,13 +13,4 @@ package ai.tessary.alert;
  *
  * @param row the fired-alert record, fully populated and persisted.
  */
-public record AlertFiredEvent(AlertEventRow row) {
-
-    public String projectId() {
-        return row.projectId();
-    }
-
-    public String ruleType() {
-        return row.ruleType();
-    }
-}
+public record AlertFiredEvent(AlertEventRow row) {}

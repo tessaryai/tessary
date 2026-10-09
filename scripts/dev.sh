@@ -48,11 +48,9 @@ if [ "${TESSARY_PROFILING:-0}" = "1" ]; then PROFILING_COMPOSE=" -f docker-compo
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# The `-f` set comes from the one derivation in scripts/lib/dev-compose.sh, which merges in any
-# extra compose fragment present on disk. Built after the `cd` on purpose: that probe is relative,
-# so assigning COMPOSE before the `cd` would run it in the caller's cwd, and `bash
-# <repo>/scripts/dev.sh` from elsewhere would silently boot with module mounts missing. The
-# profiling overlay stays last, so it still wins on conflicts.
+# The `-f` set comes from the one derivation in scripts/lib/dev-compose.sh. Built after the `cd`
+# on purpose: its file paths are relative. The profiling overlay stays last, so it still wins on
+# conflicts.
 COMPOSE="$(bash "$REPO_ROOT/scripts/lib/dev-compose.sh")${PROFILING_COMPOSE}"
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -74,10 +72,9 @@ if [ -n "${TMUX:-}" ] && [ "$(tmux display-message -p '#S' 2>/dev/null)" = "$SES
     exit 1
 fi
 
-# The decisions this stack needs (where agents run, whether the encoder service runs, whether
-# sign-in is enforced), asked once as multiple choice and remembered in .local/dev-choices.env.
-# Resolved and exported BEFORE `$COMPOSE up`, which is when compose interpolates them. The
-# `task dev:slim` preset answers its question up front and skips it.
+# The decisions this stack needs (where agents run, whether sign-in is enforced), asked once as
+# multiple choice and remembered in .local/dev-choices.env. Resolved and exported BEFORE
+# `$COMPOSE up`, which is when compose interpolates them.
 # shellcheck source=lib/dev-choices.sh
 . "$REPO_ROOT/scripts/lib/dev-choices.sh"
 dev_choices_resolve
@@ -86,7 +83,7 @@ dev_choices_export_sandbox_env
 
 # Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling, or set it yourself in front of
 # any dev task). The agent jar is fetched HERE rather than in the Taskfile so profiling composes
-# with every mode (dev, dev:slim) instead of only the one task that happened to carry the download
+# with every mode instead of only the one task that happened to carry the download
 # step. Idempotent: re-running is a no-op once the jar exists.
 #
 # Version must match the agent pinned in backend/Dockerfile and the io.pyroscope:agent dependency
@@ -125,16 +122,8 @@ if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
     echo "profiling ON — flame graphs at http://localhost:4040 once the backend has served some traffic."
 fi
 
-# Slim mode (task dev:slim → TESSARY_SKIP_CLASSIFY=1). The derivation lives in the shared
-# lib so `task dev:up`, which has no tmux session and so no scripts/dev.sh, skips the same
-# services rather than carrying a second copy of the list.
-# shellcheck source=lib/dev-services.sh
-. "$REPO_ROOT/scripts/lib/dev-services.sh"
-UP_SERVICES="$(dev_up_services "$COMPOSE")"
-
 echo "starting dev stack (this builds images on first run; subsequent runs hit the cache)..."
-# Intentionally unquoted: empty ⇒ all services; otherwise word-splits into the service list.
-$COMPOSE up -d --build $UP_SERVICES
+$COMPOSE up -d --build
 
 # Pre-render the cheat-sheet to a file. We avoid a multi-line heredoc inside
 # `tmux send-keys` because it sometimes causes the receiving shell to enter

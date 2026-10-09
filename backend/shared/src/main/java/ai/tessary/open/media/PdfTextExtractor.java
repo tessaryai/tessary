@@ -2,6 +2,7 @@
 package ai.tessary.open.media;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -21,10 +22,9 @@ import org.slf4j.LoggerFactory;
  *
  * <p><b>Never throws.</b> Every PDFBox failure mode (encrypted, scanned/no text layer, corrupt/
  * truncated bytes, and every other checked/unchecked exception PDFBox can raise) collapses to
- * {@link Optional#empty()} — this is a best-effort text lift, not a judge boundary in its own right;
- * the CALLER decides whether an empty result is fatal (a fail-loud {@code DOCUMENT_TEXT_UNAVAILABLE}
- * at the judge boundary) or merely labeled (a failure marker on the persisted {@code document_ref}).
- * A crashed batch over one bad PDF would be strictly worse than either.
+ * {@link Optional#empty()} — this is a best-effort text lift; the CALLER decides what an empty result
+ * means (a failure marker on the persisted {@code document_ref}). A crashed batch over one bad PDF
+ * would be strictly worse.
  *
  * <p><b>Bounded, deliberately, on three axes</b> — a PDF is untrusted input from an ingest path, not a
  * file the operator chose: a page cap (a pathological PDF with millions of empty pages), a character
@@ -64,14 +64,19 @@ public final class PdfTextExtractor {
      * truncated bytes, or any cap tripping before a single character was read. Never throws.
      */
     public static Optional<String> extract(byte @Nullable [] pdfBytes) {
+        return extract(pdfBytes, Clock.systemUTC());
+    }
+
+    /** {@link #extract(byte[])} measuring the wall-clock cap on {@code clock}. */
+    static Optional<String> extract(byte @Nullable [] pdfBytes, Clock clock) {
         if (pdfBytes == null || pdfBytes.length == 0) return Optional.empty();
-        Instant deadline = Instant.now().plus(MAX_DURATION);
+        Instant deadline = clock.instant().plus(MAX_DURATION);
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             if (doc.isEncrypted()) {
                 log.info("pdf text extraction: encrypted document, no text layer available");
                 return Optional.empty();
             }
-            PDFTextStripper stripper = new BoundedTextStripper(deadline);
+            PDFTextStripper stripper = new BoundedTextStripper(clock, deadline);
             stripper.setStartPage(1);
             stripper.setEndPage(Math.min(doc.getNumberOfPages(), MAX_PAGES));
             String text = stripper.getText(doc);
@@ -105,15 +110,17 @@ public final class PdfTextExtractor {
      *  the finest-grained hook PDFTextStripper exposes without subclassing its whole page-processing
      *  pipeline. */
     private static final class BoundedTextStripper extends PDFTextStripper {
+        private final Clock clock;
         private final Instant deadline;
 
-        BoundedTextStripper(Instant deadline) throws IOException {
+        BoundedTextStripper(Clock clock, Instant deadline) throws IOException {
+            this.clock = clock;
             this.deadline = deadline;
         }
 
         @Override
         protected void writeLineSeparator() throws IOException {
-            if (Instant.now().isAfter(deadline)) throw new DeadlineExceeded();
+            if (clock.instant().isAfter(deadline)) throw new DeadlineExceeded();
             super.writeLineSeparator();
         }
     }

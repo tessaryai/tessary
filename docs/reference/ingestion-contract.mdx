@@ -149,7 +149,9 @@ Per-bucket figures win over any total. A lone total lands in `input_cost`, becau
 
 | Field | Consumed for | Applies to | Origin |
 | --- | --- | --- | --- |
-| `retrieval.documents.<N>.document.id`, `.content`, `.score`, `.metadata` | First-class retrieved-document rows, ranked from 1 | Any span carrying these indexed attributes. There is no kind gate: extraction runs on every span and is a no-op when the prefix is absent | OpenInference |
+| `retrieval.documents.<N>.document.id`, `.content`, `.score`, `.metadata` | First-class retrieved-document rows, ranked from 1. `.content` is also the text the groundedness classifier checks an answer against | Any span carrying these indexed attributes. There is no kind gate: extraction runs on every span and is a no-op when the prefix is absent | OpenInference |
+
+Ingest needs none of these fields. Groundedness needs `.content` to compare an answer against retrieved documents. Without it, an answer on a `rag_answer` call site whose session called a tool or a retriever is not scored. See [Which answers are scored](/classifiers/groundedness#which-answers-are-scored).
 
 ## Call site
 
@@ -176,7 +178,7 @@ These arrive without being rejected and survive verbatim in the attribute bag. T
 | Span links (`links[]`) | Not read today. Cross-trace linking is the sanctioned future mechanism and is deferred. `trace.parent_trace_id` exists but nothing on the wire writes it: a detached sub-agent is linked by the platform, not declared by the producer |
 | `span.kind`, `trace_state`, `span.flags`, dropped counts, instrumentation-scope attributes | Ignored |
 | `gen_ai.system`, `gen_ai.provider.name` | Carried in the attribute bag, not promoted to a column |
-| `tessary.sdk`, `tessary.upstream.*` | Provenance markers. Written, never read by processing |
+| `tessary.sdk` | A provenance marker the producer stamps. Carried through, never read by processing |
 | `gen_ai.evaluation.result` span event and the `gen_ai.evaluation.*` attributes under it | No longer read. They landed explicit user feedback as first-class rows until that feature was removed. Emitting the event is harmless and has no effect; the keys are unclaimed rather than reserved |
 | `deployment.environment.name` resource attribute | No longer read. It scoped a span to an environment row until the environment concept was removed. It is still accepted and survives verbatim, and it scopes nothing. A project is the only scope below an organization, so use separate projects for separate environments |
 
@@ -209,7 +211,17 @@ Ad-hoc alias spellings of canonical fields are never read either. `sessionId`, `
 | Single span payload | `8,000,000` characters | The whole span is dropped rather than clipped |
 | Live buffer pressure | The ingest buffer's byte budget, `64 MiB` by default; the receiver refuses above 80% of it. See [Ingest buffer](/self-hosting/configuration#ingest-buffer) | The request is refused with `503` and a `Retry-After` header, before the body is decoded. Stock exporters retry a `503`, so a shed costs latency rather than data |
 
-How long a stored trace survives afterward is a separate setting: see [Data retention](/self-hosting/configuration#data-retention).
+On Tessary Cloud, three more limits apply to the whole organization. The values are on the [pricing page](https://tessary.ai/pricing). Each refusal rejects the whole export request, and the JSON error body carries the code in `meta.error.code`.
+
+| Limit | Response | Error code and message |
+| --- | --- | --- |
+| Monthly trace allowance | `402`. Exporters do not retry it, so the traces in the request are not stored | `CAPABILITY.QUOTA_EXCEEDED`, `Quota 'ingested_traces_month' exceeded: <used> of <included> used for this period` |
+| Stored data | `402`. Exporters do not retry it, so the traces in the request are not stored | `CAPABILITY.QUOTA_EXCEEDED`, `Quota 'storage_bytes' exceeded: <used> of <included> used for this period` |
+| Export requests per minute | `429` with a `Retry-After` header. Stock exporters retry it | `PAID_INGEST.RATE_LIMITED`, `This organization's plan admits <limit> pushes a minute; retry after <seconds> second(s)` |
+
+[Usage and credit](/cloud/usage-and-credit) covers how traces and stored data are counted, and how to recover from each refusal.
+
+How long a stored trace survives afterward is a separate setting: see [Data retention](/self-hosting/configuration#data-retention), or [Retention](/cloud/data-handling#retention) on Tessary Cloud.
 
 ## Invariants
 

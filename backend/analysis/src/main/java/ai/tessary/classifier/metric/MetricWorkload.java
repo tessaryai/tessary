@@ -5,6 +5,7 @@ import ai.tessary.classifier.metric.MetricHistogram.Grid;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.util.RawValue;
 import java.util.List;
 import java.util.OptionalDouble;
 import org.jspecify.annotations.Nullable;
@@ -12,7 +13,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * What the USER asked for during one window, summarized alongside what the agent did with it — three
  * bounded sketches that ride each window slot of a {@code metric_baseline} row and are reported, then
- * versus now, in a finding's evidence blob ({@code classifiers/metric_drift/PROGRAM.md} §7).
+ * versus now, in a finding's evidence blob ({@code devdocs/concepts/metric-drift.md} §7).
  *
  * <p><b>This block is not decoration, and leaving it out breaks the correction loop.</b> Triage audits
  * whether the finding's claim holds, and "the population moved" is only a claim about the agent if the
@@ -22,7 +23,7 @@ import org.jspecify.annotations.Nullable;
  * entire argument for "the agent changed, not the traffic", and it is an argument only this record can
  * make.
  *
- * <p><b>Condition on the ask, never on the answer</b> (PROGRAM.md §3.2). Every quantity here is
+ * <p><b>Condition on the ask, never on the answer</b> (metric-drift.md §3.2). Every quantity here is
  * something the user controls — how big the prompt was, how much they typed, how deep into the thread
  * they are. The agent's own choices are deliberately absent: span count, tool-call count and kind mix
  * are not workload, because an agent decomposing "what's my balance" into eleven tool calls <em>is</em>
@@ -158,12 +159,7 @@ public final class MetricWorkload {
     public String toJson() {
         ObjectNode root = MetricHistogram.JSON.createObjectNode();
         for (int i = 0; i < sketches.length; i++) {
-            try {
-                root.set(QUANTITIES.get(i), MetricHistogram.JSON.readTree(sketches[i].toJson()));
-            } catch (JsonProcessingException ex) {
-                // A sketch that cannot re-read its own output is a bug in the sketch, not a data problem.
-                throw new IllegalStateException("metric sketch produced unreadable json", ex);
-            }
+            root.putRawValue(QUANTITIES.get(i), new RawValue(sketches[i].toJson()));
         }
         return root.toString();
     }

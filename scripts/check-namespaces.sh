@@ -10,8 +10,7 @@
 #      `docker pull` before pasting a provider key into it. A private coordinate can only be read
 #      with a credential that can see it; otherwise (no `gh auth` or HF_TOKEN, or a token that cannot read
 #      the repository) the row is reported UNVERIFIED, never ok.
-#   2. Every coordinate the tree itself references, over the whole tree the export would publish
-#      (everything scripts/lib/export-denylist.txt deletes is skipped), is in the inventory. A new
+#   2. Every coordinate the tree itself references is in the inventory. A new
 #      publish target, or a dangling old path after a rename, reds here before it ships unwatched.
 #
 #   bash scripts/check-namespaces.sh              both halves
@@ -27,7 +26,6 @@ P=check-namespaces
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 INVENTORY="scripts/lib/namespace-inventory.txt"
-DENYLIST="scripts/lib/export-denylist.txt"
 NEGATIVE=0
 for arg in "$@"; do
     case "$arg" in
@@ -129,11 +127,9 @@ while IFS='|' read -r eco coord _refs want method want_id; do
 done < "$INVENTORY"
 echo "$P: $rows rows: $((rows - unverified)) verified, $unverified unverified"
 
-# Every tessaryai/<name> coordinate in the tree the export publishes, one per line. The walk is the
-# tracked and untracked-unignored files (git, or jj in a secondary workspace that has no .git), so
-# ignored scratch trees never contribute. Paths the export denylist deletes are skipped: a `dir` row
-# as a directory prefix, a `file` row exactly, never a bare string prefix (`.env` must not swallow
-# `.env.example`). The instrument and the inventory skip themselves. A trailing dot is sentence
+# Every tessaryai/<name> coordinate in the tree, one per line. The walk is the tracked and
+# untracked-unignored files (git, or jj in a secondary workspace that has no .git), so ignored
+# scratch trees never contribute. The instrument and the inventory skip themselves. A trailing dot is sentence
 # punctuation, not part of a name, and neither is the `.git` a clone URL ends in — without that
 # strip, `git clone https://github.com/tessaryai/<repo>.git` reads as a coordinate no inventory
 # row can ever match, which is what it did (unnoticed, on the old name) before this was fixed.
@@ -144,16 +140,9 @@ _tree_files() {
     fi
 }
 _referenced() {
-    local skip_dirs skip_files
-    skip_dirs="$(grep -v '^#' "$DENYLIST" | awk -F'|' '$2 == "delete" && $3 == "dir" {print $1 "/"}' | paste -sd ';' -)"
-    skip_files="$(grep -v '^#' "$DENYLIST" | awk -F'|' '$2 == "delete" && $3 == "file" {print $1}' | paste -sd ';' -)"
     _tree_files | xargs -0 grep -HInoE '(docker\.io/|ghcr\.io/|huggingface\.co/(datasets/)?|github\.com/)?tessaryai/[A-Za-z0-9._-]+' -- 2>/dev/null \
         | sed -E 's#^\./##' \
-        | awk -F: -v dirs="$skip_dirs" -v files="$skip_files" 'BEGIN { nd = split(dirs, d, ";"); nf = split(files, f, ";") }
-            { keep = 1
-              for (i = 1; i <= nd; i++) if (d[i] != "/" && index($1, d[i]) == 1) keep = 0
-              for (i = 1; i <= nf; i++) if (f[i] != "" && $1 == f[i]) keep = 0
-              if (keep && $1 != "scripts/check-namespaces.sh" && $1 != "scripts/lib/namespace-inventory.txt") print $3 }' \
+        | awk -F: '$1 != "scripts/check-namespaces.sh" && $1 != "scripts/lib/namespace-inventory.txt" { print $3 }' \
         | sed -E 's#^(docker\.io/|huggingface\.co/(datasets/)?|github\.com/)##; s#\.git$##; s#\.$##' | grep . | sort -u
 }
 _known() { grep -v '^#' "$INVENTORY" | awk -F'|' '$1 != "ecosystem" && $1 != "recheck" {print $2}' | sort -u; }

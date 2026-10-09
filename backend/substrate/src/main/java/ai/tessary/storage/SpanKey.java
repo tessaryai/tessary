@@ -10,8 +10,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * {@code project_id}, is never part of this record — it comes from the token, not from a caller's list, and
  * putting it here would invite a read whose scope arrived in its argument.
  *
- * <p>This exists for the <b>multi-key</b> reads: a page of spans chosen elsewhere (a search page, a kNN
- * ranking) that then has to be hydrated from {@code span} and {@code span_payload} without a query per row.
+ * <p>This exists for the <b>multi-key</b> reads: a page of spans chosen elsewhere (a search page) that
+ * then has to be hydrated from {@code span} and {@code span_payload} without a query per row.
  * A single-span read needs no key type — it takes the two ids and is done.
  *
  * <p>The two static helpers are the SQL shape of that read, stated once. Both tables are keyed on the same
@@ -31,15 +31,10 @@ public record SpanKey(String traceId, String spanId) {
      * {@code (trace_id, span_id) IN ((:k0t, :k0s), …)}. Index-eligible on the primary-key prefix; the column
      * names are trusted caller-supplied constants (the two tables spell the span id differently — {@code id}
      * on {@code span}, {@code span_id} on {@code span_payload}) and every value is bound by {@link #bind}.
-     *
-     * <p>Zero keys yields {@code FALSE} rather than an empty {@code IN ()}, which is a syntax error. Callers
-     * should still short-circuit on an empty list — matching no rows is worth no round trip — but a
-     * predicate that cannot be malformed is worth more than one that relies on them remembering.
+     * {@code keyCount} must be positive: an empty {@code IN ()} is a syntax error, so every caller
+     * short-circuits an empty key list before building the predicate.
      */
     static String tupleIn(String traceColumn, String spanColumn, int keyCount) {
-        if (keyCount == 0) {
-            return "FALSE";
-        }
         List<String> tuples = new ArrayList<>(keyCount);
         for (int i = 0; i < keyCount; i++) {
             tuples.add("(:k" + i + "t, :k" + i + "s)");

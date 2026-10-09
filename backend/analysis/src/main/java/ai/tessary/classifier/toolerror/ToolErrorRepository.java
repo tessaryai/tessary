@@ -94,9 +94,6 @@ public class ToolErrorRepository {
      */
     public record HourlyToolTally(String bucket, String toolKey, long calls, long failures) {}
 
-    /** One failure signature's count for one tool over the whole window. */
-    public record SignatureTally(String toolKey, String signature, String source, long count) {}
-
     /**
      * The most recent event a project has ANY tool-call traffic for — {@code MAX(started_at)} across
      * every non-deleted call, with no bucketing and no per-tool split.

@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The metric-drift operating point, parsed from the classifier's {@code config_json}. Design contract:
- * {@code classifiers/metric_drift/PROGRAM.md}, defaults enumerated in {@code PLAN.md} §4. The arithmetic
+ * {@code devdocs/concepts/metric-drift.md}. The arithmetic
  * these numbers feed lives in {@code devdocs/concepts/deviation-math.md}; changing a default here without
  * updating that doc leaves it describing a detector that no longer exists.
  *
@@ -25,10 +25,10 @@ import org.jspecify.annotations.Nullable;
  * firehose on the next sweep with nothing in the code path to notice.
  *
  * <p>Every default below is provisional (tagged {@code EXPERIMENT(metric-drift-tuning)}), and both
- * metric-drift modules seed disabled until PLAN.md §9's null-case run against real traffic writes back a
- * measured operating point.
+ * metric-drift modules seed disabled until a null run against real traffic gives a measured operating
+ * point.
  *
- * <p><b>The measure list is the classifier.</b> One switch governs several measures (PROGRAM.md §3.1):
+ * <p><b>The measure list is the classifier.</b> One switch governs several measures (metric-drift.md §3.1):
  * {@code duration_drift} is turn plus tool, {@code cost_drift} is cost plus its token evidence, so which
  * measures are live is config, not a catalog fact. Each measure carries its own grain here, in
  * {@link Measured}, and the sweep reads it from this record rather than from
@@ -49,7 +49,7 @@ public record MetricDriftConfig(
         int histBins) {
 
     // -----------------------------------------------------------------------------------------------
-    // Defaults: PLAN.md §4, every one EXPERIMENT(metric-drift-tuning)
+    // Defaults, every one EXPERIMENT(metric-drift-tuning)
     // -----------------------------------------------------------------------------------------------
 
     /**
@@ -96,15 +96,15 @@ public record MetricDriftConfig(
      *
      * <p>0.139 is the 99th percentile of a synthetic null run (two 500-sample windows drawn from one
      * lognormal, 20k repetitions) for a wide-spread call site whose p95 is ≈3.7× its median, typical of
-     * agent work: the 1% bar on that traffic. Still synthetic; PLAN.md §9's null case against real traffic
-     * is what settles it.
+     * agent work: the 1% bar on that traffic. Still synthetic; a null run against real traffic is what
+     * settles it.
      */
     public static final double DEFAULT_W1_FLOOR = 0.139;
 
     /**
      * EXPERIMENT(metric-drift-tuning): how much of a turn-duration shift a tool-duration shift inside the
      * same call site must account for, in absolute time, before the turn finding is suppressed in its
-     * favor ({@link MetricSuppression}, PROGRAM.md §6.1). Half.
+     * favor ({@link MetricSuppression}, metric-drift.md §6.1). Half.
      *
      * <p>Deliberately generous: a tool bucket's delta is measured per call and a turn's per turn, and a
      * turn usually makes more than one call to whichever tool dominates it, so a single call's delta
@@ -119,16 +119,11 @@ public record MetricDriftConfig(
     public static final double DEFAULT_EXPLAINED_BY_FRACTION = 0.5;
 
     /**
-     * EXPERIMENT(metric-drift-tuning): how long a trace is given for its spans to arrive before a summing
-     * measure reads it. Five minutes, matching {@code BehaviorDriftConfig}'s {@code trace_settle_seconds},
-     * since both wait on the same exporter.
-     *
-     * <p>Applied as a blanket horizon only by measures that {@link Measured#settles()}; duration skips it,
-     * see that method for why a fixed delay there would buy nothing.
-     *
-     * <p>It also caps how long {@code MetricDriftSweep.admissibleThrough} holds a page open for a trace
-     * whose root span hasn't landed (a trace whose root is already there is swept immediately), so a trace
-     * whose root never arrives can't stall a forward-only cursor for good.
+     * EXPERIMENT(metric-drift-tuning): how long {@code MetricDriftSweep.admissibleThrough} holds a page
+     * open for a trace whose root span hasn't landed (a trace whose root is already there is swept
+     * immediately), so a trace whose root never arrives can't stall a forward-only cursor for good. Five
+     * minutes, matching {@code BehaviorDriftConfig}'s {@code trace_settle_seconds}, since both wait on the
+     * same exporter.
      */
     public static final int DEFAULT_SETTLE_SECONDS = 300;
 
@@ -171,7 +166,7 @@ public record MetricDriftConfig(
     private static final int HIST_BINS_MAX = 1_024;
     private static final MetricDriftConfig DEFAULTS = new MetricDriftConfig(
             // Both duration measures, because they are two halves of one question and therefore one
-            // switch (PROGRAM.md §3.1). Shipping tool_duration WITHOUT turn_duration would be the
+            // switch (metric-drift.md §3.1). Shipping tool_duration WITHOUT turn_duration would be the
             // supportable half-configuration; shipping turn without tool is the one that reports a
             // symptom it could have named the cause of.
             List.of(Measure.TURN_DURATION, Measure.TOOL_DURATION),
@@ -248,40 +243,18 @@ public record MetricDriftConfig(
     // -----------------------------------------------------------------------------------------------
 
     /**
-     * One measure's fixed properties: what grain its candidates are drawn at, whether it has to wait for
-     * a trace to settle, and which bucket kind and sketch grid it lives on.
+     * One measure's fixed properties: what grain its candidates are drawn at, and which bucket kind and
+     * sketch grid it lives on.
      *
      * <p>These are facts about the measure, not knobs: a config blob can turn a measure on or off, but
-     * cannot claim that cost is read off a span or that duration needs a settle horizon.
+     * cannot claim that cost is read off a span.
      *
-     * <p>Only measures that can open a finding appear here. The four token buckets don't: PROGRAM.md §6.1
+     * <p>Only measures that can open a finding appear here. The four token buckets don't: metric-drift.md §6.1
      * makes them evidence attached to the cost finding rather than findings of their own, so a prompt edit
      * that kills caching writes one row rather than five. {@link ai.tessary.classifier.metric.MetricSource}
      * computes them every window regardless.
-     *
-     * @param settles whether this measure must wait out {@link #settleSeconds} before reading a trace.
-     *     The split is load-bearing (PROGRAM.md §5): cost and the token buckets sum over a trace's spans
-     *     and need every span to have arrived, since measuring early reads as cheap and drifts permanently
-     *     toward cheaper when ingest lags. Duration is read off a single span that carries its own start
-     *     and end, so a settle horizon there buys nothing and just delays every finding.
      */
-    public record Measured(String measure, Grain grain, boolean settles, String bucketKind, Grid grid) {}
-
-    /**
-     * How long a trace must have existed before this signal may read it: the max over the measures it is
-     * live for, since one signal has one job row and therefore one keyset cursor.
-     *
-     * <p>Taking the max rather than a per-measure horizon keeps the two settle paths honest under a shared
-     * cursor: a cursor advanced on a duration measure's zero-second horizon would walk past traces whose
-     * spans haven't landed, and a cost measure on the same cursor could never go back for them.
-     */
-    public int settleSecondsFor(List<Measured> live) {
-        int settle = 0;
-        for (Measured m : live) {
-            if (m.settles()) settle = Math.max(settle, settleSeconds);
-        }
-        return settle;
-    }
+    public record Measured(String measure, Grain grain, String bucketKind, Grid grid) {}
 
     /** The specs for the measures this signal is live for, in the registry's order. */
     public List<Measured> measured() {
@@ -313,7 +286,6 @@ public record MetricDriftConfig(
                         // point's call site: a trace can span several call sites, so a baseline scoped to
                         // a child would model "traces that happened to contain this tool".
                         Grain.TURN,
-                        false,
                         MetricBaselineRow.BucketKind.CALL_SITE,
                         Grid.duration()));
         specs.put(
@@ -327,9 +299,6 @@ public record MetricDriftConfig(
                         // site a finding is filed under is decided per window from the traffic that filled
                         // it.
                         Grain.OBSERVATION,
-                        // Same zero horizon as the turn: the span carries its own start and end, so its
-                        // arrival is the completion signal.
-                        false,
                         MetricBaselineRow.BucketKind.TOOL,
                         // The same duration grid as the turn, deliberately: MetricSuppression compares the
                         // two grains' medians in milliseconds, and a shared layout keeps those numbers
@@ -337,7 +306,7 @@ public record MetricDriftConfig(
                         Grid.duration()));
         specs.put(
                 Measure.COST,
-                new Measured(Measure.COST, Grain.TURN, true, MetricBaselineRow.BucketKind.CALL_SITE, Grid.cost()));
+                new Measured(Measure.COST, Grain.TURN, MetricBaselineRow.BucketKind.CALL_SITE, Grid.cost()));
         return specs;
     }
 
@@ -346,11 +315,7 @@ public record MetricDriftConfig(
         Grid grid = spec.grid();
         if (grid.bins() == histBins) return spec;
         return new Measured(
-                spec.measure(),
-                spec.grain(),
-                spec.settles(),
-                spec.bucketKind(),
-                new Grid(grid.lo(), grid.ratio(), histBins));
+                spec.measure(), spec.grain(), spec.bucketKind(), new Grid(grid.lo(), grid.ratio(), histBins));
     }
 
     /**

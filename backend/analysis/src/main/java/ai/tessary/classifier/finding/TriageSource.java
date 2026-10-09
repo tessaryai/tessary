@@ -15,17 +15,15 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><b>It is a full adapter, not a triage hook.</b> The seam started as {@code analyze} alone, with the
  * list merge, the detail projection and the resolve branch left inline in what is now
- * {@link FindingService} — three conformance-shaped special cases inside the generic service.
+ * {@link FindingService} — three store-shaped special cases inside the generic service.
  * Every one of them is a method below, so the service iterates uniformly and
  * a third store is an implementation rather than three more branches.
  *
  * <p>Everything downstream of the press is shared and stays shared: one job kind ({@code triage}), one
- * dedupe key shape, one worker, and one rolling per-project cap —
- * {@code BehaviorTriageJobRepository#countEnqueuedSince} counts by project and kind, so a conformance
- * escalation spends from the same allowance a behaviour one does, hand-pressed included.
+ * dedupe key shape, and one worker.
  *
- * <p><b>Registration order is the wire order.</b> {@code BehaviorTriageSource} is {@code @Order(0)} and
- * {@code ConformanceTriageSource} is {@code @Order(10)}; Spring sorts the injected {@code List} by that,
+ * <p><b>Registration order is the wire order.</b> {@code BehaviorTriageSource} is {@code @Order(0)};
+ * Spring sorts the injected {@code List} by that,
  * and it decides both the order rows appear on the findings page and which source answers first for a
  * given id. It is not declaration order, bean name or classpath order, and it must not become any of
  * them.
@@ -39,14 +37,13 @@ import org.jspecify.annotations.Nullable;
  */
 public interface TriageSource {
 
-    /** Which store this is, as the {@code finding_kind} the job payload records. */
+    /** Which store this is: the worker's logs name the source by it. */
     String kind();
 
     /**
      * Findings automatic mode may escalate for this project: open, never escalated or triaged,
      * carrying an exemplar trace, and observed over at least {@code minObservations} samples — the
-     * recurrence bar, read in each store's own unit (behaviour's trace count, conformance's window
-     * activations). Strongest first, because the caller truncates to a budget.
+     * recurrence bar, read in each store's own unit. Strongest first, because the caller truncates to a budget.
      */
     List<Escalatable> listAutoEscalatable(String projectId, long minObservations, int limit);
 
@@ -111,5 +108,5 @@ public interface TriageSource {
      * ever read: the escalator passes the finding id to {@code analyze} and the agent pages the
      * population itself.
      */
-    record Escalatable(String findingId, String classifierKey) {}
+    record Escalatable(String findingId) {}
 }

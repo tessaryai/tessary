@@ -11,13 +11,12 @@ WORKDIR /app
 # pnpm by explicit global install rather than corepack: image builds then never depend on
 # corepack's registry signature check. PNPM_VERSION is supplied by the build orchestrator (the
 # Taskfile locally, the PNPM_VERSION Actions variable in CI); the default is the same pin so a bare
-# `docker build` works, and scripts/check-required-inputs.sh reds the moment it drifts from the
-# Taskfile's.
+# `docker build` works.
 ARG PNPM_VERSION=11.15.1
 RUN npm i -g pnpm@${PNPM_VERSION}
 
 # Cache deps. pnpm-workspace.yaml is NOT optional here: pnpm 11 keeps settings there rather than in
-# package.json, and this package's overrides (the es-toolkit pin, the openapi-typescript peer) are
+# package.json, and this package's override (the openapi-typescript peer) is
 # load-bearing. Omit it and the install silently resolves a different tree.
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -32,6 +31,10 @@ COPY frontend/tsconfig.json frontend/vite.config.ts frontend/index.html ./
 COPY frontend/tokens.css ./
 COPY frontend/public ./public
 COPY frontend/src ./src
+# src/api/client.contract.test.ts imports the backend's OpenAPI document by relative path, and
+# `tsc -b` type-checks the tests along with the app. Put the one file it needs where the repo
+# keeps it, relative to /app, so the image build sees the same tree the checkout does.
+COPY backend/contract/src/main/resources/openapi/tessary-api.json /backend/contract/src/main/resources/openapi/tessary-api.json
 # scripts/ is part of `pnpm run build`, not a side tool: the build's last step is
 # `node scripts/copy-dep-licenses.mjs`, which copies the font and icon packages' license text out
 # of node_modules into dist/licenses/ so it travels into /srv with the binaries it covers (SIL OFL

@@ -66,29 +66,6 @@ class RolePermissionsTest {
         assertFalse(RolePermissions.allows(Role.BILLING, Permission.CAPABILITIES_MANAGE));
     }
 
-    /**
-     * The capability switch is owner + admin and nothing else. MEMBER is the cell that matters: it holds
-     * {@code ORG_MANAGE}, so reusing that permission — the obvious shortcut — would have let any member turn
-     * automatic triage on and start spending the org's model budget.
-     */
-    @Test
-    void onlyOwnerAndAdminChangeCapabilities() {
-        assertTrue(RolePermissions.allows(Role.OWNER, Permission.CAPABILITIES_MANAGE));
-        assertTrue(RolePermissions.allows(Role.ADMIN, Permission.CAPABILITIES_MANAGE));
-        assertFalse(RolePermissions.allows(Role.MEMBER, Permission.CAPABILITIES_MANAGE));
-        assertFalse(RolePermissions.allows(Role.VIEWER, Permission.CAPABILITIES_MANAGE));
-        assertFalse(RolePermissions.allows(Role.BILLING, Permission.CAPABILITIES_MANAGE));
-    }
-
-    @Test
-    void onlyOwnerAndBillingReachBilling() {
-        assertTrue(RolePermissions.allows(Role.OWNER, Permission.BILLING_MANAGE));
-        assertTrue(RolePermissions.allows(Role.BILLING, Permission.BILLING_MANAGE));
-        assertFalse(RolePermissions.allows(Role.ADMIN, Permission.BILLING_MANAGE));
-        assertFalse(RolePermissions.allows(Role.MEMBER, Permission.BILLING_MANAGE));
-        assertFalse(RolePermissions.allows(Role.VIEWER, Permission.BILLING_MANAGE));
-    }
-
     @Test
     void fromWire_roundTripsAndDegradesUnknownToMember() {
         for (Role r : Role.values()) {

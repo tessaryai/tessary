@@ -4,8 +4,7 @@ version: 2
 # manifest, and those go through the normal review/CI path like any other PR. CVE scanning is
 # a separate concern, handled by scripts/check-dependency-audit.sh, run on demand by a human.
 #
-# Directories not listed here are covered elsewhere or bumped by hand; see
-# check-open-boundary.sh for the rule this file has to satisfy.
+# Directories not listed here are covered elsewhere or bumped by hand.
 #
 # The uv trees use the `uv` ecosystem, not `pip`: this repo has no requirements*.txt or
 # setup.py, and `uv` reads pyproject.toml + uv.lock directly.
@@ -23,17 +22,6 @@ updates:
     schedule:
       interval: weekly
       day: monday
-
-  - package-ecosystem: npm
-    directory: /classify-service
-    schedule:
-      interval: weekly
-      day: monday
-    ignore:
-      # Pinned to match the version @huggingface/transformers resolves, so only one native ONNX
-      # Runtime ships. Dependabot can only bump this alone, which would land a second copy next
-      # to transformers': bump it by hand, in lockstep with the transformers.js dependency.
-      - dependency-name: onnxruntime-node
 
   - package-ecosystem: npm
     directory: /sandbox-runner/launcher

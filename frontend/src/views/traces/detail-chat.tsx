@@ -22,6 +22,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../ui";
 import { Markdown, PayloadBody, parsePayload } from "../components/PayloadViewer";
 import type { ChatMessage } from "../components/PayloadViewer";
+import { DetectionMarker } from "./detection-marker";
 import { TOOL_CALL_ID, ToolCallBatch, toolStepFrom, toolStepOf } from "./detail-tool";
 import type { ToolStep } from "./detail-tool";
 import type { Span } from "./detail-data";
@@ -164,8 +165,6 @@ export type SpanPlan = {
   input: ChatMessage[];
   /** Output messages this span is the first to carry, or null when not a chat payload. */
   output: ChatMessage[] | null;
-  /** True when the span's payloads are not messages at all (a tool's args/result). */
-  opaque: boolean;
 };
 
 export type ConversationPlan = {
@@ -177,8 +176,8 @@ export type ConversationPlan = {
 /** Root before child, then by clock: the order the dialogue actually happened in. */
 function chronological(spans: Span[]): Span[] {
   return [...spans].sort((a, b) => {
-    const at = a.started_at ?? "";
-    const bt = b.started_at ?? "";
+    const at = a.started_at;
+    const bt = b.started_at;
     if (at !== bt) return at < bt ? -1 : 1;
     if (a.parent_span_id == null && b.parent_span_id != null) return -1;
     if (b.parent_span_id == null && a.parent_span_id != null) return 1;
@@ -212,15 +211,33 @@ export function planConversation(spans: Span[]): ConversationPlan {
   }
   const prior = lastHuman > 0 ? fullest.slice(0, lastHuman) : [];
 
+  // The turn's own question is drawn even when an earlier message said the same words ("yes", twice):
+  // deduping it against the prior history left the turn with no question at all. Only the last human
+  // message of a span's input can be it, and only the first span to carry it draws it.
+  const questionSig = lastHuman >= 0 ? signatureOf(fullest[lastHuman]) : null;
+  let questionDrawn = false;
   const seen = new Set(prior.map(signatureOf));
   const take = (msgs: ChatMessage[]): ChatMessage[] => {
+    let questionAt = -1;
+    if (questionSig != null && !questionDrawn) {
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (isHumanSpeech(msgs[i])) {
+          questionAt = i;
+          break;
+        }
+      }
+    }
     const fresh: ChatMessage[] = [];
-    for (const m of msgs) {
+    msgs.forEach((m, i) => {
       const sig = signatureOf(m);
-      if (seen.has(sig)) continue;
+      if (i === questionAt && sig === questionSig) {
+        questionDrawn = true;
+      } else if (seen.has(sig)) {
+        return;
+      }
       seen.add(sig);
       fresh.push(m);
-    }
+    });
     return fresh;
   };
 
@@ -231,7 +248,6 @@ export function planConversation(spans: Span[]): ConversationPlan {
     bySpan.set(o.id, {
       input: inMsgs ? take(inMsgs) : [],
       output: outMsgs ? take(outMsgs) : null,
-      opaque: inMsgs == null && outMsgs == null,
     });
   }
 
@@ -418,7 +434,8 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
     if (isOnlyToolResults(message)) return;
     const content = bodyOf(message);
     const split = splitContent(content);
-    const toolUses = Array.isArray(content) ? content.filter((b) => blockType(b) === "tool_use") : [];
+    // `blockType` reads "" off anything that is not an object, so every block this keeps is one.
+    const toolUses = Array.isArray(content) ? content.filter((b): b is Obj => blockType(b) === "tool_use") : [];
     // A tool's request and its answer are both shown as a pill, so neither
     // belongs in the bubble. `isOnlyToolResults` above drops the messages that
     // are nothing but transport; this drops the block from a *mixed* message,
@@ -441,7 +458,6 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
     if (!deriveTools) return;
 
     for (const [ti, block] of toolUses.entries()) {
-      if (!isObj(block)) continue;
       const id = typeof block.id === "string" ? block.id : null;
       items.push({
         kind: "tool",
@@ -450,8 +466,6 @@ export function chatItems(messages: ChatMessage[], deriveTools: boolean): ChatIt
           name: typeof block.name === "string" ? block.name : "tool",
           args: toolArgs(block) != null ? JSON.stringify(toolArgs(block)) : null,
           result: id != null ? (results.get(id) ?? null) : null,
-          latencyMs: null,
-          retries: null,
           failed: false,
         },
       });
@@ -480,14 +494,26 @@ export function groupTools(items: ChatItem[]): GroupedItem[] {
   return out;
 }
 
-function Items({ items, failed }: { items: ChatItem[]; failed?: boolean }) {
+function Items({ items, failed, marks = [] }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
+  const grouped = groupTools(items);
+  // The marks belong to the person's words: the last human message of the run, not the whole run.
+  let markedAt = -1;
+  if (marks.length > 0) {
+    for (let i = grouped.length - 1; i >= 0; i--) {
+      const g = grouped[i];
+      if (g.kind === "message" && isHumanSpeech(g.message)) {
+        markedAt = i;
+        break;
+      }
+    }
+  }
   return (
     <div className="flex flex-col gap-2">
-      {groupTools(items).map((group, i) =>
+      {grouped.map((group, i) =>
         group.kind === "tools" ? (
           <ToolCallBatch key={`t${i}`} steps={group.steps} />
         ) : (
-          <Turn key={`m${i}`} item={group} failed={failed} />
+          <Turn key={`m${i}`} item={group} failed={failed} marks={i === markedAt ? marks : []} />
         ),
       )}
     </div>
@@ -521,12 +547,26 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-/** Rendered dialogue for a run of items, the caller decides there are any. */
-export function ChatItems({ items, failed }: { items: ChatItem[]; failed?: boolean }) {
-  return <Items items={items} failed={failed} />;
+/**
+ * Rendered dialogue for a run of items, the caller decides there are any.
+ *
+ * <p>`marks` names the classifiers that flagged the person's message in this run. It is drawn on that
+ * message only, outlined with the classifiers' names under it. It is not `failed`: nothing broke, the
+ * user's words were judged.
+ */
+export function ChatItems({ items, failed, marks }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
+  return <Items items={items} failed={failed} marks={marks} />;
 }
 
-function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; failed?: boolean }) {
+function Turn({
+  item,
+  failed,
+  marks,
+}: {
+  item: Extract<ChatItem, { kind: "message" }>;
+  failed?: boolean;
+  marks: string[];
+}) {
   const { label, side } = classify(item.message);
 
   return (
@@ -538,7 +578,7 @@ function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; 
           {label}
         </span>
       )}
-      <Bubble side={side} failed={failed}>
+      <Bubble side={side} failed={failed} marked={marks.length > 0}>
         <Clamped>
           <div className="flex flex-col gap-2">
             {item.text.length > 0 && <Markdown>{item.text}</Markdown>}
@@ -546,6 +586,9 @@ function Turn({ item, failed }: { item: Extract<ChatItem, { kind: "message" }>; 
           </div>
         </Clamped>
       </Bubble>
+      {marks.length > 0 && (
+        <DetectionMarker names={marks} className={side === "right" ? "self-end" : "self-start"} />
+      )}
     </div>
   );
 }
@@ -574,9 +617,9 @@ function Clamped({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   useLayoutEffect(() => {
-    const box = outer.current;
-    const content = inner.current;
-    if (!box || !content) return;
+    // Both are rendered unconditionally below, so a layout effect always finds them attached.
+    const box = outer.current!;
+    const content = inner.current!;
     const measure = () => {
       const limit = parseFloat(getComputedStyle(box).fontSize) * CLAMP_EM;
       // A hair of tolerance: a message one sub-pixel over the line would
@@ -647,16 +690,19 @@ function Clamped({ children }: { children: React.ReactNode }) {
 function Bubble({
   side,
   failed,
+  marked,
   children,
 }: {
   side: "left" | "right";
   failed?: boolean;
+  marked?: boolean;
   children: React.ReactNode;
 }) {
   const right = side === "right";
   return (
     <div className={cn("flex", right ? "justify-end" : "justify-start")}>
       <div
+        data-flagged={marked ? "true" : undefined}
         className={cn(
           "chat-bubble min-w-0 text-body py-2.5 px-3.5",
           right ? "bg-raised text-fg" : "bg-bg text-fg",
@@ -672,6 +718,7 @@ function Bubble({
             // like a grey band was laid over it.
             "--bubble-bg": right ? "var(--color-raised)" : "var(--color-bg)",
             ...(failed ? { borderColor: "var(--color-error)" } : null),
+            ...(marked ? { border: "1px solid var(--color-error)" } : null),
           } as React.CSSProperties
         }
       >

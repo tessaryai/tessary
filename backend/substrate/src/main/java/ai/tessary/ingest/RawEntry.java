@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -9,12 +10,7 @@ import org.jspecify.annotations.Nullable;
  * Normalized shape every ingest path emits. Downstream code never sees provider-specific JSON.
  *
  * <p>Inline-media contract: {@code input}/{@code output} carry media INLINE — a {@code data:} URI, raw
- * base64 in an Anthropic/OpenAI content block, or an {@code https://} image URL. Out-of-band provider
- * media refs that still appear in some dialect payloads (e.g. legacy Langfuse media tokens, Braintrust
- * attachment refs) are resolved to inline form by {@code MediaResolver} BEFORE the RawEntry is built,
- * so the whole downstream (storage in TEXT columns, ContentExtractor, the judge, the frontend) stays
- * media-agnostic. v1 stores resolved bytes inline; large-binary externalization is the deferred
- * MediaStore SPI (see {@code MediaResolver}).
+ * base64 in an Anthropic/OpenAI content block, or an {@code https://} image URL.
  *
  * <p><b>OTLP-native structural fields ({@code endTimestamp}, {@code inputMessagesJson},
  * {@code outputMessagesJson}).</b> Some push/JSONL paths carry none of these — a provider observation
@@ -25,10 +21,13 @@ import org.jspecify.annotations.Nullable;
  * offer: a span's measured duration (from {@code endTimestamp} − {@code timestamp}), and the structured
  * tool-call/tool-result carriers {@code SpanSideTables} reads clean arguments and results out of. Paths
  * that only have stringified blobs keep using the shorter back-compat constructors below.
+ *
+ * <p>{@code sourceUrl} and {@code callSiteId} were components once; a Kafka spool record written then
+ * still carries them, so decoding ignores both.
  */
+@JsonIgnoreProperties({"sourceUrl", "callSiteId"})
 public record RawEntry(
         @Nullable String sourceExternalId,
-        @Nullable String sourceUrl,
         @Nullable String name,
         @Nullable String input,
         @Nullable String output,
@@ -57,12 +56,6 @@ public record RawEntry(
         /** Raw {@code gen_ai.output.messages} value (JSON-encoded role-tagged array). Nullable; see
          *  {@link #inputMessagesJson}. */
         @Nullable String outputMessagesJson,
-        /** Pre-resolved call site. The substrate adapter ({@code SubstrateSource}) sets this from
-         *  the ingested observation's {@code call_site_id}, so an sdk-source run grades by the id the substrate
-         *  already resolved at ingest rather than re-deriving it through per-source mappings. Null for every
-         *  other adapter (Langfuse/Braintrust/Phoenix pull, JSONL upload, the OTLP receiver), which leave
-         *  call-site resolution to {@code MappingResolver} at ingest time. */
-        @Nullable String callSiteId,
         /** The credentials redaction removed, written by {@code RedactionService} and by nothing else. Null on
          *  every entry before redaction and on one it found nothing in. Redaction is the last hop that rebuilds
          *  an entry before the write, so nothing after it can drop this the way a copy can drop a field. */
@@ -83,29 +76,13 @@ public record RawEntry(
         return endTimestamp != null ? endTimestamp : timestamp;
     }
 
-    /** Back-compat constructor for adapters/tests that don't yet supply an operation kind ({@code null}). */
-    public RawEntry(
-            @Nullable String sourceExternalId,
-            @Nullable String sourceUrl,
-            @Nullable String name,
-            @Nullable String input,
-            @Nullable String output,
-            @Nullable String model,
-            @Nullable Map<String, Object> metadata,
-            @Nullable String parentId,
-            @Nullable String traceId,
-            @Nullable String timestamp) {
-        this(sourceExternalId, sourceUrl, name, input, output, model, metadata, parentId, traceId, timestamp, null);
-    }
-
     /**
-     * Back-compat constructor for adapters/tests that supply an {@code operationKind} but none of the
-     * OTLP-native structural fields ({@code endTimestamp}/messages) — i.e. every pull adapter and the upload
-     * parser. The three trailing OTLP fields default to {@code null}.
+     * Back-compat constructor for sources that supply an {@code operationKind} but none of the
+     * OTLP-native structural fields ({@code endTimestamp}/messages). The three trailing OTLP fields
+     * default to {@code null}.
      */
     public RawEntry(
             @Nullable String sourceExternalId,
-            @Nullable String sourceUrl,
             @Nullable String name,
             @Nullable String input,
             @Nullable String output,
@@ -117,7 +94,6 @@ public record RawEntry(
             @Nullable String operationKind) {
         this(
                 sourceExternalId,
-                sourceUrl,
                 name,
                 input,
                 output,
@@ -129,18 +105,12 @@ public record RawEntry(
                 operationKind,
                 null,
                 null,
-                null,
                 null);
     }
 
-    /**
-     * Back-compat constructor for the pre-call-site arity — every pull adapter, the upload parser, and the
-     * OTLP receiver. {@code callSiteId} defaults to {@code null}, so only {@code SubstrateSource} (which
-     * reads an already-resolved call site off the substrate) populates it.
-     */
+    /** The pre-redaction arity: every source, which knows nothing of what redaction will find. */
     public RawEntry(
             @Nullable String sourceExternalId,
-            @Nullable String sourceUrl,
             @Nullable String name,
             @Nullable String input,
             @Nullable String output,
@@ -155,7 +125,6 @@ public record RawEntry(
             @Nullable String outputMessagesJson) {
         this(
                 sourceExternalId,
-                sourceUrl,
                 name,
                 input,
                 output,
@@ -168,42 +137,6 @@ public record RawEntry(
                 endTimestamp,
                 inputMessagesJson,
                 outputMessagesJson,
-                null);
-    }
-
-    /** The pre-redaction arity: every source, which knows nothing of what redaction will find. */
-    public RawEntry(
-            @Nullable String sourceExternalId,
-            @Nullable String sourceUrl,
-            @Nullable String name,
-            @Nullable String input,
-            @Nullable String output,
-            @Nullable String model,
-            @Nullable Map<String, Object> metadata,
-            @Nullable String parentId,
-            @Nullable String traceId,
-            @Nullable String timestamp,
-            @Nullable String operationKind,
-            @Nullable String endTimestamp,
-            @Nullable String inputMessagesJson,
-            @Nullable String outputMessagesJson,
-            @Nullable String callSiteId) {
-        this(
-                sourceExternalId,
-                sourceUrl,
-                name,
-                input,
-                output,
-                model,
-                metadata,
-                parentId,
-                traceId,
-                timestamp,
-                operationKind,
-                endTimestamp,
-                inputMessagesJson,
-                outputMessagesJson,
-                callSiteId,
                 null);
     }
 }

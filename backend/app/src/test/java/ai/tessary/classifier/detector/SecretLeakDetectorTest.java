@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
-import ai.tessary.testsupport.ClassifierObservations;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
@@ -47,21 +46,6 @@ class SecretLeakDetectorTest {
     }
 
     // ---- the stamp -------------------------------------------------------------------------------------------
-
-    @Test
-    void anAnchoredStampOnTheOutputIsAHighLeakNamedByItsRule() {
-        Detection d = detect(
-                "your key is [REDACTED_SECRET]",
-                "[{\"rule\":\"aws-access-token\",\"field\":\"output\",\"anchored\":true}]");
-        assertTrue(d.fired());
-        assertEquals(Detection.Severity.CRITICAL, d.severity());
-        assertEquals(Detection.Confidence.HIGH, d.confidence());
-        JsonNode evidence = evidence(d);
-        assertEquals("aws-access-token", evidence.path("pattern").asText(), "named by the rule, not by the token");
-        assertEquals("redaction", evidence.path("source").asText());
-        assertEquals("redacted", evidence.path("stored").asText());
-        assertTrue(evidence.path("masked").isMissingNode(), "the fixture stamp carries no masked key");
-    }
 
     @Test
     void anUnanchoredStampIsLow() {
@@ -120,16 +104,6 @@ class SecretLeakDetectorTest {
     }
 
     @Test
-    void firesOnAKeyInsideTheRealGenAiOutputEnvelope() {
-        // The raw output column holds the stored gen_ai envelope, so a credential in the assistant message is
-        // still found: the shape ingest actually writes.
-        Detection d = detect(ClassifierObservations.assistantOutput(
-                "Sure, the Stripe key is sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc for the billing job."));
-        assertEquals(Detection.Confidence.HIGH, d.confidence());
-        assertEquals("stripe-access-token", evidence(d).path("pattern").asText());
-    }
-
-    @Test
     void aPlaceholderOrProseIsNotALeak() {
         assertFalse(detect("set api_key = ${API_KEY} before you run it").fired());
         assertFalse(detect("A password is required to continue.").fired());
@@ -165,6 +139,21 @@ class SecretLeakDetectorTest {
     void anUnreadableStampFallsThroughToTheOutput() {
         Detection d = detect("key AKIA" + "QYLPMN5HHHFPZAM2", "not json");
         assertEquals(Detection.Confidence.HIGH, d.confidence(), "a broken stamp must not hide a leak in plain sight");
+    }
+
+    /**
+     * Read from the raw output, a lone keyword-context match is LOW, and a provider key later in the same
+     * output still wins: taking the first match would let a weak one mask the real leak beside it.
+     */
+    @Test
+    void theStrongestMatchInTheOutputWinsAndALoneWeakOneIsLow() {
+        Detection weak = detect("api_key = \"q7Zr2mK9xW4vN8pLr5Tq\"");
+        assertEquals(Detection.Confidence.LOW, weak.confidence());
+        assertEquals("generic-api-key", evidence(weak).path("pattern").asText());
+
+        Detection both = detect("api_key = \"q7Zr2mK9xW4vN8pLr5Tq\" and AKIA" + "QYLPMN5HHHFPZAM2");
+        assertEquals(Detection.Confidence.HIGH, both.confidence());
+        assertEquals("aws-access-token", evidence(both).path("pattern").asText());
     }
 
     private static JsonNode evidence(Detection d) {

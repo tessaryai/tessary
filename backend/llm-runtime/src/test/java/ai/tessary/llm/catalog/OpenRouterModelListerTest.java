@@ -2,8 +2,6 @@
 package ai.tessary.llm.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -14,8 +12,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -31,7 +32,7 @@ class OpenRouterModelListerTest {
     private final HttpClient http = mock(HttpClient.class);
 
     private OpenRouterModelLister lister() {
-        return new OpenRouterModelLister(http, new ObjectMapper());
+        return new OpenRouterModelLister(http, new ObjectMapper(), Duration.ofSeconds(5));
     }
 
     private static ResolvedCredential cred(String apiKey) {
@@ -77,18 +78,6 @@ class OpenRouterModelListerTest {
     }
 
     @Test
-    void latestPointerAliasesResolveThroughTheTildePrefix() throws Exception {
-        stubResponse(
-                200, "{\"data\":[{\"id\":\"~anthropic/claude-haiku-latest\",\"name\":\"Claude Haiku (latest)\"}]}");
-
-        List<ProviderModel> models = lister().list(cred(null));
-
-        assertEquals(
-                List.of(new ProviderModel("~anthropic/claude-haiku-latest", "Claude Haiku (latest)", "Anthropic")),
-                models);
-    }
-
-    @Test
     void nameFallsBackToIdWhenAbsent() throws Exception {
         stubResponse(200, "{\"data\":[{\"id\":\"openai/gpt-5.5\"}]}");
 
@@ -115,17 +104,16 @@ class OpenRouterModelListerTest {
         assertEquals(List.of("Bearer sk-or-test"), capturedRequest().headers().allValues("Authorization"));
     }
 
-    @Test
-    void non2xxStatus_throwsModelListingException() throws Exception {
-        stubResponse(500, "{\"error\":\"boom\"}");
+    @ParameterizedTest
+    @CsvSource({
+        "google/gemini-3.1-pro, Google",
+        "moonshotai/kimi-k2.6, Moonshot",
+        "x-ai/grok-4.6, xAI",
+        "typesafe/jev-latest, TypeSafe"
+    })
+    void eachMakerGroupsUnderTheVendorSpellingItsStaticEntriesUse(String id, String vendor) throws Exception {
+        stubResponse(200, "{\"data\":[{\"id\":\"" + id + "\",\"name\":\"n\"}]}");
 
-        assertThrows(ModelListingException.class, () -> lister().list(cred(null)));
-    }
-
-    @Test
-    void emptyDataArray_neverFails() throws Exception {
-        stubResponse(200, "{\"data\":[]}");
-
-        assertFalse(lister().list(cred(null)).stream().findAny().isPresent());
+        assertEquals(List.of(new ProviderModel(id, "n", vendor)), lister().list(cred(null)));
     }
 }

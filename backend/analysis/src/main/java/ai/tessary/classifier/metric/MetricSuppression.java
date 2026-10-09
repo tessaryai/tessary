@@ -8,7 +8,7 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One event, one finding — the cross-grain half of {@code classifiers/metric_drift/PROGRAM.md} §6.1.
+ * One event, one finding — the cross-grain half of {@code devdocs/concepts/metric-drift.md} §6.1.
  *
  * <p>{@code duration_drift} is one on/off switch spanning two grains: a turn's own duration and the
  * duration of each tool call inside it. That is deliberate — "this turn was slow" sends someone to read
@@ -75,12 +75,7 @@ public final class MetricSuppression {
      *     a real number of milliseconds and is already what the finding's evidence prints.
      */
     public record Shift(
-            String measure,
-            String bucketKey,
-            Set<String> callSites,
-            Decision decision,
-            double refMillis,
-            double curMillis) {
+            String bucketKey, Set<String> callSites, Decision decision, double refMillis, double curMillis) {
 
         /** How far the median moved, in milliseconds. Signed: positive is slower. */
         public double deltaMillis() {

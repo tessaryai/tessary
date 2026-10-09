@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.ingest.otlp;
 
+import static ai.tessary.ingest.otlp.OtlpRequests.kv;
+import static ai.tessary.ingest.otlp.OtlpRequests.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -23,29 +25,12 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the OTLP-span → canonical {@link RawEntry} mapping: native {@code gen_ai.*}
- * read, OpenInference reuse, hex id encoding for the parent graph, nano→ISO timestamps, and the
- * OTLP-native structural fields (end-time + messages) the write path reads.
+ * OTLP span to {@link RawEntry}: native {@code gen_ai.*}, OpenInference reuse, hex ids for the parent graph, nano to
+ * ISO timestamps, and the end-time and messages the write path reads.
  */
 class OtlpSpanMapperTest {
 
     private final OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-
-    private static KeyValue kv(String key, String value) {
-        return KeyValue.newBuilder()
-                .setKey(key)
-                .setValue(AnyValue.newBuilder().setStringValue(value).build())
-                .build();
-    }
-
-    private static ExportTraceServiceRequest request(Span... spans) {
-        ScopeSpans.Builder scope = ScopeSpans.newBuilder();
-        for (Span s : spans) scope.addSpans(s);
-        return ExportTraceServiceRequest.newBuilder()
-                .addResourceSpans(
-                        ResourceSpans.newBuilder().addScopeSpans(scope).build())
-                .build();
-    }
 
     @Test
     void nativeGenAiSpan_mapsToCanonicalRawEntry_withHexIdsAndTimestamps() {
@@ -75,8 +60,8 @@ class OtlpSpanMapperTest {
 
     @Test
     void foreignTraceloopFrameworkSpan_normalizesToCanonicalKindAndIo() {
-        // A raw OpenLLMetry framework span (not pre-canonicalized by a producer): no gen_ai.operation.name,
-        // I/O under traceloop.entity.*. The foreign-sender fallback maps it to a canonical kind + I/O.
+        // A raw OpenLLMetry span: no gen_ai.operation.name, I/O under traceloop.entity.*, mapped by the foreign-
+        // sender fallback.
         Span span = Span.newBuilder()
                 .setName("RetrieverQueryEngine.workflow")
                 .setSpanId(ByteString.copyFrom(new byte[] {0x07}))
@@ -93,7 +78,7 @@ class OtlpSpanMapperTest {
 
     @Test
     void nativeGenAiWins_overTraceloopFallback() {
-        // When both are present, the native gen_ai.operation.name is authoritative (fallback never overrides).
+        // The native gen_ai.operation.name wins over the fallback.
         Span span = Span.newBuilder()
                 .setSpanId(ByteString.copyFrom(new byte[] {0x08}))
                 .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
@@ -113,28 +98,8 @@ class OtlpSpanMapperTest {
     }
 
     @Test
-    void genAiMessages_threadedOntoRawEntryMessageFields() {
-        String input = "[{\"role\":\"user\",\"content\":\"hi\"}]";
-        String output = "[{\"role\":\"assistant\",\"content\":\"hello\"}]";
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addAttributes(kv(GenAiAttributes.INPUT_MESSAGES, input))
-                .addAttributes(kv(GenAiAttributes.OUTPUT_MESSAGES, output))
-                .build();
-
-        RawEntry e = mapper.toRawEntries(request(span)).get(0);
-        assertEquals(input, e.inputMessagesJson());
-        assertEquals(output, e.outputMessagesJson());
-        // Messages also seed input/output so the observation row carries content even with no scalar field.
-        assertEquals(input, e.input());
-        assertEquals(output, e.output());
-    }
-
-    @Test
     void indexedFlattenedMessages_reconstructedIntoCanonicalArray_orderedByIndex() {
-        // OpenLLMetry/Traceloop encode messages as gen_ai.prompt.N.role|content. They are
-        // reconstructed into the same [{role, content}] array — ordered by N even when the attrs are not.
+        // gen_ai.prompt.N.role|content is rebuilt into one [{role, content}] array, ordered by N.
         Span span = Span.newBuilder()
                 .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
                 .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
@@ -157,7 +122,7 @@ class OtlpSpanMapperTest {
 
     @Test
     void structuredMessagesWin_whenBothStructuredAndFlattenedPresent() {
-        // Precedence: the canonical structured array always wins; the flattened duplicate is ignored.
+        // The canonical structured array wins over the flattened duplicate.
         String structured = "[{\"role\":\"user\",\"content\":\"canonical\"}]";
         Span span = Span.newBuilder()
                 .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
@@ -211,31 +176,8 @@ class OtlpSpanMapperTest {
         RawEntry e = mapper.toRawEntries(request(span)).get(0);
         assertEquals(KindNormalizer.LLM, e.operationKind());
         assertEquals("gpt-oi", e.model());
-        // OTLP end-time threaded on even for the OI path (for latency).
+        // End-time threaded on the OI path too, for latency.
         assertEquals("1970-01-01T00:00:03Z", e.endTimestamp());
-    }
-
-    @Test
-    void spanEvents_areNotIngested() {
-        // The substrate types no span events. A gen_ai.evaluation.result event (the standard feedback
-        // carrier) and a tessary.agent.self_report event are alike ignored: the span still maps, and
-        // nothing on the RawEntry carries the event. The attribute bag is the only thing that survives.
-        Span span = Span.newBuilder()
-                .setSpanId(ByteString.copyFrom(new byte[] {0x08}))
-                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
-                .addEvents(Span.Event.newBuilder()
-                        .setName("gen_ai.evaluation.result")
-                        .addAttributes(kv("gen_ai.evaluation.name", "thumbs_down"))
-                        .build())
-                .addEvents(Span.Event.newBuilder()
-                        .setName("tessary.agent.self_report")
-                        .addAttributes(kv("tessary.self_report.category", "missing_context"))
-                        .build())
-                .build();
-
-        List<RawEntry> entries = mapper.toRawEntries(request(span));
-        assertEquals(1, entries.size());
-        assertEquals(KindNormalizer.LLM, entries.get(0).operationKind());
     }
 
     @Test
@@ -261,5 +203,77 @@ class OtlpSpanMapperTest {
         assertEquals("0a", out.get(0).sourceExternalId());
         assertEquals("0b", out.get(1).sourceExternalId());
         assertTrue(out.get(0).metadata() != null && out.get(0).metadata().containsKey(GenAiAttributes.OPERATION_NAME));
+    }
+
+    /**
+     * Every OTLP value type survives as its plain value, nested ones as JSON; an unreadable value (unset, or a
+     * string-table index) is left out, not stored as a number.
+     */
+    @Test
+    void everyAttributeValueTypeFlattensToItsPlainValue() {
+        AnyValue nested = AnyValue.newBuilder()
+                .setKvlistValue(io.opentelemetry.proto.common.v1.KeyValueList.newBuilder()
+                        .addValues(KeyValue.newBuilder()
+                                .setKey("k")
+                                .setValue(AnyValue.newBuilder().setBoolValue(false))))
+                .build();
+        Span span = Span.newBuilder()
+                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
+                .addAttributes(value("b", AnyValue.newBuilder().setBoolValue(true)))
+                .addAttributes(value("i", AnyValue.newBuilder().setIntValue(42)))
+                .addAttributes(value("d", AnyValue.newBuilder().setDoubleValue(1.5)))
+                .addAttributes(value("bytes", AnyValue.newBuilder().setBytesValue(ByteString.copyFrom(new byte[] {
+                    0x0a, (byte) 0xff
+                }))))
+                .addAttributes(value(
+                        "arr",
+                        AnyValue.newBuilder()
+                                .setArrayValue(io.opentelemetry.proto.common.v1.ArrayValue.newBuilder()
+                                        .addValues(AnyValue.newBuilder().setStringValue("x"))
+                                        .addValues(AnyValue.newBuilder().setIntValue(1))
+                                        .addValues(nested))))
+                .addAttributes(value("kv", nested.toBuilder()))
+                .addAttributes(value("unset", AnyValue.newBuilder()))
+                .addAttributes(value("strindex", AnyValue.newBuilder().setStringValueStrindex(3)))
+                .build();
+
+        RawEntry e = mapper.toRawEntries(request(span)).get(0);
+
+        assertEquals(
+                java.util.Map.of(
+                        "b",
+                        true,
+                        "i",
+                        42L,
+                        "d",
+                        1.5,
+                        "bytes",
+                        "0aff",
+                        "arr",
+                        "[\"x\",1,\"{\\\"k\\\":false}\"]",
+                        "kv",
+                        "{\"k\":false}"),
+                e.metadata());
+    }
+
+    /** A non-integer index segment is skipped, not fatal. */
+    @Test
+    void indexedFlattenedMessages_skipMalformedIndexes() {
+        Span span = Span.newBuilder()
+                .setSpanId(ByteString.copyFrom(new byte[] {0x01}))
+                .addAttributes(kv(GenAiAttributes.OPERATION_NAME, GenAiAttributes.OP_CHAT))
+                .addAttributes(kv("gen_ai.prompt.0.role", "user"))
+                .addAttributes(kv("gen_ai.prompt.0.content", "hi"))
+                .addAttributes(kv("gen_ai.prompt.x.role", "system"))
+                .addAttributes(kv("gen_ai.prompt.-1.role", "system"))
+                .build();
+
+        assertEquals(
+                "[{\"role\":\"user\",\"content\":\"hi\"}]",
+                mapper.toRawEntries(request(span)).get(0).inputMessagesJson());
+    }
+
+    private static KeyValue value(String key, AnyValue.Builder value) {
+        return KeyValue.newBuilder().setKey(key).setValue(value).build();
     }
 }

@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Trace interior — the full page. Conversation | Tree | Timeline over the trace's
- * real span tree, rather than a
- * fourth tab: judgment is a separate question from execution and stays put while
- * the execution views switch underneath.
+ * real span tree, plus JSON, the response as the API sent it. Judgment is not a
+ * view: it is a separate question from execution and stays put while the
+ * execution views switch underneath.
  *
  * URL contract (every state a URL):
- *   ?view=tree|timeline (conversation default) · ?span=<spanId> ·
- *   ?case=C-118 (evidence mode — the banner back to the case).
+ *   ?view=tree|timeline|json (conversation default) · ?span=<spanId>.
  */
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -15,6 +14,8 @@ import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { ConversationView, TimelineView, TreeView } from "./detail-views";
+import { namesBy } from "./detection-marker";
+import { RawJsonView } from "./detail-json";
 import { clockLabel, traceSummary, useTraceDetail } from "./detail-data";
 
 export function TraceDetail() {
@@ -39,9 +40,11 @@ export function TraceDetail() {
 
   const view = (sp.get("view") as TraceView | null) ?? "conversation";
   const focusId = sp.get("span");
-  const caseRef = sp.get("case");
 
   const spans = useMemo(() => detail?.spans ?? [], [detail]);
+  const detections = useMemo(() => detail?.detections ?? [], [detail]);
+  const marksBySpan = useMemo(() => namesBy(detections, "span_id"), [detections]);
+  const turnMarks = useMemo(() => [...new Set(detections.map((d) => d.name))], [detections]);
 
   const select = (id: string) => patch({ span: id });
 
@@ -56,19 +59,6 @@ export function TraceDetail() {
         </span>
         <span className="font-mono text-fg">{trace?.id ?? traceId}</span>
       </nav>
-
-      {/* Evidence mode: arriving from a case, the way back is pinned. */}
-      {caseRef && (
-        <div
-          className="flex items-center bg-surface border border-border gap-3 py-2.5 px-3.5 mb-4.5 text-small"
-          style={{ borderRadius: "var(--radius-card)" }}
-        >
-          <Link to={`${basePath}/cases/${caseRef}`} className="text-link hover:text-link-hover hover:underline">
-            Back to {caseRef}
-          </Link>
-          <span className="text-subtle">You are reading this trace as evidence for a case.</span>
-        </div>
-      )}
 
       {/*
        * Exhaustive by construction: with no trace to show we are either still fetching, or we are not
@@ -107,10 +97,21 @@ export function TraceDetail() {
           <div className="flex items-start gap-6">
             <div className="min-w-0 flex-1">
               <TraceMedia>
-                {view === "conversation" && <ConversationView spans={spans} focusId={focusId} />}
-                {view === "tree" && <TreeView spans={spans} focusId={focusId} onSelect={select} />}
+                {view === "conversation" && <ConversationView spans={spans} focusId={focusId} marks={turnMarks} />}
+                {view === "tree" && (
+                  <TreeView spans={spans} focusId={focusId} onSelect={select} marksBySpan={marksBySpan} />
+                )}
                 {view === "timeline" && (
-                  <TimelineView trace={trace} spans={spans} focusId={focusId} onSelect={select} />
+                  <TimelineView
+                    trace={trace}
+                    spans={spans}
+                    focusId={focusId}
+                    onSelect={select}
+                    marksBySpan={marksBySpan}
+                  />
+                )}
+                {view === "json" && detail && (
+                  <RawJsonView value={detail} fileName={`trace-${trace.id}.json`} foldDepth={2} />
                 )}
               </TraceMedia>
             </div>

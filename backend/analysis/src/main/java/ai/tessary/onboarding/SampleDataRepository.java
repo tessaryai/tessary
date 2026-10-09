@@ -21,9 +21,8 @@ import org.springframework.stereotype.Repository;
  *
  * <p>The showcase project's {@code trace}/{@code span}/{@code span_payload} volume is also
  * inserted from here, as multi-row batched SQL rather than through {@code TraceV2Repository}'s /
- * {@code SpanRepository}'s single-row upsert methods — those exist for live ingest's replay
- * semantics (last-write-wins on a natural key), which a one-shot fabricated seed does not need and
- * whose per-row round trip would not scale to this volume. The row shapes are the real substrate
+ * {@code SpanRepository}'s batch write methods — those exist for live ingest's replay semantics
+ * (last-write-wins on a natural key), which a one-shot fabricated seed does not need. The row shapes are the real substrate
  * records ({@link TraceV2Row}, {@link SpanRow}, {@link SpanPayloadRow}) so a batch here can never
  * drift from what those tables actually contain.
  */
@@ -149,6 +148,19 @@ public class SampleDataRepository {
      * set directly here, same table both statements touch, so the case and its finding commit
      * together in the caller's transaction.
      */
+    /**
+     * Declare a call site's shape, as a bundle import would. A direct write rather than {@code
+     * PipelineService}'s import path: the seed has no bundle, and announcing the change would rewind sweeps
+     * over data the seed wrote for them.
+     */
+    public void setCallSiteShape(String projectId, String callSiteId, String shape) {
+        jdbc.sql("UPDATE call_site SET shape = :shape WHERE project_id = :pid AND id = :id")
+                .param("shape", shape)
+                .param("pid", projectId)
+                .param("id", callSiteId)
+                .update();
+    }
+
     public void insertCase(SampleCase c) {
         jdbc.sql("""
                 INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
@@ -189,11 +201,11 @@ public class SampleDataRepository {
         jdbc.sql("""
                 INSERT INTO rca_report (id, project_id, job_id, subject_kind, subject_id, subject_label,
                     call_site_id, metric, window_from, window_split, window_to, current_value,
-                    prior_value, delta, status, verdict, summary, ruled_out, hypotheses,
+                    prior_value, delta, status, verdict, summary, ruled_out, causes,
                     detailed_report, engine, created_at, completed_at, finding_id)
                 VALUES (:id, :pid, :jobId, :subjectKind, :subjectId, :label, :csid,
                     :metric, :windowFrom, :windowSplit, :windowTo, :current, :prior, :delta,
-                    'done', :verdict, :summary, :ruledOut::jsonb, :hypotheses::jsonb,
+                    'done', :verdict, :summary, :ruledOut::jsonb, :causes::jsonb,
                     :detailedReport, :engine, :created, :completed, :findingId)
                 """)
                 .param("id", r.id())
@@ -213,7 +225,7 @@ public class SampleDataRepository {
                 .param("verdict", r.verdict())
                 .param("summary", r.summary())
                 .param("ruledOut", r.ruledOut())
-                .param("hypotheses", r.hypotheses())
+                .param("causes", r.causes())
                 .param("detailedReport", r.detailedReport())
                 .param("engine", r.engine())
                 .param("created", r.createdAt())
@@ -344,7 +356,7 @@ public class SampleDataRepository {
         }
     }
 
-    /** Batched {@code span} rows — every producer-sourced column {@code SpanRepository.upsert}
+    /** Batched {@code span} rows — every producer-sourced column {@code SpanRepository.upsertAll}
      *  writes, minus the three GENERATED ones ({@code depth}, {@code total_tokens},
      *  {@code total_cost}) a batch insert may not name. */
     public void insertSpans(List<SpanRow> rows) {
@@ -599,7 +611,7 @@ public class SampleDataRepository {
             String verdict,
             String summary,
             @Nullable String ruledOut,
-            @Nullable String hypotheses,
+            @Nullable String causes,
             @Nullable String detailedReport,
             String engine,
             String createdAt,

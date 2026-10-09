@@ -48,8 +48,7 @@ public class RcaTriggerService {
      * for a first trigger (re-presses coalesce onto the one report for the finding) and a fresh id for an
      * explicit re-run (which must get its own analysis).
      */
-    public RcaReportView trigger(
-            String projectId, String findingId, @Nullable String userId, @Nullable String runNonce) {
+    public RcaReportView trigger(String projectId, String findingId, String userId, @Nullable String runNonce) {
         FindingClaim finding = findings.findClaim(projectId, findingId).orElseThrow(() -> {
             // A 4xx ends the press with a log line GlobalExceptionHandler writes at DEBUG — invisible in
             // prod. Without this, "Run RCA does nothing" leaves no server-side trace at all. Codes only:
@@ -64,10 +63,22 @@ public class RcaTriggerService {
         Instant from = parse(finding.createdAt(), finding.onsetAt());
         Instant split = parse(finding.onsetAt(), finding.createdAt());
         Instant to = parse(finding.lastSeenAt(), finding.onsetAt());
-        // The severity is what the classifier asserted about the cause; there is no "before" number to
-        // compare it against, and inventing one would put a movement on the page that nobody measured.
-        Double asserted = finding.severity();
-        double severity = asserted == null ? 0.0 : asserted;
+        String reportKind = RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
+        double current;
+        double prior;
+        if (RcaReportRow.ReportKind.namesCauses(reportKind)) {
+            // A frustration or groundedness finding measured a rate against a learned one, so the header
+            // reads as that rate: frustrated conversations, or traces with a flagged answer, since onset over
+            // the rate the call site learned as normal.
+            current = finding.payloadNumber("current_rate");
+            prior = finding.payloadNumber("baseline_rate");
+        } else {
+            // The severity is what the classifier asserted about the cause; there is no "before" number to
+            // compare it against, and inventing one would put a movement on the page that nobody measured.
+            Double asserted = finding.severity();
+            current = asserted == null ? 0.0 : asserted;
+            prior = 0.0;
+        }
         String label = finding.subjectLabel() == null ? finding.subjectId() : finding.subjectLabel();
 
         String jobId = jobs.createOrGet(
@@ -90,12 +101,13 @@ public class RcaTriggerService {
                 label,
                 finding.callSiteId(),
                 finding.classifierKey(),
+                reportKind,
                 from,
                 split,
                 to,
-                severity,
-                0.0,
-                severity,
+                current,
+                prior,
+                current - prior,
                 RcaReportRow.Engine.AGENTIC);
         return reportReads.getByJobId(projectId, jobId);
     }

@@ -21,38 +21,21 @@ import org.springframework.test.context.TestContext;
 import org.springframework.test.context.TestExecutionListener;
 
 /**
- * Empties the schema after every test class, so classes sharing a Spring context cannot read each
- * other's rows.
+ * Empties the schema after every test class, so classes sharing a Spring context cannot read each other's rows. They
+ * were once isolated by accident, one database per context; collapsing contexts collapsed the databases, and this
+ * listener replaces the accident.
  *
- * <p>They used to be isolated by accident. Each of ~80 classes declared its own byte-identical
- * {@code @DynamicPropertySource}, and because {@code DynamicPropertiesContextCustomizer} equality
- * compares the {@code Set<Method>} it was built from, each got its own context cache key — and
- * {@link TestcontainersPostgresInitializer} hands every context a freshly created database. Once
- * {@code ai.tessary.config.TestSecretKeyInitializer} collapsed those contexts, the databases
- * collapsed with them, and only one class in the suite is {@code @Transactional}. This listener is
- * the isolation that replaces the accident.
+ * <p>Tables come from {@code pg_tables} at run time, so the list cannot drift from Liquibase. Held back: Liquibase's
+ * bookkeeping, and whatever boot-time seeding wrote (the price book is imported once per context), measured on the
+ * first class to use a context.
  *
- * <p>The table list is read from {@code pg_tables} at run time rather than written down, so it
- * cannot drift away from the Liquibase changelog. Two categories are held back:
- *
- * <ul>
- *   <li>Liquibase's own bookkeeping — truncating {@code databasechangelog} would make the changelog
- *       look unapplied to anything that inspected it.
- *   <li>Whatever boot-time seeding wrote. {@code PriceBookImporter} imports the rate books on
- *       {@code ApplicationReadyEvent}; that runs once per context, so a class that truncated
- *       {@code model_price} would leave every later class in the same context with no price book.
- *       The held-back set is measured rather than listed: the first class to use a context reads
- *       which tables the boot left non-empty, and those are the reference data.
- * </ul>
- *
- * <p>Registered for every context in {@code src/test/resources/META-INF/spring.factories}. A
- * listener declared there is added to the framework defaults rather than replacing them.
+ * <p>Registered for every context in {@code META-INF/spring.factories}, alongside the framework defaults.
  */
 public class SchemaCleaningTestExecutionListener implements TestExecutionListener {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaCleaningTestExecutionListener.class);
 
-    /** deadlock_detected and lock_not_available: both mean a worker got there first, not that the SQL is wrong. */
+    /** Both mean a worker got there first, not that the SQL is wrong. */
     private static final Set<String> RETRYABLE_SQL_STATES = Set.of("40P01", "55P03");
 
     private static final int MAX_ATTEMPTS = 10;
@@ -61,14 +44,13 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
 
     private static final Set<String> LIQUIBASE_TABLES = Set.of("databasechangelog", "databasechangeloglock");
 
-    /** Keyed by the per-context database URL, which {@link TestcontainersPostgresInitializer} makes unique. */
+    /** Keyed by the per-context database URL. */
     private static final Map<String, Set<String>> SEEDED_TABLES = new ConcurrentHashMap<>();
 
     @Override
     public void beforeTestClass(TestContext testContext) {
-        // Forces the context to load if it has not already, which is the point: on the first class
-        // to use a context the database still holds exactly what Liquibase and the boot listeners
-        // left, and that is the only moment reference data can be told apart from test rows.
+        // Loading the context here is the point: on its first class the database holds only what Liquibase and boot
+        // left, the one moment reference data can be told apart.
         ApplicationContext context = testContext.getApplicationContext();
         DataSource dataSource = dataSourceOf(context);
         if (dataSource == null) {
@@ -99,22 +81,13 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
     }
 
     /**
-     * Retries the TRUNCATE rather than waiting it out, because a shared context keeps its
-     * {@code @Scheduled} workers ticking between classes and two kinds of collision are routine.
+     * Retries the TRUNCATE because a shared context's scheduled workers keep ticking. Postgres breaks a lock-order
+     * deadlock itself, but a lock holder waiting on the JVM forms a cycle no detector spans (on CI every thread
+     * stalled for the full 30s), so a short timeout gives up early and frees the workers.
      *
-     * <p>A deadlock: a worker's insert holds its child table and asks for the FK's ROW SHARE lock on
-     * a parent the TRUNCATE already holds ACCESS EXCLUSIVE, while the TRUNCATE waits for that child.
-     * Postgres breaks it in a second. The other kind it cannot see: while the TRUNCATE waits it keeps
-     * the locks it already has, so every worker queues behind it, and a lock holder that is itself
-     * waiting on the JVM rather than on Postgres closes a cycle no deadlock detector spans. On CI every
-     * thread went silent for the full 30s timeout and resumed the moment the TRUNCATE gave up. A short
-     * timeout gives up early, which releases the workers, and the next attempt finds the tables free.
-     *
-     * <p>Retrying alone cannot outlast a statement that never finishes: a {@code markOrphanPaths} pass
-     * once ran for over 16 minutes and failed every later class in the context. So a lost race also
-     * ends every session whose transaction is older than the lock wait. The test class is over and the
-     * database is throwaway, so whatever still holds a transaction here is a background worker, and its
-     * next tick reconnects.
+     * <p>A statement that never finishes cannot be outlasted (a {@code markOrphanPaths} pass once ran 16 minutes), so
+     * a lost race also ends every session whose transaction is older than the lock wait; they are background workers,
+     * and they reconnect.
      */
     private static void truncateWithRetry(DataSource dataSource, String sql, Class<?> testClass) {
         for (int attempt = 1; ; attempt++) {
@@ -191,15 +164,9 @@ public class SchemaCleaningTestExecutionListener implements TestExecutionListene
     }
 
     /**
-     * Refuses to truncate anything but the throwaway Testcontainers database.
-     *
-     * <p>Today this cannot fire: {@link TestcontainersPostgresInitializer} overrides
-     * {@code tessary.jdbc-url} for every context, and this listener is registered only on the test
-     * classpath. But that safety is positional, not structural — it holds because of where two
-     * other files sit. Drop the initializer, let a test pin {@code tessary.jdbc-url} at a higher
-     * precedence, or copy this class into a module wired against a real database, and the next
-     * line would empty it. Asserting on the connection's own URL rather than on a property means
-     * the check reads what is actually about to be truncated.
+     * Refuses to truncate anything but the throwaway container. Today's safety is positional (the initializer
+     * overrides {@code tessary.jdbc-url}), so this checks the connection's own URL, which is what is about to be
+     * emptied.
      */
     private static void requireThrowawayContainer(Connection connection) throws SQLException {
         String url = connection.getMetaData().getURL();

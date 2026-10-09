@@ -107,6 +107,20 @@ public class MetricRollupRepository {
                 .orElse(0L);
     }
 
+    /** {@code COUNT(*)} of traces ingested for a project in {@code [from, to)}, on ingest time like spans. */
+    public long countIngestedTraces(String projectId, String from, String to) {
+        return jdbc.sql("""
+            SELECT COUNT(*) FROM trace t
+            WHERE t.project_id = :pid AND t.created_at >= :from::timestamptz AND t.created_at < :to::timestamptz
+            """)
+                .param("pid", projectId)
+                .param("from", from)
+                .param("to", to)
+                .query(Long.class)
+                .optional()
+                .orElse(0L);
+    }
+
     /**
      * {@code COUNT(*)} of Layer-1 units for a project in {@code [from, to)} — one per classifier
      * detection.

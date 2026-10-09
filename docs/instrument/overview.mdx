@@ -16,7 +16,7 @@ The repository you are instrumenting decides everything else: which OpenTelemetr
 
 ## Prerequisites
 
-- A running Tessary instance you can reach from wherever your agent runs, with an account and a project. [Set up Tessary](/self-hosting/setup) covers first boot.
+- An account and a project, on Tessary Cloud or on a running self-hosted instance you can reach from wherever your agent runs. [Start on Tessary Cloud](/cloud/quickstart) covers sign-up, and [Set up Tessary](/self-hosting/setup) covers a self-hosted instance's first boot.
 - The **Endpoint** and **Bearer Token** shown on the connect gate. For a project already past the gate, open **Settings** → **Sources** → **Connect a source**, select **Create a connection token**, and copy **Endpoint** and **Header**, which carries the whole `Authorization: Bearer <token>` line.
 - Write access to the code that makes the model calls, and a way to run it. A tag becomes telemetry only when the code runs, so you need to exercise the application to finish.
 - For the recommended path, a coding agent that can read the repository, edit files, and fetch a URL.
@@ -108,7 +108,7 @@ Once you are through, Tessary tracks the project against a broader milestone lad
 
 ## No application to instrument yet
 
-You can send one tagged span from the stack itself, with nothing installed and no SDK, and watch the gate open on it. The command and the token it needs are in [Sign up and connect your traces](/self-hosting/setup#sign-up-and-connect-your-traces).
+On a self-hosted instance, you can send one tagged span from the stack itself, with nothing installed and no SDK, and watch the gate open on it. The command and the token it needs are in [Sign up and connect your traces](/self-hosting/setup#sign-up-and-connect-your-traces).
 
 ## Next steps
 

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * The trace interior's two shared controls: the view segment and the Verdicts
- * pill. Kept surface-local.
+ * The trace interior's shared pieces: the view segment and TraceMedia. Kept
+ * surface-local.
  */
 import { useMemo } from "react";
 import { cn } from "../../ui";
 import { MediaResolverContext } from "../components/PayloadViewer";
 import { useTenant } from "../../tenant/TenantContext";
 
-export type TraceView = "conversation" | "tree" | "timeline";
+export type TraceView = "conversation" | "tree" | "timeline" | "json";
 
 /**
  * Teaches the payload viewers inside a trace how to reach an externalized image.
@@ -39,6 +39,7 @@ const VIEWS: { id: TraceView; label: string }[] = [
   { id: "conversation", label: "Conversation" },
   { id: "tree", label: "Tree" },
   { id: "timeline", label: "Timeline" },
+  { id: "json", label: "JSON" },
 ];
 
 /** Renderings of execution only — judgment is the pill, never a view. */
@@ -78,11 +79,3 @@ export function ViewSegment({
     </div>
   );
 }
-
-/* ── Evidence banner (?case=&verdict=) ───────────────────────────────────── */
-
-/**
- * Pinned evidence strip — both variants: `turn N` targeted (Conversation
- * scrolls to the judged turn) and `whole trace` (banner only). Border comes
- * from the caller (border-b in the rail, rounded card on the full page).
- */

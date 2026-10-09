@@ -8,11 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.spool.InProcessSpool;
+import ai.tessary.ingest.spool.IngestSpool;
 import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
 import ai.tessary.redaction.RedactionService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -20,28 +22,18 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 /**
- * The drainer must survive a throw from redaction, and it must survive a throw from the span write.
+ * The drainer survives a throw from redaction or from the span write.
  *
- * <p>Redaction moved from {@code enqueue} (the HTTP request thread) to the drain side. That move
- * carried a hazard review caught: {@code redactBatch} was passed as an <em>argument</em> to
- * {@code writeWithRetry}, so it ran outside that method's {@code catch}, and {@code drainLoop} had
- * only a {@code finally}. {@code RedactionService.compiledFor} does a JDBC read on a cache miss, so a
- * single transient {@code DataAccessException} would escape the loop and kill the one
- * {@code substrate-writer} thread <b>permanently</b> — every later batch silently shed,
- * {@code awaitIdle} never true again, no counter, no log.
- *
- * <p>On the request thread the same throw failed one request. On a lone drainer it is unrecoverable,
- * which is why it is pinned here rather than left to reading.
- *
- * <p>The write case is the same hazard from the other direction: a batch whose write throws is retried
- * to the attempt cap and then counted as failed, and the drainer takes the next batch either way.
+ * <p>When redaction moved to the drain side, {@code redactBatch} ran outside {@code writeWithRetry}'s catch, and
+ * {@code drainLoop} had only a finally. One transient {@code DataAccessException} on a rule-cache miss would kill the
+ * lone {@code substrate-writer} thread for good, silently shedding every later batch. A failing write is retried to
+ * the cap, counted failed, and the drainer moves on.
  */
 class SubstrateWriterResilienceTest {
 
     private static RawEntry entry(String id) {
         return new RawEntry(
                 id,
-                null,
                 "span",
                 "in",
                 "out",
@@ -50,7 +42,6 @@ class SubstrateWriterResilienceTest {
                 null,
                 "trace-1",
                 Instant.now().toString(),
-                null,
                 null,
                 null,
                 null,
@@ -66,7 +57,7 @@ class SubstrateWriterResilienceTest {
             return 1;
         });
 
-        // Throws on the first batch only, exactly like a transient DB blip on a compiled-rule cache miss.
+        // Throws on the first batch only, like a transient DB blip.
         AtomicInteger calls = new AtomicInteger();
         RedactionService flaky = new RedactionService(null, null) {
             @Override
@@ -79,10 +70,10 @@ class SubstrateWriterResilienceTest {
         SubstrateWriter writer = new SubstrateWriter(
                 spans, new SubstrateProperties(), flaky, new InProcessSpool(new SubstrateProperties()));
 
-        writer.enqueue("p1", List.of(entry("a"))); // this one blows up in redaction
+        writer.enqueue("p1", List.of(entry("a"))); // blows up in redaction
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the poisoned batch must not leave the writer busy");
 
-        writer.enqueue("p1", List.of(entry("b"))); // the drainer must still be alive to take this
+        writer.enqueue("p1", List.of(entry("b"))); // the drainer must still take this
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "drainer died on the earlier throw");
 
         assertEquals(1, writes.get(), "the surviving batch must still reach the substrate write");
@@ -115,8 +106,6 @@ class SubstrateWriterResilienceTest {
         assertEquals(2L, writer.failedBatches(), "both batches exhausted their attempts and are counted once each");
     }
 
-    // ---- the byte budget ----
-
     /** A blocking writer, so batches stay queued and the byte accounting can be observed at rest. */
     private static SpanBatchWriter blockingWriter(CountDownLatch entered, CountDownLatch release) {
         SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
@@ -146,7 +135,6 @@ class SubstrateWriterResilienceTest {
     private static RawEntry sized(String id, int payloadChars) {
         return new RawEntry(
                 id,
-                null,
                 "span",
                 "x".repeat(payloadChars),
                 null,
@@ -158,14 +146,12 @@ class SubstrateWriterResilienceTest {
                 null,
                 null,
                 null,
-                null,
                 null);
     }
 
     /**
-     * The bound that matters. A batch is admitted on its measured size, not on a slot count — which is the
-     * whole correction: at 512 slots the queue held enough megabyte-scale batches to exhaust the heap,
-     * and the {@code OutOfMemoryError} killed the drainer outright.
+     * Admission is by measured bytes, not slots: at 512 slots, megabyte-scale batches exhausted the heap and the OOM
+     * killed the drainer.
      */
     @Test
     void enqueue_shedsOnTheByteBudget_notTheBatchCount() throws Exception {
@@ -175,26 +161,23 @@ class SubstrateWriterResilienceTest {
         props.setQueueMaxBytes(300_000);
         SubstrateWriter writer = writerWith(props, blockingWriter(entered, release));
         try {
-            // ~100 KB each (payload + the fixed per-entry allowance), so two fit under 300 KB and the
-            // third does not — with no count bound at all, which is the point.
+            // ~100 KB each, so the third does not fit, with no count bound at all.
             assertTrue(writer.enqueue("p1", List.of(sized("a", 100_000))), "first batch fits");
             assertTrue(writer.enqueue("p1", List.of(sized("b", 100_000))), "second batch fits");
             assertFalse(writer.enqueue("p1", List.of(sized("c", 100_000))), "third exceeds the byte budget");
             assertEquals(1L, writer.shedBatches(), "the refusal must be counted as a shed");
-            // Depth only drops once the drainer has CLAIMED a batch, so wait for it to be inside the
-            // write rather than racing it: the reserved bytes are held until ack, so nothing above
-            // this line depends on the timing.
+            // Wait until the drainer is inside the write; reserved bytes are held until ack.
             assertTrue(entered.await(10, TimeUnit.SECONDS), "the drainer must have claimed the first batch");
-            assertTrue(writer.queueDepth() <= 1, "one batch in flight, one queued: the count was never the bound");
+            assertTrue(
+                    writer.spoolStats().depth() <= 1, "one batch in flight, one queued: the count was never the bound");
         } finally {
             release.countDown();
         }
     }
 
     /**
-     * A batch bigger than the whole budget can never be satisfied by any amount of draining, so parking it
-     * would hold the gate shut against every other producer. The Collector raises {@code errSizeTooLarge}
-     * for exactly this; here it is refused and counted apart from an ordinary shed.
+     * A batch bigger than the whole budget is refused and counted apart; parking it would wedge the gate (the
+     * Collector's {@code errSizeTooLarge}).
      */
     @Test
     void enqueue_refusesABatchLargerThanTheWholeBudget_withoutWedgingTheQueue() throws Exception {
@@ -211,18 +194,14 @@ class SubstrateWriterResilienceTest {
         assertFalse(writer.enqueue("p1", List.of(sized("huge", 200_000))), "an oversized batch must be refused");
         assertEquals(1L, writer.oversizeBatches(), "counted apart from a shed: this one never clears on its own");
         assertEquals(0L, writer.shedBatches(), "an oversize refusal is not a shed");
-        assertEquals(0L, writer.queueBytes(), "the refusal must not have reserved anything");
+        assertEquals(0L, writer.spoolStats().bytes(), "the refusal must not have reserved anything");
 
         assertTrue(writer.enqueue("p1", List.of(sized("ok", 100))), "the queue must still accept normal work");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the queue was wedged by the refused batch");
         assertEquals(1, writes.get(), "the normal batch still reached the write");
     }
 
-    /**
-     * Every reservation must be returned. A release that can be skipped is a leak, and a leaked byte
-     * budget ends with the queue refusing everything while holding nothing — the same outage as a dead
-     * drainer, reached by arithmetic instead.
-     */
+    /** Every reservation is returned; a leaked budget ends with a queue refusing everything while holding nothing. */
     @Test
     void queuedBytes_returnToZeroAfterEveryBatchDrains() throws Exception {
         AtomicInteger writes = new AtomicInteger();
@@ -241,13 +220,13 @@ class SubstrateWriterResilienceTest {
         }
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the queue must drain");
 
-        assertEquals(0L, writer.queueBytes(), "written, failed and dropped batches must all release their reservation");
+        assertEquals(
+                0L,
+                writer.spoolStats().bytes(),
+                "written, failed and dropped batches must all release their reservation");
     }
 
-    /**
-     * The supervisor. Losing the drainer is unrecoverable and, before this, silent — the queue simply
-     * stopped draining while the HTTP surface went on accepting and answering 200.
-     */
+    /** Losing the drainer was silent: the queue stopped while HTTP kept answering 200. */
     @Test
     void ensureDrainerAlive_replacesADeadDrainer() throws Exception {
         AtomicInteger writes = new AtomicInteger();
@@ -268,5 +247,158 @@ class SubstrateWriterResilienceTest {
         assertTrue(writer.enqueue("p1", List.of(sized("after", 100))), "admitted");
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the replacement drainer must be draining");
         assertEquals(1, writes.get(), "work enqueued after the restart still reaches the write");
+    }
+
+    /** An in-process spool that throws on append or on settle, like a broker-backed one. */
+    private static final class FaultySpool implements IngestSpool {
+        private final InProcessSpool delegate;
+        private final boolean failAppend;
+        private final boolean failSettle;
+
+        FaultySpool(SubstrateProperties props, boolean failAppend, boolean failSettle) {
+            this.delegate = new InProcessSpool(props);
+            this.failAppend = failAppend;
+            this.failSettle = failSettle;
+        }
+
+        @Override
+        public Admission append(String projectId, List<RawEntry> entries) {
+            if (failAppend) throw new IllegalStateException("broker unreachable");
+            return delegate.append(projectId, entries);
+        }
+
+        @Override
+        public Optional<Claimed> claim(Duration wait) throws InterruptedException {
+            return delegate.claim(wait);
+        }
+
+        @Override
+        public void ack(Claimed claimed) {
+            if (failSettle) throw new IllegalStateException("commit failed");
+            delegate.ack(claimed);
+        }
+
+        @Override
+        public void nack(Claimed claimed) {
+            if (failSettle) throw new IllegalStateException("commit failed");
+            delegate.nack(claimed);
+        }
+
+        @Override
+        public Stats stats() {
+            return delegate.stats();
+        }
+
+        @Override
+        public double pressure() {
+            return delegate.pressure();
+        }
+    }
+
+    private static RedactionService passthrough() {
+        return new RedactionService(null, null) {
+            @Override
+            public List<RawEntry> redactBatch(String projectId, List<RawEntry> entries) {
+                return entries;
+            }
+        };
+    }
+
+    /** A spool that throws did not take the batch: the producer is told to retry, and nothing stays pending. */
+    @Test
+    void aSpoolThatThrowsOnAppend_isAnsweredAsAShed() throws Exception {
+        SubstrateProperties props = new SubstrateProperties();
+        SubstrateWriter writer = new SubstrateWriter(
+                Mockito.mock(SpanBatchWriter.class), props, passthrough(), new FaultySpool(props, true, false));
+
+        assertFalse(writer.enqueue("p1", List.of(entry("a"))), "a batch the spool refused is not accepted");
+        assertEquals(1L, writer.shedBatches());
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(1)), "the refused batch is not left counted as pending");
+    }
+
+    /** A settlement that throws still releases the batch, and the drainer takes the next one. */
+    @Test
+    void aSpoolThatThrowsOnSettlement_stillReleasesTheBatch() throws Exception {
+        AtomicInteger writes = new AtomicInteger();
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> writes.incrementAndGet());
+        SubstrateProperties props = new SubstrateProperties();
+        SubstrateWriter writer = new SubstrateWriter(spans, props, passthrough(), new FaultySpool(props, false, true));
+
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "a failed ack must not leave the batch pending forever");
+        writer.enqueue("p1", List.of(entry("b")));
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the drainer survived the failed settlement");
+        assertEquals(2, writes.get());
+    }
+
+    /** Stopping the drainer mid-backoff ends the batch as failed and released, instead of sleeping it out. */
+    @Test
+    void aStopDuringRetryBackoff_countsTheBatchFailedAndReleasesIt() throws Exception {
+        CountDownLatch attempted = new CountDownLatch(1);
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
+            attempted.countDown();
+            throw new IllegalStateException("span write failed");
+        });
+        SubstrateProperties props = new SubstrateProperties();
+        props.setMaxAttempts(2);
+        props.setRetryBackoffMs(60_000);
+        SubstrateWriter writer = writerWith(props, spans);
+
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(attempted.await(10, TimeUnit.SECONDS), "the first attempt ran");
+        writer.killDrainerForTest();
+
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "released well before the minute-long backoff ends");
+        assertEquals(1L, writer.failedBatches());
+    }
+
+    /** The wait hooks report a writer that is still busy as busy, rather than timing out into a yes. */
+    @Test
+    void theWaitHooksReportABusyWriterAsBusy() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        SubstrateWriter writer = writerWith(new SubstrateProperties(), blockingWriter(entered, release));
+        try {
+            writer.enqueue("p1", List.of(entry("a")));
+            assertTrue(entered.await(10, TimeUnit.SECONDS));
+
+            assertFalse(writer.awaitIdle(Duration.ofMillis(50)), "a batch is still in flight");
+            assertFalse(writer.awaitDrainerDeath(Duration.ofMillis(50)), "the drainer is alive");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    /** Shutdown lets the batch in hand finish and settle, then the drainer stops rather than lingering. */
+    @Test
+    void shutdownFinishesTheBatchInHandThenStopsTheDrainer() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger writes = new AtomicInteger();
+        SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
+        Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
+            entered.countDown();
+            // A write in flight does not stop for the shutdown interrupt; it finishes.
+            while (true) {
+                try {
+                    release.await();
+                    break;
+                } catch (InterruptedException ignored) {
+                }
+            }
+            return writes.incrementAndGet();
+        });
+        SubstrateWriter writer = writerWith(new SubstrateProperties(), spans);
+        writer.enqueue("p1", List.of(entry("a")));
+        assertTrue(entered.await(10, TimeUnit.SECONDS));
+
+        writer.shutdown();
+        release.countDown();
+
+        assertTrue(writer.awaitDrainerDeath(Duration.ofSeconds(10)), "the drainer stops after shutdown");
+        assertTrue(writer.awaitIdle(Duration.ofSeconds(1)), "the batch in hand was settled on the way out");
+        assertEquals(1, writes.get());
     }
 }

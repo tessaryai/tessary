@@ -47,16 +47,6 @@ class GithubAppConfigServiceTest {
     }
 
     @Test
-    void noStoredRow_leavesEnvBoundPropertiesUntouched() {
-        props.setAppId("env-app-id");
-        when(repo.findCredentialsEnc()).thenReturn(Optional.empty());
-
-        service.loadOnStartup();
-
-        assertEquals("env-app-id", props.getAppId());
-    }
-
-    @Test
     void storedRow_winsOverWhateverEnvBound() {
         props.setAppId("env-app-id"); // simulates TESSARY_GIT_GITHUB_APP_ID having been set
         String sealed = seal("byo-app-id", "byo-pem", "byo-hook", "byo-slug", "byo-client", "byo-secret");
@@ -66,7 +56,6 @@ class GithubAppConfigServiceTest {
 
         assertEquals("byo-app-id", props.getAppId());
         assertEquals("byo-pem", props.getPrivateKeyPem());
-        assertEquals("byo-hook", props.getWebhookSecret());
         assertEquals("byo-slug", props.getAppSlug());
         assertEquals("byo-client", props.getClientId());
         assertEquals("byo-secret", props.getClientSecret());
@@ -74,7 +63,7 @@ class GithubAppConfigServiceTest {
 
     @Test
     void persist_upsertsAndLiveUpdatesTheSameBean_noRestartNeeded() {
-        service.persist("new-id", "new-pem", "new-hook", "new-slug", "new-client-id", "new-client-secret");
+        service.persist("new-id", "new-pem", "new-slug", "new-client-id", "new-client-secret");
 
         // Live-updated immediately: a concurrent authHeader()/isConfigured() call reads this same bean.
         assertEquals("new-id", props.getAppId());
@@ -95,7 +84,7 @@ class GithubAppConfigServiceTest {
 
         ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
                 ai.tessary.open.errors.TessaryException.class,
-                () -> service.persist("new-id", "new-pem", "new-hook", "new-slug", "new-client", "new-secret"));
+                () -> service.persist("new-id", "new-pem", "new-slug", "new-client", "new-secret"));
         assertEquals(ai.tessary.open.errors.GitError.APP_ALREADY_CONFIGURED, e.error());
 
         // Neither the row nor the live bean moved.
@@ -125,5 +114,41 @@ class GithubAppConfigServiceTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /** A captured row this deployment has no key for is ignored at boot, not a reason to refuse to start. */
+    @Test
+    void storedRow_withoutASecretKey_leavesEnvBoundPropertiesUntouched() {
+        props.setAppId("env-app-id");
+        when(repo.findCredentialsEnc()).thenReturn(Optional.of(seal("byo", "pem", "hook", "slug", "cid", "sec")));
+        GithubAppConfigService unkeyed =
+                new GithubAppConfigService(repo, props, new SecretBox(new TessaryProperties()), mapper);
+
+        unkeyed.loadOnStartup();
+
+        assertEquals("env-app-id", props.getAppId());
+    }
+
+    @Test
+    void storedRow_thatDoesNotOpen_isMissingAppConfig() {
+        when(repo.findCredentialsEnc()).thenReturn(Optional.of("sealed-by-another-key"));
+
+        ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
+                ai.tessary.open.errors.TessaryException.class, () -> service.loadOnStartup());
+        assertEquals(ai.tessary.open.errors.GitError.MISSING_APP_CONFIG, e.error());
+    }
+
+    /** Without a key the captured private key would have to be stored in the clear, so nothing is stored. */
+    @Test
+    void persist_withoutASecretKey_storesNothing() {
+        GithubAppConfigService unkeyed =
+                new GithubAppConfigService(repo, props, new SecretBox(new TessaryProperties()), mapper);
+
+        ai.tessary.open.errors.TessaryException e = org.junit.jupiter.api.Assertions.assertThrows(
+                ai.tessary.open.errors.TessaryException.class,
+                () -> unkeyed.persist("new-id", "new-pem", "new-slug", "new-client", "new-secret"));
+        assertEquals(ai.tessary.open.errors.GitError.MISSING_APP_CONFIG, e.error());
+        verify(repo, never()).upsert(anyString());
+        assertEquals(false, props.isConfigured());
     }
 }

@@ -28,10 +28,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>Disabling auth is a real and supported thing to do, it is how the dev stack and the
  * integration suite run, so it is a documented setting rather than a hidden one. It is
- * authoritative on its own, regardless of which {@link AuthProvider} is active or how it answers
- * {@code isEnabled()} (see {@link AuthFilter#shouldNotFilter}'s own comment for why "a configured
- * provider always wins over the flag" could not survive {@link PasswordAuthProvider} always being
- * enabled).
+ * authoritative on its own, regardless of which {@link AuthProvider} is active (see
+ * {@link AuthFilter#shouldNotFilter}'s own comment for why "a configured provider always wins over
+ * the flag" could not survive {@link PasswordAuthProvider} always being available).
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.auth")

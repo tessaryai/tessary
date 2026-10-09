@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.mcp;
 
+import static ai.tessary.mcp.McpToolHarness.PROJECT_ID;
+import static ai.tessary.mcp.McpToolHarness.errorText;
+import static ai.tessary.mcp.McpToolHarness.registryWith;
+import static ai.tessary.mcp.McpToolHarness.structured;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,135 +16,43 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import ai.tessary.auth.TenantContext;
 import ai.tessary.cases.CaseDtos.CaseDetailView;
+import ai.tessary.cases.CaseDtos.CaseExemplarView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
 import ai.tessary.cases.CaseDtos.WatchingView;
 import ai.tessary.cases.CaseService;
-import ai.tessary.classifier.finding.FindingService;
+import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.secretleak.SecretLeakEvidence;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.model.Pipeline;
-import ai.tessary.open.errors.CaseError;
-import ai.tessary.open.errors.TessaryException;
-import ai.tessary.pipeline.PipelineService;
-import ai.tessary.plan.Capability;
-import ai.tessary.plan.CapabilityService;
-import ai.tessary.plan.CapabilityService.CapabilitySet;
-import ai.tessary.query.QueryService;
-import ai.tessary.rca.RcaDtos.Hypothesis;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
-import ai.tessary.tenant.Project;
-import ai.tessary.tenant.ProjectRepository;
-import ai.tessary.traces.SessionReadService;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.IntNode;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The {@code list_cases} / {@code get_case} MCP tools, read through {@link CaseService} — the same seam
- * {@code CaseController} uses, so a case reads identically here and in the UI. The service is mocked; this
- * pins the MCP wrapper contract (project scoping, arg mapping and defaults, page clamping, verbatim view
- * rendering, error mapping), not the case logic.
+ * The {@code list_cases} and {@code get_case} MCP tools over a mocked {@link CaseService}, the seam {@code
+ * CaseController} also uses. Pins the wrapper: project scoping, arg mapping, page clamping, verbatim rendering, and
+ * error mapping.
  *
- * <p>A case is what the launch product produces — the three default-on classifiers sweep a partner's traffic
- * and open cases — and until these tools existed an agent holding a partner's token could read raw spans and
- * query aggregates but could not ask what was wrong with the project. That is why the pair is ungated, which
- * {@link McpCapabilityGateTest} pins separately.
- *
- * <p><b>The {@code watching} coverage block is asserted here too, on {@code get_project}.</b> It used to ride
- * along with {@code list_cases}, and it is the only signal separating "nothing is wrong" from "nothing is
- * arriving" (launch requirement E5) — so the test that the flat page dropped it and the test that the project
- * read picked it up belong side by side. Either one alone would pass while the signal was lost.
+ * <p>The {@code watching} block is asserted here on {@code get_project} too: it is the only signal separating
+ * "nothing is wrong" from "nothing is arriving" (launch requirement E5), so the test that the page dropped it sits
+ * beside the test that the project read picked it up.
  */
 class McpCaseToolsTest {
 
-    private static final String PROJECT_ID = "proj-1";
-
-    private final ObjectMapper mapper = new ObjectMapper();
     private CaseService cases;
-    private McpDispatcher dispatcher;
+    private McpToolHarness mcp;
 
     @BeforeEach
     void setup() {
         this.cases = mock(CaseService.class);
-        ProjectRepository projects = mock(ProjectRepository.class);
-        Project project =
-                new Project(PROJECT_ID, "org-1", "proj", "Proj", null, "2026-08-12T00:00:00Z", null, null, true, null);
-        when(projects.findById(PROJECT_ID)).thenReturn(Optional.of(project));
-
-        PipelineService pipelines = mock(PipelineService.class);
-        when(pipelines.getPipeline(PROJECT_ID)).thenReturn(Pipeline.empty());
-
-        // Every capability on: this exercises the tools, not the gate (McpCapabilityGateTest owns that).
-        Map<Capability, Boolean> allOn = new EnumMap<>(Capability.class);
-        for (Capability c : Capability.values()) allOn.put(c, true);
-        CapabilityService capabilities = mock(CapabilityService.class);
-        when(capabilities.resolve(any())).thenReturn(new CapabilitySet(allOn));
-        when(capabilities.isEnabled(any(), any())).thenReturn(true);
-
-        var registry = new McpToolRegistry(
-                pipelines,
-                projects,
-                mock(QueryService.class),
-                mock(SpanRepository.class),
-                mock(SpanPayloadRepository.class),
-                mock(TraceV2Repository.class),
-                mock(SessionReadService.class),
-                capabilities,
-                mock(FindingService.class),
-                cases);
-        this.dispatcher = new McpDispatcher(registry, mapper);
-    }
-
-    @Test
-    void bothCaseToolsAreListed() {
-        List<String> names = toolNames();
-        assertTrue(names.contains("list_cases"), names.toString());
-        assertTrue(names.contains("get_case"), names.toString());
-    }
-
-    /**
-     * The lifecycle writes are deliberately absent. {@code resolve} / {@code absorb} / {@code mute} /
-     * {@code unmute} all exist on {@link CaseService} and each records a human judgement — {@code absorb}
-     * additionally moves the detector's reference so the level that fired becomes the new baseline. Adding one
-     * should be a decision argued in a diff, not a tool that appears because the service method was there.
-     */
-    @Test
-    void caseLifecycleWritesAreNotExposedAsTools() {
-        for (String name : toolNames()) {
-            assertNull(
-                    name.matches("(resolve|absorb|mute|unmute)_case|case_(resolve|absorb|mute|unmute)") ? name : null,
-                    "case lifecycle writes must stay in the UI, found tool: " + name);
-        }
-    }
-
-    /**
-     * The default page is the open cases. "What is wrong with this project" is not a question about closures,
-     * and a caller that omitted {@code state} must not get a first page of last month's history.
-     */
-    @Test
-    void listCases_defaultsToOpenAtTheHousePageSizeAndRendersThePageFlat() throws Exception {
-        when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
-                .thenReturn(new CasesPage(List.of(sampleCase("case-1", "C-1", "open")), "cursor-2"));
-
-        JsonNode body = structured(callTool("list_cases", "{}"));
-
-        verify(cases).page(PROJECT_ID, "open", null, null, 50, null);
-        assertEquals(1, body.get("cases").size());
-        assertEquals("C-1", body.get("cases").get(0).get("reference").asText());
-        assertEquals("cursor-2", body.get("next_cursor").asText());
+        this.mcp = registryWith().pipeline(Pipeline.empty()).cases(cases).build();
     }
 
     /** Filters and the cursor reach the service under the service's own names, untranslated. */
@@ -149,50 +61,41 @@ class McpCaseToolsTest {
         when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new CasesPage(List.of(), null));
 
-        JsonNode body = structured(callTool(
+        JsonNode body = structured(mcp.callTool(
                 "list_cases",
                 "{\"state\":\"resolved\",\"detector\":\"tool_error\",\"call_site_id\":\"cs-7\","
                         + "\"limit\":10,\"cursor\":\"tok\"}"));
 
         verify(cases).page(PROJECT_ID, "resolved", "tool_error", "cs-7", 10, "tok");
-        // Last page: the key is present and null rather than absent, so a caller has one thing to test.
+        // Last page: the key is present and null, not absent.
         assertTrue(body.has("next_cursor"));
         assertTrue(body.get("next_cursor").isNull());
     }
 
-    /**
-     * The page is clamped to the MCP cap, not to the REST one. These rows carry a title and a basis sentence
-     * each, so an unclamped {@code limit: 500} is a context window spent on a list.
-     */
+    /** Clamped to the MCP cap, not the REST one: an unclamped {@code limit: 500} spends a context window on a list. */
     @Test
     void listCases_clampsAnOversizedLimitToTheSurfaceCap() throws Exception {
         when(cases.page(eq(PROJECT_ID), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new CasesPage(List.of(), null));
 
-        callTool("list_cases", "{\"limit\":500}");
+        mcp.callTool("list_cases", "{\"limit\":500}");
 
         verify(cases).page(PROJECT_ID, "open", null, null, 100, null);
     }
 
-    /**
-     * A state nobody has is an error rather than an empty page. {@code state: "closed"} matches no row, so a
-     * page would come back clean and empty — and an empty page of cases reads as "nothing is wrong with this
-     * project". A wrong answer that looks like good news is worth spending the caller a turn on.
-     */
+    /** An unknown state is an error, not an empty page, which would read as "nothing is wrong". */
     @Test
     void listCases_refusesAStateThatIsNotAStateInsteadOfReturningNothing() throws Exception {
-        String text = errorText(callTool("list_cases", "{\"state\":\"closed\"}"));
+        String text = errorText(mcp.callTool("list_cases", "{\"state\":\"closed\"}"));
 
         assertTrue(text.contains("closed"), text);
         assertTrue(text.contains("resolved"), "the error must name the states that do exist: " + text);
     }
 
     /**
-     * <b>The coverage block is gone from the page and present on the project read.</b> Flattened into pages,
-     * a per-page copy of "3 classifiers, 7 call sites, 1200 traces yesterday" would read as a measurement of
-     * the page; dropped outright, an agent would report an all-clear for a project that stopped sending
-     * traffic a week ago. Both halves are asserted together because either alone passes while the signal is
-     * lost (watch-out 1 of the MCP v2 plan).
+     * Coverage leaves the page and appears on the project read. Per page it would read as a measurement of the page;
+     * dropped, an agent reports an all-clear for a project that stopped sending traffic. Either half alone passes
+     * while the signal is lost.
      */
     @Test
     void theWatchingCoverageBlockMovedFromTheCasePageToGetProject() throws Exception {
@@ -200,29 +103,26 @@ class McpCaseToolsTest {
                 .thenReturn(new CasesPage(List.of(), null));
         when(cases.watching(PROJECT_ID)).thenReturn(new WatchingView(3, 7, 1200, 48_000L, 2L));
 
-        JsonNode page = structured(callTool("list_cases", "{}"));
+        JsonNode page = structured(mcp.callTool("list_cases", "{}"));
         assertNull(page.get("watching"), "a page of cases must not carry project-wide coverage");
 
-        JsonNode project = structured(callTool("get_project", "{}"));
+        JsonNode project = structured(mcp.callTool("get_project", "{}"));
 
         verify(cases).watching(PROJECT_ID);
         assertEquals(3, project.get("watching").get("classifiers").asInt());
         assertEquals(7, project.get("watching").get("call_sites").asInt());
-        // The one number that separates the two silences a reader must never confuse.
         assertEquals(1200, project.get("watching").get("traces_last_day").asInt());
-        // get_project goes through the 1-arg overload, which always counts: an agent asking what a
-        // project looks like gets the same block whether or not the case queue happens to be empty.
+        // The 1-arg overload always counts, so the block does not depend on the case queue being empty.
         assertEquals(48_000, project.get("watching").get("traces_total").asInt());
         assertEquals(2, project.get("watching").get("open_findings").asInt());
     }
 
     @Test
     void getCase_passesTheIdThroughUntouchedSoAHumanReferenceResolves() throws Exception {
-        // The service accepts the stored id OR the display reference; the tool must not "normalise" either,
-        // or a case number quoted by a person stops resolving.
+        // The stored id or the display reference: the tool must not normalise either.
         when(cases.detail(eq(PROJECT_ID), eq("C-118"))).thenReturn(detail("rca-4", null));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"C-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"C-118\"}"));
 
         verify(cases).detail(PROJECT_ID, "C-118");
         assertEquals("C-118", body.get("case").get("reference").asText());
@@ -230,19 +130,15 @@ class McpCaseToolsTest {
     }
 
     /**
-     * <b>The finished RCA report arrives inline, whole.</b> The report IS the answer to "why is this case
-     * open", and reaching it used to mean a second, capability-gated tool call — which is how a written
-     * investigation goes unread. The assertions reach the deep fields (the agent's markdown, a hypothesis, a
-     * ruled-out check) on purpose: an {@code rca} object carrying only the summary columns would satisfy a
-     * shallower test and still lose the investigation.
+     * The finished RCA report arrives inline and whole: a second, gated call is how a written investigation goes
+     * unread. The assertions reach deep fields on purpose; summary columns alone would still lose the investigation.
      */
     @Test
     void getCase_inlinesTheFinishedRcaReportInFull() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail("rca-4", report()));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
-        // The id stays beside the report, for provenance and for the poll.
         assertEquals("rca-4", body.get("rca_report_id").asText());
         JsonNode rca = body.get("rca");
         assertEquals("model_change", rca.get("verdict").asText());
@@ -250,68 +146,146 @@ class McpCaseToolsTest {
                 "## Why\nThe judge model changed.", rca.get("detailed_report").asText());
         assertEquals(
                 "Model swap on 2026-08-14",
-                rca.get("hypotheses").get(0).get("title").asText());
+                rca.get("causes").get(0).get("title").asText());
+        assertEquals(
+                "The provider rotated the default.",
+                rca.get("causes").get(0).get("what_changed").asText());
+        assertFalse(rca.has("hypotheses"), "every case type answers in causes now");
+        assertEquals(
+                "Did the traffic mix change?",
+                rca.get("ruled_out").get(0).get("question").asText());
         assertEquals("traffic_mix", rca.get("ruled_out").get(0).get("check").asText());
         assertTrue(rca.get("ruled_out").get(0).get("passed").asBoolean());
     }
 
-    /**
-     * A report still running is named and not rendered: {@code rca_report_id} is there to poll, {@code rca} is
-     * null. Rendering the shell would show an object whose every interesting field is null, which reads as
-     * "the analysis concluded nothing" rather than "the analysis has not finished".
-     */
+    /** A running report is named, not rendered: an all-null shell reads as "concluded nothing", not "not finished". */
     @Test
     void getCase_leavesRcaNullWhileTheReportIsStillRunning() throws Exception {
         when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail("rca-5", null));
 
-        JsonNode body = structured(callTool("get_case", "{\"id\":\"case-118\"}"));
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
         assertEquals("rca-5", body.get("rca_report_id").asText());
         assertTrue(body.get("rca").isNull(), "a pending report must not render as a report");
         assertTrue(body.get("rca_available").asBoolean(), "rca_available is about whether one CAN be run");
     }
 
+    /**
+     * {@code get_case} strips ids as {@code get_finding} does, or an agent reads the withheld sample one tool over.
+     */
     @Test
-    void getCase_missingIdIsACleanToolError() throws Exception {
-        String text = errorText(callTool("get_case", "{}"));
-        assertTrue(text.contains("id"), text);
+    void getCase_toolError_keepsTheNumbersAndDropsFailingTracesAndExemplars() throws Exception {
+        when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(toolErrorRate(), null, exemplar()));
+
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
+
+        JsonNode toolError = body.get("tool_error");
+        assertEquals(5_000, toolError.get("nCur").asLong());
+        assertEquals(400, toolError.get("failuresCur").asLong());
+        assertEquals(0, toolError.get("failingTraces").size(), "the agent view carries no trace ids");
+        assertEquals(0, body.get("exemplars").size(), "exemplars are paged through get_finding_evidence");
+        assertEquals("find-9", body.get("latest_finding_id").asText());
+        assertFalse(body.toString().contains("trace-failing-1"), "a failing trace id reached the agent");
+        assertFalse(body.toString().contains("trace-exemplar-1"), "an exemplar trace id reached the agent");
     }
 
     @Test
-    void unknownCaseIsACleanToolErrorNotAn32603() throws Exception {
-        when(cases.detail(eq(PROJECT_ID), any())).thenThrow(new TessaryException(CaseError.NOT_FOUND, "nope"));
+    void getCase_secretLeak_keepsTheMaskedKeyAndDropsLeakIdsAndExemplars() throws Exception {
+        when(cases.detail(eq(PROJECT_ID), any())).thenReturn(detail(null, secretLeak(), exemplar()));
 
-        JsonRpc.Response r = dispatcher.dispatch(
-                req(1, "tools/call", mapper.readTree("{\"name\":\"get_case\",\"arguments\":{\"id\":\"nope\"}}")),
-                ctx());
+        JsonNode body = structured(mcp.callTool("get_case", "{\"id\":\"case-118\"}"));
 
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "must be a tool error inside result, not a JSON-RPC error");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>) Objects.requireNonNull(r.result());
-        assertEquals(Boolean.TRUE, result.get("isError"));
+        JsonNode secretLeak = body.get("secret_leak");
+        assertEquals(3, secretLeak.get("leakCount").asLong());
+        assertEquals(2, secretLeak.get("traceCount").asLong());
+        JsonNode leak = secretLeak.get("leaks").get(0);
+        assertTrue(leak.get("traceId").isNull(), "the agent view carries no trace id");
+        assertTrue(leak.get("spanId").isNull(), "the agent view carries no span id");
+        assertEquals("AKIA…WXYZ", leak.get("masked").asText());
+        assertEquals(0, body.get("exemplars").size(), "exemplars are paged through get_finding_evidence");
+        assertFalse(body.toString().contains("trace-secret-9"), "a witness trace id reached the agent");
+        assertFalse(body.toString().contains("trace-exemplar-1"), "an exemplar trace id reached the agent");
     }
-
-    // ------------------------------------------------------------------ helpers
 
     private static CaseDetailView detail(String rcaReportId, @Nullable RcaReportView rca) {
+        return detail(rcaReportId, rca, null, null, List.of());
+    }
+
+    private static CaseDetailView detail(
+            ToolErrorEvidence.@Nullable RateDetail toolError,
+            SecretLeakEvidence.@Nullable SecretLeakDetail secretLeak,
+            CaseExemplarView exemplar) {
+        return detail(null, null, toolError, secretLeak, List.of(exemplar));
+    }
+
+    private static CaseDetailView detail(
+            @Nullable String rcaReportId,
+            @Nullable RcaReportView rca,
+            ToolErrorEvidence.@Nullable RateDetail toolError,
+            SecretLeakEvidence.@Nullable SecretLeakDetail secretLeak,
+            List<CaseExemplarView> exemplars) {
         return new CaseDetailView(
                 sampleCase("case-118", "C-118", "open"),
                 List.of(),
                 "find-9",
                 null,
-                List.of(),
+                exemplars,
                 rcaReportId,
                 rca,
-                // No measured shift on this fixture: these tools are about the RCA payload, and a
-                // detector whose shift has no drawable shape sends both as null anyway.
                 null,
+                toolError,
                 null,
+                secretLeak,
                 null,
                 null,
                 true,
                 true,
                 true);
+    }
+
+    private static CaseExemplarView exemplar() {
+        return new CaseExemplarView(
+                "trace-exemplar-1", "exemplar", 1, "search_orders", "cs-1", 120L, 0.002, "2026-08-12T00:00:00Z");
+    }
+
+    private static ToolErrorEvidence.RateDetail toolErrorRate() {
+        return new ToolErrorEvidence.RateDetail(
+                "search_orders",
+                0.01,
+                0.08,
+                7.0,
+                20_000,
+                5_000,
+                400,
+                List.of(),
+                false,
+                List.of("trace-failing-1", "trace-failing-2"),
+                "2026-08-12T00:00:00Z",
+                null,
+                null,
+                "up",
+                9.0,
+                5.0,
+                0.3,
+                0.8);
+    }
+
+    private static SecretLeakEvidence.SecretLeakDetail secretLeak() {
+        return new SecretLeakEvidence.SecretLeakDetail(
+                "aws-access-token",
+                FindingRow.Confidence.HIGH,
+                3L,
+                2L,
+                "2026-08-12T00:00:00Z",
+                "2026-08-13T00:00:00Z",
+                List.of(new SecretLeakEvidence.SecretLeakKeyView("AKIA…WXYZ", 3L, 2L, "2026-08-13T00:00:00Z", false)),
+                List.of(new SecretLeakEvidence.SecretLeakLeakView(
+                        "2026-08-13T00:00:00Z", "AKIA…WXYZ", "masked", "trace-secret-9", "span-1")),
+                "event_count",
+                1L,
+                86_400L,
+                "2026-08-12T00:00:00Z",
+                "2026-08-13T00:00:00Z");
     }
 
     private static RcaReportView report() {
@@ -323,6 +297,7 @@ class McpCaseToolsTest {
                 "Checkout summariser",
                 "cs-1",
                 "pass_rate",
+                "metric_movement",
                 "2026-08-01T00:00:00Z",
                 "2026-08-08T00:00:00Z",
                 "2026-08-15T00:00:00Z",
@@ -333,9 +308,21 @@ class McpCaseToolsTest {
                 "model_change",
                 "The judge model changed mid-window.",
                 List.of(RuledOutCheck.assessed(
-                        "traffic_mix", RuledOutCheck.Assessment.RULED_OUT, "Mix held flat.", "chi2 = 0.4")),
-                List.of(new Hypothesis(
-                        "Model swap on 2026-08-14", "high", "The provider rotated the default.", List.of("tr-1"))),
+                        "traffic_mix",
+                        "Did the traffic mix change?",
+                        RuledOutCheck.Assessment.RULED_OUT,
+                        "Mix held flat.",
+                        "chi2 = 0.4")),
+                List.of(new Cause(
+                        "Model swap on 2026-08-14",
+                        "high",
+                        "The provider rotated the default.",
+                        null,
+                        null,
+                        null,
+                        List.of("tr-1"),
+                        List.of(),
+                        0)),
                 "## Why\nThe judge model changed.",
                 "agentic",
                 true,
@@ -369,52 +356,12 @@ class McpCaseToolsTest {
                 null,
                 null,
                 null,
+                null,
                 1L,
                 "fnd-1",
                 null,
-                // cause + rca_verdict: this fixture is a case nothing has analysed, which is what
-                // almost every case in the queue is.
+                // cause + rca_verdict: an unanalysed case, like most in the queue.
                 null,
                 null);
-    }
-
-    private List<String> toolNames() {
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/list", null), ctx());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                Objects.requireNonNull(Objects.requireNonNull(r).result());
-        JsonNode tools = mapper.valueToTree(Objects.requireNonNull(result.get("tools")));
-        List<String> names = new java.util.ArrayList<>();
-        for (JsonNode t : tools) names.add(t.get("name").asText());
-        return names;
-    }
-
-    private TenantContext ctx() {
-        return new TenantContext("user-1", null, "org-1", PROJECT_ID, "member", "tok-1");
-    }
-
-    private JsonRpc.Request req(int id, String method, @Nullable JsonNode params) {
-        return new JsonRpc.Request("2.0", IntNode.valueOf(id), method, params);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> callTool(String name, String argsJson) throws Exception {
-        JsonNode params = mapper.readTree("{\"name\":\"" + name + "\",\"arguments\":" + argsJson + "}");
-        JsonRpc.Response r = dispatcher.dispatch(req(1, "tools/call", params), ctx());
-        assertNotNull(r);
-        assertNull(Objects.requireNonNull(r).error(), "expected a tool result, not a JSON-RPC error");
-        return (Map<String, Object>) Objects.requireNonNull(r.result());
-    }
-
-    private JsonNode structured(Map<String, Object> result) {
-        assertEquals(Boolean.FALSE, result.get("isError"));
-        return mapper.valueToTree(Objects.requireNonNull(result.get("structuredContent")));
-    }
-
-    private static String errorText(Map<String, Object> result) {
-        assertEquals(Boolean.TRUE, result.get("isError"), "expected isError=true");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> content = (List<Map<String, Object>>) Objects.requireNonNull(result.get("content"));
-        return Objects.requireNonNull(content.get(0).get("text")).toString();
     }
 }

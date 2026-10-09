@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { signOut } from "./auth/signOut";
 import { TenantProvider, useProjectApi, useTenant } from "./tenant/TenantContext";
 import { auth as authApi } from "./api/client";
 import { isSampleProject } from "./api/types-auth";
 import { ShellChrome } from "./shell";
 import { CapabilityGate } from "./capabilities/CapabilityGate";
 import { ConnectGate } from "./views/onboarding/ConnectGate";
-import { Spinner, ToastProvider } from "./ui";
+import { Button, Spinner, ToastProvider } from "./ui";
 import { registerRouteChunk } from "./lib/routePreload";
-// Route arrays this build registers through the `@paid` alias; see src/paid/index.ts.
-import { paid } from "@paid";
 
 /*
  * Route-level code-splitting. Every view is lazy-loaded so the initial
@@ -51,7 +50,10 @@ const TracesIndex = named(() => import("./views/traces/TracesIndex"), "TracesInd
 const TraceDetail = named(() => import("./views/traces/TraceDetail"), "TraceDetail");
 const SessionDetail = named(() => import("./views/traces/SessionDetail"), "SessionDetail");
 const ClassifiersPage = named(() => import("./views/classifiers/ClassifiersPage"), "ClassifiersPage", "classifiers");
-const DetectorsPage = named(() => import("./views/classifiers/DetectorsPage"), "DetectorsPage");
+const ClassifierConfigurePage = named(
+  () => import("./views/classifiers/ClassifierConfigurePage"),
+  "ClassifierConfigurePage",
+);
 const FindingPage = named(() => import("./views/classifiers/FindingPage"), "FindingPage");
 const Vitals = named(() => import("./views/vitals/Vitals"), "Vitals", "vitals");
 
@@ -67,6 +69,7 @@ const PiiRedaction = named(() => import("./views/Settings/PiiRedaction"), "PiiRe
 const Retention = named(() => import("./views/Settings/Retention"), "Retention");
 const Notifications = named(() => import("./views/Settings/Notifications"), "Notifications");
 const Members = named(() => import("./views/Settings/Members"), "Members");
+const Features = named(() => import("./views/Settings/Features"), "Features");
 const Providers = named(() => import("./views/Settings/Providers"), "Providers");
 const GitIntegration = named(() => import("./views/Settings/GitIntegration"), "GitIntegration");
 const Models = named(() => import("./views/Settings/Models"), "Models");
@@ -79,18 +82,10 @@ export default function App() {
         <Suspense fallback={<FullScreen>Loading…</FullScreen>}>
         <Routes>
           {/*
-            Pricing is excluded from this build, not gated: it is the one public route (outside
-            ProtectedRoute and outside TenantProvider), and CapabilityGate calls useTenant(), which
-            throws with no provider above it, so gating it would be a render-time crash on a public
-            URL. paid.publicRoutes supplies a route here when one is registered.
-
-            The redirect below it is load-bearing: this top-level Routes has no catch-all, so an
-            unmatched /pricing would render a blank page rather than falling through anywhere. It
-            sits after the spread deliberately: react-router ranks by specificity and both are
-            static, so when paid.publicRoutes supplies /pricing, that route wins and this one never
-            matches.
+            There is no pricing page. The redirect is load-bearing: this top-level Routes has no
+            catch-all, so an unmatched /pricing would render a blank page rather than falling
+            through anywhere.
           */}
-          {paid.publicRoutes}
           <Route path="/pricing" element={<Navigate to="/" replace />} />
           {/*
             /login and /signup join /pricing in the same public, unauthenticated tier: outside
@@ -102,13 +97,6 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/link" element={<ProtectedRoute><Link /></ProtectedRoute>} />
-          {/*
-            /new-org: creating an additional org past this build's single-org cap needs a route
-            this build does not register on its own. Mounted inside ProtectedRoute (needs a
-            signed-in user) but outside TenantProvider (no org selected yet), same tier as the
-            redirects around it. paid.protectedRoutes supplies it when one is registered.
-          */}
-          {paid.protectedRoutes}
           <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
           <Route path="/orgs/:orgSlug" element={<ProtectedRoute><OrgRedirect /></ProtectedRoute>} />
           <Route path="/orgs/:orgSlug/new-project" element={<ProtectedRoute><NewProject /></ProtectedRoute>} />
@@ -134,15 +122,31 @@ function RootRedirect() {
   // which blocks on AuthProvider's own fetch, so there is no loading state left for this
   // component to own).
   //
-  // TenantService#ensureDefaultOrg runs on every signup and login, so an authenticated user
-  // always has >=1 org by the time this renders: `orgs` is empty only in a state that cannot
-  // happen post-auth, not a real fork to design a redirect for. `/login` is the safe,
-  // already-public landing for that theoretical case: a cosmetic choice, not a real branch,
-  // since this component only ever renders inside ProtectedRoute.
+  // TenantService#ensureDefaultOrg runs only at signup and login, so `orgs` can be empty: a user
+  // who leaves their only org (Members → Leave organization) keeps the session with no org until
+  // they sign in again, when it gives them one. That cannot go to `/login`, which sends a signed-in
+  // visitor straight back here, so it says so instead.
   const { user } = useAuth();
   const first = user?.orgs[0];
-  if (!first) return <Navigate to="/login" replace />;
+  if (!first) return <NoOrganization />;
   return <Navigate to={`/orgs/${first.slug}`} replace />;
+}
+
+function NoOrganization() {
+  return (
+    <div className="h-screen bg-bg text-fg flex items-center justify-center p-8">
+      <div className="max-w-md">
+        <h1 className="text-h1 text-fg">No organization</h1>
+        <p className="text-body text-muted mt-2">
+          This account is not a member of any organization. Sign out and sign in again to get your own
+          organization. To join someone else's, ask one of its admins for an invitation.
+        </p>
+        <Button className="mt-6" variant="secondary" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function OrgRedirect() {
@@ -234,12 +238,14 @@ function ProjectShell() {
         <Route path="traces" element={<TracesIndex />} />
         <Route path="traces/:traceId" element={<TraceDetail />} />
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
-        {/* Classifiers absorbs the old Behavior drift page (detectors + findings). */}
+        {/* The charts of what each classifier detects, per call site and per tool. */}
         <Route path="classifiers" element={<ClassifiersPage />} />
-        {/* The catalog and the tuning, off the queue rather than above it. */}
-        <Route path="classifiers/detectors" element={<DetectorsPage />} />
-        {/* A finding's own evidence, which the queue links every row to. */}
+        {/* The old catalog and its rail. Their abilities live on each classifier's configure page now. */}
+        <Route path="classifiers/detectors" element={<CatalogRedirect />} />
+        {/* A finding's own evidence, which Triage's findings link every row to. */}
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
+        {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
+        <Route path="classifiers/:classifierId" element={<ClassifierConfigurePage />} />
         {/* The Triage pulse strip's full-size page. Amber only, never red. */}
         <Route path="vitals" element={<Vitals />} />
 
@@ -267,8 +273,11 @@ function ProjectShell() {
               settings tab rather than redirecting to a route that no longer exists. */}
           <Route path="observer" element={<Navigate to="../sources" replace />} />
           {/* The summoned flow's admin surface: Slack channel, cadence, quiet hours. */}
-          <Route path="notifications" element={<Notifications />} />
-          {/* Signal tuning moved into the Classifiers detail rails (one home per concept). */}
+          <Route
+            path="notifications"
+            element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
+          />
+          {/* Signal tuning moved onto each classifier's configure page (one home per concept). */}
           <Route path="signal-tuning" element={<Navigate to="../../classifiers" replace />} />
           <Route
             path="mcp-tokens"
@@ -283,19 +292,14 @@ function ProjectShell() {
           <Route path="pii-redaction" element={<PiiRedaction />} />
           <Route path="retention" element={<Retention />} />
           <Route path="members" element={<Members />} />
-          {/* Usage (the metered-units and LLM-spend screen) is excluded from this build rather
-              than gated: no Capability names it, since it gates on the BILLING_MANAGE role
-              instead. The settings catch-all below folds `settings/usage` to Sources here, so no
-              blank page and no redirect of its own is needed; `shell/nav.tsx` drops the
-              rail/palette entry with it. */}
-          {paid.settingsRoutes}
           <Route path="organization" element={<Organization />} />
           {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
-          {/* Appearance lives under Organization; feature flags are managed via
-              LaunchDarkly, not in-app. Redirect old bookmarks. */}
+          <Route path="features" element={<Features />} />
+          {/* Appearance lives under Organization, and the old feature-flags tab is Features now.
+              Redirect old bookmarks. */}
           <Route path="appearance" element={<Navigate to="../organization" replace />} />
-          <Route path="feature-flags" element={<Navigate to="../sources" replace />} />
+          <Route path="feature-flags" element={<Navigate to="../features" replace />} />
           {/* Any other settings path: a retired tab, a typo, a deep link into a section that was
               removed, folds to Sources rather than rendering an empty <Outlet/>. Absolute, like the
               project-level catch-all: a relative `to="sources"` resolves against the splat it
@@ -352,6 +356,16 @@ function ProjectShell() {
       </Suspense>
     </ShellChrome>
   );
+}
+
+/**
+ * The retired catalog. Its rail was addressable as `?classifier=<id>`, and Slack links and bookmarks carry that, so
+ * a link that named a classifier lands on that classifier's configure page and a bare one on Classifiers.
+ */
+function CatalogRedirect() {
+  const [params] = useSearchParams();
+  const id = params.get("classifier");
+  return <ToProjectSegment segment={id ? `classifiers/${encodeURIComponent(id)}` : "classifiers"} />;
 }
 
 /** Absolute tenant-scoped redirect, for splat routes where relative `..` is ambiguous. */

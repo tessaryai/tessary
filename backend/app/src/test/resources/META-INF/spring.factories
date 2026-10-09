@@ -4,7 +4,8 @@ org.springframework.context.ApplicationContextInitializer=\
   ai.tessary.db.TestcontainersPostgresInitializer,\
   ai.tessary.auth.TestAuthDisabledInitializer,\
   ai.tessary.config.TestSecretKeyInitializer,\
-  ai.tessary.ingest.substrate.v2.TestResolversDisabledInitializer
+  ai.tessary.ingest.substrate.v2.TestResolversDisabledInitializer,\
+  ai.tessary.telemetry.TestTelemetryDisabledInitializer
 
 # Runs alongside the framework defaults (a listener declared here is added to, not substituted for,
 # the DEFAULT_TEST_EXECUTION_LISTENER_CLASS_NAMES set). Empties the schema between test classes that

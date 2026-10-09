@@ -19,13 +19,4 @@ public record DeliveryAttemptRow(
         @Nullable Integer httpStatus,
         @Nullable String error,
         String attemptedAt,
-        @Nullable String completedAt) {
-
-    public static final class Status {
-        private Status() {}
-
-        public static final String PENDING = "pending";
-        public static final String DELIVERED = "delivered";
-        public static final String FAILED = "failed";
-    }
-}
+        @Nullable String completedAt) {}

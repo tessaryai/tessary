@@ -39,12 +39,6 @@ public class GitIntegrationService {
         return repo.findByProject(projectId);
     }
 
-    /** The integration for a project, or 404. Used by the observer pipeline. */
-    public GitIntegrationRow require(String projectId) {
-        return repo.findByProject(projectId)
-                .orElseThrow(() -> new TessaryException(GitError.INTEGRATION_NOT_FOUND, projectId));
-    }
-
     /**
      * Bind a repo whose reachability is already established by the flow that got here: the GitHub
      * App install and reuse callbacks, which enumerated the repo off an installation the authorizing
@@ -98,7 +92,6 @@ public class GitIntegrationService {
                 req.repoName(),
                 branch,
                 credentialsEnc,
-                null,
                 now,
                 now);
     }
@@ -113,7 +106,6 @@ public class GitIntegrationService {
                 r.repoName(),
                 branch,
                 r.credentialsEnc(),
-                r.observerCursorSha(),
                 r.createdAt(),
                 r.updatedAt());
     }
@@ -144,10 +136,6 @@ public class GitIntegrationService {
         if (!secretBox.isConfigured()) {
             throw new TessaryException(GitError.SECRET_KEY_MISSING);
         }
-        try {
-            return secretBox.seal(mapper.writeValueAsString(creds));
-        } catch (Exception e) {
-            throw new TessaryException(GitError.SECRET_KEY_MISSING, e);
-        }
+        return secretBox.seal(mapper.valueToTree(creds).toString());
     }
 }

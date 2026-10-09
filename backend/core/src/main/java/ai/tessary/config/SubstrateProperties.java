@@ -9,9 +9,8 @@ import org.springframework.stereotype.Component;
  * Governs {@code ingest/substrate/SubstrateWriter}: the bounded hand-off queue in front of
  * {@code SpanBatchWriter} and its at-least-once retry policy.
  *
- * <p>Distinct from {@link IngestProperties} (media-resolver bounds) by concern, mirroring the
- * per-prefix split used by {@code ObserverProperties}. Defaults live here in code (no yaml entries
- * needed), like {@link IngestProperties}.
+ * <p>Mirrors the per-prefix split used by {@code ObserverProperties}. Defaults live here in code (no
+ * yaml entries needed).
  */
 @Component
 @ConfigurationProperties(prefix = "tessary.ingest.substrate")
@@ -74,19 +73,6 @@ public class SubstrateProperties {
     private int resolverBatchSize = 500;
 
     /**
-     * Interval between resolver passes, in milliseconds. Bound as a plain property (not read through this
-     * class) by the {@code @Scheduled} annotations, which need a literal placeholder.
-     */
-    private long resolverIntervalMs = 1000;
-
-    /**
-     * Ops kill switch for the two span resolvers. Read by their {@code @ConditionalOnProperty}, so the
-     * beans do not exist when it is false; declared here so the key is bound, documented and typed rather
-     * than a bare string in an annotation.
-     */
-    private boolean resolversEnabled = true;
-
-    /**
      * Upper bound on one resolver statement, in seconds. A healthy pass takes milliseconds; the bound is
      * for the one that does not, which otherwise holds its row locks and the resolver's scheduler thread
      * for as long as it runs. A cancelled pass changes nothing and the next tick retries.
@@ -133,22 +119,6 @@ public class SubstrateProperties {
         this.resolverBatchSize = v;
     }
 
-    public long getResolverIntervalMs() {
-        return resolverIntervalMs;
-    }
-
-    public void setResolverIntervalMs(long v) {
-        this.resolverIntervalMs = v;
-    }
-
-    public boolean isResolversEnabled() {
-        return resolversEnabled;
-    }
-
-    public void setResolversEnabled(boolean v) {
-        this.resolversEnabled = v;
-    }
-
     public int getResolverStatementTimeoutSeconds() {
         return resolverStatementTimeoutSeconds;
     }
@@ -158,30 +128,10 @@ public class SubstrateProperties {
     }
 
     /**
-     * Ops kill switch for the trace rollup worker and its reaper. Read by their
-     * {@code @ConditionalOnProperty}, so the beans do not exist when it is false.
-     *
-     * <p>Switching it off stops every trace's counters advancing — {@code is_settled} stays false and the
-     * list surfaces keep showing whatever the last rollup wrote. Nothing is lost by it: the deadlines stay
-     * armed on the rows, so turning it back on drains the backlog. It is for an operator who needs the
-     * connections back, not for a rollout.
-     */
-    private boolean rollupEnabled = true;
-
-    /**
-     * Interval between rollup worker ticks, in milliseconds. Bound as a plain property (not read through
-     * this class) by the {@code @Scheduled} annotation, which needs a literal placeholder.
-     */
-    private long rollupIntervalMs = 1000;
-
-    /**
      * Traces claimed per round, the spec's {@code LIMIT 500} (§7.3). It bounds one round, not the backlog:
      * a round that fills its limit is followed immediately by another.
      */
     private int rollupClaimLimit = 500;
-
-    /** Interval between reaper sweeps, in milliseconds. A {@code @Scheduled} placeholder, as above. */
-    private long rollupReapIntervalMs = 60_000;
 
     /**
      * How long a trace may sit claimed-but-unwritten before the reaper decides nobody is coming back for it
@@ -201,36 +151,12 @@ public class SubstrateProperties {
      */
     private long rollupStaleAfterMs = 60_000;
 
-    public boolean isRollupEnabled() {
-        return rollupEnabled;
-    }
-
-    public void setRollupEnabled(boolean v) {
-        this.rollupEnabled = v;
-    }
-
-    public long getRollupIntervalMs() {
-        return rollupIntervalMs;
-    }
-
-    public void setRollupIntervalMs(long v) {
-        this.rollupIntervalMs = v;
-    }
-
     public int getRollupClaimLimit() {
         return rollupClaimLimit;
     }
 
     public void setRollupClaimLimit(int v) {
         this.rollupClaimLimit = v;
-    }
-
-    public long getRollupReapIntervalMs() {
-        return rollupReapIntervalMs;
-    }
-
-    public void setRollupReapIntervalMs(long v) {
-        this.rollupReapIntervalMs = v;
     }
 
     public int getRollupReapGraceSeconds() {

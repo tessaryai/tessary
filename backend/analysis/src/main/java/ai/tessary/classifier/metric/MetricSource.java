@@ -12,21 +12,18 @@ import ai.tessary.pricing.ModelResolver;
 import ai.tessary.vitals.TokenUsage;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
  * The one accessor every metric-drift measure is read through: column-preferred, with a derivation
  * behind it, and an explicit abstention when neither can answer.
- * ({@code classifiers/metric_drift/PROGRAM.md} §3.0, PLAN.md §2.)
+ * ({@code devdocs/concepts/metric-drift.md} §3.0.)
  *
  * <p><b>Why a seam at all, rather than reading the rollup columns.</b> {@code trace.latency_ms},
  * {@code trace.total_cost} and {@code trace.total_tokens} are the intended source and are NULL on every
@@ -43,16 +40,14 @@ import org.springframework.stereotype.Component;
  * turns a price-book gap into a cost improvement, the single failure that makes the number worse than
  * not having it. Reasons are counted into a {@link Tally} the sweep logs once per pass, so a measure
  * abstaining on all of its traffic costs one glance rather than one investigation, the failure
- * PROGRAM.md §13 opens with.
+ * metric-drift.md §11 opens with.
  *
  * <p><b>The bucket key is not resolved here.</b> It arrives on the {@link TraceHead} this is called
- * with, resolved once by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}'s lateral,
- * root-span-first with the {@code seq → started_at → created_at} fallback chain. Taking the head rather
- * than a bare trace id is deliberate: it makes re-deriving the entry point impossible at this seam, and
+ * with, resolved once by the rollup onto {@code trace.call_site_id} (the root span's, else the earliest
+ * tagged span's) and read by {@code BehaviorSubstrateRepository.SELECT_TRACE_HEAD}. Taking the head rather
+ * than a bare trace id is deliberate: it makes re-deriving the call site impossible at this seam, and
  * re-deriving is the one place the two classifiers could silently disagree about which bucket a trace
- * belongs to. That fallback chain exists because {@code seq} is NULL on every OTLP-ingested
- * observation, and without it 443 traces whose roots all carried one call site were scattered across
- * six.
+ * belongs to.
  *
  * <p><b>Nothing is dropped.</b> A turn whose root span never ended cannot contribute a duration, but it
  * comes back with its {@link Completion} category and is counted. Excluding it silently would remove
@@ -112,7 +107,7 @@ public class MetricSource {
          * every retry would re-read the same page and hit the same span until the signal dead-lettered,
          * one bad span silencing every metric measure for the project. The counterpart guard on the rollup
          * column is already there ({@code column >= 0}); production is 100% the derivation path today
-         * (PROGRAM.md §3.0), so this is the one that fires.
+         * (metric-drift.md §3.0), so this is the one that fires.
          */
         NEGATIVE_INTERVAL,
 
@@ -213,13 +208,9 @@ public class MetricSource {
      * Everything the turn-grain measures produce for one trace, plus the key they are filed under.
      *
      * @param callSiteId the ENTRY POINT's call site, straight off the head, the bucket key of
-     *     PROGRAM.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
+     *     metric-drift.md §2.1. A trace legitimately spans several call sites, so a baseline scoped to a
      *     child would model "traces that happened to contain this tool" rather than "traffic that
      *     entered here".
-     * @param eventAt the trace's own start, falling back to ingest time, the clock windows are CUT on.
-     *     The sweep's keyset cursor stays on {@code created_at}; two clocks, two jobs.
-     * @param projectVersionId the deploy this turn ran under. Not part of the key, it is what the
-     *     pinned reference hangs on, so a deploy re-pins the reference instead of resetting the window.
      * @param tokens the four (disjoint) buckets summed over the trace's generations, or null when none
      *     reported usage. Carried so a caller can take a ratio without re-summing and arriving at a subtly
      *     different number.
@@ -229,10 +220,7 @@ public class MetricSource {
      *     Never a measure and never a covariate, see {@link MetricWorkload}.
      */
     public record TurnMetrics(
-            String traceId,
             String callSiteId,
-            String eventAt,
-            @Nullable String projectVersionId,
             Completion completion,
             @Nullable TokenUsage tokens,
             Map<String, Measurement> measurements,
@@ -245,7 +233,7 @@ public class MetricSource {
 
         /**
          * Cache-read share of the prompt, {@code cache_read / (cache_read + input)}, the form
-         * PROGRAM.md §3.3 asks for cache to be watched in.
+         * metric-drift.md §3.3 asks for cache to be watched in.
          *
          * <p>The most common silent cost regression is a prompt-prefix edit that stops the cache
          * hitting. On the ratio that reads as a clean collapse from ~0.8 to ~0.0; on the raw cache-read
@@ -369,13 +357,12 @@ public class MetricSource {
      * them on {@code trace_settle_seconds}; measuring early reads as cheap, which surfaces as a
      * permanent drift toward cheaper whenever ingest lags. Duration needs no settle horizon at all, it
      * is read off the root span, whose arrival IS the completion signal, and applying one there delays
-     * every duration finding for nothing (PROGRAM.md §5).
+     * every duration finding for nothing (metric-drift.md §5).
      *
      * @param tally accumulates provenance and abstention counts. The sweep owns one per pass and hands
      *     the same instance to every page, so its summary describes the pass rather than its last page.
      */
     public List<TurnMetrics> turnMetrics(String projectId, List<TraceHead> heads, Tally tally) {
-        if (heads.isEmpty()) return List.of();
         List<String> traceIds = heads.stream().map(TraceHead::traceId).toList();
 
         Map<String, TurnFacts> facts = new HashMap<>();
@@ -401,10 +388,7 @@ public class MetricSource {
             tally.observed(completion);
             measurements.forEach(tally::observed);
             out.add(new TurnMetrics(
-                    head.traceId(),
                     head.callSiteId(),
-                    head.eventAt(),
-                    head.projectVersionId(),
                     completion,
                     spend.tokens(),
                     Map.copyOf(measurements),
@@ -634,8 +618,8 @@ public class MetricSource {
      * Every dispatchable span of one sweep page, with its own duration: the {@code tool_duration}
      * subjects. One query for the page.
      *
-     * <p>The bucket key is minted with {@code isError = false}, so a tool's failures stay in the same
-     * latency population as its successes. Splitting them would put half the samples in a bucket that
+     * <p>The bucket key carries no error flag, so a tool's failures stay in the same latency population
+     * as its successes. Splitting them would put half the samples in a bucket that
      * has no baseline, and it would hide the move worth catching: a tool that starts failing fast reads
      * as a shift in the one distribution rather than as traffic quietly migrating to a second one.
      *
@@ -644,7 +628,6 @@ public class MetricSource {
      * shrinking sample of fast calls.
      */
     public List<ToolMetrics> toolMetrics(String projectId, List<TraceHead> heads, Tally tally) {
-        if (heads.isEmpty()) return List.of();
         List<String> traceIds = heads.stream().map(TraceHead::traceId).toList();
         Map<String, String> callSites = new HashMap<>();
         for (TraceHead head : heads) {
@@ -663,7 +646,7 @@ public class MetricSource {
                     // spelled out rather than asserted because the scope of a stray span is genuinely
                     // unattributed, which is a bucket that already exists.
                     callSites.getOrDefault(span.traceId(), BehaviorSubstrateRepository.UNATTRIBUTED),
-                    ActionSymbol.of(span.kind(), span.name(), false),
+                    ActionSymbol.of(span.kind(), span.name()),
                     span.eventAt(),
                     duration));
         }
@@ -693,7 +676,7 @@ public class MetricSource {
      * Per-measure counts of what a sweep pass actually read: how many values came off a column, how many
      * were derived, and how many abstained for each reason.
      *
-     * <p><b>This is an instrument, not bookkeeping.</b> The failure PROGRAM.md §13 opens with is a
+     * <p><b>This is an instrument, not bookkeeping.</b> The failure metric-drift.md §11 opens with is a
      * measure that abstains on 100% of traffic and therefore never fires, while looking correct in every
      * unit test. Nothing about the findings distinguishes that from a quiet week; only these counters
      * do, which is why the sweep logs {@link #summary()} once per pass whether or not anything fired.
@@ -723,49 +706,6 @@ public class MetricSource {
             completions.merge(completion, 1L, Long::sum);
         }
 
-        /** The measures this pass touched, in first-seen order. */
-        public Set<String> measures() {
-            return Collections.unmodifiableSet(new LinkedHashSet<>(byMeasure.keySet()));
-        }
-
-        /** Values read straight off the rollup column; non-zero means the backfill has reached here. */
-        public long fromColumn(String measure) {
-            return counts(measure).fromColumn;
-        }
-
-        /** Values computed from leaf facts, the live path today, for every measure. */
-        public long derived(String measure) {
-            return counts(measure).derived;
-        }
-
-        public long present(String measure) {
-            Counts c = counts(measure);
-            return c.fromColumn + c.derived;
-        }
-
-        public long absent(String measure) {
-            long total = 0;
-            for (long n : counts(measure).absent.values()) total += n;
-            return total;
-        }
-
-        public long absent(String measure, Absence reason) {
-            return counts(measure).absent.getOrDefault(reason, 0L);
-        }
-
-        public long completions(Completion completion) {
-            return completions.getOrDefault(completion, 0L);
-        }
-
-        /**
-         * Share of this measure's subjects that produced no value, {@code 0.0} when none were seen at
-         * all. A measure sitting at {@code 1.0} is the alarm this class exists for.
-         */
-        public double abstentionRate(String measure) {
-            long seen = present(measure) + absent(measure);
-            return seen == 0 ? 0.0 : (double) absent(measure) / seen;
-        }
-
         /** One log line per pass: for each measure, where its values came from and why they did not. */
         public String summary() {
             StringBuilder sb = new StringBuilder();
@@ -789,13 +729,6 @@ public class MetricSource {
             }
             return sb.toString();
         }
-
-        private Counts counts(String measure) {
-            return byMeasure.getOrDefault(measure, EMPTY);
-        }
-
-        /** The answer for a measure nothing was ever folded into. Read-only by construction. */
-        private static final Counts EMPTY = new Counts();
 
         private static final class Counts {
             private long fromColumn;

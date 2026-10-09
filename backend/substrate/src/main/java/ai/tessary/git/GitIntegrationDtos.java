@@ -24,15 +24,9 @@ public final class GitIntegrationDtos {
             String token) {}
 
     public record GitIntegrationView(
-            String provider,
-            String host,
-            String repoOwner,
-            String repoName,
-            String defaultBranch,
-            String observerCursorSha) {
+            String provider, String host, String repoOwner, String repoName, String defaultBranch) {
         public static GitIntegrationView from(GitIntegrationRow r) {
-            return new GitIntegrationView(
-                    r.provider(), r.host(), r.repoOwner(), r.repoName(), r.defaultBranch(), r.observerCursorSha());
+            return new GitIntegrationView(r.provider(), r.host(), r.repoOwner(), r.repoName(), r.defaultBranch());
         }
     }
 

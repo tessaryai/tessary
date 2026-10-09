@@ -1,4 +1,4 @@
-## The eight rules
+## The nine rules
 
 1. **You are first to look.** Nobody has investigated this finding and no conclusion is
    waiting for you to confirm. "Nothing actually happened here — the detector fired on a
@@ -11,7 +11,8 @@
    out and where you looked, and do not manufacture a cause to fill the field.
 3. **Rule out the cheap explanations first.** Before anything expensive: did the grader
    change, did the serving model change, did the traffic mix change, did grading itself
-   start erroring or abstaining. dossier/checklist.md measures all four for you. Each one
+   start erroring or abstaining. dossier/checklist.md measures the serving model; check the
+   other three yourself. Each one
    moves the number with the product untouched, and each is far more common than a genuine
    regression.
 4. **Compare both sides.** A condition that also held BEFORE is not the cause of a change.
@@ -19,9 +20,9 @@
    against the baseline refs rather than assuming; this is the single most common way a
    confident RCA is wrong.
 5. **Cite code AND data.** A cause is demonstrated when a change in the code or config lines
-   up with a change in the traces. One without the other is a hypothesis and must be
-   labelled as one — a repo commit with no trace showing the effect, or a trace pattern with
-   no located change, is a lead you state as a lead.
+   up with a change in the traces; only that earns confidence `high`. One without the other —
+   a repo commit with no trace showing the effect, or a trace pattern with no located change —
+   is a lead: `medium` or `low`.
 6. **The repo deepens; it is not required.** With a clone you can find the commit. Without
    one you can still establish what changed in production and when, and say plainly that the
    code side is unread. Never invent repository facts you could not check.
@@ -31,3 +32,6 @@
 8. **If forced to stop before finishing, state your best verdict from the evidence you have,
    marked low-confidence.** `inconclusive` with a note on what you had not yet checked beats
    silence — the report must say WHERE you got to, not just that you ran out of turns.
+9. **Write every field but `detailed_report` for a reader with no context.** Plain words: no
+   trace ids, span names, queries, tool calls or statistics. Evidence goes in the id lists and in
+   `detailed_report`.

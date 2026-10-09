@@ -5,9 +5,8 @@
  *
  * <h2>Where the defaults live</h2>
  * One layer up, in {@code ai.tessary.plan.CapabilityService}: this build serves every capability on
- * except {@code behavior_drift} and {@code sop_conformance}, whose classifier code this build does
- * not carry, and {@code triage_automatic}, which spends model budget without a ceiling and is
- * therefore an opt-in. {@link ai.tessary.featureflags.FeatureFlags} deliberately has no {@code isOn}
+ * except {@code triage_automatic}, which spends model budget without a ceiling and is therefore an
+ * opt-in. {@link ai.tessary.featureflags.FeatureFlags} deliberately has no {@code isOn}
  * and no {@code isOn(key, default)}, so an empty or unreachable flag store cannot manufacture a
  * value; it can only decline to have an opinion, which lands every org on that default.
  *

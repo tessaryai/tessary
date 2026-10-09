@@ -107,71 +107,7 @@ public record SpanRow(
         public static final String NONE = "none";
         /** Ancestry materialized. */
         public static final String RESOLVED = "resolved";
-        /** The trace settled with the parent row still absent — the producer never shipped it. */
-        public static final String ORPHAN = "orphan";
 
         private ResolverState() {}
-    }
-
-    /**
-     * The minimal ingest shape: identity, kind, timing and versioning, with no usage, no cost and no
-     * resolved ancestry. {@code costSource} defaults to {@code unpriced}, which is the honest state for a
-     * span nothing has priced — never a zero cost.
-     */
-    public static SpanRow of(
-            String projectId,
-            String traceId,
-            String id,
-            @Nullable String parentSpanId,
-            String kind,
-            @Nullable String name,
-            String startedAt,
-            @Nullable String endedAt,
-            String eventTs) {
-        return new SpanRow(
-                projectId,
-                traceId,
-                id,
-                parentSpanId,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                kind,
-                name,
-                parentSpanId == null,
-                null,
-                null,
-                null,
-                null,
-                startedAt,
-                endedAt,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                CostSource.UNPRICED,
-                null,
-                null,
-                null,
-                ResolverState.PENDING,
-                ResolverState.PENDING,
-                eventTs,
-                false,
-                null,
-                null,
-                null,
-                null);
     }
 }

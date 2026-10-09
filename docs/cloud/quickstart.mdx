@@ -1,0 +1,86 @@
+---
+title: "Start on Tessary Cloud"
+description: "Sign up at app.tessary.ai, send your agent's traces over OTLP, and get from an empty project to your first finding and case without deploying anything."
+---
+
+Tessary Cloud is Tessary run for you as a hosted service. You sign up, point your agent's traces at it, and classifiers start watching. There is nothing to deploy, and no model provider key to add before triage and RCA (root-cause analysis) can run.
+
+Tessary Cloud is free and asks for no payment method. It does have limits on traces, stored data, and retention. The numbers are on the [pricing page](https://tessary.ai/pricing), and [Usage and credit](/cloud/usage-and-credit) explains how each one is counted and what happens when you reach it.
+
+## Prerequisites
+
+- An agent whose code you can edit and run. The project opens only once that code sends a span tagged with a call site.
+- For the recommended instrumentation path, a coding agent that can read the repository, edit files, and fetch a URL.
+
+## Connect your first agent
+
+<Steps>
+  <Step title="Sign up">
+    Go to [app.tessary.ai](https://app.tessary.ai) and create an account. Tessary creates an organization and a first project for you.
+
+    <Check>
+      The project opens on the connect screen, **Connect your traces**. It stands in front of the whole product until a tagged span arrives.
+    </Check>
+  </Step>
+  <Step title="Copy the endpoint and create a token">
+    The connect screen carries both values your exporter needs:
+
+    - **Endpoint** is `https://app.tessary.ai/v1/traces`.
+    - Under **Bearer Token**, select **Create and copy**. This mints a project-scoped API key with write scope and copies it. Treat it as a secret: never hardcode it in application source and never commit it.
+
+    Tessary Cloud accepts OTLP (OpenTelemetry Protocol) over HTTP only. Configure an OTLP/HTTP exporter; the gRPC transport is not available.
+  </Step>
+  <Step title="Instrument your agent">
+    Instrumenting means making two things true: traces reach the endpoint, and every span that covers a model call carries a `tessary.call_site.id` attribute. There is no Tessary client library to install.
+
+    The recommended path is to copy the prompt under **Paste into your coding agent** and hand it to a coding agent with your repository open. [Instrument your agent](/instrument/overview) covers that path and wiring the exporter by hand.
+  </Step>
+  <Step title="Run your application">
+    Exercise the instrumented paths. Your test suite is usually enough.
+
+    <Check>
+      The screen stops reading "Listening on /v1/traces. Nothing has arrived yet." and opens on its own when the first tagged span lands.
+    </Check>
+
+    If it reads **Spans are arriving without a call site** instead, your traces are reaching Tessary but no span carries the tag. [Instrumentation troubleshooting](/instrument/troubleshooting) works through that state and the case where nothing arrives at all.
+  </Step>
+</Steps>
+
+## What happens after the first trace
+
+**Triage** names the stage your project is in whenever its queue is empty. Once traces are arriving it reads `fitting`: classifiers are learning what your traffic normally looks like, so they can tell a change from ordinary variation. That takes a while on low volume, and it is expected rather than a fault.
+
+Six classifiers run without setup: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, `malformed_output`, and [`groundedness`](/classifiers/groundedness). A seventh, [`frustration`](/classifiers/frustration), starts switched off and needs your own OpenRouter or TypeSafe key.
+
+When a classifier detects a change, it creates a **finding** on the **Classifiers** page. A finding records what changed and the evidence for it. It is not yet a validated issue.
+
+## Triage a finding and investigate the case
+
+On Tessary Cloud, triage starts when you start it. Automatic triage is not available, so open a finding and select **Run triage**. Triage reviews the finding's evidence and rules whether it is a real issue. A positive ruling opens a case, or joins the case already open for that cause.
+
+A high-confidence secret leak and a frustration finding skip triage. Each opens its case as soon as it is filed, because its numbers are the claim.
+
+On a case, select **Run RCA** to start the investigation. The report gives a one-sentence summary, the causes it found with the traces it cites for each, and the checks it ruled out. Connect a repository under **Settings → Git integration** so the run can read the code that changed.
+
+### What pays for triage and RCA
+
+Your organization starts with a model credit that pays for triage and RCA. It is granted once and does not renew. When it is used up, add your own model provider key under **Settings → Providers**, and triage and RCA run on that key from then on. Nothing else depends on the credit: traces keep arriving, classifiers keep running, and findings keep being filed.
+
+A key you add before the credit runs out is used first. [Usage and credit](/cloud/usage-and-credit) covers the credit and your limits in detail.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Usage and credit" icon="gauge" href="/cloud/usage-and-credit">
+    What counts as a trace, how stored data is measured, and what happens at each limit.
+  </Card>
+  <Card title="Data handling" icon="shield-halved" href="/cloud/data-handling">
+    What happens to your traces and credentials on Tessary Cloud, and how to delete your data.
+  </Card>
+  <Card title="How Tessary works" icon="diagram-project" href="/concepts/how-it-works">
+    The four stages in detail, from trace to explained case.
+  </Card>
+  <Card title="Cloud and self-hosted" icon="scale-balanced" href="/open-edition">
+    What differs between Tessary Cloud and a self-hosted open edition.
+  </Card>
+</CardGroup>

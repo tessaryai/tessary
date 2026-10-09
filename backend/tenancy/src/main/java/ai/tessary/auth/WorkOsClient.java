@@ -33,9 +33,10 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code GET /user_management/authorize?...} — returns the AuthKit redirect URL</li>
  *   <li>{@code POST /user_management/authenticate} (grant_type=authorization_code)</li>
  *   <li>{@code POST /user_management/authenticate} (grant_type=refresh_token)</li>
- *   <li>{@code GET /user_management/sessions/logout?...} — returns the WorkOS logout URL</li>
  *   <li>{@code POST /user_management/invitations} — sends an invitation email</li>
  *   <li>{@code POST /user_management/invitations/{id}/revoke} — revokes a pending invitation</li>
+ *   <li>{@code GET /user_management/sessions/logout?...} — the browser is sent here to end the
+ *       AuthKit session</li>
  * </ul>
  *
  * <p>The {@code /authenticate} endpoint authenticates by carrying the API key as
@@ -48,18 +49,21 @@ public class WorkOsClient implements AuthProvider {
     private static final String BASE = "https://api.workos.com";
 
     private final WorkOsProperties props;
-    private final HttpClient http =
-            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient http;
     private final ObjectMapper mapper;
 
     public WorkOsClient(WorkOsProperties props, ObjectMapper mapper) {
-        this.props = props;
-        this.mapper = mapper;
+        this(
+                props,
+                mapper,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build());
     }
 
-    @Override
-    public boolean isEnabled() {
-        return props.isEnabled();
+    /** The transport is a parameter so a test can answer for WorkOS without the network. */
+    WorkOsClient(WorkOsProperties props, ObjectMapper mapper, HttpClient http) {
+        this.props = props;
+        this.mapper = mapper;
+        this.http = http;
     }
 
     /** Build the AuthKit authorisation URL the browser is redirected to. */
@@ -71,6 +75,12 @@ public class WorkOsClient implements AuthProvider {
                 + "&provider=authkit"
                 + (state != null && !state.isBlank() ? "&state=" + enc(state) : "");
         return BASE + "/user_management/authorize?" + qs;
+    }
+
+    @Override
+    public String signOutUrl(@Nullable String sessionId, String returnTo) {
+        if (sessionId == null) return returnTo;
+        return BASE + "/user_management/sessions/logout?session_id=" + enc(sessionId) + "&return_to=" + enc(returnTo);
     }
 
     /** Exchange an authorization code for tokens + user. */
@@ -112,8 +122,7 @@ public class WorkOsClient implements AuthProvider {
     @Override
     public Invitation createInvitation(String email) {
         JsonNode body = postBearer("/user_management/invitations", Map.of("email", email));
-        return new Invitation(
-                body.path("id").asText(null), body.path("accept_invitation_url").asText(null));
+        return new Invitation(body.path("id").asText(null));
     }
 
     /** Revoke a previously-sent invitation. Best-effort; surfaces failure to the caller. */
@@ -122,54 +131,26 @@ public class WorkOsClient implements AuthProvider {
         postBearer("/user_management/invitations/" + enc(workosInvitationId) + "/revoke", Map.of());
     }
 
-    /** Build a WorkOS-signed logout URL; client should redirect the browser to it. */
-    public String getLogoutUrl(String sessionId, @Nullable String returnTo) {
-        StringBuilder qs = new StringBuilder("session_id=").append(enc(sessionId));
-        if (returnTo != null && !returnTo.isBlank()) qs.append("&return_to=").append(enc(returnTo));
-        return BASE + "/user_management/sessions/logout?" + qs;
-    }
-
+    /** POST to {@code /authenticate}, which carries the API key as {@code client_secret} in the body. */
     private JsonNode post(String path, Map<String, Object> body) {
-        try {
-            String json = mapper.writeValueAsString(body);
-            HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + path))
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .header("Accept", "application/json")
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(20))
-                    .build();
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-            int s = res.statusCode();
-            if (s / 100 != 2) {
-                // WARN egresses to Loki and the exception message surfaces to the client; keep both
-                // categorical (path + status). The upstream body can carry WorkOS account/user detail —
-                // keep it local at DEBUG only.
-                log.warn("WorkOS {} -> {}", path, s);
-                log.debug("WorkOS {} -> {} body={}", path, s, truncate(res.body(), 200));
-                throw new AuthException("workos " + path + " returned " + s);
-            }
-            return mapper.readTree(res.body());
-        } catch (java.io.IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            throw new AuthException("workos call failed: " + e.getMessage(), e);
-        } catch (AuthException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new AuthException("workos call failed: " + e.getMessage(), e);
-        }
+        return send(path, body, false);
     }
 
+    /** POST to a plain REST endpoint, which takes the API key as a bearer header instead. */
     private JsonNode postBearer(String path, Map<String, Object> body) {
+        return send(path, body, true);
+    }
+
+    private JsonNode send(String path, Map<String, Object> body, boolean bearer) {
         try {
             String json = mapper.writeValueAsString(body);
-            HttpRequest req = HttpRequest.newBuilder(URI.create(BASE + path))
+            HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(BASE + path))
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .header("Accept", "application/json")
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + props.getApiKey())
-                    .timeout(Duration.ofSeconds(20))
-                    .build();
-            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+                    .timeout(Duration.ofSeconds(20));
+            if (bearer) req.header("Authorization", "Bearer " + props.getApiKey());
+            HttpResponse<String> res = http.send(req.build(), HttpResponse.BodyHandlers.ofString());
             int s = res.statusCode();
             if (s / 100 != 2) {
                 // WARN egresses to Loki and the exception message surfaces to the client; keep both

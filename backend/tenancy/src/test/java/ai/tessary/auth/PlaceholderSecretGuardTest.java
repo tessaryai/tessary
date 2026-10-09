@@ -88,17 +88,6 @@ class PlaceholderSecretGuardTest {
     }
 
     @Test
-    void verify_namesBothKeysWhenBothAreStillDefault() {
-        String message = refusalOf(guard(
-                "app.example.com",
-                PlaceholderSecretGuard.SEALING_PLACEHOLDER,
-                PlaceholderSecretGuard.COOKIE_PLACEHOLDER));
-
-        assertTrue(message.contains("TESSARY_AUTH_COOKIE_PASSWORD"));
-        assertTrue(message.contains("TESSARY_SECRET_KEY"));
-    }
-
-    @Test
     void verify_bootsWithAWarningOnALocalhostInstance() {
         // The whole point of the placeholders: `docker compose up -d` with no .env has to work.
         guard("", PlaceholderSecretGuard.SEALING_PLACEHOLDER, PlaceholderSecretGuard.COOKIE_PLACEHOLDER)

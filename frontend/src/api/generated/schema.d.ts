@@ -580,6 +580,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_callSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/chart-scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierChartController_scopes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/charts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierChartController_charts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events": {
         parameters: {
             query?: never;
@@ -644,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/call-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["ClassifierController_setCallSites"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/debug": {
         parameters: {
             query?: never;
@@ -692,6 +756,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-tuning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getFrustrationTuning"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ClassifierController_getGroundednessStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics": {
         parameters: {
             query?: never;
@@ -718,6 +814,22 @@ export interface paths {
         get?: never;
         put: operations["ClassifierController_setMode"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["ClassifierController_reset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -844,6 +956,38 @@ export interface paths {
             cookie?: never;
         };
         get: operations["FindingController_findingEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/flagged-answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_flaggedAnswers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/frustrated-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["FindingController_frustratedSessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2060,6 +2204,14 @@ export interface components {
             data?: components["schemas"]["ChannelView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseChartScopesView: {
+            data?: components["schemas"]["ChartScopesView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseChartsView: {
+            data?: components["schemas"]["ChartsView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseClassifierDailyVolumeView: {
             data?: components["schemas"]["ClassifierDailyVolumeView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2100,12 +2252,28 @@ export interface components {
             data?: components["schemas"]["FindingEvidenceSpanPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
+        ApiResponseFlaggedAnswerPage: {
+            data?: components["schemas"]["FlaggedAnswerPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseFrustratedSessionPage: {
+            data?: components["schemas"]["FrustratedSessionPage"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseFrustrationTuningView: {
+            data?: components["schemas"]["FrustrationTuningView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
         ApiResponseGitIntegrationView: {
             data?: components["schemas"]["GitIntegrationView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseGlobalSearchView: {
             data?: components["schemas"]["GlobalSearchView"] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseGroundednessStatusView: {
+            data?: components["schemas"]["GroundednessStatusView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseImportResult: {
@@ -2192,6 +2360,10 @@ export interface components {
         };
         ApiResponseListSourceResponse: {
             data?: components["schemas"]["SourceResponse"][] | null;
+            meta: components["schemas"]["ResponseMeta"];
+        };
+        ApiResponseListString: {
+            data?: string[] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseListToolErrorRateView: {
@@ -2389,6 +2561,23 @@ export interface components {
                     registeredAsParallelCapable?: boolean;
                     unnamedModule?: {
                         annotations?: unknown[];
+                        classLoader?: {
+                            defaultAssertionStatus?: boolean;
+                            definedPackages?: {
+                                annotations?: unknown[];
+                                declaredAnnotations?: unknown[];
+                                implementationTitle?: string;
+                                implementationVendor?: string;
+                                implementationVersion?: string;
+                                name?: string;
+                                sealed?: boolean;
+                                specificationTitle?: string;
+                                specificationVendor?: string;
+                                specificationVersion?: string;
+                            }[];
+                            name?: string;
+                            registeredAsParallelCapable?: boolean;
+                        };
                         declaredAnnotations?: unknown[];
                         descriptor?: {
                             automatic?: boolean;
@@ -2404,6 +2593,23 @@ export interface components {
                 registeredAsParallelCapable?: boolean;
                 unnamedModule?: {
                     annotations?: unknown[];
+                    classLoader?: {
+                        defaultAssertionStatus?: boolean;
+                        definedPackages?: {
+                            annotations?: unknown[];
+                            declaredAnnotations?: unknown[];
+                            implementationTitle?: string;
+                            implementationVendor?: string;
+                            implementationVersion?: string;
+                            name?: string;
+                            sealed?: boolean;
+                            specificationTitle?: string;
+                            specificationVendor?: string;
+                            specificationVersion?: string;
+                        }[];
+                        name?: string;
+                        registeredAsParallelCapable?: boolean;
+                    };
                     declaredAnnotations?: unknown[];
                     descriptor?: {
                         automatic?: boolean;
@@ -2436,6 +2642,20 @@ export interface components {
             windowSeconds: number;
             windowStart: string | null;
         };
+        ArmingView: {
+            basis: string;
+            confidence: string;
+            /** Format: int64 */
+            threshold: number;
+            /** Format: int64 */
+            window_seconds: number;
+        };
+        Attribution: {
+            commit: string | null;
+            excerpt: string | null;
+            kind: string;
+            path: string | null;
+        };
         AuditLog: {
             action: string;
             attributes: string | null;
@@ -2467,8 +2687,9 @@ export interface components {
         };
         BehaviorFindingDetailView: {
             armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
-            baseline: components["schemas"]["ConformanceBaselineView"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
+            frustration: components["schemas"]["FrustrationDetail"] | null;
+            groundedness: components["schemas"]["GroundednessDetail"] | null;
             malformedOutput: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
             secretLeak: components["schemas"]["SecretLeakDetail"] | null;
@@ -2479,9 +2700,7 @@ export interface components {
             caseId: string | null;
             causeKey: string;
             causeKind: string;
-            conformanceKind: string | null;
             detector: string | null;
-            evidence: components["schemas"]["EvidenceRefView"][];
             firstSeenAt: string;
             humanVerdictAt: string | null;
             id: string;
@@ -2501,26 +2720,6 @@ export interface components {
         BehaviorFindingsView: {
             findings: components["schemas"]["BehaviorFindingView"][];
             lane: string;
-        };
-        BehaviorProfileDebugView: {
-            /** Format: int32 */
-            alphabet_size: number;
-            armed_at: string | null;
-            call_site_id: string;
-            /** Format: double */
-            discovery_rate: number | null;
-            fit_carry_json: string | null;
-            last_trace_at: string | null;
-            /** Format: int32 */
-            max_order: number;
-            opened_at: string;
-            rare_symbols_json: string | null;
-            reservoir_json: string | null;
-            state: string;
-            /** Format: double */
-            threshold_d2: number | null;
-            /** Format: int64 */
-            trace_count: number;
         };
         BehaviorResolutionRequest: {
             action: string;
@@ -2558,11 +2757,18 @@ export interface components {
             tools: components["schemas"]["ToolSpec"][];
             use_case: string | null;
         };
+        CallSiteOption: {
+            call_site_id: string;
+            learning: boolean;
+            /** Format: int32 */
+            open_cases: number;
+            /** Format: int64 */
+            turns: number;
+        };
         CapabilitiesView: {
             capabilities: {
                 [key: string]: boolean;
             };
-            unavailable: string[];
         };
         Capability: {
             call_site_ids: string[];
@@ -2578,6 +2784,8 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
+            frustration: components["schemas"]["FrustrationDetail"] | null;
+            groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
             malformed_output: components["schemas"]["MalformedDetail"] | null;
             metric: components["schemas"]["ShiftDetail"] | null;
@@ -2619,6 +2827,17 @@ export interface components {
             triaged_at: string | null;
             verdict: string | null;
         };
+        CaseSpan: {
+            case_id: string;
+            case_reference: string;
+            case_state: string;
+            case_title: string;
+            disposition: string | null;
+            end_at: string | null;
+            finding_id: string;
+            resolution: string | null;
+            start_at: string;
+        };
         CaseView: {
             /** Format: double */
             baseline_value: number | null;
@@ -2630,6 +2849,7 @@ export interface components {
             /** Format: double */
             delta: number | null;
             detector: string;
+            disposition: string | null;
             /** Format: int64 */
             finding_count: number;
             id: string;
@@ -2655,20 +2875,38 @@ export interface components {
             subject_label: string;
             title: string;
         };
+        CasesView: {
+            /** Format: int32 */
+            open_cases: number;
+            spans: components["schemas"]["CaseSpan"][];
+        };
         CatalogEntry: {
             agentic: boolean;
+            decision: boolean;
             default_base_url: string;
             display_name: string;
             effort_levels: string[];
             model_name: string;
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             strict_json_schema: boolean;
             vendor: string;
         };
         CatalogView: {
             models: components["schemas"]["CatalogEntry"][];
             platforms: components["schemas"]["PlatformDescriptor"][];
+        };
+        Cause: {
+            /** Format: int32 */
+            affected_count: number;
+            attribution: components["schemas"]["Attribution"] | null;
+            confidence: string;
+            evidence_session_ids: string[];
+            evidence_trace_ids: string[];
+            how_it_caused_this: string | null;
+            next_step: string | null;
+            title: string;
+            what_changed: string | null;
         };
         Chain: {
             call_site_ids: string[];
@@ -2689,6 +2927,78 @@ export interface components {
             name: string;
             updatedAt: string;
         };
+        ChartBaseline: {
+            /** Format: int64 */
+            calls: number | null;
+            /** Format: int64 */
+            failures: number | null;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+            pinned: boolean | null;
+            /** Format: double */
+            rate: number | null;
+        };
+        ChartCard: {
+            arming: components["schemas"]["ArmingView"] | null;
+            baseline: components["schemas"]["ChartBaseline"] | null;
+            cases: components["schemas"]["CasesView"];
+            classifier_id: string;
+            classifier_key: string;
+            headline: components["schemas"]["HeadlineView"];
+            kind: string;
+            learning: components["schemas"]["LearningView"] | null;
+            measure: string | null;
+            name: string;
+            points: components["schemas"]["ChartPoint"][];
+            unit: string;
+        };
+        ChartChip: {
+            classifier_id: string;
+            classifier_key: string;
+            name: string;
+            reason: string | null;
+            since: string | null;
+            state: string;
+        };
+        ChartPoint: {
+            /** Format: int64 */
+            checked: number | null;
+            /** Format: int64 */
+            count: number | null;
+            end_at: string;
+            /** Format: int64 */
+            flagged: number | null;
+            /** Format: int64 */
+            n: number | null;
+            open: boolean;
+            /** Format: double */
+            p50: number | null;
+            /** Format: double */
+            p95: number | null;
+            reached: boolean | null;
+            start_at: string;
+            /** Format: int64 */
+            total: number | null;
+        };
+        ChartScopesView: {
+            call_sites: components["schemas"]["CallSiteOption"][];
+            classifiers: components["schemas"]["ClassifierMenuItem"][];
+            /** Format: int32 */
+            days: number;
+            tools: components["schemas"]["ToolOption"][];
+        };
+        ChartsView: {
+            cards: components["schemas"]["ChartCard"][];
+            chips: components["schemas"]["ChartChip"][];
+            /** Format: int32 */
+            days: number;
+            from_day: string;
+            scope: string;
+            scope_id: string;
+            to_day: string;
+        };
         Citation: {
             path: string;
             reason: string;
@@ -2708,7 +3018,6 @@ export interface components {
             trace_totals: number[];
         };
         ClassifierDebugView: {
-            behavior_profiles: components["schemas"]["BehaviorProfileDebugView"][] | null;
             detector: string;
             family: string;
             id: string;
@@ -2725,6 +3034,7 @@ export interface components {
             id: string;
             occurred_at: string | null;
             project_version_id: string | null;
+            session_id: string | null;
             severity: string | null;
             subject_id: string;
             subject_kind: string;
@@ -2741,6 +3051,17 @@ export interface components {
             next_attempt_at: string | null;
             status: string;
         };
+        ClassifierMenuItem: {
+            all_call_sites: boolean;
+            /** Format: int32 */
+            call_site_count: number;
+            classifier_key: string;
+            covers: string;
+            id: string;
+            name: string;
+            status: string;
+            waiting_reason: string | null;
+        };
         ClassifierMetricsView: {
             classifier_id: string;
             /** Format: int64 */
@@ -2753,6 +3074,7 @@ export interface components {
         };
         ClassifierView: {
             built_in: boolean;
+            call_site_ids: string[] | null;
             classifier_key: string;
             config_json: string | null;
             created_at: string;
@@ -2770,15 +3092,6 @@ export interface components {
         ConfirmRequest: {
             org_slug?: string;
             project_slug?: string;
-        };
-        ConformanceBaselineView: {
-            /** Format: int64 */
-            applicableTurns: number;
-            fittedAt: string;
-            ruleKey: string;
-            violatingTraceIds: string[];
-            /** Format: int32 */
-            violations: number;
         };
         ConnectRequest: {
             defaultBranch?: string;
@@ -2869,6 +3182,16 @@ export interface components {
             id: string;
             status: string;
         };
+        DetectionLabel: {
+            classifier_id: string;
+            name: string;
+        };
+        DetectionMark: {
+            classifier_id: string;
+            name: string;
+            span_id: string | null;
+            trace_id: string;
+        };
         Duration: {
             /** Format: int64 */
             baseline_p95_ms: number | null;
@@ -2902,15 +3225,6 @@ export interface components {
                 [key: string]: string;
             } | null;
             message?: string | null;
-        };
-        EvidenceRefView: {
-            grain: string;
-            /** Format: int32 */
-            rank: number | null;
-            role: string;
-            sessionId: string | null;
-            spanId: string | null;
-            traceId: string | null;
         };
         EvidenceSpanView: {
             callSiteId: string | null;
@@ -3043,16 +3357,138 @@ export interface components {
             };
             rows: components["schemas"]["EvidenceSpanView"][];
         };
+        FlaggedAnswerPage: {
+            nextCursor: string | null;
+            rows: components["schemas"]["FlaggedAnswerView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        FlaggedAnswerView: {
+            answer: string | null;
+            cleared: boolean;
+            documents: components["schemas"]["RetrievedDocumentView"][] | null;
+            flaggedAt: string | null;
+            flaggedSentences: components["schemas"]["FlaggedSentenceView"][];
+            premiseHadEvidence: boolean;
+            question: string | null;
+            /** Format: double */
+            score: number | null;
+            sessionId: string | null;
+            spanId: string;
+            stored: boolean;
+            traceId: string;
+        };
+        FlaggedSentenceView: {
+            /** Format: int32 */
+            end: number;
+            /** Format: double */
+            score: number;
+            /** Format: int32 */
+            start: number;
+        };
+        FrustratedConversationView: {
+            callSiteId: string | null;
+            cleared: boolean;
+            contextTraceIds: string[];
+            conversationId: string;
+            flaggedAt: string | null;
+            message: string | null;
+            /** Format: double */
+            score: number | null;
+            sessionId: string | null;
+            traceId: string;
+        };
+        FrustratedSessionPage: {
+            nextCursor: string | null;
+            rows: components["schemas"]["FrustratedConversationView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        FrustrationCallSiteView: {
+            /** Format: int64 */
+            baseline_conversations: number | null;
+            /** Format: int64 */
+            baseline_frustrated: number | null;
+            /** Format: double */
+            baseline_rate: number | null;
+            call_site_id: string;
+            /** Format: double */
+            decision_interval: number | null;
+            /** Format: int64 */
+            learned_conversations: number;
+            onset_at: string | null;
+            reset_at: string | null;
+            reset_note: string | null;
+            state: string;
+            /** Format: double */
+            statistic: number;
+        };
+        FrustrationDetail: {
+            /** Format: int64 */
+            arlTarget: number;
+            /** Format: int64 */
+            baselineFrustrated: number;
+            conversations: components["schemas"]["FrustratedConversationView"][];
+            conversationsNextCursor: string | null;
+            /** Format: double */
+            jevThreshold: number;
+            /** Format: double */
+            minDecisionInterval: number;
+            rate: components["schemas"]["RateDetail"];
+            scorerVersion: string | null;
+        };
+        FrustrationTuningView: {
+            /** Format: int64 */
+            arl_target: number;
+            call_sites: components["schemas"]["FrustrationCallSiteView"][];
+            /** Format: int32 */
+            min_baseline_conversations: number;
+            /** Format: double */
+            min_decision_interval: number;
+            scorer_version: string;
+            /** Format: double */
+            shift_floor: number;
+            /** Format: double */
+            shift_multiple: number;
+            /** Format: double */
+            threshold: number;
+            /** Format: int64 */
+            unassigned_conversations: number;
+        };
         GitIntegrationView: {
             defaultBranch: string;
             host: string;
-            observerCursorSha: string;
             provider: string;
             repoName: string;
             repoOwner: string;
         };
         GlobalSearchView: {
             hits: components["schemas"]["SearchHit"][];
+        };
+        GroundednessDetail: {
+            answers: components["schemas"]["FlaggedAnswerView"][];
+            answersNextCursor: string | null;
+            /** Format: int64 */
+            arlTarget: number;
+            /** Format: int64 */
+            baselineTraces: number;
+            /** Format: double */
+            flagThreshold: number;
+            /** Format: int64 */
+            learningUntil: number;
+            rate: components["schemas"]["RateDetail"];
+        };
+        GroundednessStatusView: {
+            available: boolean;
+            checked_at: string | null;
+            configured: boolean;
+            ever_swept: boolean;
+            last_caught_up_at: string | null;
+            last_scored_at: string | null;
+            mode: string;
+            reason: string;
+            setup_ref: string;
+            state: string;
         };
         Group: {
             cost: components["schemas"]["Cost"];
@@ -3063,11 +3499,16 @@ export interface components {
         };
         GroupView: {
             description: string;
-            effort_tunable: boolean;
             /** @enum {string} */
-            id: "llm_calls" | "agent_vm";
+            id: "agent_vm" | "decision_calls";
             label: string;
-            tiered: boolean;
+            model_selectable: boolean;
+        };
+        HeadlineView: {
+            /** Format: double */
+            delta: number | null;
+            /** Format: double */
+            value: number | null;
         };
         /** @enum {unknown} */
         HttpStatus: "100 CONTINUE" | "101 SWITCHING_PROTOCOLS" | "102 PROCESSING" | "103 EARLY_HINTS" | "200 OK" | "201 CREATED" | "202 ACCEPTED" | "203 NON_AUTHORITATIVE_INFORMATION" | "204 NO_CONTENT" | "205 RESET_CONTENT" | "206 PARTIAL_CONTENT" | "207 MULTI_STATUS" | "208 ALREADY_REPORTED" | "226 IM_USED" | "300 MULTIPLE_CHOICES" | "301 MOVED_PERMANENTLY" | "302 FOUND" | "303 SEE_OTHER" | "304 NOT_MODIFIED" | "307 TEMPORARY_REDIRECT" | "308 PERMANENT_REDIRECT" | "400 BAD_REQUEST" | "401 UNAUTHORIZED" | "402 PAYMENT_REQUIRED" | "403 FORBIDDEN" | "404 NOT_FOUND" | "405 METHOD_NOT_ALLOWED" | "406 NOT_ACCEPTABLE" | "407 PROXY_AUTHENTICATION_REQUIRED" | "408 REQUEST_TIMEOUT" | "409 CONFLICT" | "410 GONE" | "411 LENGTH_REQUIRED" | "412 PRECONDITION_FAILED" | "413 CONTENT_TOO_LARGE" | "413 PAYLOAD_TOO_LARGE" | "414 URI_TOO_LONG" | "415 UNSUPPORTED_MEDIA_TYPE" | "416 REQUESTED_RANGE_NOT_SATISFIABLE" | "417 EXPECTATION_FAILED" | "418 I_AM_A_TEAPOT" | "421 MISDIRECTED_REQUEST" | "422 UNPROCESSABLE_CONTENT" | "422 UNPROCESSABLE_ENTITY" | "423 LOCKED" | "424 FAILED_DEPENDENCY" | "425 TOO_EARLY" | "426 UPGRADE_REQUIRED" | "428 PRECONDITION_REQUIRED" | "429 TOO_MANY_REQUESTS" | "431 REQUEST_HEADER_FIELDS_TOO_LARGE" | "451 UNAVAILABLE_FOR_LEGAL_REASONS" | "500 INTERNAL_SERVER_ERROR" | "501 NOT_IMPLEMENTED" | "502 BAD_GATEWAY" | "503 SERVICE_UNAVAILABLE" | "504 GATEWAY_TIMEOUT" | "505 HTTP_VERSION_NOT_SUPPORTED" | "506 VARIANT_ALSO_NEGOTIATES" | "507 INSUFFICIENT_STORAGE" | "508 LOOP_DETECTED" | "509 BANDWIDTH_LIMIT_EXCEEDED" | "510 NOT_EXTENDED" | "511 NETWORK_AUTHENTICATION_REQUIRED";
@@ -3078,12 +3519,6 @@ export interface components {
             is3xxRedirection?: boolean;
             is4xxClientError?: boolean;
             is5xxServerError?: boolean;
-        };
-        Hypothesis: {
-            confidence: string;
-            evidence_trace_ids: string[];
-            rationale: string;
-            title: string;
         };
         ImplicitInvariant: {
             applies_to: unknown;
@@ -3149,11 +3584,17 @@ export interface components {
             description: string;
             effective_model_key: string | null;
             /** @enum {string} */
-            group: "llm_calls" | "agent_vm";
+            group: "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage";
+            id: "rca" | "triage" | "authoring" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
+        };
+        LearningView: {
+            /** Format: int64 */
+            learned: number;
+            /** Format: int64 */
+            needed: number;
         };
         LlmUsageCellView: {
             bucket_start: string;
@@ -3256,21 +3697,11 @@ export interface components {
         };
         ModelDescriptor: {
             agentic: boolean;
-            api_path: string | null;
             display_name: string;
-            effort_levels: string[];
             /** @enum {string} */
             endpoint: "RUNTIME" | "MANTLE";
-            explicit_cache_ttls: string[];
-            forced_tool_choice: boolean;
             inference_profile_id: string;
-            /** Format: int32 */
-            min_cache_checkpoint_tokens: number;
             model_key: string;
-            prompt_caching: boolean;
-            /** @enum {string} */
-            structured_output: "NATIVE" | "TOOL_CALL";
-            supported_tiers: ("standard" | "flex" | "priority" | "batch")[];
             vendor: string;
         };
         ModelRateView: {
@@ -3280,7 +3711,7 @@ export interface components {
         };
         ModelSettingsView: {
             catalog_models: components["schemas"]["CatalogEntry"][];
-            configured_providers: ("OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE")[];
+            configured_providers: ("OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM")[];
             groups: components["schemas"]["GroupView"][];
             lanes: components["schemas"]["LaneView"][];
             models: components["schemas"]["ModelDescriptor"][];
@@ -3346,10 +3777,9 @@ export interface components {
         };
         OverrideView: {
             capability: string;
+            default_enabled: boolean;
             enabled: boolean;
             has_override: boolean;
-            open_default: boolean;
-            unavailable: boolean;
         };
         Pack: {
             content_digest: string | null;
@@ -3405,10 +3835,12 @@ export interface components {
         PlatformDescriptor: {
             auth: string;
             default_base_url: string;
+            detail: string | null;
             /** @enum {string} */
-            id: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+            id: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             label: string;
             supports_base_url: boolean;
+            used_by: string[];
         };
         PolicyView: {
             /** Format: int64 */
@@ -3480,7 +3912,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage";
+            lane: "rca" | "triage" | "authoring" | "frustration";
             model_key: string;
             project_id: string;
             reasoning_effort: string | null;
@@ -3504,7 +3936,7 @@ export interface components {
             label: string;
             model_keys: string[];
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
         };
         RateDetail: {
             bucketKey: string;
@@ -3538,6 +3970,7 @@ export interface components {
         };
         RcaReportView: {
             call_site_id: string | null;
+            causes: components["schemas"]["Cause"][];
             completed_at: string | null;
             created_at: string;
             /** Format: double */
@@ -3546,13 +3979,13 @@ export interface components {
             delta: number;
             detailed_report: string | null;
             engine: string;
-            hypotheses: components["schemas"]["Hypothesis"][];
             id: string;
             job_id: string;
             metric: string;
             /** Format: double */
             prior_value: number;
             repo_available: boolean | null;
+            report_kind: string;
             ruled_out: components["schemas"]["RuledOutCheck"][];
             status: string;
             subject_id: string;
@@ -3603,6 +4036,7 @@ export interface components {
             owner: string;
         };
         ResolveCaseRequest: {
+            disposition?: string | null;
             reason: string;
         };
         ResponseMeta: {
@@ -3613,6 +4047,8 @@ export interface components {
         };
         RetentionClassView: {
             data_class: string;
+            /** Format: int32 */
+            fixed_ttl_days: number;
             from_policy: boolean;
             /** Format: int32 */
             platform_default_days: number;
@@ -3637,6 +4073,10 @@ export interface components {
             /** Format: int32 */
             seq: number | null;
         };
+        RetrievedDocumentView: {
+            text: string;
+            title: string | null;
+        };
         RuleListView: {
             rules: components["schemas"]["RuleView"][];
         };
@@ -3653,11 +4093,12 @@ export interface components {
             updated_at: string;
         };
         RuledOutCheck: {
-            assessment: string | null;
+            assessment: string;
             check: string;
             detail: string;
             measurement: string | null;
             passed: boolean;
+            question: string | null;
         };
         Runtime: {
             /** Format: double */
@@ -3791,6 +4232,23 @@ export interface components {
                     registeredAsParallelCapable?: boolean;
                     unnamedModule?: {
                         annotations?: unknown[];
+                        classLoader?: {
+                            defaultAssertionStatus?: boolean;
+                            definedPackages?: {
+                                annotations?: unknown[];
+                                declaredAnnotations?: unknown[];
+                                implementationTitle?: string;
+                                implementationVendor?: string;
+                                implementationVersion?: string;
+                                name?: string;
+                                sealed?: boolean;
+                                specificationTitle?: string;
+                                specificationVendor?: string;
+                                specificationVersion?: string;
+                            }[];
+                            name?: string;
+                            registeredAsParallelCapable?: boolean;
+                        };
                         declaredAnnotations?: unknown[];
                         descriptor?: {
                             automatic?: boolean;
@@ -3806,6 +4264,23 @@ export interface components {
                 registeredAsParallelCapable?: boolean;
                 unnamedModule?: {
                     annotations?: unknown[];
+                    classLoader?: {
+                        defaultAssertionStatus?: boolean;
+                        definedPackages?: {
+                            annotations?: unknown[];
+                            declaredAnnotations?: unknown[];
+                            implementationTitle?: string;
+                            implementationVendor?: string;
+                            implementationVersion?: string;
+                            name?: string;
+                            sealed?: boolean;
+                            specificationTitle?: string;
+                            specificationVendor?: string;
+                            specificationVersion?: string;
+                        }[];
+                        name?: string;
+                        registeredAsParallelCapable?: boolean;
+                    };
                     declaredAnnotations?: unknown[];
                     descriptor?: {
                         automatic?: boolean;
@@ -3871,10 +4346,12 @@ export interface components {
             secure?: boolean;
         };
         SessionDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             /** Format: int64 */
             error_count: number | null;
             id: string;
             last_activity_at: string;
+            matched_trace_ids: string[] | null;
             /** Format: int64 */
             span_count: number | null;
             started_at: string;
@@ -3898,6 +4375,7 @@ export interface components {
             cache_write_tokens: number | null;
             /** Format: int32 */
             call_site_count: number | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             dominant_call_site_id: string | null;
             /** Format: int64 */
             error_count: number | null;
@@ -3934,6 +4412,9 @@ export interface components {
         SessionsPage: {
             next_cursor: string | null;
             sessions: components["schemas"]["SessionListItem"][];
+        };
+        SetCallSitesRequest: {
+            call_site_ids?: string[] | null;
         };
         SetEnabledRequest: {
             enabled: boolean;
@@ -3993,6 +4474,7 @@ export interface components {
         SignupPolicyView: {
             domains: string[];
             governing: boolean;
+            governing_org_name: string | null;
             governing_org_slug: string | null;
             mode: string;
         };
@@ -4129,7 +4611,6 @@ export interface components {
             mcpToken?: boolean;
             mcpTokenId: string | null;
             orgId: string | null;
-            owner?: boolean;
             projectId: string | null;
             role: string | null;
             userEmail: string | null;
@@ -4174,6 +4655,15 @@ export interface components {
             /** Format: int64 */
             total_calls: number;
         };
+        ToolOption: {
+            callers: string[];
+            /** Format: int64 */
+            calls: number;
+            label: string;
+            /** Format: int32 */
+            open_cases: number;
+            tool_key: string;
+        };
         ToolSpec: {
             description: string | null;
             input_schema: components["schemas"]["JsonNode"] | null;
@@ -4181,6 +4671,7 @@ export interface components {
             source: string | null;
         };
         TraceDetail: {
+            detections: components["schemas"]["DetectionMark"][];
             spans: components["schemas"]["SpanView"][];
             trace: components["schemas"]["TraceListItem"];
         };
@@ -4190,6 +4681,7 @@ export interface components {
             /** Format: int64 */
             cache_write_tokens: number | null;
             call_site_id: string | null;
+            detected_by: components["schemas"]["DetectionLabel"][];
             ended_at: string | null;
             /** Format: int32 */
             error_count: number | null;
@@ -4354,7 +4846,7 @@ export interface components {
             has_aws_credentials: boolean;
             id: string;
             /** @enum {string} */
-            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+            provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             updated_at: string;
         };
         Vitals: {
@@ -5656,6 +6148,85 @@ export interface operations {
             };
         };
     };
+    ClassifierController_callSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListString"];
+                };
+            };
+        };
+    };
+    ClassifierChartController_scopes: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseChartScopesView"];
+                };
+            };
+        };
+    };
+    ClassifierChartController_charts: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                callSiteId?: string;
+                tool?: string;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseChartsView"];
+                };
+            };
+        };
+    };
     ClassifierController_events: {
         parameters: {
             query: {
@@ -5758,6 +6329,36 @@ export interface operations {
             };
         };
     };
+    ClassifierController_setCallSites: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCallSitesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
     ClassifierDebugController_get: {
         parameters: {
             query: {
@@ -5842,6 +6443,58 @@ export interface operations {
             };
         };
     };
+    ClassifierController_getFrustrationTuning: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustrationTuningView"];
+                };
+            };
+        };
+    };
+    ClassifierController_getGroundednessStatus: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGroundednessStatusView"];
+                };
+            };
+        };
+    };
     ClassifierController_metrics: {
         parameters: {
             query: {
@@ -5886,6 +6539,32 @@ export interface operations {
                 "application/json": components["schemas"]["SetModeRequest"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseClassifierView"];
+                };
+            };
+        };
+    };
+    ClassifierController_reset: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
@@ -6138,6 +6817,66 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFindingEvidenceSpanPage"];
+                };
+            };
+        };
+    };
+    FindingController_flaggedAnswers: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                rcaReport?: string;
+                cause?: number;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFlaggedAnswerPage"];
+                };
+            };
+        };
+    };
+    FindingController_frustratedSessions: {
+        parameters: {
+            query: {
+                ctx: components["schemas"]["TenantContext"];
+                rcaReport?: string;
+                cause?: number;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                orgSlug: string;
+                projectSlug: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFrustratedSessionPage"];
                 };
             };
         };
@@ -7112,6 +7851,15 @@ export interface operations {
                 limit?: number;
                 cursor?: string;
                 include?: string;
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7137,6 +7885,15 @@ export interface operations {
         parameters: {
             query: {
                 ctx: components["schemas"]["TenantContext"];
+                model?: string;
+                kind?: string;
+                callSite?: string;
+                hasCallSite?: boolean;
+                fromTimestamp?: string;
+                toTimestamp?: string;
+                status?: string;
+                q?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7325,11 +8082,13 @@ export interface operations {
                 model?: string;
                 kind?: string;
                 callSite?: string;
+                hasCallSite?: boolean;
                 fromTimestamp?: string;
                 toTimestamp?: string;
                 status?: string;
                 q?: string;
                 sort?: string;
+                detectedBy?: string;
             };
             header?: never;
             path: {
@@ -7589,7 +8348,7 @@ export interface operations {
             header?: never;
             path: {
                 orgSlug: string;
-                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             };
             cookie?: never;
         };
@@ -7618,7 +8377,7 @@ export interface operations {
             header?: never;
             path: {
                 orgSlug: string;
-                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE";
+                provider: "OPENAI" | "ANTHROPIC" | "OPENROUTER" | "MOONSHOT" | "BEDROCK" | "GEMINI" | "GLM" | "GROK" | "CUSTOM" | "BEDROCK_MANTLE" | "TYPESAFE" | "PLATFORM";
             };
             cookie?: never;
         };

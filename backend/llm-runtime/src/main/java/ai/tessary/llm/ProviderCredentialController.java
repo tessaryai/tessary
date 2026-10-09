@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +29,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -67,7 +70,6 @@ public class ProviderCredentialController {
     private static final Logger log = LoggerFactory.getLogger(ProviderCredentialController.class);
 
     private final ProviderCredentialRepository repo;
-    private final ChatModelFactory factory;
     private final SecretBox secretBox;
     private final TenantPathResolver resolver;
     private final CapabilityService capabilities;
@@ -75,19 +77,52 @@ public class ProviderCredentialController {
     /** The live, per-(org, provider) model catalog; see {@link #catalog}. */
     private final ModelCatalogFetchService catalogFetchService;
 
+    private final ApplicationEventPublisher events;
+
+    /** Whether and how {@link #catalog} lists {@link ModelProvider#PLATFORM}. */
+    private final PlatformProviderSupplier platformSupplier;
+
+    /** How long {@link #catalog} waits on one provider; {@link #PER_PROVIDER_FETCH_DEADLINE} in production. */
+    private final Duration fetchDeadline;
+
+    @Autowired
     public ProviderCredentialController(
             ProviderCredentialRepository repo,
-            ChatModelFactory factory,
             SecretBox secretBox,
             TenantPathResolver resolver,
             CapabilityService capabilities,
-            ModelCatalogFetchService catalogFetchService) {
+            ModelCatalogFetchService catalogFetchService,
+            ApplicationEventPublisher events,
+            PlatformProviderSupplier platformSupplier) {
+        this(
+                repo,
+                secretBox,
+                resolver,
+                capabilities,
+                catalogFetchService,
+                events,
+                platformSupplier,
+                PER_PROVIDER_FETCH_DEADLINE);
+    }
+
+    /** Test seam: a short deadline, so a test can hang one provider without waiting ten seconds. */
+    ProviderCredentialController(
+            ProviderCredentialRepository repo,
+            SecretBox secretBox,
+            TenantPathResolver resolver,
+            CapabilityService capabilities,
+            ModelCatalogFetchService catalogFetchService,
+            ApplicationEventPublisher events,
+            PlatformProviderSupplier platformSupplier,
+            Duration fetchDeadline) {
+        this.fetchDeadline = fetchDeadline;
         this.repo = repo;
-        this.factory = factory;
+        this.events = events;
         this.secretBox = secretBox;
         this.resolver = resolver;
         this.capabilities = capabilities;
         this.catalogFetchService = catalogFetchService;
+        this.platformSupplier = platformSupplier;
     }
 
     /**
@@ -165,9 +200,12 @@ public class ProviderCredentialController {
     @GetMapping("/catalog")
     public ApiResponse<CatalogView> catalog(TenantContext ctx, @PathVariable String orgSlug) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        Optional<PlatformProviderSupplier.SuppliedProvider> supplied =
+                platformSupplier.describe(r.org().id());
         Map<ModelProvider, List<ProviderModel>> live = fetchAllProviders(r.org().id());
         List<ModelCatalog.CatalogEntry> models = new ArrayList<>();
         for (ModelProvider provider : ModelProvider.values()) {
+            if (provider == ModelProvider.PLATFORM && supplied.isEmpty()) continue;
             List<ProviderModel> providerLive = live.getOrDefault(provider, List.of());
             List<ModelCatalog.CatalogEntry> providerEntries = providerLive.isEmpty()
                     ? ModelCatalog.entries().stream()
@@ -176,7 +214,25 @@ public class ProviderCredentialController {
                     : ModelCatalog.mergeLive(provider, providerLive);
             models.addAll(providerEntries);
         }
-        return ApiResponse.ok(new CatalogView(PlatformCatalog.platforms(), List.copyOf(models)));
+        return ApiResponse.ok(new CatalogView(platforms(supplied), List.copyOf(models)));
+    }
+
+    /**
+     * {@link PlatformCatalog#platforms()} with {@link ModelProvider#PLATFORM}'s placeholder replaced by
+     * the supplier's label and detail, or dropped when the supplier does not offer it to this org.
+     */
+    private static List<PlatformCatalog.PlatformDescriptor> platforms(
+            Optional<PlatformProviderSupplier.SuppliedProvider> supplied) {
+        List<PlatformCatalog.PlatformDescriptor> out = new ArrayList<>();
+        for (PlatformCatalog.PlatformDescriptor p : PlatformCatalog.platforms()) {
+            if (p.id() != ModelProvider.PLATFORM) {
+                out.add(p);
+            } else {
+                supplied.ifPresent(s -> out.add(new PlatformCatalog.PlatformDescriptor(
+                        p.id(), s.label(), p.auth(), p.supportsBaseUrl(), p.defaultBaseUrl(), p.usedBy(), s.detail())));
+            }
+        }
+        return List.copyOf(out);
     }
 
     /**
@@ -191,14 +247,14 @@ public class ProviderCredentialController {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Map<ModelProvider, Future<List<ProviderModel>>> futures = new EnumMap<>(ModelProvider.class);
             for (ModelProvider provider : ModelProvider.values()) {
+                // No org credential and no listing: the supplier, not a vendor, answers for PLATFORM.
+                if (provider == ModelProvider.PLATFORM) continue;
                 futures.put(provider, executor.submit(() -> catalogFetchService.refreshingRead(orgId, provider)));
             }
             Map<ModelProvider, List<ProviderModel>> results = new EnumMap<>(ModelProvider.class);
             for (Map.Entry<ModelProvider, Future<List<ProviderModel>>> entry : futures.entrySet()) {
                 try {
-                    results.put(
-                            entry.getKey(),
-                            entry.getValue().get(PER_PROVIDER_FETCH_DEADLINE.toMillis(), TimeUnit.MILLISECONDS));
+                    results.put(entry.getKey(), entry.getValue().get(fetchDeadline.toMillis(), TimeUnit.MILLISECONDS));
                 } catch (TimeoutException e) {
                     entry.getValue().cancel(true);
                 } catch (ExecutionException e) {
@@ -235,10 +291,11 @@ public class ProviderCredentialController {
             @PathVariable ModelProvider provider,
             @RequestBody UpsertRequest req) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        requireEditable(provider);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
 
-        // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target in
-        // ChatModelFactory (its response flows back into the judge verdict), so reject
+        // SSRF guard: a user-supplied base-URL override becomes a server-side outbound target (the
+        // model-catalog fetch, the decision call and the sandbox agent), so reject
         // loopback/link-local/RFC1918/CGNAT/IMDS hosts at the write boundary, exactly as the
         // ingestion-source URL is guarded. This is the only credentialed outbound caller that was
         // skipping the guard.
@@ -295,7 +352,7 @@ public class ProviderCredentialController {
         } else {
             repo.insert(row);
         }
-        factory.invalidate(r.org().id(), provider);
+        events.publishEvent(new ProviderCredentialSavedEvent(r.org().id(), provider));
         return ApiResponse.ok(toView(row));
     }
 
@@ -303,25 +360,34 @@ public class ProviderCredentialController {
     public ApiResponse<DeleteResponse> delete(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable ModelProvider provider) {
         var r = resolver.requireOrg(ctx, orgSlug);
+        requireEditable(provider);
         capabilities.require(r.org().id(), Capability.BYO_PROVIDER_KEYS);
         boolean deleted = repo.deleteByOrgAndProvider(r.org().id(), provider);
-        factory.invalidate(r.org().id(), provider);
         return ApiResponse.ok(new DeleteResponse(deleted));
     }
 
+    /**
+     * {@link ModelProvider#PLATFORM} takes no org credential: a stored row would be a key nothing reads,
+     * and {@link ProjectModelSettings#configuredProviders} ignores one anyway.
+     */
+    private static void requireEditable(ModelProvider provider) {
+        if (provider == ModelProvider.PLATFORM) {
+            throw new TessaryException(ModelConfigError.PROVIDER_NOT_EDITABLE, provider);
+        }
+    }
+
     private static String blankToNull(String s) {
-        return (s == null || s.isBlank()) ? null : s;
+        return s.isBlank() ? null : s;
     }
 
     /**
      * Bedrock needs a region (AWS auth). {@code api_key}/{@code none} platforms are not
-     * checked; a credential may be saved without a key, and a paid platform then fails at run
-     * time with {@code MISSING_CREDENTIALS} (only Ollama may run keyless).
+     * checked; a credential may be saved without a key, and the platform then fails at run time
+     * with {@code MISSING_CREDENTIALS}.
      *
      * <p>{@code auth_mode} is meaningful only for {@code AUTH_AWS} platforms (Bedrock/mantle): a
      * non-AWS platform saving {@code iam_role} would be a setting that can never take effect, since
-     * {@code ChatModelFactory} only ever reads {@link ProviderCredential#usesIamRole()} on that build
-     * path.
+     * {@link ProviderCredential#usesIamRole()} is only ever read on the AWS paths.
      */
     private static void validateAuth(ProviderCredential row) {
         boolean awsAuth = PlatformCatalog.AUTH_AWS.equals(PlatformCatalog.authOf(row.provider()));

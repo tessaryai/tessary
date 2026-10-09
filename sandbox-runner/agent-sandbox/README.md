@@ -1,20 +1,18 @@
-# observer-analyzer E2B template (v2 SDK build)
+# Agent sandbox E2B template (v2 SDK build)
 
-The microVM every agentic lane runs in: it clones the target repo at HEAD and runs
-**OpenCode** over the diff + the committed `.tessary/` bundle. Defined in code with the
-**E2B v2 build system** (no `e2b.toml`, no Dockerfile).
+The microVM every agentic lane runs in: it materializes a finding's dossier, clones the target
+repo at HEAD when the caller sends a clone URL, and runs **OpenCode** over them. Defined in code
+with the **E2B v2 build system** (no `e2b.toml`). The sibling `Dockerfile` builds the same runtime
+as the Docker backend's agent image.
 
 ## Files
 - `template.ts` — the image definition (base image, `git`, the `opencode-ai` CLI +
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
-  through the SDK. Required by `analyze.js` / `rca.js` / `triage.js` / `synthesize.js` /
-  `codegen.js`.
-- `analyze.js` — runs inside the sandbox: clone → checkout → repo-only bundle check → agent run
-  → emit verdict. (Node builtins only.)
+  through the SDK. Required by `rca.js`, `triage.js` and `authoring.js`.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
   `evidence.json`, `checklist.md`) → read-only agent run wired to the platform's MCP surface → emit
-  verdict + hypotheses + the markdown investigation. It reads every trace it cites through MCP, so
+  verdict + summary + causes + the markdown investigation. It reads every trace it cites through MCP, so
   the door is required; the clone is OPTIONAL and adds `./repo/` for the projects that have an
   integration. Read-only by permission rule: it may never edit the clone. (Node builtins only.)
 - `triage.js` — the Layer-2 ruling: materialize the finding's two-file dossier (`finding.md`,
@@ -23,6 +21,13 @@ The microVM every agentic lane runs in: it clones the target repo at HEAD and ru
   production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
   under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
   computes what is mechanical rather than eyeballing it. (Node builtins only.)
+- `authoring.js` — the generic agent run behind the backend's `AgentRunService` (the `AUTHORING`
+  lane): materialize the caller's files under `dossier/`, clone the repository at the requested
+  commit when a `clone_url` is sent (quarantined like RCA's), run the agent under the caller's own
+  system prompt wired to the platform's MCP surface, and emit the schema-constrained answer, or
+  prose when no `json_schema` was sent. The repository is read-only (`edit` denied under `repo/`);
+  everywhere else under the work dir is writable, so the agent can draft a builder and run it with
+  `node`. (Node builtins only.)
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's
@@ -48,7 +53,7 @@ pnpm exec tsx build.ts                            # == pnpm run build
 |---|---|---|
 | *(none)* | build + publish under the `default` tag | by hand |
 | `--release=<semver>` | build **only if the recipe hash changed**, tag `<semver>` + `recipe-<hash>` | `build-agent-template` |
-| `--verify=<semver>` | assert public + namespaced name, then boot it and run seven checks | `verify-agent-template` |
+| `--verify=<semver>` | assert public + namespaced name, then boot it and run four checks | `verify-agent-template` |
 | `--promote=<semver>` | move `latest` and `default` onto that build | `finalize` |
 | `--rollback=<semver>` | remove the `<semver>` tag, keep `recipe-<hash>` | `cleanup` |
 
@@ -57,6 +62,5 @@ pnpm exec tsx build.ts                            # == pnpm run build
 - The name is stable, so rebuilds update the same template; tags are what distinguish builds.
 - Verify: `e2b template list` shows `tessary/tessary-agent-sandbox`.
 
-> Network egress: this template (unlike the air-gapped grader template) reaches
-> github.com + the model provider at run time. Credentials are never baked in —
+> Network egress: this template reaches github.com + the model provider at run time. Credentials are never baked in —
 > the launcher injects them per invocation.

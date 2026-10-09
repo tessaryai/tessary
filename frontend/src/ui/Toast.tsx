@@ -2,19 +2,17 @@
 import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { CheckCircle2, X, XCircle } from "lucide-react";
 import { cn } from "./cn";
 
-export type ToastKind = "success" | "error" | "info";
-export type Toast = { id: number; kind: ToastKind; title: string; body?: string; ttlMs: number };
+type ToastKind = "success" | "error";
+type Toast = { id: number; kind: ToastKind; title: string; body?: string };
 
-type ToastInput = Omit<Toast, "id" | "ttlMs"> & { ttlMs?: number };
+type ToastInput = Omit<Toast, "id">;
 
 type Ctx = {
-  push: (t: ToastInput) => void;
   success: (title: string, body?: string) => void;
   error: (title: string, body?: string) => void;
-  info: (title: string, body?: string) => void;
 };
 
 const ToastCtx = createContext<Ctx | null>(null);
@@ -28,13 +26,11 @@ export function useToast(): Ctx {
 const KIND_STYLE: Record<ToastKind, { ring: string; icon: ReactNode }> = {
   success: { ring: "border-l-success", icon: <CheckCircle2 size={14} strokeWidth={1.75} aria-hidden="true" /> },
   error: { ring: "border-l-error", icon: <XCircle size={14} strokeWidth={1.75} aria-hidden="true" /> },
-  info: { ring: "border-l-info", icon: <Info size={14} strokeWidth={1.75} aria-hidden="true" /> },
 };
 
 const KIND_TEXT: Record<ToastKind, string> = {
   success: "text-success",
   error: "text-error",
-  info: "text-info",
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -48,18 +44,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback(
     (t: ToastInput) => {
       const id = ++seq.current;
-      const ttl = t.ttlMs ?? 5000;
-      setToasts((cur) => [...cur, { ...t, id, ttlMs: ttl }]);
-      window.setTimeout(() => dismiss(id), ttl);
+      setToasts((cur) => [...cur, { ...t, id }]);
+      window.setTimeout(() => dismiss(id), 5000);
     },
     [dismiss],
   );
 
   const ctx: Ctx = {
-    push,
     success: (title, body) => push({ kind: "success", title, body }),
     error: (title, body) => push({ kind: "error", title, body }),
-    info: (title, body) => push({ kind: "info", title, body }),
   };
 
   return (

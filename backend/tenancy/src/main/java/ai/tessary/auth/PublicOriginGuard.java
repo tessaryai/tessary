@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
@@ -55,16 +56,34 @@ public class PublicOriginGuard {
         "TESSARY_RCA_AGENTIC_MCP_BASE_URL", "TESSARY_CLASSIFIER_TRIAGE_MCP_BASE_URL"
     };
 
+    /** Resolves an IP-shaped host to its address; the seam a test uses to make a lookup fail. */
+    @FunctionalInterface
+    interface HostResolver {
+        InetAddress resolve(String host) throws UnknownHostException;
+    }
+
     private final TessaryProperties tessary;
     private final AuthProperties auth;
     private final WorkOsProperties workos;
     private final Environment env;
+    private final HostResolver resolver;
 
+    @Autowired
     public PublicOriginGuard(TessaryProperties tessary, AuthProperties auth, WorkOsProperties workos, Environment env) {
+        this(tessary, auth, workos, env, InetAddress::getByName);
+    }
+
+    PublicOriginGuard(
+            TessaryProperties tessary,
+            AuthProperties auth,
+            WorkOsProperties workos,
+            Environment env,
+            HostResolver resolver) {
         this.tessary = tessary;
         this.auth = auth;
         this.workos = workos;
         this.env = env;
+        this.resolver = resolver;
     }
 
     @PostConstruct
@@ -72,8 +91,7 @@ public class PublicOriginGuard {
         // BEFORE the no-domain early return: the value this catches is built precisely when
         // SITE_DOMAIN is blank, so a check that runs only under a domain never sees it.
         rejectHostlessMcpOrigin();
-        String raw =
-                tessary.getSiteDomain() == null ? "" : tessary.getSiteDomain().trim();
+        String raw = tessary.getSiteDomain().trim();
         if (raw.isEmpty() || NO_DOMAIN_SENTINEL.equals(raw)) {
             return;
         }
@@ -85,16 +103,13 @@ public class PublicOriginGuard {
         }
         tessary.setSiteDomain(domain);
 
-        String mode = tessary.getTlsMode() == null
-                ? "acme"
-                : tessary.getTlsMode().trim().toLowerCase(Locale.ROOT);
+        String mode = tessary.getTlsMode().trim().toLowerCase(Locale.ROOT);
         if (!TLS_MODES.contains(mode)) {
             throw new IllegalStateException(
                     "Refusing to start: TLS_MODE must be one of acme, owncert or upstream, not '" + tessary.getTlsMode()
                             + "'.");
         }
-        if ("acme".equals(mode)
-                && (tessary.getAcmeEmail() == null || tessary.getAcmeEmail().isBlank())) {
+        if ("acme".equals(mode) && tessary.getAcmeEmail().isBlank()) {
             throw new IllegalStateException("Refusing to start: ACME_EMAIL is required when SITE_DOMAIN is set and "
                     + "TLS_MODE is acme. Let's Encrypt registers the certificate account to that address, so it must "
                     + "be yours; set TLS_MODE=owncert or TLS_MODE=upstream to bring your own certificate or "
@@ -138,10 +153,7 @@ public class PublicOriginGuard {
     }
 
     /** The configured value when it already names the domain; the derived one when it is blank or local; otherwise a refusal naming both keys. */
-    private static String reconcile(String key, @Nullable String configured, String domain, String derived) {
-        if (configured == null) {
-            return derived;
-        }
+    private String reconcile(String key, String configured, String domain, String derived) {
         String host = hostOf(configured);
         if (host == null || isLocal(host)) {
             return derived;
@@ -185,17 +197,17 @@ public class PublicOriginGuard {
      * container itself — so a value pointing there is the misconfiguration this check exists to
      * catch, not the compose default it exists to allow.
      */
-    private static boolean isInternal(String host) {
+    private boolean isInternal(String host) {
         return !isLocal(host) && !host.contains(".") && !host.contains(":");
     }
 
     /** The hosts a compose default or a developer's own machine answers on: not a deployment origin. */
-    private static boolean isLocal(String host) {
+    private boolean isLocal(String host) {
         if ("localhost".equals(host)) return true;
         String bare = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
         if (!IP_LITERAL.matcher(bare).matches()) return false;
         try {
-            return InetAddress.getByName(bare).isLoopbackAddress();
+            return resolver.resolve(bare).isLoopbackAddress();
         } catch (UnknownHostException e) {
             return false;
         }

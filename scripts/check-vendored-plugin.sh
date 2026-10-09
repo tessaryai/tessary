@@ -9,7 +9,8 @@
 # public repo: phase 2 only READS raw file contents over unauthenticated HTTPS.
 #
 # Two phases:
-#   1. pytest over contract/tests — the validator rules the platform's import depends on.
+#   1. pytest over contract/tests — the validator rules the platform's import depends on. Lives in
+#      scripts/check-vendored-plugin-rules.sh, which scripts/check.sh also runs per PR.
 #   2. freshness — diff each vendored file against the plugin's live `main`.
 #
 # Phase 2 needs network. Offline it WARNS and passes, so a local `task check` on a plane still works;
@@ -24,19 +25,8 @@ fail() { echo "vendored-plugin: $1" >&2; exit 1; }
 
 # --- phase 1: the validator's rules -----------------------------------------------------------
 
-# validate.py is PLATFORM-OWNED (the plugin dropped its validator with synthesis in v0.23.0);
-# a sync will not restore it — its absence means someone deleted the platform's copy.
-[[ -f "$contract_dir/validate.py" ]] \
-  || fail "contract/validate.py is missing — it is platform-owned; restore it from git history"
-
-python3 -c 'import yaml' 2>/dev/null \
-  || fail "PyYAML is required to exercise the vendored validator (pip install pyyaml)"
-python3 -c 'import pytest' 2>/dev/null \
-  || fail "pytest is required (pip install pytest)"
-
-echo "vendored-plugin: running validator tests…"
-python3 -m pytest "$contract_dir/tests" -q --no-header \
-  || fail "the vendored validator does not behave as this platform's import assumes"
+# One definition of the rules, shared with the per-PR `vendored-plugin-rules` row in scripts/check.sh.
+bash "$repo_root/scripts/check-vendored-plugin-rules.sh" || exit 1
 
 # --- phase 2: is the vendored copy current? ---------------------------------------------------
 

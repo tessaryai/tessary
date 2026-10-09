@@ -13,8 +13,6 @@ import org.jspecify.annotations.Nullable;
  *       {@link #threshold}, {@link #windowSeconds}). one rule per classifier ({@code UNIQUE(classifier_id)}).
  *   <li>{@link RuleType#DIGEST} / {@link RuleType#BRIEF} — a per-project scheduled roll-up
  *       ({@link #digestCron} / {@link #briefCron}). At most one of each per project.
- *   <li>{@link RuleType#ANOMALY}, {@link RuleType#TRACE}, {@link RuleType#LOG}, {@link RuleType#EXCEPTION}
- *       — reserved rule types the schema accepts for a later increment; not yet evaluated.
  * </ul>
  *
  * <p>The two suppression controls live HERE, never on the classifier: {@link #enabled} is a hard off and
@@ -80,29 +78,12 @@ public record AlertRuleRow(
          */
         public static final String CASE_OPENED = "case_opened";
 
-        /** Reserved: a per-classifier statistical anomaly (baseline vs. window). Not yet evaluated. */
-        public static final String ANOMALY = "anomaly";
-
-        /** Reserved: a trace-shape rule. Not yet evaluated. */
-        public static final String TRACE = "trace";
-
-        /** Reserved: a log-pattern rule. Not yet evaluated. */
-        public static final String LOG = "log";
-
-        /** Reserved: an exception-rate rule. Not yet evaluated. */
-        public static final String EXCEPTION = "exception";
-
         /** True for the rule types the {@link AlertWorker} evaluates today. */
         public static boolean isImplemented(String ruleType) {
             return THRESHOLD.equals(ruleType)
                     || DIGEST.equals(ruleType)
                     || BRIEF.equals(ruleType)
                     || CASE_OPENED.equals(ruleType);
-        }
-
-        /** True for the per-project scheduled roll-up grains. */
-        public static boolean isRollup(String ruleType) {
-            return DIGEST.equals(ruleType) || BRIEF.equals(ruleType);
         }
     }
 

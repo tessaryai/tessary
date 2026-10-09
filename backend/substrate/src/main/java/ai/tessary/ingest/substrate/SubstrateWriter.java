@@ -347,16 +347,6 @@ public class SubstrateWriter {
         return spool.stats();
     }
 
-    /** Test seam; the throughput line and the health group read the spool's stats directly. */
-    public int queueDepth() {
-        return (int) Math.min(Integer.MAX_VALUE, spool.stats().depth());
-    }
-
-    /** Test seam, as {@link #queueDepth()}. */
-    public long queueBytes() {
-        return spool.stats().bytes();
-    }
-
     /** The spool's admission pressure, read on every push by the pre-decode gate ({@code OtlpIngestService#shouldRefuse}). */
     public double queueBytesUsedFraction() {
         return spool.pressure();

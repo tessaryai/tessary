@@ -26,6 +26,7 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.common.GroupState;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +47,9 @@ import org.testcontainers.redpanda.RedpandaContainer;
  * oversize batch is refused for the producer to split.
  */
 @Testcontainers
+// CI only: against a local Docker the drain never reaches the substrate inside the test's wait, so it fails on every
+// branch there. GitHub Actions sets CI=true.
+@EnabledIfEnvironmentVariable(named = "CI", matches = "true")
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
 // Own context on purpose: it swaps the ingest spool onto a Redpanda container, so its bean graph is not the shared
 // one.
@@ -58,7 +62,10 @@ class KafkaSpoolIntegrationTest {
             new RedpandaContainer("docker.redpanda.com/redpandadata/redpanda:v25.2.1");
 
     @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
+    static void props(DynamicPropertyRegistry r) throws Exception {
+        var noRebalanceDelay =
+                REDPANDA.execInContainer("rpk", "cluster", "config", "set", "group_initial_rebalance_delay", "0");
+        assertEquals(0, noRebalanceDelay.getExitCode(), noRebalanceDelay.getStderr());
         r.add("tessary.ingest.spool.mode", () -> "kafka");
         r.add("tessary.ingest.spool.kafka.bootstrap-servers", REDPANDA::getBootstrapServers);
         r.add("tessary.ingest.spool.kafka.partitions", () -> "4");
@@ -91,8 +98,7 @@ class KafkaSpoolIntegrationTest {
 
     private static RawEntry span(String traceId, String id) {
         String now = Instant.now().toString();
-        return new RawEntry(
-                id, null, "span " + id, "in", "out", null, null, null, traceId, now, "llm", now, null, null, null);
+        return new RawEntry(id, "span " + id, "in", "out", null, null, null, traceId, now, "llm", now, null, null);
     }
 
     private static List<RawEntry> batch(String traceId, int spans) {

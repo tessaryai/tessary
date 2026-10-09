@@ -1,0 +1,161 @@
+---
+title: "Usage and Credit"
+description: "How Tessary Cloud counts traces and stored data, what happens when an organization reaches a limit, and how the one-time model credit pays for triage and root-cause analysis."
+---
+
+Tessary Cloud is free and asks for no payment method. Each organization has a monthly trace allowance, a cap on stored data, a retention period, and a one-time model credit. The numbers for each are on the [pricing page](https://tessary.ai/pricing).
+
+| Limit | Applies to | Resets |
+| --- | --- | --- |
+| Trace allowance | Every project in the organization, together | At the start of each calendar month |
+| Stored data | Every project in the organization, together | Never. It falls only when data is deleted |
+| Retention | Each project's traces and classifier detections | Not a counter. Data older than the period is deleted |
+| Model credit | Triage and RCA (root-cause analysis) runs | Never. It is granted once |
+
+## What counts as a trace
+
+A trace is one complete execution of your agent, identified by its trace id. It counts once, when Tessary first accepts a span carrying that trace id. Every later span with the same trace id joins the same trace and does not count again, so a trace with 200 spans costs the same as a trace with 1.
+
+A trace counts toward the month in which Tessary received it, not the month its timestamps fall in. Sending a backlog of last month's traces today counts against this month.
+
+## When the count resets
+
+The trace count resets at midnight UTC on the first day of every calendar month. The previous month's traces stay stored; only the count starts over.
+
+Stored data does not reset. It is a measure of what the organization is keeping right now, so it goes down only when retention or a deletion removes data.
+
+## How stored data is measured
+
+Stored data is the size of the content your spans carry, summed across every project in the organization:
+
+- Each span's input and output
+- Each span's attributes
+- The token usage each span reports
+- Media attached to spans
+
+Tessary re-measures it every hour. Data you delete stops counting at the next measurement, not the moment it is deleted.
+
+## Retention
+
+Tessary deletes trace data older than the retention period. The plan sets the longest period a project can keep, for both traces and detections, and an hourly sweep removes anything older.
+
+Deletion has two exceptions that matter for findings and cases:
+
+- **Evidence stays.** A trace that an open finding cites is kept whatever its age, including a finding that backs a case nobody has resolved yet. It keeps counting toward stored data until the finding closes or the case is resolved, and then ages out on a later sweep.
+- **Span content can go first.** A trace's span content can be deleted before the trace itself. The trace stays on every list, count, and metric, and its detail view shows the content as expired rather than empty.
+
+An owner or admin can keep a project's data for less time than the plan allows. Open **Settings → Data retention** in that project, turn on **Override for this project**, and enter **Days to keep**. Tessary refuses `0` and any value above the plan's maximum, so no project keeps data forever. [Data handling](/cloud/data-handling#retention) covers retention and deletion in more detail.
+
+## See your usage
+
+Open **Settings → Usage**, under the organization settings. The **Usage and plan** page shows:
+
+| Section | What it shows |
+| --- | --- |
+| **Plan** | The current period's start and end dates, the plan's limits, and a badge that reads **Active**, or **Paused** while ingest is refused at the trace allowance or the stored-data cap. |
+| **Metered units** | **Traces this period** and **Storage**, each as used against included, with a progress bar. |
+| **Refused this period** | How many export requests Tessary turned away, grouped by reason. |
+| **LLM spend** | LLM (large language model) calls and their cost for triage and RCA runs on your own provider keys this period. Only members with the owner or billing role see it. |
+
+The trace count lags by up to an hour, because traces are counted in hourly batches. Storage lags by up to an hour too, because it is measured hourly.
+
+## Warnings as a limit approaches
+
+Each progress bar changes color at 80% of its limit and again at 100%. The used and included figures next to each bar give the same information without relying on color.
+
+Tessary does not send an email or show a notice anywhere else as you approach a limit. Check **Settings → Usage** if your traffic is growing.
+
+## What happens at a limit
+
+Tessary refuses new traces once the organization reaches its trace allowance or its stored-data cap. It rejects the whole export request with an explicit error. It never samples traces or drops part of a request without telling you.
+
+| Limit reached | Response | What your exporter does |
+| --- | --- | --- |
+| Trace allowance | `402` `CAPABILITY.QUOTA_EXCEEDED`, naming the quota `ingested_traces_month` | Does not retry. The traces in that request are not stored. |
+| Stored-data cap | `402` `CAPABILITY.QUOTA_EXCEEDED`, naming the quota `storage_bytes` | Does not retry. The traces in that request are not stored. |
+| Rate limit | `429`, with a `Retry-After` header | Retries after the interval `Retry-After` names. |
+
+The rate limit caps how many export requests an organization can send per minute. It is separate from the monthly allowance, and a request refused for rate is not lost if your exporter retries it.
+
+Because the trace count lags by up to an hour, an organization can go a little past its allowance before refusals begin. Once they begin, every export request is refused until you recover.
+
+A refusal deletes nothing. Traces already stored, findings, and cases stay as they are. The exact error codes and messages are in the [ingestion contract](/reference/ingestion-contract#limits).
+
+## Recover from a limit
+
+**Trace allowance.** Ingest resumes on its own when the count resets at the start of the next month. To resume sooner, [ask for a higher limit](#get-higher-limits).
+
+**Stored-data cap.** Stored data does not reset, so waiting for the next month does not help. Free space instead:
+
+1. Shorten retention on your largest projects under **Settings → Data retention**. The hourly sweep deletes the older data.
+2. Resolve cases you have finished with. Their evidence traces can then age out like any other trace.
+3. Delete a project you no longer need, from the project list under **Settings → Organization**. This permanently deletes the project and its data.
+
+Ingest resumes after the next hourly measurement shows the organization below its cap.
+
+## Get higher limits
+
+Email [sales@tessary.ai](mailto:sales@tessary.ai) with your organization and the limit you need raised. The Organization ID is under **Settings → Organization**.
+
+## The model credit
+
+Each organization starts with a model credit, so triage and RCA work before you add a model provider key of your own. The credit is granted once and does not renew. The amount is on the [pricing page](https://tessary.ai/pricing).
+
+### What spends it
+
+Two things spend the credit, and only when you have not stored your own key:
+
+- **Triage**, when you select **Run triage** on a finding. On Tessary Cloud, triage runs only when you start it.
+- **RCA**, when you select **Run RCA** on a case.
+
+The `frustration` classifier never spends the credit. It always needs your own OpenRouter or TypeSafe key, as it does when you self-host. See [Watch for frustrated users](/classifiers/frustration).
+
+An RCA run that is already going finishes, even if it uses more than the credit that remained when it started.
+
+### When the credit runs out
+
+Triage and RCA need your own model provider key from then on. [Add one](#add-a-key) and they run on it.
+
+Nothing else depends on the credit. Traces keep arriving, classifiers keep evaluating every trace, findings keep being filed, and existing cases and reports stay available. A high-confidence secret leak or a frustration finding still opens its case without triage.
+
+## Use your own model provider key
+
+A key you store is always used before the credit. Store one at any time, before or after the credit runs out, and triage and RCA run on your provider account from then on. The provider bills you directly for those runs.
+
+Keys belong to the organization, and every project in it shares them.
+
+### Add a key
+
+<Steps>
+  <Step title="Open the providers page">
+    Open **Settings → Providers**.
+  </Step>
+  <Step title="Add the key">
+    On the provider you use, select **Add key**, enter the key in **API key (required)**, and select **Test and save**.
+
+    <Check>The provider shows **Key stored**.</Check>
+  </Step>
+</Steps>
+
+A triage run that was waiting on a credential proceeds after the key is stored.
+
+### Remove a key
+
+On the provider, select **Remove** and confirm. Once the credit is used up, triage and RCA on that provider fail until you add a new key. [Data handling](/cloud/data-handling#how-credentials-are-stored) covers how Tessary stores the keys you add.
+
+## Read next
+
+<CardGroup cols={2}>
+  <Card title="Start on Tessary Cloud" icon="rocket" href="/cloud/quickstart">
+    Sign up, connect your first agent, and run triage on your first finding.
+  </Card>
+  <Card title="Data handling" icon="shield-halved" href="/cloud/data-handling">
+    What happens to your traces and credentials, and how to delete your data.
+  </Card>
+  <Card title="Ingestion contract" icon="file-contract" href="/reference/ingestion-contract">
+    Every field ingest reads, and the limits and errors it returns.
+  </Card>
+  <Card title="Cases" icon="folder-open" href="/concepts/cases">
+    How triage turns a finding into a case.
+  </Card>
+</CardGroup>

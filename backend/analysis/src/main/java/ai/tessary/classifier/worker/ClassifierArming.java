@@ -19,6 +19,7 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -84,6 +85,11 @@ public class ClassifierArming {
      */
     private static final Map<String, String> FACET_KEYS = Map.of(BuiltInDetector.Kind.SECRET_LEAK, "pattern");
 
+    /** The evidence member {@code detector}'s bar counts each value of on its own, or null for a whole-project bar. */
+    public static @Nullable String facetKey(String detector) {
+        return FACET_KEYS.get(detector);
+    }
+
     /**
      * Witnesses kept per faceted finding. A cause that keeps firing needs a handful of instances a reader
      * can open, not every span it ever fired on pinned against retention.
@@ -122,13 +128,14 @@ public class ClassifierArming {
      *     the classifier's mode. Set explicitly by a built-in whose low band should stay visible on the
      *     page (which is what discovery mode means) without counting toward its bar.
      */
-    record Config(
+    public record Config(
             String basis,
             long threshold,
             long windowSeconds,
             @Nullable String confidence) {
 
-        boolean highOnly(ClassifierRow signal) {
+        /** Whether the bar counts only the HIGH band for {@code signal}. */
+        public boolean highOnly(ClassifierRow signal) {
             return switch (confidence == null ? "" : confidence) {
                 case "high" -> true;
                 case "any" -> false;
@@ -136,7 +143,8 @@ public class ClassifierArming {
             };
         }
 
-        boolean bySession() {
+        /** Whether the bar counts distinct sessions rather than detections. */
+        public boolean bySession() {
             // distinct_users is a SESSION count, the user proxy the threshold rules used, carried over
             // verbatim so a translated rule keeps counting what its owner set it to count. every_match and
             // event_count both count detections; they differed only in the threshold, and 0089 folded
@@ -403,7 +411,14 @@ public class ClassifierArming {
     @Nullable
     Config configOf(ClassifierRow signal) {
         if (!this.detections.writesDetections(signal.detector())) return null;
-        String json = signal.configJson();
+        return parse(mapper, signal.configJson());
+    }
+
+    /**
+     * The {@code arming} block of a classifier's {@code config_json}, with its defaults, or null when it is absent
+     * or unreadable. The one parse both the sweep and a chart read, so the bar a chart draws is the bar that files.
+     */
+    public static @Nullable Config parse(ObjectMapper mapper, @Nullable String json) {
         if (json == null || json.isBlank()) return null;
         try {
             JsonNode node = mapper.readTree(json).path(ARMING);
@@ -433,7 +448,7 @@ public class ClassifierArming {
             @Nullable String callSiteId,
             @Nullable String facet,
             @Nullable String confidence) {
-        Map<String, Object> body = new LinkedHashMap<>();
+        ObjectNode body = mapper.createObjectNode();
         body.put("cause_kind", FindingRow.Cause.ARMED_WINDOW);
         body.put("native_cause_key", facet == null ? classifierKey : facet);
         body.put("basis", config.basis());
@@ -447,10 +462,6 @@ public class ClassifierArming {
             if (callSiteId != null) body.put("call_site_id", callSiteId);
         }
         if (confidence != null) body.put(FindingRow.Confidence.PAYLOAD_KEY, confidence);
-        try {
-            return mapper.writeValueAsString(body);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            return "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
-        }
+        return body.toString();
     }
 }

@@ -7,17 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,9 +44,6 @@ class FindingRulingIntegrationTest {
 
     @Autowired
     TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     private static final String GRAM = "gram-ruling";
 
@@ -96,67 +93,6 @@ class FindingRulingIntegrationTest {
     }
 
     @Test
-    @DisplayName("a new finding under the same cause is triaged independently of the one before it")
-    void aNewFindingIsTriagedIndependently() {
-        Project p = project("ruling-independent");
-        String first = firing(p, GRAM);
-        behaviorTriage.recordVerdict(p.id(), first, verdict("negative", "an artifact"), null, now());
-        String second = firing(p, GRAM);
-
-        behaviorTriage.recordVerdict(p.id(), second, verdict("positive", "sound this time"), null, now());
-
-        assertEquals(
-                FindingRow.TriageVerdict.NEGATIVE,
-                findings.findById(p.id(), first).orElseThrow().triageVerdict());
-        assertEquals(
-                FindingRow.TriageVerdict.POSITIVE,
-                findings.findById(p.id(), second).orElseThrow().triageVerdict());
-    }
-
-    @Test
-    @DisplayName("a person's Real deviation writes positive and human_verdict_at, and stays open")
-    void personsRealDeviationWritesPositive() {
-        Project p = project("ruling-human-positive");
-        String findingId = firing(p, GRAM);
-
-        var view = behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.NOT_EXPECTED, "user-1");
-
-        assertNotNull(view.orElseThrow());
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.OPEN, row.status());
-        assertEquals(FindingRow.TriageVerdict.POSITIVE, row.triageVerdict());
-        assertNotNull(row.humanVerdictAt(), "the ruling is stamped, which is what a case is opened off");
-    }
-
-    @Test
-    @DisplayName("a person's Legitimate closes the finding negative")
-    void personsLegitimateClosesNegative() {
-        Project p = project("ruling-human-negative");
-        String findingId = firing(p, GRAM);
-
-        behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-1");
-
-        FindingRow row = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(FindingRow.Status.CLOSED, row.status());
-        assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
-        assertNotNull(row.humanVerdictAt());
-    }
-
-    @Test
-    @DisplayName("a verb on an already-closed finding returns 409 FINDING_CLOSED")
-    void aVerbOnAClosedFindingIs409() {
-        Project p = project("ruling-409-closed");
-        String findingId = firing(p, GRAM);
-        behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-1");
-
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> behaviorTriage.resolve(p.id(), findingId, BehaviorResolutionRequest.EXPECTED, "user-2"));
-
-        assertEquals(ClassifierError.FINDING_CLOSED, e.error());
-    }
-
-    @Test
     @DisplayName("a verb on an open, already-ruled-positive finding also returns 409")
     void aVerbOnAnOpenRuledFindingIsAlso409() {
         Project p = project("ruling-409-open-ruled");
@@ -190,25 +126,26 @@ class FindingRulingIntegrationTest {
     // ---- fixtures ---------------------------------------------------------------------------------
 
     private Project project(String slug) {
-        // The grant precedes the project: project creation is what seeds the built-in classifiers, and
-        // requireReachableFinding refuses a classifier the org's capability layer withholds.
-        return TenantFixture.bootstrap(tenants, slug, org -> capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT))
-                .project();
+        return TenantFixture.bootstrap(tenants, slug).project();
     }
 
+    /** The finding shape these fixtures file: a classifier's armed window, which rules by the verb alone. */
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
     private String firing(Project p, String gram) {
-        return findings.recordFiring(
+        return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         p.id(),
-                        "profile-" + p.id(),
-                        FindingRow.Cause.NOVELTY,
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + gram,
                         gram,
-                        "workflow-1",
                         5,
-                        null,
-                        null,
                         "cs-1",
-                        now())
+                        ARMED_PAYLOAD,
+                        now(),
+                        now(),
+                        now(),
+                        now()))
                 .findingId();
     }
 

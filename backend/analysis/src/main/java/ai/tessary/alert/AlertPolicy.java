@@ -62,13 +62,12 @@ public record AlertPolicy(
     private static final long MAX_CADENCE_SECONDS = 86_400;
 
     /**
-     * Read a policy out of a rule's {@code attributes}. Every unreadable or partial input degrades to
-     * {@link #IMMEDIATE} rather than throwing, and that direction is deliberate: this is consulted on a
-     * heartbeat, and a malformed blob must not be able to stop a project's pages going out. Failing open
-     * to "notify" is the safe failure for an alerting policy; failing open to "stay quiet" is not.
+     * Read a policy out of a rule's {@code attributes}. An unreadable blob degrades to {@link #IMMEDIATE}
+     * rather than throwing, and that direction is deliberate: this is consulted on a heartbeat, and a
+     * malformed blob must not be able to stop a project's pages going out. Failing open to "notify" is the
+     * safe failure for an alerting policy; failing open to "stay quiet" is not.
      */
-    public static AlertPolicy of(ObjectMapper mapper, @Nullable String attributesJson) {
-        if (attributesJson == null || attributesJson.isBlank()) return IMMEDIATE;
+    public static AlertPolicy of(ObjectMapper mapper, String attributesJson) {
         try {
             JsonNode root = mapper.readTree(attributesJson);
             return of(

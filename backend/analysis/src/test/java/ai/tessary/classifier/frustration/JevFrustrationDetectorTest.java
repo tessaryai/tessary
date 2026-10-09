@@ -1,0 +1,793 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.classifier.frustration;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Named.named;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import ai.tessary.classifier.ClassifierDetectionWriteRepository;
+import ai.tessary.classifier.ClassifierPause;
+import ai.tessary.classifier.ClassifierRepository;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.ClassifierRowBuilder;
+import ai.tessary.classifier.TestObservations;
+import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.PagedDetector.FiredTurn;
+import ai.tessary.classifier.catalog.PagedDetector.PageAction;
+import ai.tessary.classifier.catalog.PagedDetector.Status;
+import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.Assessment;
+import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.TurnFacts;
+import ai.tessary.classifier.frustration.StructuredThread.Message;
+import ai.tessary.classifier.substrate.SubstrateObservation;
+import ai.tessary.config.FrustrationProperties;
+import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.PlatformCreditExhausted;
+import ai.tessary.llm.decisions.DecisionAnswer;
+import ai.tessary.llm.decisions.DecisionClient;
+import ai.tessary.llm.decisions.DecisionProviderResolver;
+import ai.tessary.llm.decisions.DecisionRequest;
+import ai.tessary.llm.decisions.DecisionTarget;
+import ai.tessary.llmspi.ModelLane;
+import ai.tessary.open.errors.DecisionError;
+import ai.tessary.open.errors.ModelConfigError;
+import ai.tessary.open.errors.TessaryException;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.math.BigDecimal;
+import java.net.URI;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionOperations;
+
+/**
+ * One page through the Jev detector with everything else stubbed: what is sent, what fires, what a persisted page
+ * writes, and how a refused or missing key pauses the classifier.
+ */
+class JevFrustrationDetectorTest {
+
+    private static final String PROJECT = "proj-1";
+    private static final String CLASSIFIER = "cls-1";
+    private static final Instant NOW = Instant.parse("2026-09-21T12:00:00Z");
+    private static final String RESPONDED = "typesafe/jev-1.13-20260917";
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final ConversationThreadAssembler assembler = mock(ConversationThreadAssembler.class);
+    private final DecisionProviderResolver providers = mock(DecisionProviderResolver.class);
+    private final FrustrationAssessmentRepository assessments = mock(FrustrationAssessmentRepository.class);
+    private final ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
+    private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
+    private final FrustrationProperties props = new FrustrationProperties();
+    private final StubClient client = new StubClient();
+    private final Map<String, TurnFacts> facts = new HashMap<>();
+
+    private final DecisionTarget target = new DecisionTarget(
+            ModelProvider.TYPESAFE, "jev-latest", URI.create("https://api.typesafe.ai/v1/systemone"), "key");
+    private static final DecisionTarget PLATFORM = new DecisionTarget(
+            ModelProvider.PLATFORM,
+            "~typesafe/jev-latest",
+            URI.create("https://openrouter.ai/api/alpha/decisions"),
+            "platform-key");
+
+    @BeforeEach
+    void wire() {
+        when(classifiers.findPause(PROJECT, CLASSIFIER)).thenReturn(Optional.empty());
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(target));
+        when(assessments.turnFacts(eq(PROJECT), any())).thenAnswer(inv -> facts);
+        when(assessments.insert(any())).thenReturn(true);
+        when(detections.insert(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        any(),
+                        anyString(),
+                        any(),
+                        any(),
+                        any(),
+                        any()))
+                .thenReturn(true);
+    }
+
+    private JevFrustrationDetector detector() {
+        return detector(client);
+    }
+
+    private JevFrustrationDetector detector(DecisionClient decisions) {
+        return new JevFrustrationDetector(
+                new FrustrationTurnBuilder(assembler),
+                decisions,
+                providers,
+                assessments,
+                detections,
+                classifiers,
+                TransactionOperations.withoutTransaction(),
+                props,
+                mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    void unhappyAboutSomethingElseNeverFires() {
+        SubstrateObservation turn = eligibleTurn("t-other", "conv-a");
+        client.answer("t-other", 0.05, 0.93);
+        JevFrustrationDetector d = detector();
+
+        List<FiredTurn> fired = d.complete(signal("{}"), d.score(signal("{}"), List.of(turn)), PageAction.PERSIST, 5);
+
+        assertTrue(fired.isEmpty());
+        verify(detections, never())
+                .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void theThresholdComesFromTheClassifierConfig() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        client.answer("t-1", 0.45, 0.01);
+        JevFrustrationDetector d = detector();
+
+        String strict = "{\"threshold\":0.5}";
+        List<FiredTurn> fired =
+                d.complete(signal(strict), d.score(signal(strict), List.of(turn)), PageAction.PERSIST, 5);
+
+        assertTrue(fired.isEmpty(), "0.45 fires under the 0.40 default but not under 0.5");
+    }
+
+    @Test
+    void everySentTurnIsAssessedAndEveryFiredTurnIsADetection() throws Exception {
+        SubstrateObservation high = eligibleTurn("t-high", "conv-a");
+        SubstrateObservation low = eligibleTurn("t-low", "conv-b");
+        client.answer("t-high", 0.71, 0.04);
+        client.answer("t-low", 0.12, 0.02);
+        JevFrustrationDetector d = detector();
+
+        d.complete(signal("{}"), d.score(signal("{}"), List.of(high, low)), PageAction.PERSIST, 5);
+
+        ArgumentCaptor<Assessment> rows = ArgumentCaptor.forClass(Assessment.class);
+        verify(assessments, times(2)).insert(rows.capture());
+        Assessment flagged = rows.getAllValues().stream()
+                .filter(a -> a.traceId().equals("t-high"))
+                .findFirst()
+                .orElseThrow();
+        Assessment calm = rows.getAllValues().stream()
+                .filter(a -> a.traceId().equals("t-low"))
+                .findFirst()
+                .orElseThrow();
+        String version = JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
+
+        assertTrue(flagged.frustrated());
+        assertFalse(calm.frustrated());
+        assertEquals(PROJECT, flagged.projectId());
+        assertEquals(CLASSIFIER, flagged.classifierId());
+        assertEquals("span-t-high", flagged.spanId());
+        assertEquals("conv-a", flagged.conversationId());
+        assertEquals("cs-t-high", flagged.callSiteId());
+        assertEquals(NOW.minusSeconds(60), flagged.turnStartedAt());
+        assertEquals(version, flagged.scorerVersion());
+        assertEquals("TYPESAFE", flagged.provider());
+        assertEquals(RESPONDED, flagged.model(), "the row keeps the model the provider echoed");
+        assertEquals(812, flagged.inputTokens());
+        assertEquals(new BigDecimal("0.00003248"), flagged.costUsd());
+        assertEquals(140, flagged.latencyMs());
+
+        JsonNode request = mapper.readTree(flagged.requestJson());
+        assertFalse(request.has("model"), "the model id has its own column");
+        assertEquals(Objects.requireNonNull(client.sentBodies.get("t-high")).get("state"), request.get("state"));
+        assertEquals(
+                Objects.requireNonNull(client.sentBodies.get("t-high")).get("questions"), request.get("questions"));
+        assertEquals(client.responses.get("t-high"), mapper.readTree(flagged.responseJson()));
+
+        ArgumentCaptor<String> evidence = ArgumentCaptor.forClass(String.class);
+        verify(detections, times(1))
+                .insert(
+                        anyString(),
+                        eq(BuiltInDetector.Kind.FRUSTRATION),
+                        eq(PROJECT),
+                        eq(CLASSIFIER),
+                        eq("frustration"),
+                        isNull(),
+                        eq("conv-a"),
+                        eq("t-high"),
+                        eq("span-t-high"),
+                        eq("warn"),
+                        eq("high"),
+                        evidence.capture());
+        JsonNode e = mapper.readTree(evidence.getValue());
+        assertEquals(
+                List.of("model", "provider", "score", "threshold", "scorer_version", "k_turn", "call_site_id"),
+                fieldNames(e));
+        assertEquals(RESPONDED, e.get("model").asText());
+        assertEquals("TYPESAFE", e.get("provider").asText());
+        assertEquals(0.71, e.get("score").asDouble(), 1e-9);
+        assertEquals(0.40, e.get("threshold").asDouble(), 1e-9);
+        assertEquals(version, e.get("scorer_version").asText());
+        assertEquals(3, e.get("k_turn").asInt(), "the third user message of its conversation");
+        assertEquals("cs-t-high", e.get("call_site_id").asText());
+    }
+
+    @Test
+    void aSessionStopsBeingSentAtItsFirstFlagOnThePage() {
+        SubstrateObservation calm = eligibleTurn("t-1", "t-1", "conv-a", "cs-reply", 30);
+        SubstrateObservation flagged = eligibleTurn("t-2", "t-2", "conv-a", "cs-reply", 20);
+        SubstrateObservation after = eligibleTurn("t-3", "t-3", "conv-a", "cs-reply", 10);
+        SubstrateObservation other = eligibleTurn("t-4", "conv-b", 5);
+        client.answer("t-1", 0.1, 0.0);
+        client.answer("t-2", 0.8, 0.0);
+        client.answer("t-3", 0.9, 0.0);
+        client.answer("t-4", 0.1, 0.0);
+        JevFrustrationDetector d = detector();
+
+        // Out of order on the page: scored earliest turn first.
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(after, other, flagged, calm));
+        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
+
+        assertFalse(client.requests.containsKey("t-3"), "nothing after the session's flag is sent");
+        assertEquals(Set.of("t-1", "t-2", "t-4"), client.requests.keySet());
+        assertEquals(4, page.eligible());
+        assertEquals(3, page.sent());
+        assertEquals(1, fired.size());
+        assertEquals("t-2", fired.get(0).turn().traceId());
+        verify(assessments, times(3)).insert(any());
+    }
+
+    /**
+     * A session is a conversation on one call site. Keyed on the conversation alone, the reply call site's flag
+     * stops the support call site in the same conversation, and the support call site's own flag is never written.
+     */
+    @Test
+    void aFlagOnOneCallSiteDoesNotStopTheSameConversationOnAnother() {
+        SubstrateObservation reply1 = eligibleTurn("reply-1", "t-1", "conv-a", "cs-reply", 30);
+        SubstrateObservation support1 = eligibleTurn("support-1", "t-1", "conv-a", "cs-support", 30);
+        SubstrateObservation reply2 = eligibleTurn("reply-2", "t-2", "conv-a", "cs-reply", 20);
+        SubstrateObservation support2 = eligibleTurn("support-2", "t-2", "conv-a", "cs-support", 20);
+        client.answer("reply-1", 0.8, 0.0);
+        client.answer("support-1", 0.1, 0.0);
+        client.answer("reply-2", 0.9, 0.0);
+        client.answer("support-2", 0.9, 0.0);
+        JevFrustrationDetector d = detector();
+
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(reply1, support1, reply2, support2));
+        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
+
+        assertEquals(Set.of("reply-1", "support-1", "support-2"), client.requests.keySet());
+        assertEquals(
+                List.of("span-reply-1", "span-support-2"),
+                fired.stream().map(f -> f.turn().observationId()).sorted().toList());
+        verify(assessments, times(3)).insert(any());
+    }
+
+    @Test
+    void aFailedCallDoesNotStopItsConversation() {
+        SubstrateObservation failed = eligibleTurn("t-1", "conv-a", 20);
+        SubstrateObservation next = eligibleTurn("t-2", "conv-a", 10);
+        client.fail("t-1", DecisionError.PROVIDER_UNAVAILABLE);
+        client.answer("t-2", 0.1, 0.0);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(failed, next));
+
+        assertEquals(Set.of("t-1", "t-2"), client.requests.keySet());
+        assertEquals(1, page.unavailable());
+    }
+
+    /** An unclassified call failure fails that turn only. */
+    @Test
+    void anUnexpectedClientFailureFailsOnlyItsTurn() {
+        SubstrateObservation broken = eligibleTurn("t-1", "conv-a", 20);
+        SubstrateObservation next = eligibleTurn("t-2", "conv-a", 10);
+        client.answer("t-2", 0.1, 0.0); // t-1 has no answer, so the stub throws
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(broken, next));
+
+        assertEquals(Status.SCORED, page.status());
+        assertEquals(Set.of("t-1", "t-2"), client.requests.keySet(), "the conversation carried on past it");
+        assertEquals(1, page.failed());
+        assertEquals(0, page.unavailable(), "not an outage, so it does not count toward holding the page");
+    }
+
+    /** An interrupted sweep stops sending and keeps its interrupt. */
+    @Test
+    void anInterruptedSweepStopsSendingAndKeepsItsInterrupt() throws InterruptedException {
+        props.setConcurrency(1);
+        SubstrateObservation first = eligibleTurn("t-1", "conv-a");
+        SubstrateObservation second = eligibleTurn("t-2", "conv-b");
+        AtomicInteger sends = new AtomicInteger();
+        CountDownLatch inCall = new CountDownLatch(1);
+        DecisionClient hangs = (projectId, lane, t, request) -> {
+            sends.incrementAndGet();
+            inCall.countDown();
+            try {
+                new CountDownLatch(1).await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new IllegalStateException("the provider call was interrupted");
+        };
+        JevFrustrationDetector d = detector(hangs);
+        AtomicReference<JevFrustrationDetector.Page> page = new AtomicReference<>();
+        AtomicBoolean keptInterrupt = new AtomicBoolean();
+        Thread sweep = new Thread(() -> {
+            page.set(d.score(signal("{}"), List.of(first, second)));
+            keptInterrupt.set(Thread.currentThread().isInterrupted());
+        });
+
+        sweep.start();
+        assertTrue(inCall.await(10, TimeUnit.SECONDS), "one turn reached the provider");
+        sweep.interrupt();
+        sweep.join(10_000);
+
+        assertEquals(1, sends.get(), "the turn waiting for a permit was not sent");
+        assertTrue(keptInterrupt.get());
+        assertEquals(1, Objects.requireNonNull(page.get()).sent());
+    }
+
+    /**
+     * A task dying of an {@link Error} its catch misses vanished, and the page scored without it. It must fail the
+     * page.
+     */
+    @Test
+    void aTaskThatDiesOutsideItsCatchFailsThePage() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        AssertionError boom = new AssertionError("boom");
+        DecisionClient dies = (projectId, lane, t, request) -> {
+            throw boom;
+        };
+        JevFrustrationDetector d = detector(dies);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> d.score(signal("{}"), List.of(turn)));
+
+        assertSame(boom, e.getCause());
+    }
+
+    /**
+     * The worker handed a paged detector one observation and got a detection with no assessment row. The one-at-a-
+     * time path refuses.
+     */
+    @Test
+    void aPagedDetectorRefusesToScoreOneObservation() {
+        JevFrustrationDetector d = detector();
+
+        assertThrows(IllegalStateException.class, () -> d.detect(observation("t-1"), null));
+    }
+
+    @Test
+    void theRequestCarriesTheBuiltStateAndTheOneQuestion() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        client.answer("t-1", 0.1, 0.1);
+
+        detector().score(signal("{}"), List.of(turn));
+
+        DecisionRequest sent = Objects.requireNonNull(client.requests.get("t-1"));
+        assertEquals("still wrong t-1", sent.state().get("current_user_message").asText());
+        assertEquals(4, sent.state().get("earlier_messages").size());
+        assertEquals(Set.of(JevFrustrationQuestion.NAME), sent.questions().keySet());
+        assertEquals("frustration", client.lanes.get("t-1"));
+    }
+
+    @Test
+    void aHeldOrSkippedPageWritesNothing() {
+        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
+        client.answer("t-1", 0.9, 0.0);
+        JevFrustrationDetector d = detector();
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(turn));
+
+        assertTrue(d.complete(signal("{}"), page, PageAction.HOLD, 5).isEmpty());
+        assertTrue(d.complete(signal("{}"), page, PageAction.SKIP, 5).isEmpty());
+
+        verify(assessments, never()).insert(any());
+    }
+
+    @Test
+    void anIneligibleTurnOrOneWithNoConversationIsNotSent() {
+        SubstrateObservation opener = observation("t-open");
+        facts.put("t-open", new TurnFacts("conv-a", NOW));
+        when(assembler.assembleStructured(opener))
+                .thenReturn(Optional.of(new StructuredThread(List.of(), text("user", "hello"), 1)));
+        SubstrateObservation anonymous = eligibleTurn("t-anon", null);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(opener, anonymous));
+
+        assertEquals(0, page.sent());
+        assertEquals(0, page.eligible());
+        assertTrue(client.requests.isEmpty());
+    }
+
+    @Test
+    void aMalformedAnswerFailsTheTurnWithNoRow() {
+        SubstrateObservation bad = eligibleTurn("t-bad", "conv-a");
+        client.fail("t-bad", DecisionError.MALFORMED_ANSWER);
+        JevFrustrationDetector d = detector();
+
+        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(bad));
+        d.complete(signal("{}"), page, PageAction.PERSIST, 5);
+
+        assertEquals(Status.SCORED, page.status());
+        assertEquals(0, page.unavailable(), "a malformed answer is not an outage");
+        verify(assessments, never()).insert(any());
+    }
+
+    static Stream<Arguments> failedCalls() {
+        return Stream.of(
+                arguments(
+                        named("a rejected own key, after a turn that answered", false),
+                        true,
+                        DecisionError.PROVIDER_REJECTED,
+                        ClassifierPause.PROVIDER_REJECTED),
+                arguments(
+                        named("a refused request on the deployment's provider is not the org's to fix", true),
+                        false,
+                        DecisionError.REQUEST_REFUSED,
+                        ClassifierPause.PLATFORM_UNAVAILABLE),
+                arguments(
+                        named("an own key out of credit is no_credit, not a bad key", false),
+                        false,
+                        DecisionError.PROVIDER_NO_CREDIT,
+                        ClassifierPause.NO_CREDIT),
+                arguments(
+                        named("the deployment's key out of credit is not the org's to fix", true),
+                        false,
+                        DecisionError.PROVIDER_NO_CREDIT,
+                        ClassifierPause.PLATFORM_UNAVAILABLE));
+    }
+
+    @ParameterizedTest
+    @MethodSource("failedCalls")
+    void aFailedCallPausesTheClassifierAndAbortsThePage(
+            boolean platform, boolean answeredFirst, DecisionError error, String reason) {
+        if (platform) when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
+        List<SubstrateObservation> turns = new ArrayList<>();
+        if (answeredFirst) {
+            turns.add(eligibleTurn("t-ok", "conv-a"));
+            client.answer("t-ok", 0.9, 0.0);
+        }
+        turns.add(eligibleTurn("t-failed", "conv-b"));
+        client.fail("t-failed", error);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), turns);
+
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(reason, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, reason, NOW);
+    }
+
+    /**
+     * A 4xx on the request itself (a model id the provider does not serve) is the same again on every
+     * later turn, so it pauses as request_refused rather than counting as one failed turn and moving the
+     * cursor past a history that was never scored. The provider's words are logged once, at WARN.
+     */
+    @Test
+    void aRefusedRequestPausesAsRequestRefusedAndLogsTheProvidersWords() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SubstrateObservation ok = eligibleTurn("t-ok", "conv-a");
+            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+            client.answer("t-ok", 0.9, 0.0);
+            client.fail("t-refused", DecisionError.REQUEST_REFUSED);
+            JevFrustrationDetector d = detector();
+
+            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(ok, refused));
+            assertEquals(List.of(), d.complete(signal("{}"), page, PageAction.ABORT, 5));
+
+            assertEquals(Status.ABORTED, page.status());
+            assertEquals(ClassifierPause.REQUEST_REFUSED, page.pauseReason());
+            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.REQUEST_REFUSED, NOW);
+            verify(assessments, never()).insert(any());
+            List<String> warned = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.WARN)
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertEquals(2, warned.size(), warned.toString());
+            assertTrue(warned.get(0).startsWith("TYPESAFE refused a frustration call: "), warned.get(0));
+            assertTrue(
+                    warned.get(1).contains("request_refused") || warned.get(1).contains("refused the request"),
+                    warned.get(1));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    /** An aborted page records nothing and logs a pause with its reason; a silent pause reads as a quiet week. */
+    @Test
+    void anAbortedPageRecordsNothingAndLogsThePauseWithItsReason() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SubstrateObservation refused = eligibleTurn("t-refused", "conv-b");
+            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+            JevFrustrationDetector d = detector();
+            JevFrustrationDetector.Page rejected = d.score(signal("{}"), List.of(refused));
+            assertEquals(List.of(), d.complete(signal("{}"), rejected, PageAction.ABORT, 5));
+
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
+            JevFrustrationDetector.Page noKey = d.score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+            assertEquals(List.of(), d.complete(signal("{}"), noKey, PageAction.ABORT, 5));
+
+            List<Object> pauses = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.WARN)
+                    .map(e -> e.getKeyValuePairs().stream()
+                            .filter(kv -> "reason".equals(kv.key))
+                            .findFirst()
+                            .map(kv -> kv.value)
+                            .orElse("none"))
+                    .toList();
+            assertEquals(List.of(ClassifierPause.PROVIDER_REJECTED, ClassifierPause.NO_PROVIDER), pauses);
+            verify(assessments, never()).insert(any());
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    /** Out of platform credit is not "no key": the org has a provider, and adding a key is one of two ways out. */
+    @Test
+    void aResolverReportingNoPlatformCreditPausesAsNoCreditAndSendsNothing() {
+        when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.ABORTED, page.status());
+        assertEquals(ClassifierPause.NO_CREDIT, page.pauseReason());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.NO_CREDIT, NOW);
+        assertTrue(client.requests.isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.NO_PROVIDER})
+    void aRecheckThatStillFindsTheSameGapPassesThePageAndRestampsThePause(String reason) {
+        when(classifiers.findPause(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(
+                        new ClassifierPause(reason, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+        if (ClassifierPause.NO_CREDIT.equals(reason)) {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
+        } else {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.empty());
+        }
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.PAUSED, page.status());
+        verify(classifiers).pause(PROJECT, CLASSIFIER, reason, NOW);
+        verify(classifiers, never()).unpause(any(), any());
+    }
+
+    /**
+     * The platform provider's key is the deployment's, shared by every org on it. Its refusal is not the org's to
+     * fix, so the pause must not tell them to fix a key, and an operator has to hear about it.
+     */
+    @Test
+    void aRejectedPlatformProviderCallPausesAsPlatformUnavailableAndLogsAnError() {
+        Logger logger = (Logger) LoggerFactory.getLogger(JevFrustrationDetector.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenReturn(Optional.of(PLATFORM));
+            client.fail("t-refused", DecisionError.PROVIDER_REJECTED);
+            JevFrustrationDetector d = detector();
+
+            JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(eligibleTurn("t-refused", "conv-a")));
+            d.complete(signal("{}"), page, PageAction.ABORT, 5);
+
+            assertEquals(Status.ABORTED, page.status());
+            assertEquals(ClassifierPause.PLATFORM_UNAVAILABLE, page.pauseReason());
+            verify(classifiers).pause(PROJECT, CLASSIFIER, ClassifierPause.PLATFORM_UNAVAILABLE, NOW);
+            List<Object> errors = appender.list.stream()
+                    .filter(e -> e.getLevel() == Level.ERROR)
+                    .map(e -> e.getKeyValuePairs().stream()
+                            .filter(kv -> "reason".equals(kv.key))
+                            .findFirst()
+                            .map(kv -> kv.value)
+                            .orElse("none"))
+                    .toList();
+            assertEquals(List.of(ClassifierPause.PLATFORM_UNAVAILABLE), errors);
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    void aPausedClassifierSendsNothingUntilTheRetryIntervalPasses() {
+        when(classifiers.findPause(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(new ClassifierPause(ClassifierPause.PROVIDER_REJECTED, NOW.minusSeconds(60))));
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.PAUSED, page.status());
+        assertTrue(client.requests.isEmpty());
+        verify(providers, never()).resolve(any(), any());
+    }
+
+    @Test
+    void aPauseOlderThanTheRetryIntervalIsCheckedAgainAndClearedWhenAKeyResolves() {
+        when(classifiers.findPause(PROJECT, CLASSIFIER))
+                .thenReturn(Optional.of(new ClassifierPause(
+                        ClassifierPause.NO_PROVIDER, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+        client.answer("t-1", 0.1, 0.0);
+
+        JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));
+
+        assertEquals(Status.SCORED, page.status());
+        verify(classifiers).unpause(PROJECT, CLASSIFIER);
+        assertEquals(1, page.sent());
+    }
+
+    private static ClassifierRow signal(String configJson) {
+        return ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .id(CLASSIFIER)
+                .projectId(PROJECT)
+                .named("frustration", "Frustration")
+                .config(configJson)
+                .version(8)
+                .build();
+    }
+
+    private static SubstrateObservation observation(String traceId) {
+        return observation(traceId, traceId, "cs-" + traceId);
+    }
+
+    private static SubstrateObservation observation(String key, String traceId, String callSiteId) {
+        return TestObservations.llm(
+                "span-" + key, PROJECT, traceId, "sess", callSiteId, null, null, "2026-09-21T11:59:00Z");
+    }
+
+    /** A turn with a clean user, assistant, user, assistant prefix. */
+    private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv) {
+        return eligibleTurn(traceId, conv, 60);
+    }
+
+    /** As {@link #eligibleTurn(String, String)}, started {@code secondsAgo} before now. */
+    private SubstrateObservation eligibleTurn(String traceId, @Nullable String conv, long secondsAgo) {
+        return eligibleTurn(traceId, traceId, conv, "cs-" + traceId, secondsAgo);
+    }
+
+    /**
+     * As {@link #eligibleTurn(String, String, long)}, on {@code callSiteId}. {@code key} names the span and is what
+     * the stub client answers by, so one trace can hold a turn on each of several call sites.
+     */
+    private SubstrateObservation eligibleTurn(
+            String key, String traceId, @Nullable String conv, String callSiteId, long secondsAgo) {
+        SubstrateObservation obs = observation(key, traceId, callSiteId);
+        facts.put(traceId, new TurnFacts(conv, NOW.minusSeconds(secondsAgo)));
+        when(assembler.assembleStructured(obs))
+                .thenReturn(Optional.of(new StructuredThread(
+                        List.of(
+                                text("user", "first question"),
+                                text("assistant", "first answer"),
+                                text("user", "second question"),
+                                text("assistant", "second answer")),
+                        text("user", "still wrong " + key),
+                        3)));
+        return obs;
+    }
+
+    private static Message text(String role, String text) {
+        return new Message(role, text, true, false);
+    }
+
+    private static List<String> fieldNames(JsonNode node) {
+        List<String> names = new ArrayList<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
+    }
+
+    /** What a deployment's resolver throws when the org has no platform credit left. */
+    private static final class NoCredit extends TessaryException implements PlatformCreditExhausted {
+        NoCredit() {
+            super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
+        }
+    }
+
+    /** Answers by the trace id in the message text; records what it was asked. */
+    private final class StubClient implements DecisionClient {
+        final Map<String, JsonNode> responses = new ConcurrentHashMap<>();
+        final Map<String, DecisionError> failures = new ConcurrentHashMap<>();
+        final Map<String, DecisionRequest> requests = new ConcurrentHashMap<>();
+        final Map<String, ObjectNode> sentBodies = new ConcurrentHashMap<>();
+        final Map<String, String> lanes = new ConcurrentHashMap<>();
+        final AtomicInteger calls = new AtomicInteger();
+
+        void answer(String traceId, double withAssistant, double otherCause) {
+            ObjectNode body = mapper.createObjectNode();
+            body.put("model", RESPONDED);
+            ObjectNode answer = body.putObject("answers").putObject(JevFrustrationQuestion.NAME);
+            answer.put("type", "choice");
+            answer.put(
+                    "choice",
+                    withAssistant > 0.5 ? JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT : "neutral_or_positive");
+            ObjectNode p = answer.putObject("probabilities");
+            p.put(JevFrustrationQuestion.UNHAPPY_WITH_ASSISTANT, withAssistant);
+            p.put(JevFrustrationQuestion.UNHAPPY_OTHER_CAUSE, otherCause);
+            p.put(JevFrustrationQuestion.NEUTRAL_OR_POSITIVE, 1 - withAssistant - otherCause);
+            body.putObject("usage").put("input_tokens", 812).put("output_tokens", 0);
+            responses.put(traceId, body);
+        }
+
+        void fail(String traceId, DecisionError error) {
+            failures.put(traceId, error);
+        }
+
+        @Override
+        public DecisionAnswer decide(String projectId, String lane, DecisionTarget t, DecisionRequest request) {
+            calls.incrementAndGet();
+            String current = request.state().get("current_user_message").asText();
+            String traceId = current.substring("still wrong ".length());
+            requests.put(traceId, request);
+            lanes.put(traceId, lane);
+            ObjectNode body = mapper.createObjectNode();
+            body.put("model", t.modelId());
+            body.set("state", request.state());
+            body.set("questions", mapper.valueToTree(request.questions()));
+            sentBodies.put(traceId, body);
+            DecisionError error = failures.get(traceId);
+            if (error != null) throw new TessaryException(error, t.provider(), "stub");
+            JsonNode response = Objects.requireNonNull(responses.get(traceId));
+            Map<String, Double> probabilities = new LinkedHashMap<>();
+            response.path("answers")
+                    .path(JevFrustrationQuestion.NAME)
+                    .path("probabilities")
+                    .properties()
+                    .forEach(en -> probabilities.put(en.getKey(), en.getValue().doubleValue()));
+            return new DecisionAnswer(
+                    t.provider(),
+                    t.modelId(),
+                    RESPONDED,
+                    Map.of(
+                            JevFrustrationQuestion.NAME,
+                            new DecisionAnswer.Answer("choice", "x", null, null, probabilities)),
+                    812,
+                    0,
+                    new BigDecimal("0.00003248"),
+                    "book-1",
+                    140,
+                    body,
+                    response);
+        }
+    }
+}

@@ -123,8 +123,7 @@ public class AlertQueryRepository {
     }
 
     /** A per-classifier detection count in a window — the rolled-up unit a digest/brief is assembled from. */
-    public record ClassifierActivity(
-            String classifierId, String classifierKey, String classifierName, long eventCount) {}
+    public record ClassifierActivity(String classifierKey, String classifierName, long eventCount) {}
 
     /**
      * Per-classifier detection counts over the window {@code [start, end)} for a whole project, worst-first —
@@ -132,7 +131,7 @@ public class AlertQueryRepository {
      * Counts every band (a roll-up is a recall-oriented activity summary, not a precision metric).
      */
     public List<ClassifierActivity> projectActivityInWindow(String projectId, String start, String end) {
-        return jdbc.sql("SELECT sg.id AS classifier_id, sg.classifier_key AS classifier_key,"
+        return jdbc.sql("SELECT sg.classifier_key AS classifier_key,"
                         + " sg.name AS classifier_name, COUNT(*) AS event_count "
                         + "FROM (" + detectionTables.unionSql() + ") d "
                         + "  JOIN classifier sg ON sg.project_id = d.project_id AND sg.classifier_key = d.classifier_id "
@@ -144,10 +143,7 @@ public class AlertQueryRepository {
                 .param("start", start)
                 .param("end", end)
                 .query((rs, n) -> new ClassifierActivity(
-                        rs.getString("classifier_id"),
-                        rs.getString("classifier_key"),
-                        rs.getString("classifier_name"),
-                        rs.getLong("event_count")))
+                        rs.getString("classifier_key"), rs.getString("classifier_name"), rs.getLong("event_count")))
                 .list();
     }
 }

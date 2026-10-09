@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.config;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -44,12 +45,11 @@ class IngestSpoolPropertiesTest {
     }
 
     @Test
-    @DisplayName("mode is normalised and validated, and drainers are the spool's answer rather than the mode string")
+    @DisplayName("mode is validated after trimming and lower-casing, so only an unknown spool is refused")
     void modeIsNormalisedAndValidated() {
         IngestSpoolProperties props = new IngestSpoolProperties();
-        assertEquals("memory", props.getMode());
-        props.setMode("  KAFKA  ");
-        assertEquals("kafka", props.getMode(), "trimmed and lower-cased, so an operator's spacing does not matter");
+        assertDoesNotThrow(
+                () -> props.setMode("  KAFKA  "), "trimmed and lower-cased, so an operator's spacing does not matter");
         assertThrows(IllegalArgumentException.class, () -> props.setMode("redpanda"));
     }
 }

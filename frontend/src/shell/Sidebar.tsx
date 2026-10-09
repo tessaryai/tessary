@@ -17,14 +17,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { auth as authApi } from "../api/client";
-import { paid } from "@paid";
 import { useTenant } from "../tenant/TenantContext";
 import { useAuth } from "../auth/AuthContext";
+import { signOut } from "../auth/signOut";
 import { cn } from "../ui";
 import { SETTINGS_ICON } from "./nav";
 import type { NavItem } from "./nav";
 import { useNavigation } from "./useNavigation";
-import { useDropdown } from "./useDropdown";
+import { useDropdown } from "../ui/useDropdown";
 import { useShellActions } from "./ShellActions";
 import { usePalette } from "./PaletteContext";
 import { useCaseCounts } from "./useCases";
@@ -35,8 +35,15 @@ export function Sidebar() {
   const { collapsed, toggle } = useSidebarCollapsed();
   const { triage, groups } = useNavigation();
 
+  const items = [triage, ...groups.flatMap((g) => g.items)];
   const renderItem = (item: NavItem, badge?: number) => (
-    <NavLinkRow key={item.id} item={item} badge={badge} collapsed={collapsed} />
+    <NavLinkRow
+      key={item.id}
+      item={item}
+      claimedElsewhere={items.filter((other) => other.id !== item.id).flatMap((other) => other.match ?? [])}
+      badge={badge}
+      collapsed={collapsed}
+    />
   );
 
   return (
@@ -178,15 +185,6 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   const currentOrg = orgs.find((o) => o.slug === orgSlug);
   const currentProject = projects.data?.find((p) => p.slug === projectSlug);
 
-  /*
-    orgSwitcherRows renders the multi-org section of this dropdown (an "Organizations" header, one
-    row per org, and "+ New organization"). This build's default renders null, so the switcher
-    shows only Projects, with no dead action pointing at a route this build doesn't ship. Held in a
-    variable rather than called inline because the section divider below has to know whether there
-    is a section above it at all.
-  */
-  const orgRows = paid.orgSwitcherRows(orgs, orgSlug);
-
   const go = (to: string) => {
     setOpen(false);
     nav(to);
@@ -242,13 +240,6 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
           className="absolute left-full bottom-0 w-60 max-h-[70vh] overflow-y-auto rounded-card bg-overlay border border-border-strong py-1 z-50"
           style={{ boxShadow: "var(--shadow-md)" }}
         >
-          {orgRows}
-
-          {/* Separates the two sections, so it only exists when there are two: this build's
-              `orgSwitcherRows` returns null, and an unconditional rule left a divider hanging above
-              the Projects header with nothing above it to divide. */}
-          {orgRows != null && <div className="my-1 border-t border-border" />}
-
           <div className="px-3 pt-1.5 pb-1 text-label uppercase text-subtle">Projects</div>
           {(projects.data ?? []).map((p) => (
             <SwitcherRow
@@ -267,8 +258,7 @@ function ProjectSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
-export function SwitcherRow({
+function SwitcherRow({
   name,
   selected,
   onClick,
@@ -293,8 +283,7 @@ export function SwitcherRow({
   );
 }
 
-/** Exported for the `orgSwitcherRows` seam, which reuses this row exactly. */
-export function SwitcherAction({ label, onClick }: { label: string; onClick: () => void }) {
+function SwitcherAction({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -313,10 +302,13 @@ export function SwitcherAction({ label, onClick }: { label: string; onClick: () 
  */
 function NavLinkRow({
   item,
+  claimedElsewhere = [],
   badge,
   collapsed,
 }: {
   item: NavItem;
+  /** Other rows' `match` routes: a path under this row's route that another row claims lights that row instead. */
+  claimedElsewhere?: string[];
   /** Triage only: the open-case count. The app's only nav count. */
   badge?: number;
   collapsed?: boolean;
@@ -326,10 +318,10 @@ function NavLinkRow({
   const location = useLocation();
   const projectBase = `/orgs/${orgSlug}/projects/${projectSlug}/`;
   const href = `${projectBase}${item.id}`;
-  const active =
-    location.pathname === href ||
-    location.pathname.startsWith(href + "/") ||
-    (item.match?.some((m) => location.pathname.startsWith(projectBase + m)) ?? false);
+  const under = (routes: string[] | undefined) =>
+    routes?.some((m) => location.pathname.startsWith(projectBase + m)) ?? false;
+  const own = location.pathname === href || location.pathname.startsWith(href + "/");
+  const active = (own && !under(claimedElsewhere)) || under(item.match);
   const hasBadge = badge != null && badge > 0;
 
   return (
@@ -368,18 +360,10 @@ function NavLinkRow({
 }
 
 function AccountRow({ collapsed }: { collapsed: boolean }) {
-  const { user } = useAuth();
+  // Rendered only inside ProtectedRoute, which does not mount its children without a user.
+  const user = useAuth().user!;
   const { open, setOpen, ref } = useDropdown();
-  const onSignOut = async () => {
-    try {
-      const { frontendUrl } = await authApi.logout();
-      window.location.assign(frontendUrl);
-    } catch {
-      window.location.assign("/");
-    }
-  };
 
-  if (!user) return null;
   const initial = (user.email ?? "?").charAt(0).toUpperCase();
   return (
     <div ref={ref} className="px-2 py-2 border-t border-border relative">
@@ -415,7 +399,7 @@ function AccountRow({ collapsed }: { collapsed: boolean }) {
         >
           <button
             type="button"
-            onClick={onSignOut}
+            onClick={() => void signOut()}
             className="w-full text-left px-3 py-1.5 text-small text-fg hover:bg-hover">
             Sign out
           </button>

@@ -110,7 +110,7 @@ public class PlaceholderSecretGuard {
         }
 
         String domain = tessary.getSiteDomain();
-        boolean hasDomain = domain != null && !domain.isBlank() && !NO_DOMAIN_SENTINEL.equals(domain.trim());
+        boolean hasDomain = !domain.isBlank() && !NO_DOMAIN_SENTINEL.equals(domain.trim());
 
         if (hasDomain) {
             throw new IllegalStateException("Refusing to start: this instance is served on " + domain.trim()

@@ -12,24 +12,20 @@ import org.jspecify.annotations.Nullable;
  */
 public record CaseEventRow(
         String id,
-        String caseId,
-        String projectId,
         String kind,
         @Nullable String actor,
         String summary,
         @Nullable String detail,
         String createdAt) {
 
-    /** {@code kind} values — mirrors the {@code eval_case_event} CHECK constraint in the baseline changeset. */
+    /**
+     * The {@code kind} values code writes. The {@code eval_case_event} CHECK constraint also allows the
+     * history-only {@code reopened} and {@code recovered}, which older trails still carry.
+     */
     public static final class Kind {
         private Kind() {}
 
         public static final String OPENED = "opened";
-
-        /** History only — no code writes this any more. A closed case is final; the next positive on
-         *  its cause opens a fresh case number rather than reopening this one. Kept so an old case's
-         *  trail, written before that model existed, still reads. */
-        public static final String REOPENED = "reopened";
 
         /** A second (or later) finding on the same cause joined this still-open case. */
         public static final String RECURRED = "recurred";
@@ -39,10 +35,6 @@ public record CaseEventRow(
 
         public static final String RCA_REQUESTED = "rca_requested";
         public static final String RCA_COMPLETED = "rca_completed";
-
-        /** History only — no code writes this any more. A case now closes only when a person resolves
-         *  or absorbs it; nothing auto-recovers it on silence. Kept so an old case's trail still reads. */
-        public static final String RECOVERED = "recovered";
 
         public static final String RESOLVED = "resolved";
         public static final String MUTED = "muted";

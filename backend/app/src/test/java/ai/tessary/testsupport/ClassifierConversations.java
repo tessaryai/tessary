@@ -3,54 +3,65 @@ package ai.tessary.testsupport;
 
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import java.time.Instant;
+import java.util.List;
 
 /**
- * Seeds the conversational PREAMBLE a frustration fixture needs to be scoreable at all.
+ * Seeds the preamble a frustration fixture needs to be scoreable: a user turn is sent only when the four messages
+ * before it are user, assistant, user, assistant, each with text. Without it a fixture asserts on a turn production
+ * never scores, and the failure reads as a cursor or grain bug.
  *
- * <p>The frustration built-in skips a conversation's opener ({@code context_min_prior_user_turns=1}):
- * the agent has not acted yet, so whatever emotion the first message carries is what the user arrived
- * with, not something the product caused (measured: 4% of turn-0 messages are frustrated against 30%
- * at turn 2). A fixture that inserts ONE turn and expects a detection is therefore asserting against a
- * turn production would never score — and the failure reads as a cursor or grain bug rather than the
- * gate doing its job, which is exactly how it presented when the gate landed.
- *
- * <p>Call this before the turn under test, in the same session, so the fixture represents a real
- * conversation. The preamble turn is stamped EARLIER than the turns it precedes so it never disturbs a
- * test that depends on a specific timestamp ordering or an identical-timestamp group.
- *
- * <p>A turn is a TRACE now, so the preamble is one trace with one root {@code llm} span — no context
- * spine, no {@code seq}. It is written FIRST, which matters for more than tidiness: the thread window
- * orders by {@code (created_at, trace_id, id)}, and {@code created_at} is the row's own insert time.
+ * <p>Call before the turn under test, in the same session, and put that turn on {@link #CALL_SITE}: earlier turns
+ * are read from the scored turn's own call site. Each preamble turn is one trace with a root {@code llm} span,
+ * stamped earlier and written first, since the thread window orders by {@code (created_at, trace_id, id)}.
  */
 public final class ClassifierConversations {
 
     private ClassifierConversations() {}
 
-    /** How far before {@code beforeTs} the preamble turn is stamped — clear of any same-timestamp group. */
-    private static final int PREAMBLE_LEAD_SECONDS = 60;
+    /** The call site every preamble turn is on; pick it on the classifier for the turn under test to be scored. */
+    public static final String CALL_SITE = "cs-chat";
+
+    /** How far before {@code beforeTs} the first preamble turn is stamped, clear of any same-timestamp group. */
+    private static final int PREAMBLE_LEAD_SECONDS = 120;
 
     /**
-     * Insert one benign user turn into {@code sessionId} ahead of {@code beforeTs}, so the next turn in
-     * that session has a prior exchange and is eligible for scoring.
+     * Two benign exchanges in {@code sessionId} ahead of {@code beforeTs}.
      *
-     * @param beforeTs the timestamp of the turn under test; the preamble lands a minute earlier
-     * @return the preamble span's producer identity (rarely needed; returned for assertions that count
-     *     turns)
+     * @param beforeTs the turn under test's timestamp; the preamble lands two and one minutes earlier
+     * @return the two preamble spans, oldest first
      */
-    public static SpanRef seedPriorTurn(SubstrateV2Fixtures fx, String projectId, String sessionId, String beforeTs) {
-        Instant at = Instant.parse(beforeTs).minusSeconds(PREAMBLE_LEAD_SECONDS);
+    public static List<SpanRef> seedPreamble(
+            SubstrateV2Fixtures fx, String projectId, String sessionId, String beforeTs) {
+        Instant first = Instant.parse(beforeTs).minusSeconds(PREAMBLE_LEAD_SECONDS);
+        return List.of(
+                exchange(
+                        fx,
+                        projectId,
+                        sessionId,
+                        first,
+                        "hello, i have a question about my account",
+                        "Happy to help. What would you like to know?"),
+                exchange(
+                        fx,
+                        projectId,
+                        sessionId,
+                        first.plusSeconds(PREAMBLE_LEAD_SECONDS / 2),
+                        "what plan am i on?",
+                        "You are on the standard plan."));
+    }
+
+    // Neutral, so the preamble fires no detector and inflates no count.
+    private static SpanRef exchange(
+            SubstrateV2Fixtures fx, String projectId, String sessionId, Instant at, String user, String assistant) {
         return fx.spanSeed(projectId)
                 .traceId(SubstrateV2Fixtures.traceId())
                 .sessionId(sessionId)
+                .callSiteId(CALL_SITE)
                 .kind("llm")
                 .name("chat")
                 .model("gpt-x")
                 .at(at)
-                .payload(
-                        // Deliberately neutral: the preamble must make the NEXT turn eligible without
-                        // itself firing any detector, or it would inflate whatever the test counts.
-                        ClassifierObservations.userInput("hello, i have a question about my account"),
-                        ClassifierObservations.assistantOutput("Happy to help — what would you like to know?"))
+                .payload(ClassifierObservations.userInput(user), ClassifierObservations.assistantOutput(assistant))
                 .writeRef();
     }
 }

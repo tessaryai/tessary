@@ -19,9 +19,6 @@ import ai.tessary.classifier.finding.FindingRow;
  */
 public interface CaseSource {
 
-    /** The {@link CaseRow.Detector} constant this source produces. */
-    String detector();
-
     /** Whether this source is the one that shapes a case for a finding filed under {@code classifierKey}. */
     boolean owns(String classifierKey);
 

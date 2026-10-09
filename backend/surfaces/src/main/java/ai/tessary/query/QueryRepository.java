@@ -230,9 +230,8 @@ public class QueryRepository {
             int sep = rest.lastIndexOf('|');
             List<String> keyValues = sep > 0 ? splitHandle(rest.substring(sep + 1), keyColumns.size()) : List.of();
             if (keyValues.size() == keyColumns.size()) {
-                String tsCast = scope.dataset().timeIsTimestamptz() ? "::timestamptz" : "";
                 List<String> placeholders = new ArrayList<>();
-                placeholders.add(":cur_ts" + tsCast);
+                placeholders.add(":cur_ts::timestamptz");
                 for (int i = 0; i < keyColumns.size(); i++) {
                     placeholders.add(":cur_k" + i);
                     params.put("cur_k" + i, keyValues.get(i));
@@ -258,8 +257,7 @@ public class QueryRepository {
                     for (String field : displayColumns.keySet()) {
                         fields.put(field, rs.getString(field));
                     }
-                    return new SearchRow(
-                            rs.getString("row_handle"), readTime(rs, scope), readEventTime(rs, scope), fields);
+                    return new SearchRow(rs.getString("row_handle"), readTime(rs), readEventTime(rs), fields);
                 })
                 .list();
 
@@ -273,70 +271,14 @@ public class QueryRepository {
         return new SearchPage(List.copyOf(rows), next);
     }
 
-    /**
-     * Hydrate a kNN-ranked list of row handles into display rows, scoped to the project, <b>preserving the
-     * input order</b> (the semantic-search ranking by cosine distance). ONE query fetches every row (no
-     * N+1) — {@code id = ANY(:ids)} for a surrogate-keyed dataset, a row-constructor {@code IN} over the
-     * identity tuple for a composite-keyed one; the result is then re-ordered in Java to the requested
-     * ranking, since SQL has no inherent order over an id set. Handles with no row (e.g. churned since
-     * indexing) are dropped, as are handles that do not parse. The page carries a null {@code nextCursor}:
-     * kNN is top-k by distance, not keyset-paginable, so there is no continuation token.
-     *
-     * <p>The scope's time range and equality filters are honored here too — the same {@code basePredicate}
-     * the keyword/aggregation paths use is applied on top of the {@code id = ANY(:ids)} restriction — so a
-     * semantic search with a {@code range}/{@code filters} returns the kNN matches that <em>also</em>
-     * satisfy those constraints, never the unfiltered nearest neighbours. (The kNN bound is applied first
-     * over the whole namespace, so a restrictive filter can shrink the page below the requested top-k.)
-     *
-     * @param orderedIds the row handles, nearest-first; the returned rows follow this order
-     * @param displayColumns trusted {@code wire field -> column identifier} projection for each row's
-     *     {@code fields} map (the column is SELECTed {@code AS} the wire field)
-     */
-    public SearchPage searchByIds(Scope scope, List<String> orderedIds, Map<String, String> displayColumns) {
-        if (orderedIds.isEmpty()) {
-            return new SearchPage(List.of(), null);
-        }
-        StringBuilder select = new StringBuilder("SELECT " + scope.dataset().idExpr() + " AS row_handle, created_at, "
-                + scope.dataset().timeColumn() + " AS event_ts");
-        for (Map.Entry<String, String> col : displayColumns.entrySet()) {
-            select.append(", ").append(col.getValue()).append(" AS ").append(col.getKey());
-        }
-        // project_id scope is enforced here too (defense in depth): the namespace already partitions by
-        // project, but the row hydration must never cross a tenant boundary. The shared basePredicate adds
-        // the project_id, time-range, and equality-filter clauses; the kNN id set is an extra restriction.
-        List<String> where = new ArrayList<>();
-        Map<String, Object> params = basePredicate(scope, where);
-        addHandleRestriction(scope.dataset(), orderedIds, where, params);
-        var spec = jdbc.sql(select + " FROM " + relation(scope.dataset()) + whereClause(where));
-        bind(spec, params);
-        Map<String, SearchRow> byId = new LinkedHashMap<>();
-        spec.query((rs, n) -> {
-                    Map<String, String> fields = new LinkedHashMap<>();
-                    for (String field : displayColumns.keySet()) {
-                        fields.put(field, rs.getString(field));
-                    }
-                    return new SearchRow(
-                            rs.getString("row_handle"), readTime(rs, scope), readEventTime(rs, scope), fields);
-                })
-                .list()
-                .forEach(row -> byId.put(row.id(), row));
-        // Re-apply the kNN ranking: SQL returned the set in arbitrary order.
-        List<SearchRow> ranked = new ArrayList<>(byId.size());
-        for (String id : orderedIds) {
-            SearchRow row = byId.get(id);
-            if (row != null) ranked.add(row);
-        }
-        return new SearchPage(List.copyOf(ranked), null);
-    }
-
     // ---- row handles -----------------------------------------------------------------------------
 
     /**
      * Split an opaque row handle back into its identity values. A single-key dataset's handle is the value
      * itself; a composite handle splits on the FIRST {@code ':'} for each leading key, so the last
      * component keeps any colon a producer id might contain rather than being silently truncated.
-     * Returns an empty list when the handle does not carry {@code arity} components — the caller treats
-     * that as "no usable cursor / no such row" rather than guessing.
+     * Returns an empty list when the handle does not carry {@code arity} components — the keyset cursor
+     * treats that as "no usable cursor" rather than guessing.
      */
     private static List<String> splitHandle(String handle, int arity) {
         if (arity == 1) {
@@ -353,44 +295,6 @@ public class QueryRepository {
         if (rest.isEmpty()) return List.of();
         parts.add(rest);
         return parts;
-    }
-
-    /**
-     * Restrict a hydration read to the rows named by {@code handles}. A single-key dataset keeps the
-     * original {@code id = ANY(:ids)} shape. A composite-key dataset gets a row-constructor
-     * {@code (trace_id, id) IN ((:h0k0, :h0k1), …)}, which is index-eligible on the span primary key —
-     * concatenating the handle in SQL instead would defeat every index on the largest table in the schema.
-     * Handles that do not parse are dropped: they name no row, and a malformed vector-index entry must not
-     * take the whole page down.
-     */
-    private static void addHandleRestriction(
-            QueryDataset dataset, List<String> handles, List<String> where, Map<String, Object> params) {
-        List<String> keyColumns = dataset.keyColumns();
-        if (keyColumns.size() == 1) {
-            where.add(keyColumns.get(0) + " = ANY(:ids)");
-            params.put("ids", handles.toArray(new String[0]));
-            return;
-        }
-        List<String> tuples = new ArrayList<>();
-        int row = 0;
-        for (String handle : handles) {
-            List<String> values = splitHandle(handle, keyColumns.size());
-            if (values.size() != keyColumns.size()) continue;
-            List<String> placeholders = new ArrayList<>(values.size());
-            for (int i = 0; i < values.size(); i++) {
-                String p = "h" + row + "_" + i;
-                placeholders.add(":" + p);
-                params.put(p, values.get(i));
-            }
-            tuples.add("(" + String.join(", ", placeholders) + ")");
-            row++;
-        }
-        if (tuples.isEmpty()) {
-            // Nothing addressable — a predicate that matches no row, rather than an empty IN () (a syntax error).
-            where.add("FALSE");
-            return;
-        }
-        where.add("(" + String.join(", ", keyColumns) + ") IN (" + String.join(", ", tuples) + ")");
     }
 
     /** {@code "a DESC, b DESC"} for the keyset's identity tuple (trusted identifiers). */
@@ -435,23 +339,18 @@ public class QueryRepository {
         return params;
     }
 
-    /** The row's literal {@code created_at} (ingest time) as an ISO-8601 instant: read a native
-     *  timestamptz column back via {@link ai.tessary.storage.Timestamps}, else the ISO-8601 TEXT column
-     *  verbatim. Always {@code created_at}, regardless of the dataset's {@link QueryDataset#timeColumn()}. */
-    private static String readTime(ResultSet rs, Scope scope) throws SQLException {
-        String ts = scope.dataset().timeIsTimestamptz()
-                ? ai.tessary.storage.Timestamps.iso(rs, "created_at")
-                : rs.getString("created_at");
+    /** The row's literal {@code created_at} (ingest time) as an ISO-8601 instant, read back via {@link
+     *  ai.tessary.storage.Timestamps}. Always {@code created_at}, regardless of the dataset's {@link
+     *  QueryDataset#timeColumn()}. Every searchable dataset's time columns are timestamptz. */
+    private static String readTime(ResultSet rs) throws SQLException {
+        String ts = ai.tessary.storage.Timestamps.iso(rs, "created_at");
         return ts == null ? "" : ts;
     }
 
     /** The row's {@code event_ts} alias — its value of {@link QueryDataset#timeColumn()} — the clock the
-     *  keyset actually orders on and the cursor is minted from. Same timestamptz/TEXT read as {@link
-     *  #readTime}, keyed off the same {@link QueryDataset#timeIsTimestamptz()} flag. */
-    private static String readEventTime(ResultSet rs, Scope scope) throws SQLException {
-        String ts = scope.dataset().timeIsTimestamptz()
-                ? ai.tessary.storage.Timestamps.iso(rs, "event_ts")
-                : rs.getString("event_ts");
+     *  keyset actually orders on and the cursor is minted from. Same read as {@link #readTime}. */
+    private static String readEventTime(ResultSet rs) throws SQLException {
+        String ts = ai.tessary.storage.Timestamps.iso(rs, "event_ts");
         return ts == null ? "" : ts;
     }
 

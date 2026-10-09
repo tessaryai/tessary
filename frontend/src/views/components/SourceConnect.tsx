@@ -10,10 +10,9 @@ import { Button, CopyButton, cn, useToast } from "../../ui";
  * Shared "connect a source" UI — the OTLP connect story (forward your traces to
  * Tessary as a second exporter), a config screen with copyable secrets.
  *
- * Single-sourced so the Setup surface and the in-app "Connect a source" modal
- * (Settings → Sources) show the exact same flow. Decoupled from any wizard
- * context: telemetry is an optional `emitAction` callback and toasts are taken
- * from the live context.
+ * Single-sourced so the first-run connect gate and the in-app "Connect a source"
+ * modal (Settings → Sources) show the exact same pieces. Toasts are taken from
+ * the live context.
  *
  * This is now the ONLY thing a partner has to do (launch G1), so it also has to
  * be doable without asking us (G2): the agent prompt, the raw endpoint and
@@ -61,25 +60,13 @@ export const OTLP_PROMPT = `Update the instrumentation using ${INSTRUMENT_DOC_UR
  */
 export const TAG_REPAIR_PROMPT = `Tessary is receiving my spans but none carry a call site. Tag them by following ${INSTRUMENT_DOC_URL}#the-call-site-tag. Do not change the exporter, it already works.`;
 
-export function OtlpConnect({
-  onBack,
-  backLabel,
-  emitAction,
-  arrived = false,
-}: {
-  onBack?: () => void;
-  backLabel?: string;
-  emitAction?: (action: string) => void;
-  /** Whether a trace has already landed. The pulsing banner is a claim about the project's state,
-   *  so it must not sit above a ladder that says traces arrived days ago. */
-  arrived?: boolean;
-}) {
+export function OtlpConnect({ onBack, backLabel }: { onBack: () => void; backLabel: string }) {
   const toast = useToast();
-  const { token, issue, issuing } = useIngestToken(emitAction);
-  const endpoint = (typeof window !== "undefined" ? window.location.origin : "https://your-host") + "/v1/traces";
+  const { token, issue, issuing } = useIngestToken();
+  const endpoint = window.location.origin + "/v1/traces";
   return (
     <div>
-      {onBack && backLabel !== "" && <BackLink onClick={onBack} label={backLabel} />}
+      <BackLink onClick={onBack} label={backLabel} />
       <h3 className="mb-1.5 text-h2 text-fg">Forward your OpenTelemetry traces</h3>
       <p className="mb-4 text-small text-muted leading-relaxed">
         Add Tessary as a second OpenTelemetry exporter. Your existing one keeps working, and traces go to
@@ -104,7 +91,7 @@ export function OtlpConnect({
         )}
       </div>
       <ExporterSnippets endpoint={endpoint} token={token} />
-      {!arrived && <ListeningBanner />}
+      <ListeningBanner />
     </div>
   );
 }
@@ -269,7 +256,7 @@ function ExporterSnippets({ endpoint, token }: { endpoint: string; token: string
  * clipboard on that click and so needs the value back. Exported for that one caller; every other
  * consumer of this file keeps using {@link OtlpConnect} whole.
  */
-export function useIngestToken(emitAction?: (action: string) => void) {
+export function useIngestToken() {
   const api = useProjectApi();
   const toast = useToast();
   const qc = useQueryClient();
@@ -278,7 +265,6 @@ export function useIngestToken(emitAction?: (action: string) => void) {
     mutationFn: () => api.createApiKey({ name: "OTLP ingest", scope: "write" }),
     onSuccess: (res) => {
       setToken(res.plaintext);
-      emitAction?.("issue_token");
       // Minting an ingest token means data is about to flow into the substrate via the OTLP ingest path.
       // Materialize the substrate-backed "sdk" source (idempotent server-side via ensureSdkSource) so the
       // ingested telemetry shows up as a selectable dataset source — without this the token leads nowhere.
@@ -303,7 +289,7 @@ export function useIngestToken(emitAction?: (action: string) => void) {
 
 // ---- shared atoms ------------------------------------------------------------
 
-export function CodingAgentLabel() {
+function CodingAgentLabel() {
   return (
     <span className="inline-flex items-center gap-1.5 text-label uppercase text-muted mb-2.5">
       <Code2 size={13} strokeWidth={1.7} aria-hidden="true" />
@@ -312,7 +298,7 @@ export function CodingAgentLabel() {
   );
 }
 
-export function PromptCard({ prompt, onCopy }: { prompt: string; onCopy: () => void }) {
+function PromptCard({ prompt, onCopy }: { prompt: string; onCopy: () => void }) {
   return (
     <div className="flex flex-col gap-2.5 rounded-card border border-border-strong bg-surface p-3.5">
       <code className="font-mono text-small text-fg leading-relaxed">{prompt}</code>
@@ -373,7 +359,7 @@ export function ListeningBanner({ label = "Listening for your first trace." }: {
   );
 }
 
-export function BackLink({ onClick, label = "Back to sources" }: { onClick: () => void; label?: string }) {
+function BackLink({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button onClick={onClick} className="inline-flex items-center gap-1.5 text-small text-muted hover:text-fg mb-2.5">
       <ChevronLeft size={13} strokeWidth={1.7} aria-hidden="true" />

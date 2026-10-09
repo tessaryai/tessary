@@ -1,34 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * F1/F3/E coverage for agent-stream.js's runAgent(): the turn-accumulation fix (a failing lane's
- * spend must survive a fresh-session retry) and the retry gate (E — a session that already did
- * real work must not be silently re-run at double cost). Run with:
+ * Tests for agent-stream.js runAgent(): a failing lane's spend survives a fresh-session retry, and a session that
+ * already did real work is not re-run at double cost. Run with `node --experimental-test-module-mocks --test
+ * test/agent-stream.test.js` (the package "test" script passes the flag).
  *
- *   node --experimental-test-module-mocks --test test/agent-stream.test.js
- *
- * (the "test" script in package.json passes the flag; node:test's `mock.module` needs it.)
- *
- * WHY MOCK @opencode-ai/sdk RATHER THAN SPIN UP A REAL `opencode serve`: runAgent's own contract
- * with the SDK is one HTTP-shaped client (`session.create` / `session.prompt` / `session.messages`)
- * — everything this file is responsible for (accumulating turns across a fresh-session retry,
- * gating that retry, summing usage) sits entirely on top of that client's return values, so faking
- * them exercises the real code under test without needing a live agent, a model, or a network call.
- * `createOpencodeClient` is the ONLY SDK entry point runAgent touches — mocking exactly that keeps
- * the rest of the module (splitModel, toTurns, sumUsage, toEnvelope, the retry loop itself)
- * genuinely under test.
- *
- * THE SERVER PROCESS IS REAL, just not opencode. agent-stream.js spawns `opencode serve` itself
- * (see its header), so the `opencode` on this process's PATH is test/fixtures/fake-opencode: it
- * announces itself like opencode and records the config it was started with, which is how the
- * tests below read what runAgent configured. Its HTTP routes go unused here (the client is mocked).
- *
- * WHY NOT DRIVE triage.js/rca.js DIRECTLY for the failure-envelope shape (b): their `main()` is not
- * exported and ends in `process.exit`, which is awkward to assert against in-process without a
- * child process per case. Both scripts' catch blocks do exactly two things with runAgent's thrown
- * error — `describeError(e)` and `sumUsage(e.turns)` — and JSON.stringify the result; that contract
- * is tested directly against the real exported functions below, which is the part actually worth
- * protecting (the numeric-only shape server.js's HARD RULE depends on).
+ * Only `createOpencodeClient` from @opencode-ai/sdk is mocked, so turn accumulation, the retry gate, and usage sums
+ * run for real. The server process is test/fixtures/fake-opencode on PATH, which records the config it was started
+ * with. The failure envelope is tested through the exported `describeError` and `sumUsage` that triage.js and rca.js
+ * call, since their `main()` ends in `process.exit`.
  */
 const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,10 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// agent-stream.js reads WORK_DIR (-> WORK -> AGENT_CWD) at module load time, and runAgent's
-// startServer() chdir()s into it — so this MUST be a real, existing directory, set BEFORE the
-// first require of the module under test. '/home/user' (the module's own default) does not exist
-// on a dev/CI host.
+// Read at module load, and runAgent chdir()s into it, so it must exist before the first require.
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-stream-test-'));
 process.env.WORK_DIR = workDir;
 
@@ -61,6 +38,10 @@ function clearRecords() {
   for (const f of fs.readdirSync(recordDir)) fs.rmSync(path.join(recordDir, f));
 }
 
+const SCHEMA = { type: 'object', required: ['verdict'], properties: { verdict: { type: 'string' } } };
+const OK_REPLY = JSON.stringify({ verdict: 'ok' });
+const MCP = { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' };
+
 /** Whether a process with this pid still exists. */
 function isAlive(pid) {
   try {
@@ -72,9 +53,7 @@ function isAlive(pid) {
 }
 
 /**
- * One assistant turn in the shape `toTurns` reads (see agent-stream.js's partsOf/toolCallsOf/
- * usageOf): `{info: {...}, parts: [...]}`, where `info.parts` being absent is what makes `toTurns`
- * read `parts` off the outer object (`m.parts ? m : msg` in the real code) rather than `info`.
+ * One assistant turn in the `{info, parts}` shape `toTurns` reads; no `info.parts` makes it read the outer `parts`.
  */
 function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
   const parts = [];
@@ -96,13 +75,8 @@ function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
 }
 
 /**
- * Install a fake @opencode-ai/sdk for one test. `messagesById(id, callCount)` returns the message
- * array `session.messages` answers with for that session id on its Nth call (1-based) — modelling
- * the real API, where messages() always returns a session's FULL history so far.
- *
- * Also records what runAgent handed over: `serverConfigs()` returns every config a (fake) opencode
- * was started with, and `promptBodies` every `body` session.prompt was called with — the two places
- * the systemPrompt/no-systemPrompt split (custom triage agent vs. the RCA path) is visible.
+ * A fake @opencode-ai/sdk for one test. `messagesById(id, callCount)` answers `session.messages`, which returns a
+ * session's full history so far. Records server configs and every `session.prompt` body.
  */
 function mockSdk({ messagesById }) {
   let sessionCounter = 0;
@@ -137,11 +111,8 @@ function mockSdk({ messagesById }) {
 
 test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => {
   t.after(() => mock.reset());
-  // Session 1: ONE assistant turn, empty completion (no text, no tool calls) but real input spend
-  // (Bedrock/non-Anthropic "done with nothing in it" — see isEmptyCompletion's doc comment). A lone
-  // empty turn is cheap-looking enough that the E gate (below) allows the fresh-session retry.
-  // Session 2: the same shape, so the run ultimately fails — the case that matters here is whether
-  // session 1's spend is still counted in the failure.
+  // Session 1: one empty turn with real input spend, cheap enough that the gate allows a retry. Session 2 fails the
+  // same way; session 1's spend must still be counted.
   const { runAgent } = require('../agent-stream');
   mockSdk({
     messagesById: (id) =>
@@ -151,7 +122,7 @@ test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => 
   });
 
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
     (err) => {
       assert.ok(Array.isArray(err.turns), 'thrown error carries .turns');
       assert.equal(err.turns.length, 2, 'both sessions\' turns survive into the failure');
@@ -165,9 +136,8 @@ test('F1: a fresh-session retry does not lose attempt 1\'s usage', async (t) => 
 
 test('E: a session that already did real work is not silently retried at double cost', async (t) => {
   t.after(() => mock.reset());
-  // Session 1: TWO turns — the first does substantial (tool-calling) work, the second ends empty.
-  // isEmptyCompletion looks only at the LAST turn, so the old code retried this from scratch,
-  // re-paying for turn 1's work. The gate must instead let the run fail on this session.
+  // Two turns, real work then an empty one. isEmptyCompletion reads only the last turn, so the old code re-ran turn
+  // 1's work; the gate must fail on this session instead.
   const { runAgent } = require('../agent-stream');
   const { createCalls, promptBodies } = mockSdk({
     messagesById: () => [
@@ -177,7 +147,7 @@ test('E: a session that already did real work is not silently retried at double 
   });
 
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
   );
   assert.equal(createCalls.length, 1, 'a session with real prior work must not trigger a second, fresh session');
   assert.equal(promptBodies.length, 1, 'no systemPrompt: the 4B turn-cap resume never applies, so this fails on the first prompt');
@@ -185,9 +155,8 @@ test('E: a session that already did real work is not silently retried at double 
 
 test('4B: triage resumes the same session once, no tools, when the turn cap empties the final reply', async (t) => {
   t.after(() => mock.reset());
-  // Session 1, first prompt: real (tool-calling) investigation work, then an empty final turn —
-  // the shape opencode's own step cap produces (a forced text-only turn with no budget left), not
-  // a provider giving up. The resume must reuse this session and ask it to answer with no tools.
+  // Tool-calling work, then an empty final turn: opencode's step cap, not a provider giving up. The resume must reuse
+  // this session and ask for an answer with no tools.
   const toolTurn = assistantMessage({
     toolCalls: ['get_finding_evidence'],
     usage: { input_tokens: 400, output_tokens: 100 },
@@ -205,6 +174,8 @@ test('4B: triage resumes the same session once, no tools, when the turn cap empt
   const run = await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
+    mcp: MCP,
     systemPrompt: 'You are the triage agent.',
     timeoutMs: 1000,
   });
@@ -240,6 +211,8 @@ test('4B: still empty after the resume, the run rejects after exactly two prompt
     runAgent({
       model: 'anthropic/claude-sonnet-5',
       prompt: 'rule on this finding',
+      jsonSchema: SCHEMA,
+      mcp: MCP,
       systemPrompt: 'You are the triage agent.',
       timeoutMs: 1000,
     }),
@@ -256,8 +229,7 @@ test('C/F3: a schema-miss same-session retry does not double-count usage', async
   const jsonUsage = { input_tokens: 20, output_tokens: 30 };
   const { runAgent } = require('../agent-stream');
   const { createCalls } = mockSdk({
-    // Same session id ('s1') both times — messages() answers the FULL cumulative history, exactly
-    // as the real opencode server does. The second call adds the corrected reply on top of the first.
+    // Same session id both times; messages() returns the full cumulative history, as the real server does.
     messagesById: (id, callCount) => {
       const prose = assistantMessage({ text: 'here is my analysis, sorry no JSON', usage: proseUsage });
       if (callCount === 1) return [prose];
@@ -269,6 +241,7 @@ test('C/F3: a schema-miss same-session retry does not double-count usage', async
   const run = await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'investigate',
+    mcp: MCP,
     jsonSchema: schema,
     timeoutMs: 1000,
   });
@@ -308,15 +281,14 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
-  // No mock of mcp-relay.js: it is cheap to run for real (binds a loopback port, does not touch
-  // the network until an actual tools/call arrives, which never happens here since the SDK client
-  // is mocked) — see agent-stream.js's runAgent for why the relay is only ever real here or in prod.
+  // mcp-relay.js runs for real: it binds a loopback port and never sees a tools/call here.
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
     systemPrompt: 'You are the triage agent. Goals: ...',
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     maxTurns: 10,
@@ -347,12 +319,14 @@ test('5: triage opens external_directory to opencode\'s own tmp and tool-output 
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
+    mcp: MCP,
     systemPrompt: 'You are the triage agent.',
     timeoutMs: 1000,
   });
@@ -372,10 +346,10 @@ test('5: RCA (no systemPrompt) keeps external_directory as a blanket deny, uncha
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
-  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', timeoutMs: 1000 });
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'investigate this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
 
   assert.deepEqual(serverConfigs()[0].permission.external_directory, { '*': 'deny' });
 });
@@ -384,12 +358,13 @@ test('no systemPrompt (RCA): unchanged — default build agent, direct MCP with 
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs, promptBodies } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'investigate this finding',
+    jsonSchema: SCHEMA,
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     maxTurns: 10,
     timeoutMs: 1000,
@@ -419,9 +394,7 @@ async function relayRefusesConnections(relayUrl) {
 test('decision 2: a failed server start still closes the relay, so it cannot hang the process', async (t) => {
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
-  // No mock of mcp-relay.js here either (see the systemPrompt test above for why that is cheap and
-  // real): the whole point of this test is that a REAL listening socket gets closed, which a mocked
-  // relay could not demonstrate.
+  // A real relay: the test is that a real listening socket gets closed.
   mock.module('@opencode-ai/sdk', {
     namedExports: {
       createOpencodeClient: () => {
@@ -429,8 +402,7 @@ test('decision 2: a failed server start still closes the relay, so it cannot han
       },
     },
   });
-  // The fake records its config, then exits before announcing — the "Server exited with code 1"
-  // start failure (a bad config, say), after the relay is already listening.
+  // The fake exits before announcing, after the relay is already listening.
   process.env.FAKE_OPENCODE_EXIT_BEFORE_READY = '1';
   t.after(() => {
     delete process.env.FAKE_OPENCODE_EXIT_BEFORE_READY;
@@ -441,6 +413,7 @@ test('decision 2: a failed server start still closes the relay, so it cannot han
     runAgent({
       model: 'anthropic/claude-sonnet-5',
       prompt: 'rule on this finding',
+      jsonSchema: SCHEMA,
       systemPrompt: 'You are the triage agent.',
       mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
       timeoutMs: 1000,
@@ -460,12 +433,13 @@ test('decision 2: a successful run also closes the relay once it is done', async
   t.after(() => mock.reset());
   const { runAgent } = require('../agent-stream');
   const { serverConfigs } = mockSdk({
-    messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })],
+    messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })],
   });
 
   await runAgent({
     model: 'anthropic/claude-sonnet-5',
     prompt: 'rule on this finding',
+    jsonSchema: SCHEMA,
     systemPrompt: 'You are the triage agent.',
     mcp: { url: 'https://tessary.example/mcp', token: 'tsy_a_live-token' },
     timeoutMs: 1000,
@@ -477,24 +451,23 @@ test('decision 2: a successful run also closes the relay once it is done', async
 
 test('shutdown: runAgent does not return until an opencode that ignores SIGTERM is gone', async (t) => {
   t.after(() => mock.reset());
-  // The live bug: the SDK's close() sent one SIGTERM and returned, an opencode that did not exit on
-  // it kept its pipes open, and the lane's process outlived its own run. Both outcomes are covered —
-  // the close sits in runAgent's `finally`, which a failed run reaches by a different path.
+  // Live bug: close() sent one SIGTERM and returned, so an opencode ignoring it outlived the run. The close sits in
+  // `finally`, so success and failure both reach it.
   process.env.FAKE_OPENCODE_IGNORE_SIGTERM = '1';
   t.after(() => {
     delete process.env.FAKE_OPENCODE_IGNORE_SIGTERM;
   });
   const { runAgent } = require('../agent-stream');
 
-  mockSdk({ messagesById: () => [assistantMessage({ text: 'ok', usage: { input_tokens: 10, output_tokens: 5 } })] });
-  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 });
+  mockSdk({ messagesById: () => [assistantMessage({ text: OK_REPLY, usage: { input_tokens: 10, output_tokens: 5 } })] });
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
   const [ok] = serverRecords();
   assert.equal(isAlive(ok.pid), false, 'a successful run returns only once the server process is gone');
 
   mock.reset();
   mockSdk({ messagesById: () => [assistantMessage({ usage: { input_tokens: 10, output_tokens: 0 } })] });
   await assert.rejects(
-    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', timeoutMs: 1000 }),
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'rule on this finding', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
     /opencode produced no usable reply/,
   );
   const [failed] = serverRecords();
@@ -502,9 +475,7 @@ test('shutdown: runAgent does not return until an opencode that ignores SIGTERM 
 });
 
 test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeric-only usage object', () => {
-  // Reproduces exactly what triage.js/rca.js's catch block does with a thrown runAgent error, using
-  // the same two exported functions they call — see the file header for why this is tested at that
-  // level rather than by driving triage.js's non-exported, process.exit-ing main().
+  // What triage.js and rca.js do with a thrown runAgent error, through the same two exported functions.
   const { describeError, sumUsage } = require('../agent-stream');
   const err = Object.assign(new Error('opencode produced no usable reply'), {
     turns: [{ usage: { input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],
@@ -516,4 +487,91 @@ test('b: the failure envelope triage.js/rca.js write is valid JSON with a numeri
   for (const [k, v] of Object.entries(parsed.usage)) {
     assert.equal(typeof v, 'number', `usage.${k} must be numeric — server.js's HARD RULE forwards this verbatim`);
   }
+});
+
+test('describeError: a non-Error cause is serialised, scrubbed, and never "[object Object]"', () => {
+  const { describeError } = require('../agent-stream');
+  const body = { name: 'ConfigInvalidError', data: { path: 'https://x-access-token:ghs_1@github.com/a/b' } };
+  assert.equal(
+    describeError(new Error('Bad Request', { cause: { body, status: 400 } })),
+    'Bad Request <- caused by: {"body":{"name":"ConfigInvalidError","data":{"path":"https://x-access-token:***@github.com/a/b"}},"status":400}',
+  );
+  assert.equal(describeError(new Error('failed', { cause: 'tsy_a_secret-key rejected' })), 'failed <- caused by: tsy_*** rejected');
+  const circular = { status: 500 };
+  circular.self = circular;
+  assert.equal(describeError(new Error('failed', { cause: circular })), 'failed <- caused by: [object Object]', 'an unserialisable cause still describes, never throws');
+});
+
+test('the provider config the launcher passes down is merged into opencode\'s, not replaced', async (t) => {
+  const inherited = { provider: { 'bedrock-mantle-gpt': { npm: '@ai-sdk/amazon-bedrock/mantle', options: { baseURL: 'https://m.example' } } } };
+  process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify(inherited);
+  t.after(() => {
+    delete process.env.OPENCODE_CONFIG_CONTENT;
+    mock.reset();
+  });
+  const { runAgent } = require('../agent-stream');
+  const { serverConfigs } = mockSdk({ messagesById: () => [assistantMessage({ text: OK_REPLY })] });
+
+  await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
+
+  const config = serverConfigs()[0];
+  assert.deepEqual(config.provider, inherited.provider, 'dropping it leaves the mantle lanes with no provider to resolve');
+  assert.ok(config.mcp['tessary-evals'], 'and runAgent\'s own keys still land beside it');
+});
+
+test('a brace-balanced aside before the JSON object does not hide the object', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const { promptBodies } = mockSdk({
+    messagesById: () => [assistantMessage({ text: 'Checked {the evidence} first. {"verdict":"ok"}' })],
+  });
+
+  const run = await runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 });
+
+  assert.equal(promptBodies.length, 1, 'no correction round for a reply that complied');
+  assert.deepEqual(JSON.parse(run.resultRaw).structured_output, { verdict: 'ok' });
+});
+
+test('JSON still missing a required key after the correction fails the run, naming the key both times', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const partial = assistantMessage({ text: '{"reason":"because"}', usage: { input_tokens: 5 } });
+  const { promptBodies } = mockSdk({ messagesById: (id, n) => Array.from({ length: n }, () => partial) });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.message, 'opencode returned JSON missing required verdict (2 attempts)');
+      assert.equal(err.turns.length, 2, 'the failure still carries both turns\' spend');
+      return true;
+    },
+  );
+  assert.match(promptBodies[1].parts[0].text, /^Your previous reply was missing verdict\./);
+});
+
+test('prose twice fails the run as no JSON object, rather than persisting the prose', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  const prose = assistantMessage({ text: 'The verdict is positive.' });
+  mockSdk({ messagesById: (id, n) => Array.from({ length: n }, () => prose) });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    { message: 'opencode did not return a JSON object for the requested schema (2 attempts)' },
+  );
+});
+
+test('a session that never produced a turn fails as no result', async (t) => {
+  t.after(() => mock.reset());
+  const { runAgent } = require('../agent-stream');
+  mockSdk({ messagesById: () => [] });
+
+  await assert.rejects(
+    runAgent({ model: 'anthropic/claude-sonnet-5', prompt: 'p', jsonSchema: SCHEMA, mcp: MCP, timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.message, 'opencode produced no result');
+      assert.deepEqual(err.turns, []);
+      return true;
+    },
+  );
 });

@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Session interior — the full page, opened from the rail's ⤢. Same shell as TraceDetail: Conversation |
- * Tree | Timeline over the session's spans, stitched across every trace in it. No Verdicts panel here —
+ * Tree | Timeline over the session's spans, stitched across every trace in it, plus JSON, the session and
+ * its spans as the API sent them. No Verdicts panel here —
  * judgment is per-trace, and a session-wide verdicts read is out of scope (see detail-views.tsx's
  * SessionConversationView doc comment).
  *
- * URL contract: ?view=tree|timeline (conversation default).
+ * URL contract: ?view=tree|timeline|json (conversation default).
  */
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";
 import { TraceMedia, ViewSegment, type TraceView } from "./detail-bits";
 import { SessionConversationView, SessionTreeView, SessionTimelineView } from "./detail-views";
+import { namesBy } from "./detection-marker";
+import { RawJsonView } from "./detail-json";
 import { useSessionDetail, useSessionSpans, useSpansByTrace, sessionSummary } from "./session-detail-data";
 
 export function SessionDetail() {
@@ -24,6 +27,9 @@ export function SessionDetail() {
   const spansQ = useSessionSpans(sessionId);
   const detail = q.data;
   const traces = detail?.traces ?? [];
+  const detections = detail?.detections ?? [];
+  const marksByTrace = namesBy(detections, "trace_id");
+  const marksBySpan = namesBy(detections, "span_id");
   const spansByTrace = useSpansByTrace(spansQ.data?.spans);
 
   const patch = (kv: Record<string, string | null>) => {
@@ -73,10 +79,21 @@ export function SessionDetail() {
 
           <TraceMedia>
             {view === "conversation" && (
-              <SessionConversationView traces={traces} spansByTrace={spansByTrace} focusId={focusId} />
+              <SessionConversationView
+                traces={traces}
+                spansByTrace={spansByTrace}
+                focusId={focusId}
+                marksByTrace={marksByTrace}
+              />
             )}
             {view === "tree" && (
-              <SessionTreeView traces={traces} spansByTrace={spansByTrace} focusId={focusId} onSelect={select} />
+              <SessionTreeView
+                traces={traces}
+                spansByTrace={spansByTrace}
+                focusId={focusId}
+                onSelect={select}
+                marksBySpan={marksBySpan}
+              />
             )}
             {view === "timeline" && (
               <SessionTimelineView
@@ -84,8 +101,21 @@ export function SessionDetail() {
                 spansByTrace={spansByTrace}
                 focusId={focusId}
                 onSelect={select}
+                marksBySpan={marksBySpan}
               />
             )}
+            {view === "json" &&
+              (spansQ.data ? (
+                <RawJsonView
+                  value={{ session: detail, spans: spansQ.data }}
+                  fileName={`session-${detail.id}.json`}
+                  foldDepth={3}
+                />
+              ) : spansQ.isFetching ? (
+                <LoadingRow />
+              ) : (
+                <ErrorNote error={spansQ.error ?? "This session's spans could not be loaded."} />
+              ))}
           </TraceMedia>
         </>
       )}

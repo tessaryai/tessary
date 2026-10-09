@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: Apache-2.0
+package ai.tessary.classifier.detector.groundedness;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import ai.tessary.auth.AuthFilter;
+import ai.tessary.classifier.ClassifierRow;
+import ai.tessary.classifier.finding.FindingEvidenceRepository;
+import ai.tessary.classifier.finding.FindingEvidenceRow;
+import ai.tessary.classifier.finding.FindingRepository;
+import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.plan.Capability;
+import ai.tessary.storage.SessionRepository;
+import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanRepository;
+import ai.tessary.storage.TraceV2Repository;
+import ai.tessary.tenant.Ids;
+import ai.tessary.tenant.Organization;
+import ai.tessary.tenant.OrganizationRepository;
+import ai.tessary.tenant.Project;
+import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.AuthEnforcedContext;
+import ai.tessary.testsupport.CapabilityFixture;
+import ai.tessary.testsupport.RateClassifierFixture;
+import ai.tessary.testsupport.SubstrateV2Fixtures;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+/**
+ * {@code GET /findings/{id}/flagged-answers} against a finding the rate test really filed: every flagged answer it
+ * cites comes back newest first, a page at a time; one whose span and retrieval are stored comes back with its
+ * question, the exact answer, the documents it was compared against and flagged sentences that slice to their
+ * text; one whose trace was never stored says so; an RCA cause narrows the list to its traces; and the finding
+ * page's block carries the first page. Another project's finding and groundedness classifier are 404 under the
+ * caller's project, and an RCA report on another finding narrows the list to nothing.
+ */
+@AuthEnforcedContext
+class GroundednessFlaggedAnswersIntegrationTest {
+
+    private static final String CALL_SITE = "cs-rag";
+    private static final String QUESTION = "When will my refund arrive?";
+    private static final String FIRST = "The refund was issued on March 3.";
+    private static final String SECOND = "It arrives within two business days by bank transfer.";
+    private static final String ANSWER = FIRST + " " + SECOND;
+    private static final String DOCUMENT = "Card refunds reach the customer within five to ten business days.";
+
+    @Autowired
+    WebApplicationContext wac;
+
+    @Autowired
+    AuthFilter authFilter;
+
+    @Autowired
+    OrganizationRepository orgs;
+
+    @Autowired
+    ProjectRepository projects;
+
+    @Autowired
+    CapabilityFixture capabilities;
+
+    @Autowired
+    RateClassifierFixture fixture;
+
+    @Autowired
+    GroundednessRateService rates;
+
+    @Autowired
+    FindingRepository findings;
+
+    @Autowired
+    FindingEvidenceRepository evidence;
+
+    @Autowired
+    GroundednessDetailService detail;
+
+    @Autowired
+    JdbcClient jdbc;
+
+    @Autowired
+    SessionRepository sessions;
+
+    @Autowired
+    TraceV2Repository traces;
+
+    @Autowired
+    SpanRepository spans;
+
+    @Autowired
+    SpanPayloadRepository payloads;
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private MockMvc mvc;
+
+    @BeforeEach
+    void setUp() {
+        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
+    }
+
+    @Test
+    void theEndpointPagesEveryFlaggedAnswerAndReadsBackTheStoredOne() throws Exception {
+        Filed filed = fileFinding("flagged-answers@example.com");
+        Cookie session = filed.session();
+        Organization org = filed.org();
+        Project project = filed.project();
+        String pid = project.id();
+        ClassifierRow signal = filed.signal();
+        FindingRow finding = filed.finding();
+        long cited = evidence.listByFinding(pid, finding.id()).stream()
+                .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
+                .count();
+
+        String base = "/api/orgs/" + org.slug() + "/projects/" + project.slug() + "/findings/" + finding.id()
+                + "/flagged-answers";
+        JsonNode first = page(session, base + "?limit=2");
+        assertEquals(cited, first.path("total").asLong(), "every flagged answer the finding cites");
+        assertEquals(2, first.path("rows").size());
+        assertEquals("2", first.path("nextCursor").asText());
+        JsonNode newest = first.path("rows").get(0);
+        assertFalse(newest.path("stored").asBoolean(), "no span was stored for it");
+        assertTrue(newest.path("answer").isNull());
+        assertEquals(1, newest.path("flaggedSentences").size(), "the offsets survive the payload");
+
+        // Store the newest answer's span, its retrieval, and the sentences the model flagged in it.
+        String trace = newest.path("traceId").asText();
+        String span = newest.path("spanId").asText();
+        Instant at = Instant.parse(newest.path("flaggedAt").asText());
+        storeAnswer(pid, signal, trace, span, at);
+
+        JsonNode again = page(session, base + "?limit=2");
+        JsonNode stored = again.path("rows").get(0);
+        assertEquals(span, stored.path("spanId").asText(), "the same answer, still first");
+        assertTrue(stored.path("stored").asBoolean());
+        assertEquals(ANSWER, stored.path("answer").asText());
+        assertEquals(QUESTION, stored.path("question").asText());
+        assertTrue(stored.path("premiseHadEvidence").asBoolean());
+        assertEquals(DOCUMENT, stored.path("documents").get(0).path("text").asText());
+        assertTrue(stored.path("documents").get(0).path("title").isNull());
+        JsonNode marks = stored.path("flaggedSentences");
+        assertEquals(2, marks.size());
+        assertEquals(
+                FIRST,
+                ANSWER.substring(
+                        marks.get(0).path("start").asInt(),
+                        marks.get(0).path("end").asInt()));
+        assertEquals(
+                SECOND,
+                ANSWER.substring(
+                        marks.get(1).path("start").asInt(),
+                        marks.get(1).path("end").asInt()));
+        assertEquals(0.992, stored.path("score").asDouble(), "the highest marked sentence");
+
+        JsonNode last = page(session, base + "?limit=2&cursor=" + (cited - 1));
+        assertEquals(1, last.path("rows").size());
+        assertTrue(last.path("nextCursor").isNull(), "the last page");
+
+        // An RCA cause narrows the list to the answers in the traces it names; an index past its causes is none.
+        String report = rcaReport(
+                pid,
+                finding.id(),
+                "[{\"title\":\"One document\",\"evidence_trace_ids\":[\"" + trace
+                        + "\",\"not-a-cited-trace\"],\"evidence_session_ids\":[]}]");
+        JsonNode share = page(session, base + "?limit=50&rcaReport=" + report + "&cause=0");
+        assertEquals(1, share.path("total").asLong(), "only the cause's trace");
+        assertEquals(span, share.path("rows").get(0).path("spanId").asText());
+        assertTrue(share.path("nextCursor").isNull());
+        assertEquals(
+                0,
+                page(session, base + "?rcaReport=" + report + "&cause=1")
+                        .path("total")
+                        .asLong());
+        assertEquals(
+                cited,
+                page(session, base + "?rcaReport=" + report).path("total").asLong(),
+                "both or neither");
+
+        GroundednessEvidence.GroundednessDetail block = detail.detail(finding);
+        assertNotNull(block);
+        assertEquals(
+                Math.min(cited, GroundednessDetailService.PAGE_SIZE),
+                block.answers().size());
+        assertEquals(span, block.answers().getFirst().spanId());
+        assertEquals(
+                finding.payload().path("traces_since_onset").asLong(),
+                block.rate().nCur());
+    }
+
+    @Test
+    void anotherProjectsFindingClassifierAndReportAreNotReachableByTheirIds() throws Exception {
+        Filed mine = fileFinding("flagged-tenant-mine@example.com");
+        Filed theirs = fileFinding("flagged-tenant-theirs@example.com");
+        String base =
+                "/api/orgs/" + mine.org().slug() + "/projects/" + mine.project().slug();
+        String myAnswers = base + "/findings/" + mine.finding().id() + "/flagged-answers";
+        mvc.perform(get(myAnswers)).andExpect(status().isUnauthorized());
+        // Both projects were seeded alike, so their findings cite the same trace ids.
+        String trace = page(mine.session(), myAnswers + "?limit=1")
+                .path("rows")
+                .get(0)
+                .path("traceId")
+                .asText();
+        String causes =
+                "[{\"title\":\"One document\",\"evidence_trace_ids\":[\"" + trace + "\"],\"evidence_session_ids\":[]}]";
+        String myReport = rcaReport(mine.project().id(), mine.finding().id(), causes);
+        assertEquals(
+                1,
+                page(mine.session(), myAnswers + "?rcaReport=" + myReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "setup: my own report narrows my list to the trace");
+        mvc.perform(get(base + "/classifiers/" + mine.signal().id() + "/groundedness-status")
+                        .cookie(mine.session()))
+                .andExpect(status().isOk());
+
+        mvc.perform(get(base + "/findings/" + theirs.finding().id() + "/flagged-answers")
+                        .cookie(mine.session()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(base + "/classifiers/" + theirs.signal().id() + "/groundedness-status")
+                        .cookie(mine.session()))
+                .andExpect(status().isNotFound());
+        String theirReport = rcaReport(theirs.project().id(), theirs.finding().id(), causes);
+        assertEquals(
+                0,
+                page(mine.session(), myAnswers + "?rcaReport=" + theirReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "another project's report names nothing of mine");
+        String otherFindingsReport = rcaReport(mine.project().id(), Ids.ulid(), causes);
+        assertEquals(
+                0,
+                page(mine.session(), myAnswers + "?rcaReport=" + otherFindingsReport + "&cause=0")
+                        .path("total")
+                        .asLong(),
+                "a report on another finding of my project names nothing of this one");
+    }
+
+    private record Filed(Cookie session, Organization org, Project project, ClassifierRow signal, FindingRow finding) {}
+
+    /** A signed-up user whose project's groundedness replay filed one finding: 5% for 7 hours, then 40% for 6. */
+    private Filed fileFinding(String email) throws Exception {
+        MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse();
+        Cookie session = Objects.requireNonNull(signup.getCookie("tessary-session"));
+        String orgId = mapper.readTree(signup.getContentAsString())
+                .path("data")
+                .path("orgId")
+                .asText();
+        Organization org = orgs.findById(orgId).orElseThrow();
+        Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
+        String pid = project.id();
+        capabilities.grant(org.id(), Capability.GROUNDEDNESS);
+        ClassifierRow signal = fixture.builtIn(pid, "groundedness");
+
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        seedHours(pid, signal, start, 0, 7, 0.05);
+        seedHours(pid, signal, start, 7, 6, 0.40);
+        rates.refresh(pid, signal, Instant.now());
+        List<FindingRow> filed = findings.listByProject(pid, null, null, "groundedness", false, 10);
+        assertEquals(1, filed.size());
+        return new Filed(session, org, project, signal, filed.get(0));
+    }
+
+    private JsonNode page(Cookie session, String path) throws Exception {
+        String body = mvc.perform(get(path).cookie(session))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return mapper.readTree(body).path("data");
+    }
+
+    /** A finished groundedness RCA report on {@code findingId} carrying {@code causes}, and its job. */
+    private String rcaReport(String pid, String findingId, String causes) {
+        return fixture.rcaReport(
+                pid,
+                findingId,
+                "classifier",
+                "groundedness",
+                "Groundedness",
+                "groundedness",
+                "groundedness_causes",
+                causes);
+    }
+
+    private void storeAnswer(String pid, ClassifierRow signal, String trace, String span, Instant at) {
+        jdbc.sql("INSERT INTO call_site (project_id, id, shape) VALUES (:pid, :id, 'rag_answer')")
+                .param("pid", pid)
+                .param("id", CALL_SITE)
+                .update();
+        SubstrateV2Fixtures fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        SubstrateV2Fixtures.SpanRef retrieval = fx.spanSeed(pid)
+                .traceId(trace)
+                .spanId(span + "-r")
+                .kind("retrieval")
+                .at(at.minusSeconds(1))
+                .writeRef();
+        fx.retrievedDoc(pid, retrieval, DOCUMENT, 0, null, at.minusSeconds(1));
+        fx.spanSeed(pid)
+                .traceId(trace)
+                .spanId(span)
+                .callSiteId(CALL_SITE)
+                .kind("llm")
+                .at(at)
+                .payload(QUESTION, ANSWER)
+                .write();
+        int second = ANSWER.indexOf(SECOND);
+        jdbc.sql("UPDATE groundedness_detection SET evidence = CAST(:evidence AS jsonb)"
+                        + " WHERE project_id = :pid AND classifier_id = :cid"
+                        + " AND subject_trace_id = :trace AND subject_span_id = :span")
+                .param(
+                        "evidence",
+                        "{\"head\":\"groundedness\",\"unsupported\":0.992,\"flagged_sentences\":["
+                                + "{\"start\":0,\"end\":" + FIRST.length() + ",\"unsupported\":0.981},"
+                                + "{\"start\":" + second + ",\"end\":" + ANSWER.length() + ",\"unsupported\":0.992}"
+                                + "]}")
+                .param("pid", pid)
+                .param("cid", signal.id())
+                .param("trace", trace)
+                .param("span", span)
+                .update();
+    }
+
+    /** 30 traces an hour, each with one scored answer; the first {@code rate} of each hour flagged. */
+    private void seedHours(String pid, ClassifierRow signal, Instant start, int fromHour, int hours, double rate) {
+        long flaggedPerHour = Math.round(30 * rate);
+        for (int h = fromHour; h < fromHour + hours; h++) {
+            for (int c = 0; c < 30; c++) {
+                String trace = CALL_SITE + "-" + h + "-" + String.format(Locale.ROOT, "%02d", c);
+                boolean flagged = c < flaggedPerHour;
+                Instant at = start.plus(Duration.ofHours(h)).plusSeconds(c);
+                fixture.groundednessAnswer(
+                        pid,
+                        signal,
+                        trace,
+                        trace + "-a",
+                        CALL_SITE,
+                        at,
+                        flagged,
+                        "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
+                                + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}]}");
+            }
+        }
+    }
+}

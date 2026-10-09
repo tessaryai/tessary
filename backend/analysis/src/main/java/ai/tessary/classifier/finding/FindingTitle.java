@@ -3,15 +3,12 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
  * What a finding is called, in a sentence — {@code "policy-gpt.member-chat turns are 1.47× more expensive"}
  * rather than {@code "cost:policy-gpt.member-chat:dearer:pinned"}.
- *
- * <p>Conformance has its own sentence in {@code ConformanceFindingViews.title}, on the other side of the
- * triage seam: its rates are columns rather than an evidence blob, so it shares the reason this class
- * exists (a finding and its case are named identically) without sharing a line of its dispatch.
  *
  * <p><b>One implementation, because two surfaces name the same object.</b> A finding on the Classifiers
  * page and the case it opens in Triage are the same event seen at two stages, and they used to be named
@@ -28,8 +25,8 @@ import java.util.Locale;
  *
  * <p><b>It never invents a number.</b> Every title is read back out of the finding's own evidence blob
  * through that classifier's reader, exactly as {@code MetricDriftSource} already did it. When the blob
- * is missing or unreadable — a behaviour-drift cause, which carries no measured shift, or a row written
- * before the evidence was recorded — this falls back to a form of the cause key rather than guessing at
+ * is missing or unreadable — a cause that carries no measured shift, or a row written before the
+ * evidence was recorded — this falls back to a form of the cause key rather than guessing at
  * a magnitude. A title that says less is survivable; one that says the wrong multiple is not.
  */
 public final class FindingTitle {
@@ -49,8 +46,8 @@ public final class FindingTitle {
             case FindingRow.Cause.RATE_SHIFT -> toolError(finding);
             case FindingRow.Cause.ARMED_WINDOW -> armed(finding);
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
-            // Omission, novelty and surprisal are shapes rather than magnitudes — there is no "by how
-            // much" to put in a sentence, and the cause key already reads as the action sequence.
+            case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
+            case FindingRow.Cause.GROUNDEDNESS_RATE -> groundednessRate(finding);
             default -> finding.nativeCauseKey();
         };
     }
@@ -114,6 +111,33 @@ public final class FindingTitle {
     private static String malformedRate(FindingRow finding) {
         String callSite = finding.callSiteId();
         return (callSite == null ? finding.nativeCauseKey() : callSite) + " outputs failing their schema";
+    }
+
+    /**
+     * {@code "Frustrated sessions increased from 20.3% to 36.6% on checkout-agent"}. Unlike {@link #toolError}
+     * the rates are in the headline: both are shares of the same call site's own sessions, the learned
+     * normal and the rate since onset, so the sentence states what happened rather than inviting a comparison
+     * across call sites. A payload that carries no rates falls back to the sentence without them.
+     */
+    private static String frustrationRate(FindingRow finding) {
+        String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
+        JsonNode body = finding.payload();
+        if (!body.path("baseline_rate").isNumber() || !body.path("current_rate").isNumber()) {
+            return "Frustrated sessions increased on " + callSite;
+        }
+        return "Frustrated sessions increased from "
+                + pct(body.path("baseline_rate").asDouble()) + " to "
+                + pct(body.path("current_rate").asDouble()) + " on " + callSite;
+    }
+
+    /**
+     * {@code "Answers on rag-answer became less grounded"}. The direction only, with no rates: the flagged
+     * rate counts the model's false alarms and misses its real ones, so the direction is reliable where the
+     * size is not. The finding's body carries the numbers, labelled as flagged.
+     */
+    private static String groundednessRate(FindingRow finding) {
+        String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
+        return "Answers on " + callSite + " became less grounded";
     }
 
     /**

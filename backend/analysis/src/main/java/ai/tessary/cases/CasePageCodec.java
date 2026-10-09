@@ -5,6 +5,7 @@ import ai.tessary.cases.CaseRepository.PageKey;
 import ai.tessary.cases.CaseRepository.PageOrder;
 import ai.tessary.ingest.PreviewCursor;
 import java.util.List;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -88,14 +89,11 @@ final class CasePageCodec {
         return new Page(List.copyOf(overFetched.subList(0, pageSize)), encode(last, order));
     }
 
-    private static @Nullable String encode(CaseRow last, PageOrder order) {
-        String at = order == PageOrder.LIVE_RANK ? last.openedAt() : last.resolvedAt();
-        // Unreachable: ck_eval_case_resolved_stamp makes resolved_at NOT NULL for exactly the rows the
-        // resolved order selects. No cursor rather than one bounded on "null": the page simply ends here,
-        // because a missing next_cursor loses a page and a lying one loses the reader's trust.
-        if (at == null) {
-            return null;
-        }
+    private static String encode(CaseRow last, PageOrder order) {
+        // ck_eval_case_resolved_stamp makes resolved_at NOT NULL for exactly the rows the resolved order selects.
+        String at = order == PageOrder.LIVE_RANK
+                ? last.openedAt()
+                : Objects.requireNonNull(last.resolvedAt(), "resolved row without resolved_at");
         String severity = order == PageOrder.LIVE_RANK ? Double.toString(last.severity()) : "";
         return PreviewCursor.encode(VERSION + SEP + order.name() + SEP + severity + SEP + at + SEP + last.id(), 0);
     }

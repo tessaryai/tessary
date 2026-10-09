@@ -18,7 +18,6 @@ type PaletteApi = {
   isOpen: boolean;
   open: () => void;
   close: () => void;
-  toggle: () => void;
 };
 
 const PaletteCtx = createContext<PaletteApi | null>(null);
@@ -31,8 +30,8 @@ export function usePalette(): PaletteApi {
 
 /** True when focus is in a field where ⌘K should defer to normal typing/editing. */
 function isEditableTarget(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null;
-  if (!el) return false;
+  // A keydown always has a target: the focused element, else the body.
+  const el = t as HTMLElement;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 }
@@ -42,7 +41,6 @@ export function PaletteProvider({ children }: { children: ReactNode }) {
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
-  const toggle = useCallback(() => setIsOpen((v) => !v), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +61,7 @@ export function PaletteProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const api = useMemo<PaletteApi>(() => ({ isOpen, open, close, toggle }), [isOpen, open, close, toggle]);
+  const api = useMemo<PaletteApi>(() => ({ isOpen, open, close }), [isOpen, open, close]);
 
   return <PaletteCtx.Provider value={api}>{children}</PaletteCtx.Provider>;
 }

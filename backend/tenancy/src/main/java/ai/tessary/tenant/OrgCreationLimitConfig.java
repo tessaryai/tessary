@@ -17,6 +17,6 @@ public class OrgCreationLimitConfig {
     @Bean
     @ConditionalOnMissingBean(OrgCreationLimit.class)
     OrgCreationLimit orgCreationLimit() {
-        return () -> 1;
+        return userId -> 1;
     }
 }

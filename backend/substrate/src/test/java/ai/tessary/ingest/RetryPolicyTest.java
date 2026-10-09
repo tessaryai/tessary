@@ -29,16 +29,6 @@ class RetryPolicyTest {
     }
 
     @Test
-    void interactiveIsFailFast() {
-        assertEquals(2, RetryPolicy.INTERACTIVE.maxAttempts(), "one quick retry at most");
-        assertEquals(
-                2000,
-                RetryPolicy.INTERACTIVE.backoffMs(1, 60_000),
-                "a long Retry-After is capped to the short interactive ceiling so the UI never hangs");
-        assertEquals(500, RetryPolicy.INTERACTIVE.backoffMs(1, -1));
-    }
-
-    @Test
     void rejectsInvalidConfig() {
         assertThrows(IllegalArgumentException.class, () -> new RetryPolicy(0, 1, 1), "maxAttempts must be >= 1");
         assertThrows(IllegalArgumentException.class, () -> new RetryPolicy(1, -1, 1), "back-off must be >= 0");

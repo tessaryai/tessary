@@ -2,6 +2,7 @@
 package ai.tessary.rca;
 
 import ai.tessary.classifier.catalog.ClassifierMethodCard;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.finding.DossierPayload;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
@@ -11,7 +12,7 @@ import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaChecklist.Measurement;
-import ai.tessary.rca.RcaDtos.Hypothesis;
+import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,6 +76,7 @@ public class RcaAnalysisService {
     private final RcaChecklist checklist;
     private final RcaReportRepository reports;
     private final AgenticRcaEngine agenticEngine;
+    private final GroundednessDetailService groundedness;
     private final ObjectMapper mapper;
 
     public RcaAnalysisService(
@@ -83,12 +85,14 @@ public class RcaAnalysisService {
             RcaChecklist checklist,
             RcaReportRepository reports,
             AgenticRcaEngine agenticEngine,
+            GroundednessDetailService groundedness,
             ObjectMapper mapper) {
         this.findings = findings;
         this.evidence = evidence;
         this.checklist = checklist;
         this.reports = reports;
         this.agenticEngine = agenticEngine;
+        this.groundedness = groundedness;
         this.mapper = mapper;
     }
 
@@ -100,13 +104,21 @@ public class RcaAnalysisService {
 
         // ---- 1. dereference the evidence into the two sides ------------------------------------
         Sides sides = sides(job.projectId(), finding.id());
-        if (sides.flagged().isEmpty() && sides.baseline().isEmpty()) {
+        if (sides.flagged().isEmpty()
+                && sides.baseline().isEmpty()
+                && sides.sessions().isEmpty()) {
             throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, finding.id());
         }
 
         // ---- 2. measure the structural checklist (no thresholds, no judgment) -------------------
-        List<Measurement> measurements =
-                new ArrayList<>(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
+        // A frustration or groundedness finding has no baseline side, so serving_model, which compares two,
+        // has nothing to compare and is not measured rather than reported empty. failing_cohort_shape still
+        // reads the traces that fired.
+        boolean causes = RcaReportRow.ReportKind.namesCauses(report.reportKind());
+        List<Measurement> measurements = new ArrayList<>();
+        if (!causes) {
+            measurements.addAll(checklist.measure(job.projectId(), sides.baseline(), sides.flagged()));
+        }
         measurements.add(checklist.failingCohortShape(job.projectId(), new LinkedHashSet<>(sides.flagged())));
 
         // Citable = every trace the finding cites, per side. The evidence rows ARE the citable set:
@@ -117,13 +129,20 @@ public class RcaAnalysisService {
         // ---- 3. the sandboxed agent investigates -------------------------------------------------
         Map<String, String> files = dossierFiles(report, finding, measurements);
         AgenticRcaEngine.Result result = agenticEngine.run(
-                job, report, finding.id(), files, baselineTraceIds, flaggedTraceIds, measuredChecks(measurements));
+                job,
+                report,
+                finding.id(),
+                files,
+                baselineTraceIds,
+                flaggedTraceIds,
+                new LinkedHashSet<>(sides.sessions()),
+                measuredChecks(measurements));
         complete(
                 job,
                 result.verdict(),
                 result.summary(),
                 merge(measurements, result.checklist()),
-                result.hypotheses(),
+                result.causes(),
                 result.detailedReport(),
                 result.repoAvailable());
     }
@@ -142,8 +161,13 @@ public class RcaAnalysisService {
      * common, was handed the whole population and reported the shape of ordinary traffic. Every
      * classifier that writes no {@code witness} is unaffected: for those, {@code member} IS the flagged
      * population and the behaviour is exactly as before.
+     *
+     * <p>{@code sessions} holds the session-grain refs, which carry no trace id, on the same witness-first rule.
+     * Only Frustration writes them: {@code member} is every session its rate scored, and {@code witness} each
+     * frustrated one, cited beside the trace of the turn that fired in it. The witnesses are what RCA reads
+     * and may cite.
      */
-    private record Sides(List<String> baseline, List<String> flagged) {}
+    private record Sides(List<String> baseline, List<String> flagged, List<String> sessions) {}
 
     /**
      * Roles that name the flagged population when a classifier draws no narrower subset. {@code member}
@@ -158,7 +182,17 @@ public class RcaAnalysisService {
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnesses = new LinkedHashSet<>();
         Set<String> population = new LinkedHashSet<>();
+        Set<String> witnessSessions = new LinkedHashSet<>();
+        Set<String> populationSessions = new LinkedHashSet<>();
         for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
+            if (row.traceId() == null && row.sessionId() != null) {
+                if (FindingEvidenceRow.Role.WITNESS.equals(row.role())) {
+                    witnessSessions.add(row.sessionId());
+                } else if (!FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
+                    populationSessions.add(row.sessionId());
+                }
+                continue;
+            }
             // Span-grain rows carry their trace id too, so nothing is dropped by keying on it here — but
             // the precision IS lost, because the checklist's reads are all trace-scoped. A trace holding
             // fifty calls of which one failed counts once, which is what "what do the failing traces have
@@ -176,10 +210,12 @@ public class RcaAnalysisService {
         // The narrowest set the classifier drew. A witness is a member the detector singled out, so where
         // both exist the witnesses are the claim and the members are what it was a fraction OF.
         Set<String> flagged = witnesses.isEmpty() ? population : witnesses;
+        // Sessions the same way: a frustration finding's members are every session it scored, most of them calm.
+        Set<String> sessions = witnessSessions.isEmpty() ? populationSessions : witnessSessions;
         // A trace cited on both sides is flagged: it is what the claim is about, and offering it as a
         // baseline anchor as well would let the agent cite the same trace as both sides of a comparison.
         baseline.removeAll(flagged);
-        return new Sides(List.copyOf(baseline), List.copyOf(flagged));
+        return new Sides(List.copyOf(baseline), List.copyOf(flagged), List.copyOf(sessions));
     }
 
     /** Fold the agent's assessments back onto the measurements they judged, in measurement order —
@@ -193,7 +229,7 @@ public class RcaAnalysisService {
             out.add(
                     a == null
                             ? RuledOutCheck.unassessed(m.check(), m.finding())
-                            : RuledOutCheck.assessed(m.check(), a.assessment(), a.detail(), m.finding()));
+                            : RuledOutCheck.assessed(m.check(), a.question(), a.assessment(), a.detail(), m.finding()));
         }
         return out;
     }
@@ -205,9 +241,9 @@ public class RcaAnalysisService {
     private void complete(
             RcaJobRow job,
             String verdict,
-            String summary,
+            @Nullable String summary,
             List<RuledOutCheck> checks,
-            List<Hypothesis> hypotheses,
+            List<Cause> causes,
             @Nullable String detailedReport,
             boolean repoAvailable) {
         reports.complete(
@@ -216,17 +252,17 @@ public class RcaAnalysisService {
                 verdict,
                 summary,
                 writeJson(checks),
-                writeJson(hypotheses),
+                causes.isEmpty() ? null : writeJson(causes),
                 detailedReport,
                 repoAvailable);
         log.info(
-                "rca done project={} subject={}:{} metric={} verdict={} hypotheses={}",
+                "rca done project={} subject={}:{} metric={} verdict={} causes={}",
                 job.projectId(),
                 job.subjectKind(),
                 job.subjectId(),
                 job.metric(),
                 verdict,
-                hypotheses.size());
+                causes.size());
     }
 
     // ---- dossier assembly ---------------------------------------------------------------------------
@@ -261,6 +297,19 @@ public class RcaAnalysisService {
                 .orElseGet(() -> DossierPayload.forAgent(mapper, finding.payloadJson()));
         if (payload != null && !payload.isBlank()) {
             files.put("evidence.json", payload);
+        }
+        // A groundedness cause is found by reading a flagged sentence against its documents, so the answers
+        // themselves ride along, as the triage dossier's do; everything else is read through MCP.
+        if (RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES.equals(report.reportKind())) {
+            files.put(
+                    GroundednessAnswersFile.NAME,
+                    GroundednessAnswersFile.render(groundedness.page(
+                            finding.projectId(),
+                            finding.subjectId(),
+                            finding.id(),
+                            null,
+                            GroundednessAnswersFile.CAP,
+                            null)));
         }
         files.put("checklist.md", checklistDoc(checks));
         return files;
@@ -339,10 +388,6 @@ public class RcaAnalysisService {
     }
 
     private String writeJson(Object value) {
-        try {
-            return mapper.writeValueAsString(value);
-        } catch (Exception e) {
-            throw new IllegalStateException("failed to serialize rca report field", e);
-        }
+        return mapper.valueToTree(value).toString();
     }
 }

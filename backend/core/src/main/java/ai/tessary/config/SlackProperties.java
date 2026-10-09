@@ -31,7 +31,7 @@ public class SlackProperties {
      * The shared key both directions of the link authenticate with; env-injected, never committed. The
      * backend presents it on {@code POST /deliver}, and the adapter presents the same one on the mention
      * callback. Symmetric because it is one private link between two of our own processes, the same
-     * posture {@code classify-service} takes with its API key.
+     * posture the groundedness model server takes with its API key.
      */
     private @Nullable String serviceKey;
 

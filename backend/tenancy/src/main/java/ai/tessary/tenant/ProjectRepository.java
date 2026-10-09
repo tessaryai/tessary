@@ -52,19 +52,6 @@ public class ProjectRepository {
                 .list();
     }
 
-    /**
-     * Projects marked for deletion, oldest mark first — the purge worker's recovery read.
-     *
-     * <p>The delete endpoint sets {@code deleting_at} and enqueues in two statements, so a backend that
-     * dies between them leaves a project nobody is purging. This is how that project is found again; the
-     * marker, not the job row, is the durable record that a delete was accepted.
-     */
-    public List<Project> findDeleting() {
-        return jdbc.sql("SELECT * FROM project WHERE deleting_at IS NOT NULL ORDER BY deleting_at ASC, id ASC")
-                .query(ProjectRepository::map)
-                .list();
-    }
-
     /** The organization's guaranteed default project, if one is set. */
     public Optional<Project> findDefaultForOrg(String orgId) {
         return jdbc.sql("SELECT * FROM project WHERE org_id = :oid AND is_default = TRUE")

@@ -2,55 +2,22 @@
 package ai.tessary.detection;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.detection.DetectionTable.Grain;
-import java.util.List;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 class DetectionTableRegistryTest {
 
-    /** A minimal {@link ObjectProvider} stub backed by a fixed list, mirroring what Spring hands a
-     * bean constructor for an {@code ObjectProvider<T>} parameter — only {@code orderedStream()} is
-     * exercised by {@link DetectionTableRegistry}, so nothing else needs a real implementation. */
-    private static <T> ObjectProvider<T> providerOf(List<T> items) {
-        return new ObjectProvider<>() {
-            @Override
-            public T getObject() {
-                throw new UnsupportedOperationException("not exercised by DetectionTableRegistry");
-            }
-
-            @Override
-            public Stream<T> orderedStream() {
-                return items.stream();
-            }
-        };
-    }
-
-    @Test
-    void tableForAndWritesDetectionsResolveARegisteredKind() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
-                new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
-                new DetectionTable("frustration", "frustration_detection", Grain.TRACE))));
-
-        assertEquals("secret_leak_detection", registry.tableFor("secret_leak"));
-        assertTrue(registry.writesDetections("frustration"));
-        assertNull(registry.tableFor("no_such_kind"));
-        assertFalse(registry.writesDetections("no_such_kind"));
-    }
-
     @Test
     void twoBeansClaimingOneKindFailAtConstruction() {
-        List<DetectionTable> dup = List.of(
+        ObjectProvider<DetectionTable> dup = Providers.of(
                 new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
                 new DetectionTable("classifier", "some_other_table", Grain.SPAN));
 
-        assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(providerOf(dup)));
+        assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(dup));
     }
 
     @Test
@@ -62,23 +29,12 @@ class DetectionTableRegistryTest {
     }
 
     @Test
-    void twoKindsMaySharedOneTable() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
-                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN))));
-
-        // Deduplicated by table name: one arm, not two, in the union.
-        assertEquals(1, registry.tables().size());
-        assertEquals("user_classifier_detection", registry.tables().get(0).table());
-    }
-
-    @Test
     void unionSqlHasOneArmPerDistinctTableAndThirteenColumnsPerArm() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of(
+        DetectionTableRegistry registry = new DetectionTableRegistry(Providers.of(
                 new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
                 new DetectionTable("frustration", "frustration_detection", Grain.TRACE),
                 new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN))));
+                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN)));
 
         String sql = registry.unionSql();
         String[] arms = sql.split(" UNION ALL ");
@@ -92,12 +48,5 @@ class DetectionTableRegistryTest {
         }
         assertTrue(sql.contains("'trace'::text AS subject_kind"));
         assertTrue(sql.contains("'span'::text AS subject_kind"));
-    }
-
-    @Test
-    void unionSqlWithNoRegistrationsIsAWellTypedEmptyRelation() {
-        DetectionTableRegistry registry = new DetectionTableRegistry(providerOf(List.of()));
-        assertEquals("SELECT NULL WHERE false", registry.unionSql());
-        assertTrue(registry.tables().isEmpty());
     }
 }

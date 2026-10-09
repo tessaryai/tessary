@@ -15,6 +15,7 @@ import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.HashMap;
@@ -22,11 +23,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -36,16 +34,8 @@ import org.springframework.web.context.WebApplicationContext;
  * what the sweeper's own {@link RetentionResolver} then reports, clearing it restores the default,
  * {@code 0} keeps forever, and a negative number is refused.
  */
-@SpringBootTest
+@AuthEnforcedContext
 class RetentionSettingsIntegrationTest {
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("tessary.auth.cookie-password", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
-        r.add("workos.api-key", () -> "");
-        r.add("workos.client-id", () -> "");
-        r.add("tessary.auth.disabled", () -> "false");
-    }
 
     @Autowired
     WebApplicationContext wac;
@@ -125,10 +115,14 @@ class RetentionSettingsIntegrationTest {
                 .andExpect(jsonPath("$.data.classes[0].from_policy").value(true))
                 .andExpect(jsonPath("$.data.classes[1].ttl_days").value(0))
                 .andExpect(jsonPath("$.data.classes[1].from_policy").value(true));
-        var effective = resolver.resolveByDataClass(project.id());
-        assertEquals(30, effective.get(RetentionResolver.DataClass.TRACES).ttlDays(), "the sweeper sees the override");
         assertEquals(
-                false, effective.get(RetentionResolver.DataClass.DETECTIONS).bounded(), "0 keeps forever");
+                30,
+                effective(project.id(), RetentionResolver.DataClass.TRACES).ttlDays(),
+                "the sweeper sees the override");
+        assertEquals(
+                false,
+                effective(project.id(), RetentionResolver.DataClass.DETECTIONS).bounded(),
+                "0 keeps forever");
 
         mvc.perform(put(path)
                         .cookie(session)
@@ -148,9 +142,7 @@ class RetentionSettingsIntegrationTest {
                 .andExpect(status().isBadRequest());
         assertEquals(
                 traceDefault,
-                resolver.resolveByDataClass(project.id())
-                        .get(RetentionResolver.DataClass.TRACES)
-                        .ttlDays());
+                effective(project.id(), RetentionResolver.DataClass.TRACES).ttlDays());
 
         // A member reads the page but cannot change it: deletion is owner/admin business.
         mvc.perform(post("/api/orgs/" + org.slug() + "/members")
@@ -178,5 +170,12 @@ class RetentionSettingsIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(7, 7)))
                 .andExpect(status().isForbidden());
+    }
+
+    private RetentionResolver.EffectiveRetention effective(String projectId, RetentionResolver.DataClass dataClass) {
+        return resolver.resolve(projectId).stream()
+                .filter(e -> e.dataClass() == dataClass)
+                .findFirst()
+                .orElseThrow();
     }
 }

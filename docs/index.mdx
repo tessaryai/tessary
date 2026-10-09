@@ -1,17 +1,23 @@
 ---
 title: "Tessary"
-description: "What Tessary does, how to self-host it, and the three steps from a running instance to your first explained case."
+description: "What Tessary does, the two ways to run it (Tessary Cloud or self-hosted), and the three steps from sign-up to your first explained case."
 ---
 
 Tessary watches agents running in production. It reads every trace your agents produce, runs classifiers over all of them to detect changes and likely problems, checks whether each detected change is a real issue, and then investigates what caused the ones that are.
 
-The four stages have names you will see throughout these pages. A classifier creates a **finding** when it detects a change. **Triage** decides whether the finding is a real issue. A validated finding becomes a **case**. An agentic root-cause analysis (RCA) run then investigates the case and reports what it thinks caused it.
+The four stages have names you will see throughout these pages. A classifier creates a **finding** when it detects a change. **Triage** decides whether the finding is a real issue. A validated finding becomes a **case**. An agentic RCA (root-cause analysis) run then investigates the case and reports what it thinks caused it.
 
-These pages document the open edition, the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE). They do not document Tessary Cloud, the hosted service.
+You can run Tessary two ways, and these pages cover both. Tessary Cloud is the hosted service. The open edition is the code in the [tessary repository](https://github.com/tessaryai/tessary), released under the [Apache License 2.0](https://github.com/tessaryai/tessary/blob/main/LICENSE), and you self-host it.
+
+## Sign up for Tessary Cloud
+
+Tessary Cloud is the quickest way to start, because there is nothing to deploy. Sign up at [app.tessary.ai](https://app.tessary.ai) and your first project opens on the connect screen. It is free, and a one-time model credit pays for triage and root-cause analysis until it is used up or you add your own model provider key. Limits on traces, stored data, and retention are on the [pricing page](https://tessary.ai/pricing).
+
+[Start on Tessary Cloud](/cloud/quickstart) takes you from sign-up to your first finding.
 
 ## Self-host Tessary
 
-A deployment is a single-node Docker Compose stack, and every credential it needs ships with a working default. Paste this into your coding agent:
+Self-host when you want Tessary running on your own infrastructure. A deployment is a single-node Docker Compose stack, and every credential it needs ships with a working default. Paste this into your coding agent:
 
 ```text
 Self-host Tessary for me by following https://github.com/tessaryai/tessary/blob/main/setup.md
@@ -27,19 +33,21 @@ docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
 
 Either way, open `http://localhost` once `docker compose -p tessary ps` reports every service healthy, and create the first account with an email and password. Three of the shipped credentials are placeholders published in the repository, so this install is a localhost test drive until you replace them. [Secure the instance](/self-hosting/setup#secure-the-instance) covers that, and it is not something the agent does for you.
 
-## What the open edition includes
+## What runs where
 
-Five classifiers run out of the box: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. Triage and root-cause analysis both work, and both need a model provider credential you supply. Automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+Five classifiers run out of the box on both: `duration_drift`, `cost_drift`, `tool_error`, `secret_leak`, and `malformed_output`. [`frustration`](/classifiers/frustration) starts switched off on both and needs an OpenRouter or TypeSafe key. [`groundedness`](/classifiers/groundedness) is on from the start on Tessary Cloud; self-hosted, it starts switched off and needs its model running on a Mac with Apple silicon or a GPU instance on AWS.
 
-<Card title="Open edition" icon="box-open" href="/open-edition">
-  What is included, what needs configuring, what is unavailable here, and where the product's boundaries are today.
+Triage and root-cause analysis work on both. On Tessary Cloud, the model credit pays for them at first, and you start triage by hand on each finding. Self-hosted, both need a model provider credential you supply, and automatic triage is available but starts switched off, so nothing spends against your provider account until you turn it on.
+
+<Card title="Cloud and self-hosted" icon="box-open" href="/open-edition">
+  What differs between the two, what needs configuring, and where the product's boundaries are today.
 </Card>
 
 ## Start in three steps
 
 <Steps>
   <Step title="Start Tessary">
-    Take either path above, create your account, and replace the three placeholder secrets. [Set up Tessary](/self-hosting/setup) covers first boot end to end.
+    Sign up at [app.tessary.ai](https://app.tessary.ai). To self-host instead, take either self-host path above, create your account, and replace the three placeholder secrets. [Start on Tessary Cloud](/cloud/quickstart) and [Set up Tessary](/self-hosting/setup) cover each path end to end.
   </Step>
   <Step title="Instrument your agent">
     Send traces to the OTLP (OpenTelemetry Protocol) endpoint, and tag every span that covers a model call with a `tessary.call_site.id` attribute. There is no Tessary client library to install, and the connect screen carries a prompt you can hand to a coding agent. [Instrument your agent](/instrument/overview) covers both paths.
@@ -58,8 +66,8 @@ After that, three things appear in order:
 | You see | What it means |
 | --- | --- |
 | A **finding** on the Classifiers page | A classifier detected a change and recorded the production evidence for it. It is not yet a validated issue. |
-| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. |
-| An **RCA report** on the case | The agentic run reports a verdict, hypotheses with the traces it cites for each, and the checks it ruled out. Connect a repository and it can ground that work in your own code. |
+| A **case**, once triage validates the finding | Triage reviewed the evidence and decided the change is a real issue worth attention. A high-confidence secret leak and a frustration finding skip triage and open a case as soon as they are filed, because their numbers are the claim. |
+| An **RCA report** on the case | The agentic run reports a one-sentence summary, the causes it found with the traces it cites for each, and the checks it ruled out. Connect a repository and it can ground that work in your own code. |
 
 Tessary explains the issue and hands it to you. It does not open the fix.
 

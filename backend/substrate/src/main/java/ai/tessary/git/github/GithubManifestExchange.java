@@ -14,8 +14,8 @@ public interface GithubManifestExchange {
 
     /**
      * {@code POST https://api.github.com/app-manifests/{code}/conversions} — no auth, no body.
-     * Returns the App object GitHub hands back ({@code id}, {@code pem}, {@code webhook_secret},
-     * {@code slug}, {@code client_id}, {@code client_secret}). Throws {@code
+     * Returns the App object GitHub hands back; the callback reads {@code id}, {@code pem},
+     * {@code slug}, {@code client_id} and {@code client_secret} from it. Throws {@code
      * GitError.MANIFEST_CONVERSION_FAILED} on any transport failure or non-2xx status — GitHub
      * rejects a reused/expired {@code code} this way, since the code is one-shot.
      */

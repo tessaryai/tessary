@@ -4,46 +4,37 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Info } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useProjectApi, useTenant } from "../tenant/TenantContext";
-import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn, type BadgeTone } from "../ui";
+import { Badge, Button, Card, PageBody, PageHeader, Spinner, StatusPill, cn } from "../ui";
 import { Markdown } from "./components/PayloadViewer";
-import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning } from "./rcaLabels";
+import { RCA_JOB_STATUS, RCA_VERDICT_LABEL, RCA_VERDICT_TONE, rcaRunning, shiftKind, type CauseKind } from "./rcaLabels";
+import { CauseCard } from "./components/CauseCard";
 import { ConnectRepositoryDialog } from "./components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "./components/useRepoPrompt";
-import type { RcaHypothesis, RcaRuledOutCheck } from "../api/types";
+import type { RcaReport as RcaReportView, RcaRuledOutCheck } from "../api/types";
 
 /**
  * One RCA report — the immutable per-finding drill-in behind the case page's "Run RCA" action.
- * Reads top-to-bottom the way the analysis ran: the movement, the verdict + summary, the checklist
- * of structural causes with the analysis's call on each (shown even when all were ruled out — the
- * eliminated boring causes are what make the hypotheses trustworthy), then ranked hypotheses whose
- * evidence links open the real traces, then the agent's full write-up.
+ * Reads top-to-bottom: the movement, the verdict and its one-sentence summary, the proven causes on the
+ * same card the case page uses, the checklist of structural causes with the analysis's call on each
+ * (shown even when all were ruled out — the eliminated boring causes are what make the causes
+ * trustworthy), the agent's full write-up with all of its evidence, and last the leads it could not prove.
  */
 
 const METRIC_LABEL: Record<string, string> = {
-  pass_rate: "Pass rate",
-  score: "Score",
-};
-
-const SUBJECT_LABEL: Record<string, string> = {
-  grader: "Grader",
-  call_site: "Call site",
-};
-
-const CONFIDENCE_TONE: Record<string, BadgeTone> = {
-  high: "error",
-  medium: "warning",
-  low: "neutral",
+  frustration: "Frustrated sessions",
+  groundedness: "Flagged answers",
 };
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
+/** Frustration and groundedness rates sit at a few percent, where a whole-percent round hides the rise. */
+const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 
 function windowLabel(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" });
 }
 
-/** How each checklist item renders. Reports written before the checks became subjective carry no
- *  `assessment`, so those fall back to the old pass/fail glyph. */
+/** How each checklist item renders, by the analysis's own assessment. */
 const ASSESSMENT: Record<string, { glyph: string; label: string; className: string }> = {
   ruled_out: { glyph: "✓", label: "Ruled out", className: "bg-success-subtle text-success" },
   contributing: { glyph: "!", label: "Contributing", className: "bg-warning-subtle text-warning" },
@@ -63,7 +54,7 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
       </div>
       <div className="flex flex-col gap-0.5 px-1.5 pb-2.5">
         {checks.map((c) => {
-          const state = ASSESSMENT[c.assessment ?? (c.passed ? "ruled_out" : "explains")] ?? ASSESSMENT.unknown;
+          const state = ASSESSMENT[c.assessment];
           return (
             <div key={c.check} className="flex items-start gap-3 px-2 py-2 rounded-card">
               <span
@@ -77,7 +68,8 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
                 {state.glyph}
               </span>
               <div className="min-w-0">
-                <span className="text-body font-medium text-fg font-mono">{c.check}</span>
+                <span className="text-body font-medium text-fg">{c.question ?? c.check}</span>
+                {c.question && <span className="block font-mono text-label text-subtle">{c.check}</span>}
                 <p className="text-small text-muted mt-0.5">{c.detail}</p>
                 {c.measurement && (
                   <pre className="text-label text-subtle font-mono mt-1.5 whitespace-pre-wrap break-words">
@@ -93,33 +85,54 @@ function ChecklistList({ checks }: { checks: RcaRuledOutCheck[] }) {
   );
 }
 
-function HypothesisCard({ hypothesis, rank, exploreBase }: { hypothesis: RcaHypothesis; rank: number; exploreBase: string }) {
+/** Which movement a report's causes explain. The report carries no detector blob, so this reads its kind,
+ *  measure and the sign of the move. */
+function reportCauseKind(r: RcaReportView): CauseKind {
+  if (r.report_kind === "frustration_causes") return "frustration";
+  if (r.report_kind === "groundedness_causes") return "groundedness";
+  const shift = shiftKind(r.metric, r.delta > 0);
+  if (shift) return shift;
+  if (r.metric === "leak_count") return "secret_leak";
+  if (r.metric === "malformed_rate") return "malformed";
+  if (r.metric.includes("error")) return "tool_error";
+  return "other";
+}
+
+function affectedUnit(kind: CauseKind): [string, string] {
+  if (kind === "frustration") return ["frustrated session", "frustrated sessions"];
+  if (kind === "groundedness") return ["flagged answer", "flagged answers"];
+  return ["flagged trace", "flagged traces"];
+}
+
+function CauseList({
+  title,
+  causes,
+  kind,
+  base,
+  repoRead,
+}: {
+  title: string;
+  causes: RcaReportView["causes"];
+  kind: CauseKind;
+  base: string;
+  repoRead: boolean;
+}) {
   return (
-    <Card className="border border-border">
-      <div className="px-3.5 py-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-label text-subtle tabular-nums">#{rank}</span>
-          <span className="text-body font-medium text-fg">{hypothesis.title}</span>
-          <Badge tone={CONFIDENCE_TONE[hypothesis.confidence] ?? "neutral"}>{hypothesis.confidence} confidence</Badge>
-        </div>
-        <p className="text-small text-muted mt-1.5">{hypothesis.rationale}</p>
-        {hypothesis.evidence_trace_ids.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap mt-2.5">
-            <span className="text-label uppercase text-subtle">Evidence</span>
-            {hypothesis.evidence_trace_ids.map((traceId) => (
-              <Link
-                key={traceId}
-                to={`${exploreBase}?trace=${encodeURIComponent(traceId)}`}
-                className="font-mono text-label text-link hover:text-link-hover hover:underline"
-                title={traceId}
-              >
-                trace …{traceId.slice(-8)}
-              </Link>
-            ))}
-          </div>
-        )}
+    <div>
+      <div className="text-h3 text-fg mb-2">{title}</div>
+      <div className="flex flex-col gap-2.5">
+        {causes.map((c, i) => (
+          <CauseCard
+            key={`${c.title}-${i}`}
+            cause={c}
+            kind={kind}
+            basePath={base}
+            affected={affectedUnit(kind)}
+            repoRead={repoRead}
+          />
+        ))}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -139,8 +152,7 @@ export function RcaReport() {
 
   const base = `/orgs/${orgSlug}/projects/${projectSlug}`;
 
-  // A report is immutable, so re-running produces a NEW one and we navigate to it. The common
-  // failure is RCA.NOT_A_MOVER — the subject has stopped moving, so there is nothing to snapshot;
+  // A report is immutable, so re-running produces a NEW one and we navigate to it. On failure,
   // surface the API's own message rather than a bare retry.
   const rerun = useMutation({
     mutationFn: () => api.rerunRca(reportId),
@@ -171,6 +183,18 @@ export function RcaReport() {
 
   const running = rcaRunning(r.status);
   const worse = r.delta < 0;
+  const frustration = r.report_kind === "frustration_causes";
+  const groundedness = r.report_kind === "groundedness_causes";
+  const kind = reportCauseKind(r);
+  const proven = r.causes.filter((c) => c.confidence === "high");
+  const leads = r.causes.filter((c) => c.confidence !== "high");
+  const subtitle = frustration || groundedness
+    ? `${r.call_site_id ? `Call site ${r.call_site_id} · ` : ""}${
+        groundedness ? "Flagged answers" : "Frustrated sessions"
+      } rose to ${pct1(r.current_value)} from a learned ${pct1(r.prior_value)} · ${windowLabel(r.window_split)} onward`
+    : `${r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
+        worse ? "fell" : "moved"
+      } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`;
 
   return (
     <PageBody>
@@ -183,12 +207,10 @@ export function RcaReport() {
         title={
           <span className="flex items-center gap-3">
             <span>RCA (root-cause analysis): {r.subject_label}</span>
-            <StatusPill status={RCA_JOB_STATUS[r.status] ?? "pending"} label={r.status} />
+            <StatusPill status={RCA_JOB_STATUS[r.status]} label={r.status} />
           </span>
         }
-        subtitle={`${SUBJECT_LABEL[r.subject_kind] ?? r.subject_kind} · ${METRIC_LABEL[r.metric] ?? r.metric} ${
-          worse ? "fell" : "moved"
-        } to ${pct(r.current_value)} from ${pct(r.prior_value)} · ${windowLabel(r.window_split)} onward vs the 24h before`}
+        subtitle={subtitle}
         actions={
           running ? undefined : (
             <span className="flex items-center gap-2">
@@ -196,9 +218,7 @@ export function RcaReport() {
                 variant="secondary"
                 size="sm"
                 disabled={rerun.isPending}
-                onClick={() => {
-                  if (!rerun.isPending) rerun.mutate();
-                }}
+                onClick={() => rerun.mutate()}
                 title={rerunError ?? "Analyze this degradation again against the latest traces"}
               >
                 {rerun.isPending ? "Starting…" : "Re-run RCA"}
@@ -220,9 +240,8 @@ export function RcaReport() {
       {running && (
         <div className="py-6 flex items-center gap-2 text-small text-muted">
           <Spinner size="sm" />
-          {r.engine === "agentic"
-            ? "Analyzing. Tessary measures the structural causes, then an agent reads your repo and traces. This can take several minutes."
-            : "Analyzing. Ruling out the structural causes and diffing the failing cohort…"}
+          Analyzing. Tessary measures the structural causes, then an agent reads your repo and traces. This can
+          take several minutes.
         </div>
       )}
 
@@ -269,8 +288,8 @@ export function RcaReport() {
               <div className="px-3.5 py-3">
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-label uppercase text-subtle">Verdict</span>
-                  <Badge tone={RCA_VERDICT_TONE[r.verdict] ?? "neutral"}>
-                    {RCA_VERDICT_LABEL[r.verdict] ?? r.verdict}
+                  <Badge tone={RCA_VERDICT_TONE[r.verdict]}>
+                    {RCA_VERDICT_LABEL[r.verdict]}
                   </Badge>
                 </div>
                 {r.summary && <p className="text-small text-fg mt-2">{r.summary}</p>}
@@ -278,18 +297,17 @@ export function RcaReport() {
             </Card>
           )}
 
-          {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
-
-          {r.hypotheses.length > 0 && (
-            <div>
-              <div className="text-h3 text-fg mb-2">Hypotheses</div>
-              <div className="flex flex-col gap-2.5">
-                {r.hypotheses.map((h, i) => (
-                  <HypothesisCard key={i} hypothesis={h} rank={i + 1} exploreBase={`${base}/explore`} />
-                ))}
-              </div>
-            </div>
+          {proven.length > 0 && (
+            <CauseList
+              title={proven.length === 1 ? "Cause" : "Causes"}
+              causes={proven}
+              kind={kind}
+              base={base}
+              repoRead={r.repo_available !== false}
+            />
           )}
+
+          {r.ruled_out.length > 0 && <ChecklistList checks={r.ruled_out} />}
 
           {r.detailed_report && (
             <Card className="border border-border">
@@ -300,6 +318,16 @@ export function RcaReport() {
                 </div>
               </div>
             </Card>
+          )}
+
+          {leads.length > 0 && (
+            <CauseList
+              title="Leads not proven"
+              causes={leads}
+              kind={kind}
+              base={base}
+              repoRead={r.repo_available !== false}
+            />
           )}
         </div>
       )}

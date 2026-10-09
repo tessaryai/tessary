@@ -3,6 +3,7 @@ package ai.tessary.telemetry;
 
 import ai.tessary.cases.CaseRepository;
 import ai.tessary.classifier.finding.FindingRepository;
+import ai.tessary.config.AppVersion;
 import ai.tessary.edition.Edition;
 import ai.tessary.pricing.PriceBook;
 import ai.tessary.pricing.PriceBookFetcher;
@@ -209,21 +210,24 @@ public class TelemetryHeartbeat {
         return value.length() <= max ? value : value.substring(0, max);
     }
 
-    /** The running app's version, from the packaged jar's manifest ({@code Implementation-Version},
-     *  set from {@code ${project.version}} by the Spring Boot repackage). Null outside a packaged
-     *  jar (an IDE run, a test) — {@code "dev"} covers that case rather than sending a null field the
-     *  contract does not mark optional. */
+    /** The running app's version ({@link AppVersion#current()}): {@code "dev"} outside a packaged jar
+     *  rather than a null field the contract does not mark optional. */
     private static String appVersion() {
-        String v = TelemetryHeartbeat.class.getPackage().getImplementationVersion();
-        return (v == null || v.isBlank()) ? "dev" : v;
+        return AppVersion.current();
     }
 
     /** A coarse host OS family, not the full {@code os.name} string (which carries version numbers,
      *  e.g. "Windows 11") — the contract's example is the bare family ({@code "linux"}). */
     private static String osFamily() {
-        String raw = System.getProperty("os.name", "unknown").toLowerCase(Locale.ROOT);
-        if (raw.contains("win")) return "windows";
+        return osFamily(System.getProperty("os.name", "unknown"));
+    }
+
+    /** {@link #osFamily()} over a given {@code os.name} value. */
+    static String osFamily(String osName) {
+        String raw = osName.toLowerCase(Locale.ROOT);
+        // mac/darwin first: "darwin" contains "win".
         if (raw.contains("mac") || raw.contains("darwin")) return "macos";
+        if (raw.contains("win")) return "windows";
         if (raw.contains("linux")) return "linux";
         return raw.isEmpty() ? "unknown" : raw;
     }

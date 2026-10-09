@@ -4,6 +4,7 @@ package ai.tessary.git.github;
 import ai.tessary.crypto.SecretBox;
 import ai.tessary.open.errors.GitError;
 import ai.tessary.open.errors.TessaryException;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -24,7 +25,7 @@ import org.springframework.stereotype.Service;
  * keeps winning, same as it did the first time; worth flagging if this ever trips someone up in an
  * incident.
  *
- * <p>The live-update path ({@link #persist}) replaces {@link GithubAppProperties}'s six credential
+ * <p>The live-update path ({@link #persist}) replaces {@link GithubAppProperties}'s five credential
  * fields outside Spring's own binding lifecycle, via {@link GithubAppProperties#applyAll}, which
  * swaps them behind one {@code volatile} reference. That is what actually protects a concurrent
  * {@code isConfigured()}/{@code authHeader()} read (e.g. {@link GithubTokenService}, or
@@ -53,14 +54,12 @@ public class GithubAppConfigService {
         this.mapper = mapper;
     }
 
-    /** JSON shape sealed into {@code github_app_config.credentials_enc}. */
-    record CapturedApp(
-            String appId,
-            String privateKeyPem,
-            String webhookSecret,
-            String appSlug,
-            String clientId,
-            String clientSecret) {}
+    /**
+     * JSON shape sealed into {@code github_app_config.credentials_enc}. Rows sealed before the
+     * webhook secret was dropped still carry a {@code webhookSecret} key, hence ignoreUnknown.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record CapturedApp(String appId, String privateKeyPem, String appSlug, String clientId, String clientSecret) {}
 
     @EventListener(ApplicationReadyEvent.class)
     public void loadOnStartup() {
@@ -100,14 +99,8 @@ public class GithubAppConfigService {
      * standing cross-tenant overwrite surface; a deployment operator who genuinely wants to rotate the
      * App clears the {@code github_app_config} row (or the env vars) themselves first.
      */
-    public void persist(
-            String appId,
-            String privateKeyPem,
-            String webhookSecret,
-            String appSlug,
-            String clientId,
-            String clientSecret) {
-        CapturedApp app = new CapturedApp(appId, privateKeyPem, webhookSecret, appSlug, clientId, clientSecret);
+    public void persist(String appId, String privateKeyPem, String appSlug, String clientId, String clientSecret) {
+        CapturedApp app = new CapturedApp(appId, privateKeyPem, appSlug, clientId, clientSecret);
         String enc = seal(app);
         synchronized (bindLock) {
             // Re-checked under the same lock applyToProps writes under, so two concurrent manifest
@@ -117,26 +110,14 @@ public class GithubAppConfigService {
                 throw new TessaryException(GitError.APP_ALREADY_CONFIGURED);
             }
             repo.upsert(enc);
-            props.applyAll(
-                    app.appId(),
-                    app.privateKeyPem(),
-                    app.webhookSecret(),
-                    app.appSlug(),
-                    app.clientId(),
-                    app.clientSecret());
+            props.applyAll(app.appId(), app.privateKeyPem(), app.appSlug(), app.clientId(), app.clientSecret());
         }
         log.info("github app config captured via manifest flow (appSlug={})", appSlug);
     }
 
     private void applyToProps(CapturedApp app) {
         synchronized (bindLock) {
-            props.applyAll(
-                    app.appId(),
-                    app.privateKeyPem(),
-                    app.webhookSecret(),
-                    app.appSlug(),
-                    app.clientId(),
-                    app.clientSecret());
+            props.applyAll(app.appId(), app.privateKeyPem(), app.appSlug(), app.clientId(), app.clientSecret());
         }
     }
 
@@ -144,11 +125,7 @@ public class GithubAppConfigService {
         if (!secretBox.isConfigured()) {
             throw new TessaryException(GitError.MISSING_APP_CONFIG, "github");
         }
-        try {
-            return secretBox.seal(mapper.writeValueAsString(app));
-        } catch (Exception e) {
-            throw new TessaryException(GitError.MISSING_APP_CONFIG, e, "github");
-        }
+        return secretBox.seal(mapper.valueToTree(app).toString());
     }
 
     private CapturedApp open(String enc) {

@@ -35,6 +35,15 @@ import {
  * upsert/remove mutations, are unchanged.
  */
 
+/** Display names for `PlatformDescriptor.used_by` lane ids; an unknown id shows as sent. */
+const LANE_LABELS: Record<string, string> = { frustration: "Frustration" };
+
+/** "Used by Frustration" for a provider that serves one feature and no chat lane, else null. */
+export function usedByLine(p: PlatformDescriptor): string | null {
+  if (p.used_by.length === 0) return null;
+  return `Used by ${p.used_by.map((lane) => LANE_LABELS[lane] ?? lane).join(", ")}`;
+}
+
 /** What credential shape a not-yet-configured provider expects, read aloud. */
 function expectedFields(p: PlatformDescriptor): string {
   if (p.auth === "aws") return "Access key · secret · region";
@@ -101,9 +110,8 @@ export function Providers() {
             "Could not load the provider catalog. Try again."}
         </p>
       ) : (
-        // The "Free judge included" banner named Ollama, the platform's one no-key
-        // provider — dropped by the maker filter (Amazon/Meta are not supported makers). Every
-        // provider now needs an org key, so there is nothing left to point that banner at.
+        // A provider the deployment supplies (auth "platform") needs no key and renders as
+        // included; every other provider needs an org key.
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {platforms.map((p) => (
             <ProviderRow
@@ -162,9 +170,12 @@ function ProviderRow({
   onRemove: () => void;
   removing: boolean;
 }) {
-  const configured = !!cred && (cred.has_api_key || cred.has_aws_credentials);
+  // A provider the deployment supplies takes no key of the org's own: always on, nothing to edit.
+  const supplied = platform.auth === "platform";
+  const configured = supplied || (!!cred && (cred.has_api_key || cred.has_aws_credentials));
   const names = models.map((m) => m.display_name);
   const namePreview = names.slice(0, 2).join(", ");
+  const usedBy = usedByLine(platform);
 
   return (
     <div className="flex flex-col justify-between rounded-card border border-border p-4">
@@ -175,15 +186,19 @@ function ProviderRow({
         {configured ? (
           <span className="flex items-center gap-1.5 text-label uppercase text-success">
             <span className="h-1.5 w-1.5 rounded-pill bg-success" aria-hidden="true" />
-            Configured
+            {supplied ? "Included" : "Configured"}
           </span>
         ) : (
           <span className="text-label uppercase text-subtle">Not configured</span>
         )}
       </div>
 
+      {usedBy && <div className="mt-1 text-label text-muted">{usedBy}</div>}
+
       <div className="mt-2.5 text-label text-muted">
-        {configured ? (
+        {supplied ? (
+          <span className="text-subtle">{platform.detail ?? "No key needed"}</span>
+        ) : configured ? (
           <span className="font-mono text-subtle">Key stored</span>
         ) : (
           <span className="text-subtle">{expectedFields(platform)}</span>
@@ -196,7 +211,7 @@ function ProviderRow({
           {namePreview ? ` · ${namePreview}${names.length > 2 ? "…" : ""}` : " available"}
         </span>
         <div className="flex shrink-0 items-center gap-1">
-          {configured ? (
+          {supplied ? null : configured ? (
             <>
               <button
                 type="button"
@@ -258,7 +273,6 @@ function ProviderKeyModal({
   const [awsRegion, setAwsRegion] = useState(existing?.aws_region ?? "us-east-1");
   const [awsAccess, setAwsAccess] = useState("");
   const [awsSecret, setAwsSecret] = useState("");
-  const [bedrockArn, setBedrockArn] = useState(existing?.bedrock_model_arn ?? "");
   const [customModelName, setCustomModelName] = useState(existing?.custom_model_name ?? "");
   // Bedrock/mantle-only. Defaults to the stored value, else "api_key" — the same default the
   // backend applies to a credential with no auth_mode column value (ProviderCredentialController).
@@ -279,7 +293,6 @@ function ProviderKeyModal({
         // (explicitly clear) whenever that mode is selected, same as any other omitted field.
         aws_access_key: isAws && !usesIamRole ? (awsAccess.trim() ? awsAccess.trim() : undefined) : undefined,
         aws_secret_key: isAws && !usesIamRole ? (awsSecret.trim() ? awsSecret.trim() : undefined) : undefined,
-        bedrock_model_arn: isAws ? bedrockArn.trim() : undefined,
         auth_mode: isAws ? authMode : undefined,
         custom_model_name: isCustom ? (customModelName.trim() ? customModelName.trim() : undefined) : undefined,
       };
@@ -385,21 +398,11 @@ function ProviderKeyModal({
             <Field label="AWS region">
               {(p) => <Input {...p} value={awsRegion} onChange={(e) => setAwsRegion(e.target.value)} className="font-mono" />}
             </Field>
-            <Field label="Inference profile ARN" hint="The ARN (Amazon Resource Name) of the inference profile. Optional, but required for marketplace models.">
-              {(p) => (
-                <Input
-                  {...p}
-                  value={bedrockArn}
-                  onChange={(e) => setBedrockArn(e.target.value)}
-                  placeholder="arn:aws:bedrock:…"
-                  className="font-mono"
-                />
-              )}
-            </Field>
 
             {/* API key (sealed access/secret keys) vs IAM role (the sandbox/host's own
                 instance or task role — no keys stored at all). An explicit opt-in, never inferred
-                from blank key fields: see ChatModelFactory#byoOrIamAwsCredentials for why. */}
+                from blank key fields, so a key left empty by mistake never falls back to the
+                host's own role. */}
             <div className="col-span-2">
               <Field label="Auth mode">
                 {(p) => (

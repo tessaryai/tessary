@@ -85,11 +85,13 @@ public record RetrievedDocRow(
                 spanId);
     }
 
-    /** The canonical {@code retrieved_doc.list_role} values. */
+    /**
+     * The {@code retrieved_doc.list_role} value ingest writes. The schema also allows {@code 'candidate'},
+     * which the grounding read filters on.
+     */
     public static final class ListRole {
         private ListRole() {}
 
-        public static final String CANDIDATE = "candidate";
         public static final String RESULT = "result";
     }
 }

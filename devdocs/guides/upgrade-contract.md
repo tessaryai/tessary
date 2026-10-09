@@ -103,19 +103,6 @@ For every layout-level change, touch each of these in order:
    Update the shard fixtures (`META_YAML`, `CALL_SITE_YAML`, …) to use the new
    schema version, add a fixture for any new shard, and add a happy-path
    assertion that the new field round-trips through the DB.
-9. **Prompt-craft skill** — `claude-skill/evals-prompt/`. It is craft guidance, not a second copy of
-   the schema, and it points at `contract/` as source of truth. A contract bump touching
-   author-owned fields still wants its `contract_version:` frontmatter bumped and any prose that
-   names a renamed field updated. It no longer has to stay in lockstep the way it did when the
-   platform ran the graders this skill helps author.
-10. **E2B `tessary-agent-sandbox` template** — `sandbox-runner/agent-sandbox/template.ts`
-   bakes the contract files into the sandbox image from this repo's `contract/` (staged into
-   `vendor/` by `build.ts`). The two lanes that run there — RCA and Layer-2 triage — READ the
-   bundle to ground a ruling; neither writes one back, so a version skew now fails a comparison
-   rather than corrupting a repo. **A contract bump no longer needs a manual rebuild**: the five
-   `contract/` files are inputs to `build.ts`'s recipe hash, so the next release notices they moved
-   and rebuilds the template on its own. Nothing to remember, and nothing to forget — which is what
-   the old instruction here was relying on.
 
 ### 4. Verify
 
@@ -139,8 +126,6 @@ backend/.../pipeline/      # repository + shard assembly + import controller (Pi
 backend/.../test/          # fixtures
 frontend/src/api/          # types + client
 frontend/src/views/        # rendering
-claude-skill/evals-prompt/ # prompt-craft skill, when author-owned fields changed
-sandbox-runner/agent-sandbox/  # rebuild the E2B analyzer image (baked contract files)
 devdocs/                   # this runbook if the steps shifted
 ```
 

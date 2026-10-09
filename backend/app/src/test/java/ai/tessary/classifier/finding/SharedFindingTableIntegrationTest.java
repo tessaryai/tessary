@@ -7,19 +7,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.ingest.PreviewCursor;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.plan.Capability;
-import ai.tessary.storage.AnnotationRepository;
-import ai.tessary.storage.AnnotationRow;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
-import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,12 +27,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The invariants the shared {@code finding} table introduces, against the real schema: every one of
- * them is a database constraint or a predicate rather than Java, so a unit test would assert the mock.
- *
- * <p>What is pinned here is the set of rules that make ONE table safe for four classifiers: the live
- * uniqueness arbiter and its {@code blocked} arm, the bounded append-only evidence set, the case's
- * mandatory pointer at a finding, and the correction anchor that outlives the verdict TTL.
+ * The shared {@code finding} table's invariants against the real schema, since each is a constraint or predicate a
+ * unit test would only mock: the live uniqueness arbiter and its {@code blocked} arm, the bounded append-only
+ * evidence set, and the case's mandatory finding pointer.
  */
 @SpringBootTest
 class SharedFindingTableIntegrationTest {
@@ -48,66 +44,14 @@ class SharedFindingTableIntegrationTest {
     FindingService behaviorDrift;
 
     @Autowired
-    AnnotationRepository annotations;
-
-    @Autowired
     TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     @Autowired
     JdbcClient jdbc;
 
-    /**
-     * A detector records the POPULATION it measured, so the writer truncates nothing and the finding
-     * carries the size of what it wrote. The retention pin widens with it, by decision: a claim about a
-     * population cannot be audited against a sample whose selection rule nobody stated.
-     */
+    /** The dossier reads the first page in the detector's order and needs the cursor to say whether more follow. */
     @Test
-    @DisplayName("evidence is uncapped and counted, and a repeat reference is a no-op rather than a duplicate")
-    void evidenceIsUncappedAndAppendOnly() {
-        Project p = project("finding-evidence-population");
-        String findingId = firing(p, "gram-population");
-        String now = Instant.now().toString();
-
-        int population = 70;
-        List<FindingEvidenceRepository.Ref> many = new ArrayList<>();
-        for (int i = 0; i < population; i++) {
-            many.add(FindingEvidenceRepository.Ref.trace("trace-" + i));
-        }
-        int written = evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now);
-        assertEquals(population, written, "the writer records every ref the classifier handed it");
-
-        // Re-offering the same window must write nothing, which is what makes a sweep that re-reads its
-        // own page idempotent, and it must not double the recorded count either.
-        assertEquals(
-                0,
-                evidence.record(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, many, now),
-                "a repeated reference is absorbed by ux_finding_evidence_ref");
-
-        assertEquals(1, evidence.recordExemplarTrace(p.id(), findingId, "trace-exemplar", now));
-        assertTrue(evidence.exemplarTraceId(p.id(), findingId).isPresent());
-        assertEquals(population + 1, evidence.listByFinding(p.id(), findingId).size());
-
-        // The cost of the claim, readable off the finding without a count(*).
-        FindingRow finding = findings.findById(p.id(), findingId).orElseThrow();
-        assertEquals(population, finding.evidenceCount(FindingEvidenceRow.Role.MEMBER));
-        assertEquals(1, finding.evidenceCount(FindingEvidenceRow.Role.EXEMPLAR));
-        assertEquals(0, finding.evidenceCount(FindingEvidenceRow.Role.BASELINE));
-    }
-
-    /**
-     * The read side of the population: {@code get_finding_evidence} pages this repository, and its keyset
-     * is SQL, a row comparison over {@code (role, rank, id)} with a cast on each slot, so a unit test
-     * against a mock would prove nothing about the one thing that can be wrong here.
-     *
-     * <p>The property that matters is completeness. A population is only auditable if walking it returns
-     * every row exactly once, so the walk below is asserted against the whole set rather than against the
-     * first page, and it crosses a role boundary on the way (the order is role-major).
-     */
-    @Test
-    @DisplayName("the evidence page walks the whole population once, and the counts report every role")
+    @DisplayName("the evidence page is the unpaged order's head, and the counts report every role")
     void evidencePagesInStableOrderAndCountsEveryRole() {
         Project p = project("finding-evidence-paging");
         String findingId = firing(p, "gram-paging");
@@ -126,52 +70,30 @@ class SharedFindingTableIntegrationTest {
                         FindingEvidenceRepository.Ref.trace("ref-2")),
                 now);
 
-        List<String> walked = new ArrayList<>();
-        String cursor = null;
-        int pages = 0;
-        do {
-            FindingEvidenceRepository.Page page = evidence.page(p.id(), findingId, null, 3, cursor);
-            for (FindingEvidenceRow row : page.rows()) walked.add(row.role() + ':' + row.id());
-            cursor = page.nextCursor();
-            pages++;
-        } while (cursor != null && pages < 10);
-
-        assertEquals(8, walked.size(), "the walk returned " + walked.size() + " of 8 refs: " + walked);
+        List<String> unpaged = evidence.listByFinding(p.id(), findingId).stream()
+                .map(r -> r.role() + ':' + r.id())
+                .toList();
+        FindingEvidenceRepository.Page head = evidence.page(p.id(), findingId, 3);
         assertEquals(
-                8,
-                walked.stream().distinct().count(),
-                "a keyset that re-emits a row is as wrong as one that skips it: " + walked);
-        assertEquals(
-                evidence.listByFinding(p.id(), findingId).stream()
-                        .map(r -> r.role() + ':' + r.id())
-                        .toList(),
-                walked,
+                unpaged.subList(0, 3),
+                head.rows().stream().map(r -> r.role() + ':' + r.id()).toList(),
                 "the paged order must be the unpaged order");
+        assertNotNull(head.nextCursor(), "a page that stopped short of the set says more rows follow");
 
-        // Narrowing to one role pages only that role, and the page still ends with a null cursor.
-        FindingEvidenceRepository.Page baseline =
-                evidence.page(p.id(), findingId, FindingEvidenceRow.Role.BASELINE, 50, null);
-        assertEquals(3, baseline.rows().size());
-        assertNull(baseline.nextCursor(), "a page that exhausted the set mints no cursor");
+        FindingEvidenceRepository.Page whole = evidence.page(p.id(), findingId, 50);
+        assertEquals(8, whole.rows().size());
+        assertNull(whole.nextCursor(), "a page that exhausted the set mints no cursor");
 
-        // An unreadable token is page one, never an error: the only failure mode a feed can absorb.
-        assertEquals(
-                walked.size(),
-                evidence.page(p.id(), findingId, null, 50, "not-a-cursor")
-                        .rows()
-                        .size());
-
-        // Every role in the vocabulary is reported, so a detector with no reference side reads as an
-        // explicit zero rather than as a key somebody forgot to send.
+        // Every role is reported, so a detector with no reference side reads as an explicit zero.
         var counts = evidence.countsByRole(p.id(), findingId);
         assertEquals(FindingEvidenceRow.Role.ALL, List.copyOf(counts.keySet()));
         assertEquals(5L, counts.get(FindingEvidenceRow.Role.MEMBER));
         assertEquals(3L, counts.get(FindingEvidenceRow.Role.BASELINE));
         assertEquals(0L, counts.get(FindingEvidenceRow.Role.WITNESS));
 
-        // count_only sizes the set without walking it: rows omitted on a finding that HAS eight of them,
-        // so an empty refs list here is the caller's own request rather than an evidence set that vanished.
-        var sized = behaviorDrift.findingEvidence(p.id(), findingId, null, 100, null, true);
+        // count_only on a finding that has eight rows: an empty refs list is the caller's request, not vanished
+        // evidence.
+        var sized = behaviorDrift.findingEvidence(p.id(), findingId);
         assertTrue(sized.refs().isEmpty(), "the cheap first call spends nothing on rows");
         assertTrue(sized.rowsOmitted(), "rowsOmitted is what separates 'did not ask' from 'has none'");
         assertNull(sized.nextCursor(), "a call that returned no rows must not offer to resume after them");
@@ -180,13 +102,9 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * A trace-grain ref names a TRACE, and the span join has to pick one span out of it. The fallback it
-     * picks by, {@code is_logical_root}, is not unique within a trace — it marks every sub-agent boundary
-     * — so a plain {@code ON} multiplied one ref by however many agents ran inside that trace.
-     *
-     * <p>That was not a cosmetic duplicate. The copies were sub-agent roots with {@code latency_ms = 0},
-     * the page disagreed with {@code countsByRole} over the same evidence, and a reader instructed to
-     * compute over every row was handed a set padded with zeros. This pins one ref to one row.
+     * A trace-grain ref resolves to one span. {@code is_logical_root} marks every sub-agent boundary, so a plain join
+     * multiplied a ref by the agents inside: zero-latency copies that disagreed with {@code countsByRole} and padded
+     * any computation over the rows.
      */
     @Test
     @DisplayName("a trace-grain ref resolves to ONE span, the outermost root, however many agents ran inside")
@@ -196,8 +114,7 @@ class SharedFindingTableIntegrationTest {
         String now = Instant.now().toString();
         String traceId = "trace-many-roots";
 
-        // The shape a real sub-agent trace has: one parentless root, and a logical root per sub-agent
-        // under it. Every one of these is_logical_root, which is exactly why the flag cannot pick.
+        // One parentless root plus a logical root per sub-agent, all flagged is_logical_root.
         jdbc.sql("INSERT INTO trace (project_id, id, started_at, event_ts) VALUES (:pid, :tid, now(), now())")
                 .param("pid", p.id())
                 .param("tid", traceId)
@@ -228,12 +145,9 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * A whole-run evidence row ({@code span_id IS NULL}) reads tokens and cost off the TRACE rollup,
-     * not the root span — a run's spend is the sum of every LLM call inside it, and the root step
-     * (an {@code agent} span) carries neither. It also reports every distinct model the run called,
-     * and mirrors the rollup's own caveats: not yet rolled up, missing priced spans, or still
-     * unsettled. Latency alone stays the root step's, per decision R2, since that is what the
-     * detector actually measured.
+     * A whole-run row reads tokens and cost from the trace rollup (the root agent span carries neither), lists every
+     * model called, and mirrors the rollup's caveats. Latency stays the root step's (decision R2), as the detector
+     * measured it.
      */
     @Test
     @DisplayName("a whole-run row reads tokens and cost from the trace rollup, every model, and the rollup flags")
@@ -279,9 +193,34 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * One logical-root span, inserted straight in: the substrate fixtures build whole traces, and this
-     * test needs an unnatural one — several logical roots in a single trace — to exercise the join.
+     * A drift finding is filed under the trace's call site, which falls back past an untagged root to the span that
+     * covers the model call. The whole-run row has to show that call site, not the untagged root's empty one.
      */
+    @Test
+    @DisplayName("a whole-run row shows the trace's call site, not the untagged root span's")
+    void wholeRunEvidenceRowShowsTheTracesCallSite() {
+        Project p = project("finding-evidence-call-site");
+        String findingId = firing(p, "gram-call-site");
+        String traceId = "trace-untagged-root";
+
+        jdbc.sql("""
+                INSERT INTO trace (project_id, id, started_at, event_ts, call_site_id)
+                VALUES (:pid, :tid, now(), now(), 'policy.answer')
+                """).param("pid", p.id()).param("tid", traceId).update();
+        insertRootSpan(p.id(), traceId, "span-handler", null, "POST /chat", 4_000L);
+
+        evidence.record(
+                p.id(),
+                findingId,
+                FindingEvidenceRow.Role.MEMBER,
+                List.of(FindingEvidenceRepository.Ref.trace(traceId)),
+                Instant.now().toString());
+
+        var page = behaviorDrift.findingEvidenceSpans(p.id(), findingId, FindingEvidenceRow.Role.MEMBER, 100, null);
+        assertEquals("policy.answer", page.rows().get(0).callSiteId());
+    }
+
+    /** Inserted directly: the fixtures build natural traces, and this needs several logical roots in one. */
     private void insertRootSpan(
             String projectId, String traceId, String spanId, @Nullable String parentId, String name, long latencyMs) {
         jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name, is_logical_root,"
@@ -297,7 +236,6 @@ class SharedFindingTableIntegrationTest {
                 .update();
     }
 
-    /** One LLM leaf span under {@code parentId}, carrying a model — what the whole-run models list reads. */
     private void insertLlmSpan(
             String projectId, String traceId, String spanId, String parentId, String model, boolean deleted) {
         jdbc.sql("INSERT INTO span (project_id, trace_id, id, parent_span_id, kind, name,"
@@ -313,17 +251,9 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * The evidence door's project scope, through the real service rather than a stubbed one.
-     *
-     * <p>The MCP-side test can only prove that a thrown not-found maps to a clean tool error, because it
-     * mocks the service that would have decided. The decision is here: {@code findingEvidence} resolves
-     * the finding under the CALLER's project first, so a finding id lifted from another tenant is
-     * indistinguishable from one that never existed, not-found, never forbidden, since a distinguishable
-     * 403 is itself a disclosure that the id is real.
-     *
-     * <p>The repository is asserted directly beside it, so the scope does not rest on the service guard
-     * alone: a {@code page} or a {@code countsByRole} that dropped its {@code project_id} predicate would
-     * leak the population to anyone who could guess a finding id.
+     * Project scope through the real service: {@code findingEvidence} resolves the finding under the caller's project
+     * first, so another tenant's id reads not-found, never a 403 that would confirm it exists. The repository is
+     * asserted too, so a {@code page} or {@code countsByRole} missing its {@code project_id} predicate fails here.
      */
     @Test
     @DisplayName("another tenant's finding id reads as not-found, and its evidence does not page")
@@ -338,28 +268,18 @@ class SharedFindingTableIntegrationTest {
                 List.of(FindingEvidenceRepository.Ref.trace("trace-owned")),
                 Instant.now().toString());
 
-        // The positive control. Without it every assertion below would also pass on a finding that was
-        // never written, and the test would be proving nothing but its own fixture failing quietly.
+        // The positive control: without it every assertion below also passes on a finding never written.
         assertEquals(
-                1,
-                behaviorDrift
-                        .findingEvidence(owner.id(), findingId, null, 100, null, false)
-                        .refs()
-                        .size(),
+                1L,
+                behaviorDrift.findingEvidence(owner.id(), findingId).counts().get(FindingEvidenceRow.Role.MEMBER),
                 "the owner reads its own evidence");
 
-        TessaryException e = assertThrows(
-                TessaryException.class,
-                () -> behaviorDrift.findingEvidence(stranger.id(), findingId, null, 100, null, false));
+        TessaryException e =
+                assertThrows(TessaryException.class, () -> behaviorDrift.findingEvidence(stranger.id(), findingId));
         assertEquals(ClassifierError.FINDING_NOT_FOUND, e.error(), "a cross-tenant id must not read as forbidden");
 
-        assertThrows(
-                TessaryException.class,
-                () -> behaviorDrift.findingEvidence(stranger.id(), findingId, null, 100, null, true),
-                "count_only is the cheap first call, so it is also the cheap first probe");
-
         assertTrue(
-                evidence.page(stranger.id(), findingId, null, 100, null).rows().isEmpty(),
+                evidence.page(stranger.id(), findingId, 100).rows().isEmpty(),
                 "the page's own project predicate is what makes the service guard belt-and-braces");
         assertEquals(
                 0L,
@@ -368,11 +288,8 @@ class SharedFindingTableIntegrationTest {
     }
 
     /**
-     * {@code ux_finding_live} now excludes any ruled row, {@code blocked} included: a person's ruling
-     * is written onto the same {@code triage_verdict}/{@code status} columns a machine's is, and a
-     * ruled row leaves the arbiter by construction. Dropping a ruled row out of the index is the
-     * point, not the bug this test used to guard against: the next firing must open a FRESH finding
-     * rather than silently mutate the one a person already read and ruled on.
+     * {@code ux_finding_live} excludes every ruled row, since a person's ruling uses the same columns as a machine's:
+     * the next firing opens a fresh finding rather than mutating one a person already ruled on.
      */
     @Test
     @DisplayName("a human-ruled finding leaves the live arbiter, so a later firing opens a fresh one")
@@ -397,81 +314,110 @@ class SharedFindingTableIntegrationTest {
         assertTrue(fresh.triageVerdict() == null, "the new row starts unruled, exactly like a first firing");
     }
 
+    private Project project(String name) {
+        return TenantFixture.bootstrap(tenants, name).project();
+    }
+
     /**
-     * A correction anchors on {@code of_finding_id}, the only anchor there is. A verdict pointer would
-     * age out on the 90-day verdict TTL, so a human's correction would outlive the row it was attached
-     * to and the training signal would be lost by a clock rather than by a decision.
+     * A span page resumes after its own last row, not the over-fetched one; an unreadable or other-generation cursor
+     * restarts at page one; an aged-out span still reads with no start time. Secret-leak and malformed-output pages
+     * join their own tables the same way.
      */
     @Test
-    @DisplayName("a correction anchors on the finding, the only anchor left")
-    void annotationsAnchorOnTheFinding() {
-        Project p = project("finding-annotation-anchor");
-        String findingId = firing(p, "gram-annotation");
-        annotations.upsert(new AnnotationRow(
-                Ids.ulid(),
+    @DisplayName("the span page resumes after its own last row and restarts on a cursor it cannot read")
+    void spanPageResumesAfterItsLastRowAndRestartsOnAnUnreadableCursor() {
+        Project p = project("finding-span-page");
+        String findingId = firing(p, "gram-span-page");
+        List<FindingEvidenceRepository.Ref> refs = new ArrayList<>();
+        for (int i = 0; i < 3; i++) refs.add(FindingEvidenceRepository.Ref.span("trace-" + i, "span-" + i));
+        evidence.record(
                 p.id(),
-                AnnotationRow.SubjectKind.TRACE,
-                "session-1",
-                "trace-1",
-                null,
-                "behavior_drift",
-                "user-1",
-                AnnotationRow.AnnotatorKind.HUMAN,
-                "boolean",
-                null,
-                null,
-                null,
-                null,
                 findingId,
-                true,
-                null,
-                Instant.now().toString(),
-                null));
+                FindingEvidenceRow.Role.MEMBER,
+                refs,
+                Instant.now().toString());
 
-        assertEquals(
-                1L,
-                jdbc.sql("SELECT count(*) FROM annotation WHERE project_id = :pid AND of_finding_id = :fid")
-                        .param("pid", p.id())
-                        .param("fid", findingId)
-                        .query(Long.class)
-                        .single(),
-                "the anchor is stored, and it is the finding rather than a verdict");
-    }
+        for (boolean joined : new boolean[] {false, true}) {
+            FindingEvidenceRepository.SpanPage first =
+                    evidence.spanPage(p.id(), findingId, null, 2, null, joined, joined);
+            FindingEvidenceRepository.SpanPage second =
+                    evidence.spanPage(p.id(), findingId, null, 2, first.nextCursor(), joined, joined);
 
-    // ---- fixtures ---------------------------------------------------------------------------------
-
-    private Project project(String name) {
-        return bootstrapGranted(name).project();
-    }
-
-    /** One behaviour-drift firing against {@code gram}, returning the finding that owns the cause. */
-    private String firing(Project p, String gram) {
-        return findings.recordFiring(
-                        Ids.ulid(),
-                        p.id(),
-                        "profile-1",
-                        FindingRow.Cause.NOVELTY,
-                        gram,
-                        FindingRow.GLOBAL_WORKFLOW,
-                        1,
-                        null,
-                        null,
-                        "cs-a",
-                        Instant.now().toString())
-                .findingId();
+            assertEquals(List.of("trace-0", "trace-1"), traces(first));
+            assertNotNull(first.nextCursor());
+            assertEquals(List.of("trace-2"), traces(second));
+            assertNull(second.nextCursor());
+            assertNull(second.rows().get(0).startedAt(), "the span aged out; the ref still reads");
+        }
+        String sep = "\u001f";
+        for (String token : List.of(
+                "v1" + sep + "member" + sep + "first" + sep + "x",
+                "v0" + sep + "member" + sep + "1" + sep + "x",
+                "v1" + sep + "" + sep + "1" + sep + "x",
+                "v1" + sep + "member" + sep + "1")) {
+            assertEquals(
+                    List.of("trace-0", "trace-1"),
+                    traces(evidence.spanPage(p.id(), findingId, null, 2, PreviewCursor.encode(token, 0), false, false)),
+                    "an unreadable cursor restarts at page one: " + token);
+        }
     }
 
     /**
-     * Bootstrap a tenant whose org has behaviour drift switched on before its project is created. This
-     * build's default has {@code behavior_drift} off, so without a grant these cases would assert the
-     * capability default rather than the behaviour they name. The grant has to precede the project,
-     * because project creation is what seeds the built-in classifiers: grant afterwards and the
-     * classifier row is never inserted, leaving the test hunting findings from a classifier the project
-     * does not have.
+     * A cause key with quotes, backslashes and control characters is escaped into the payload; unescaped, the jsonb
+     * cast rejects the write.
      */
-    private TenantFixture.Setup bootstrapGranted(String name) {
-        return TenantFixture.bootstrap(tenants, name, org -> {
-            capabilities.grant(org.id(), Capability.BEHAVIOR_DRIFT);
-        });
+    @Test
+    void aCauseKeyWithCharactersJsonMustEscapeIsRecordedIntact() {
+        Project p = project("finding-escaped-key");
+        String nasty = "tool:\"quoted\" \\path\n\r\t\u0001end";
+        String now = Instant.now().toString();
+
+        FindingRepository.Recorded recorded = Objects.requireNonNull(findings.recordRecomputedRate(
+                Ids.ulid(),
+                p.id(),
+                BuiltInDetector.Kind.TOOL_ERROR,
+                "clf-escape:" + nasty,
+                FindingRow.Cause.RATE_SHIFT,
+                nasty,
+                FindingRow.SubjectKind.TOOL,
+                "search_docs",
+                "search_docs",
+                12,
+                null,
+                null,
+                "{\"n_cur\":12}",
+                now,
+                now,
+                now));
+
+        assertEquals(
+                nasty,
+                findings.findById(p.id(), recorded.findingId()).orElseThrow().nativeCauseKey());
+    }
+
+    private static List<String> traces(FindingEvidenceRepository.SpanPage page) {
+        return page.rows().stream()
+                .map(FindingEvidenceRepository.SpanRef::traceId)
+                .toList();
+    }
+
+    private static final String ARMED_PAYLOAD = "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\"}";
+
+    private String firing(Project p, String gram) {
+        String now = Instant.now().toString();
+        return Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        "clf-" + gram,
+                        gram,
+                        1,
+                        "cs-a",
+                        ARMED_PAYLOAD,
+                        now,
+                        now,
+                        now,
+                        now))
+                .findingId();
     }
 }

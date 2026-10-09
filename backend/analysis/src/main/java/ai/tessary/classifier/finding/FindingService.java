@@ -3,13 +3,18 @@ package ai.tessary.classifier.finding;
 
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
+import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
+import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
-import ai.tessary.classifier.finding.BehaviorDtos.EvidenceRefView;
+import ai.tessary.classifier.frustration.FrustrationDetailService;
+import ai.tessary.classifier.frustration.FrustrationEvidence;
+import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.open.errors.ClassifierError;
@@ -27,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>It was renamed from {@code BehaviorDriftService} because seven of its eight
  * public methods never had anything to do with behaviour drift. The findings store is shared — rows
- * carry a {@code classifier_key} — and metric drift, tool error and SOP conformance all list, page,
+ * carry a {@code classifier_key} — and metric drift, tool error and the per-span classifiers all list, page,
  * escalate and resolve through here.
  *
  * <p><b>The merged surface knows no table.</b> Listing, detail, resolution and the dossier all route
@@ -66,19 +71,27 @@ public class FindingService {
     /** The one classifier-specific read on this surface: a {@code malformed_rate} finding's failing outputs. */
     private final MalformedOutputDetailService malformedOutputs;
 
+    private final FrustrationDetailService frustrations;
+
+    private final GroundednessDetailService groundedness;
+
     public FindingService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             ClassifierService classifiers,
             BehaviorBaselineEventRepository events,
             List<TriageSource> triageSources,
-            MalformedOutputDetailService malformedOutputs) {
+            MalformedOutputDetailService malformedOutputs,
+            FrustrationDetailService frustrations,
+            GroundednessDetailService groundedness) {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
         this.events = events;
         this.triageSources = triageSources;
         this.malformedOutputs = malformedOutputs;
+        this.frustrations = frustrations;
+        this.groundedness = groundedness;
     }
 
     /**
@@ -90,10 +103,10 @@ public class FindingService {
      * stream, which is a lead list, not an alert list.
      *
      * <p><b>The page is the concatenation of the sources, in {@code @Order}</b>, and that order is
-     * wire-observable: the shared table's rows first, conformance's after them. Each source applies its
-     * own narrowing — see {@link FindingFilters}, which holds the two that no query can express — and
-     * each pages to its own limit, so a two-source page can hold twice one source's worth. That was true
-     * before the seam and is unchanged by it; there is no cursor on this list.
+     * wire-observable. Each source applies its own narrowing — see {@link FindingFilters}, which holds the
+     * one that no query can express — and each pages to its own limit, so a two-source page can hold twice
+     * one source's worth. That was true before the seam and is unchanged by it; there is no cursor on this
+     * list.
      */
     public BehaviorFindingsView findings(
             String projectId,
@@ -127,40 +140,20 @@ public class FindingService {
     }
 
     /**
-     * One page of a finding's evidence refs — the read side of the population a detector enumerated.
+     * The size of a finding's evidence population, per role, with no rows — the cheap sizing call a
+     * caller makes before it pages {@link #findingEvidenceSpans}.
      *
      * <p>Behind the same reachability guard as {@link #finding}, and for the same reason: the refs ARE
      * the finding's claim, so a classifier the org does not hold must not become readable through its
-     * evidence. Conformance rows need no special case here — they share the {@code finding} table, and
-     * only their DETAIL shape differs.
-     *
-     * <p>The counts are read on every call, {@code countOnly} or not, because they are how a caller
-     * sizes what it is about to page and how it reads a role that came back empty. Both readings ride
-     * along: see {@link BehaviorDtos.FindingEvidencePage} for why they can disagree.
-     *
-     * <p>No sampling mode, deliberately. The tool pages in the detector's own order and an agent that
-     * wants a stride or a random draw takes one and states that it did — a server-side sample would put
-     * the selection rule back where the auditor cannot see it, which is the whole reason the write side
-     * stopped capping.
+     * evidence. Both readings of the counts ride along: see {@link BehaviorDtos.FindingEvidencePage} for
+     * why they can disagree.
      */
-    public BehaviorDtos.FindingEvidencePage findingEvidence(
-            String projectId,
-            String findingId,
-            @Nullable String role,
-            int limit,
-            @Nullable String cursor,
-            boolean countOnly) {
+    public BehaviorDtos.FindingEvidencePage findingEvidence(String projectId, String findingId) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         Map<String, Long> recorded = new LinkedHashMap<>();
         for (String r : FindingEvidenceRow.Role.ALL) recorded.put(r, finding.evidenceCount(r));
         Map<String, Long> live = evidence.countsByRole(projectId, findingId);
-        if (countOnly) {
-            return new BehaviorDtos.FindingEvidencePage(List.of(), null, true, live, recorded);
-        }
-        FindingEvidenceRepository.Page page = evidence.page(projectId, findingId, role, limit, cursor);
-        List<EvidenceRefView> refs =
-                page.rows().stream().map(EvidenceRefView::of).toList();
-        return new BehaviorDtos.FindingEvidencePage(refs, page.nextCursor(), false, live, recorded);
+        return new BehaviorDtos.FindingEvidencePage(List.of(), null, true, live, recorded);
     }
 
     /**
@@ -208,13 +201,57 @@ public class FindingService {
     }
 
     /**
+     * One page of the frustrated sessions a {@code frustration_rate} finding cites, newest flag first: what the
+     * finding and case pages' session list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
+     * position in that report's causes) narrow it to one RCA cause's share; both or neither. Any other finding
+     * has none.
+     */
+    public FrustrationEvidence.FrustratedSessionPage frustratedSessions(
+            String projectId,
+            String findingId,
+            @Nullable String rcaReport,
+            @Nullable Integer cause,
+            int limit,
+            @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())) {
+            return new FrustrationEvidence.FrustratedSessionPage(List.of(), 0, null);
+        }
+        FrustrationRateRepository.CauseRef ref =
+                rcaReport == null || cause == null ? null : new FrustrationRateRepository.CauseRef(rcaReport, cause);
+        return frustrations.page(finding, ref, limit, cursor);
+    }
+
+    /**
+     * One page of the flagged answers a {@code groundedness_rate} finding cites, newest flag first: what the
+     * finding and case pages' answer list loads as it scrolls. {@code rcaReport} and {@code cause} (its 0-based
+     * position in that report's causes) narrow it to the answers in the traces that RCA cause names; both or
+     * neither. Any other finding has none.
+     */
+    public GroundednessEvidence.FlaggedAnswerPage flaggedAnswers(
+            String projectId,
+            String findingId,
+            @Nullable String rcaReport,
+            @Nullable Integer cause,
+            int limit,
+            @Nullable String cursor) {
+        FindingRow finding = requireReachableFinding(projectId, findingId);
+        if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) {
+            return new GroundednessEvidence.FlaggedAnswerPage(List.of(), 0, null);
+        }
+        GroundednessRateRepository.CauseRef ref =
+                rcaReport == null || cause == null ? null : new GroundednessRateRepository.CauseRef(rcaReport, cause);
+        return groundedness.page(finding, ref, limit, cursor);
+    }
+
+    /**
      * Tenant + existence guard for one finding, extended to the flag layer: a finding whose classifier
      * the org does not have is a 404, exactly as the classifier itself is. Without this, hiding a
      * classifier would still leave its findings reachable — and WRITABLE — by id, so a stale tab could
      * hand a withheld finding to Layer 2 or resolve it.
      *
      * <p>Kept here rather than pushed behind the seam because the two evidence reads above are over the
-     * shared {@code finding_evidence} table for EVERY classifier, conformance included: the refs are the
+     * shared {@code finding_evidence} table for EVERY classifier: the refs are the
      * one part of the surface the stores genuinely share.
      */
     private FindingRow requireReachableFinding(String projectId, String findingId) {
@@ -230,12 +267,11 @@ public class FindingService {
      * Run Layer-2 on one finding, because a human asked for it.
      *
      * <p>The default and, unless an org opts in, the only way a triage gets enqueued. The sweeps
-     * used to do it, and the reason they stopped is that a finding is a LEAD: behaviour drift detects
-     * atypical, metric drift detects change, and neither can tell either from a problem — slow is not bad
-     * and expensive is not bad. Every automatic escalation was an E2B microVM and an agent session spent
-     * to find that out. A person reading the finding can usually tell, and when they cannot, this is the
-     * button. {@link TriageAutoEscalator} is the opt-in that presses it unattended, flagged off by
-     * default and bounded when on.
+     * used to do it, and the reason they stopped is that a finding is a LEAD: metric drift detects change,
+     * and cannot tell it from a problem — slow is not bad and expensive is not bad. Every automatic
+     * escalation was an E2B microVM and an agent session spent to find that out. A person reading the finding
+     * can usually tell, and when they cannot, this is the button. {@link TriageAutoEscalator} is the opt-in
+     * that presses it unattended, flagged off by default and bounded when on.
      *
      * <p><b>{@code requestedLane} no longer routes anywhere.</b> It used to choose between the triage
      * agent and a grader run over the finding's cited traces; grading was removed, so every press

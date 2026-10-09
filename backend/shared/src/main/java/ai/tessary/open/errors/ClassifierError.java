@@ -5,7 +5,6 @@ import org.springframework.http.HttpStatus;
 
 public enum ClassifierError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "No classifier '%s'"),
-    UNKNOWN_DETECTOR(HttpStatus.UNPROCESSABLE_ENTITY, "Unknown classifier detector: %s"),
     INVALID_MODE(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid classifier mode: %s (expected 'discovery' or 'tracking')"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
     // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
@@ -18,12 +17,25 @@ public enum ClassifierError implements ErrorCode {
     NOT_METRIC_DRIFT(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no window/threshold tuning — only cost_drift and duration_drift do"),
-    DETECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "No detection '%s' on this classifier"),
-    /** The two ways a detection has nothing a grader run could evaluate — see ClassifierService#analyze. */
-    DETECTION_NOT_GRADABLE(
-            HttpStatus.CONFLICT, "Detection '%s' resolved no call site, so there are no graders to scope a run to"),
-    NO_GRADERS_FOR_CALL_SITE(
-            HttpStatus.CONFLICT, "Call site '%s' has no runnable grader, so a run would evaluate nothing"),
+    NOT_FRUSTRATION(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
+    UNKNOWN_CALL_SITE(HttpStatus.UNPROCESSABLE_ENTITY, "This project has no call site '%s'"),
+    // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket
+    // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.
+    CALL_SITE_SCOPE_UNSUPPORTED(
+            HttpStatus.UNPROCESSABLE_ENTITY, "Classifier '%s' runs on every call site and cannot be limited to some"),
+    INVALID_CHART_DAYS(HttpStatus.UNPROCESSABLE_ENTITY, "A chart range is 7 or 28 days, not %s"),
+    CHART_SCOPE(HttpStatus.UNPROCESSABLE_ENTITY, "Pick one call site or one tool"),
+    NOT_GROUNDEDNESS(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' has no groundedness status — only the groundedness classifier does"),
+    /** Enabling a classifier that calls a provider on the org's own key, while no such key is configured. */
+    PROVIDER_REQUIRED(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Classifier '%s' needs a TypeSafe or OpenRouter key. Add one under Settings, Providers, then enable it"),
+    /** A reset while a worker holds the sweep job: that sweep would write its cursor back over the reset. */
+    SWEEP_RUNNING(HttpStatus.CONFLICT, "Classifier '%s' is checking traces right now. Try the reset again in a minute"),
     // NO_REPO_TO_RULE_AGAINST used to sit here: a 409 on `Run analysis` for a project with no git
     // integration, back when the only Layer-2 lane rules against a committed spec. It is gone rather than
     // deprecated because the state it named cannot occur — a repo-less project is now ruled on the

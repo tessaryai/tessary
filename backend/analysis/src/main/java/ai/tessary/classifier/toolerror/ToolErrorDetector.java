@@ -5,11 +5,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * A Bernoulli CUSUM over one tool's calls: in-control rate and running state in, an alarm or a reason
- * for silence out. Design contract: {@code classifiers/tool_error/PROGRAM.md} §4.
+ * for silence out. Design contract: {@code devdocs/concepts/tool-error.md} §4.
  *
- * <p>Pure by design: no database, no Spring, no clock, the caller supplies event times. PROGRAM.md §12's
- * null run replays a real corpus through this class directly, and that run, not a review, decides
- * {@link ToolErrorConfig#ARL_FIT_INTERCEPT}.
+ * <p>Pure by design: no database, no Spring, no clock, the caller supplies event times.
  *
  * <p>Sequential rather than windowed, because a fixed window both delays and dilutes a rate change: a
  * regression that begins mid-window is averaged against its own healthy first half. A CUSUM accumulates
@@ -156,11 +154,37 @@ public final class ToolErrorDetector {
     /**
      * Cohen's h between two proportions: the reported effect size, never the trigger.
      *
-     * <p>Exposed because the eval harness prints it beside the run length, and a harness computing its
-     * own copy is a harness that can disagree with the detector it is measuring.
      */
     public static double cohensH(double refRate, double curRate) {
         return 2.0 * (Math.asin(Math.sqrt(clamp01(curRate))) - Math.asin(Math.sqrt(clamp01(refRate))));
+    }
+
+    /**
+     * {@code d} with its failures counted rather than recovered. {@link #failuresFromS} is exact only when every
+     * hour of the run was judged against one reference. A reference that keeps learning while it judges ({@link
+     * ToolErrorConfig#learnsWhileJudging()}) judged a run that began before it froze against several, and the
+     * recovered count is off; the classifier's own witnesses are the count. The statistic, the threshold and the
+     * onset stay the engine's.
+     */
+    public static Decision counted(Decision d, long failures) {
+        long calls = d.callsSinceOnset();
+        long counted = Math.max(0, Math.min(calls, failures));
+        double current = calls == 0 ? d.baselineRate() : (double) counted / calls;
+        return new Decision(
+                d.fired(),
+                d.direction(),
+                d.statistic(),
+                d.threshold(),
+                d.criticality(),
+                d.baselineRate(),
+                current,
+                (current - d.baselineRate()) * 100.0,
+                cohensH(d.baselineRate(), current),
+                calls,
+                counted,
+                d.baselineCalls(),
+                d.onsetAt(),
+                d.silence());
     }
 
     /**
@@ -207,22 +231,9 @@ public final class ToolErrorDetector {
     }
 
     /**
-     * Fold one tool call into both arms.
-     *
-     * <p>Called once per call in event order. Cheap by construction (two logs and two adds), because at
-     * real ingest volume this runs on every tool call the platform sees.
-     *
-     * @param eventAt the call's event time, recorded as the onset when an arm leaves zero
-     */
-    public static State advance(
-            State state, ToolErrorRate pinned, ToolErrorConfig config, boolean failed, String eventAt) {
-        return advanceBucket(state, pinned, config, 1, failed ? 1 : 0, eventAt);
-    }
-
-    /**
      * Fold a whole bucket of calls into both arms in one step: the grouped Bernoulli CUSUM.
      *
-     * <p>Closed form rather than a loop over {@link #advance}, and that is not only an optimization: a
+     * <p>Closed form rather than a per-call loop, and that is not only an optimization: a
      * busy tool over a month is millions of calls, and a per-call loop would make recompute-per-read
      * unaffordable for precisely the tools most worth watching.
      *
