@@ -68,15 +68,7 @@ import { useRepoPrompt } from "../components/useRepoPrompt";
 import { formatDuration } from "../traces/detail-data";
 import { traceLinker } from "../traceLinker";
 import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
-
-/** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. The window is the story's spine, so it reads as a clock. */
-function stamp(iso: string): string {
-  const d = new Date(iso);
-  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${d.toLocaleTimeString(
-    undefined,
-    { hour: "2-digit", minute: "2-digit", hour12: false },
-  )}`;
-}
+import { stamp } from "../classifiers/shared";
 
 export function CasePage() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -191,17 +183,25 @@ export function CasePage() {
 
   // The window the spell spans. The detector's own blob wins where it has one — it is what the
   // detector actually measured — and the case's timestamps answer for every other detector.
+  // A drift window is taken whole or not at all: the case's last seen is the wall clock the case
+  // opened at, and pairing it with the window's event-time open draws a span that never happened.
+  const driftWindow =
+    detail.metric?.windowOpenedAt && detail.metric.windowClosedAt
+      ? { openedAt: detail.metric.windowOpenedAt, closedAt: detail.metric.windowClosedAt }
+      : null;
   const openedAt =
     detail.tool_error?.onsetAt ??
     detail.malformed_output?.rate?.onsetAt ??
     detail.secret_leak?.firstAt ??
     detail.frustration?.rate.onsetAt ??
     detail.groundedness?.rate.onsetAt ??
+    driftWindow?.openedAt ??
     c.onset_at;
   const closedAt =
     detail.tool_error?.windowClosedAt ??
     detail.malformed_output?.rate?.windowClosedAt ??
     detail.secret_leak?.lastAt ??
+    driftWindow?.closedAt ??
     (c.state === "resolved" ? c.resolved_at : c.last_seen_at);
 
   return (

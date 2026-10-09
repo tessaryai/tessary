@@ -23,6 +23,7 @@ import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
 import { ToastProvider } from "../../ui";
 import { CasePage } from "./CasePage";
+import { stamp } from "../classifiers/shared";
 import {
   FLAGGED_ANSWER,
   GROUNDEDNESS_CASE_DETAIL,
@@ -207,6 +208,42 @@ const frustrationCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
   case: { ...BASE.case, detector: "frustration", title: "Users on support-agent grew frustrated" },
 });
 
+const WINDOW_OPENED = "2026-10-09T10:26:48Z";
+const WINDOW_CLOSED = "2026-10-09T15:52:33Z";
+const CASE_OPENED = "2026-10-09T16:07:10Z";
+
+const SHIFT = {
+  bucketKey: "support-agent",
+  bucketKind: "call_site",
+  nCur: 500,
+  nRef: 1200,
+  sinceVersionId: null,
+  windowClosedAt: WINDOW_CLOSED,
+  windowKind: null,
+  windowOpenedAt: WINDOW_OPENED,
+  w1Log: 0.4,
+  control: null,
+  direction: "up",
+  explains: [],
+  floor: 0,
+  measure: "duration",
+  quantiles: [
+    { key: "p50", then: 1000, now: 2500 },
+    { key: "p95", then: 4000, now: 9000 },
+  ],
+  ratio: 2.5,
+  reference: "previous",
+  tokens: [],
+  workload: [],
+} as unknown as NonNullable<CaseDetail["metric"]>;
+
+/** A drift case as the server writes it: onset is the sample that closed the window, last seen is the wall clock. */
+const driftCase = (metric: Partial<NonNullable<CaseDetail["metric"]>> = {}): CaseDetail =>
+  plainCase(
+    { metric: { ...SHIFT, ...metric } },
+    { detector: "duration_drift", onset_at: WINDOW_CLOSED, last_seen_at: CASE_OPENED },
+  );
+
 // ---- harness --------------------------------------------------------------------------------
 
 beforeEach(() => {
@@ -370,6 +407,35 @@ describe("the meta line", () => {
 
     expect(screen.getByText("Tool error")).toBeTruthy();
     expect(screen.queryByText("__unattributed__")).toBeNull();
+  });
+});
+
+describe("a metric-drift case's window", () => {
+  // Bug: the header read the case's onset (the sample that closed the window) and its wall-clock last
+  // seen, so a five-hour window showed as fifteen minutes on two different clocks.
+  it("spans the window the drift was measured over", async () => {
+    api.getCase.mockResolvedValue(driftCase());
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText(`${stamp(WINDOW_OPENED)} → ${stamp(WINDOW_CLOSED)}`)).toBeTruthy();
+  });
+
+  it("falls back to the case's own times when the finding carries no window", async () => {
+    api.getCase.mockResolvedValue(driftCase({ windowOpenedAt: null, windowClosedAt: null }));
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
+  });
+
+  // Bug: a half-known window paired the window's open with the case's wall-clock last seen.
+  it("takes both ends from the case when only one end of the window is known", async () => {
+    api.getCase.mockResolvedValue(driftCase({ windowClosedAt: null }));
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.getByText(`${stamp(WINDOW_CLOSED)} → ${stamp(CASE_OPENED)}`)).toBeTruthy();
   });
 });
 

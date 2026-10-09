@@ -13,6 +13,7 @@ import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_DETAIL, GROUNDEDNESS_FINDING_DETAIL } from "../../test/groundednessFixtures";
 import { FindingPage } from "./FindingPage";
 import { dateTime } from "./groundedness";
+import { stamp } from "./shared";
 
 const api = vi.hoisted(() => ({
   base: "/api/orgs/acme/projects/default",
@@ -215,6 +216,18 @@ describe("a shift finding", () => {
 
     fireEvent.click(button("Run triage"));
     await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+  });
+
+  // Bug: the window named its days only, so a drift that ran from morning to afternoon read as a whole day
+  // and did not match the case header's clock.
+  it("names the window to the minute, as the case header does", async () => {
+    api.getBehaviorFinding.mockResolvedValue(plain({ detector: "cost_drift" }, { metric: SHIFT }));
+    renderPage();
+    await screen.findByRole("heading", { level: 1 });
+
+    expect(screen.getByTitle("groundedness_rate:support-agent").textContent).toBe(
+      `cost|checkout · ${stamp("2026-09-16T00:00:00Z")} → ${stamp("2026-09-23T00:00:00Z")} vs its recent normal`,
+    );
   });
 
   it("shows the ruling in place of the button once triaged, and drops a bucket that is the call site", async () => {

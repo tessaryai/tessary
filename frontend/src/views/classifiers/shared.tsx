@@ -224,6 +224,15 @@ export function detectorLabel(key: string): string {
     .join(" ");
 }
 
+/** `2026-08-24T18:00:00Z` → `24 Aug 18:00`. A window is a story's spine, so it reads as a clock. */
+export function stamp(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${d.toLocaleTimeString(
+    undefined,
+    { hour: "2-digit", minute: "2-digit", hour12: false },
+  )}`;
+}
+
 /** Coarse age: an exact second never changes what you do next. */
 export function ago(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
