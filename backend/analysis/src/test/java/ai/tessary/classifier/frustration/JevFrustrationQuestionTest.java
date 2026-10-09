@@ -2,8 +2,11 @@
 package ai.tessary.classifier.frustration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+import ai.tessary.open.hash.Sha256;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -25,6 +28,18 @@ class JevFrustrationQuestionTest {
     @Test
     void theQuestionIsSentExactlyAsDecided() throws Exception {
         assertEquals(WIRE, new ObjectMapper().writeValueAsString(JevFrustrationQuestion.questions()));
+    }
+
+    /**
+     * Rows scored when a thread id was the conversation key saw prior turns from other sessions and stopped a
+     * user's later sessions after one flag. Under the old version the session-keyed rate would read them as its own
+     * baseline.
+     */
+    @Test
+    void theSessionKeyIsANewScorerVersion() {
+        String threadKeyed = "jev-choice3-" + HexFormat.of().formatHex(Sha256.digest(WIRE + "|0.4000"), 0, 6);
+
+        assertNotEquals(threadKeyed, JevFrustrationQuestion.scorerVersion(0.40));
     }
 
     @Test

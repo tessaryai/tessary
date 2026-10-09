@@ -37,6 +37,12 @@ public final class JevFrustrationQuestion {
     // research grade set, where it kept 59% recall at 74% precision. Per-project config overrides it.
     public static final double DEFAULT_THRESHOLD = 0.40;
 
+    /**
+     * What a conversation is keyed on. Rows scored when a thread id was the key read prior turns from other
+     * sessions and stopped a user's later sessions after one flag, so the session key starts new rows.
+     */
+    private static final String CONVERSATION_KEY = "conversation=session_id";
+
     static final String INSTRUCTION = """
             Judge only current_user_message; earlier_messages are the turns before it, oldest first. \
             Unhappy means frustration, disappointment or hostility caused by the assistant, visible in the \
@@ -78,13 +84,14 @@ public final class JevFrustrationQuestion {
     }
 
     /**
-     * What produced an assessment: a hash of the question as sent (its name, instruction and criteria)
-     * and the threshold, since a flag under one threshold and under another are different events. The
-     * model version is deliberately not in it, so a provider moving {@code jev-latest} does not restart
-     * every call site.
+     * What produced an assessment: a hash of the question as sent (its name, instruction and criteria),
+     * the threshold, and the conversation key, since a flag under one of them and under another are
+     * different events. The model version is deliberately not in it, so a provider moving {@code
+     * jev-latest} does not restart every call site.
      */
     public static String scorerVersion(double threshold) {
-        String material = questionsJson() + "|" + String.format(Locale.ROOT, "%.4f", threshold);
+        String material =
+                questionsJson() + "|" + String.format(Locale.ROOT, "%.4f", threshold) + "|" + CONVERSATION_KEY;
         return "jev-choice3-" + HexFormat.of().formatHex(Sha256.digest(material), 0, 6);
     }
 

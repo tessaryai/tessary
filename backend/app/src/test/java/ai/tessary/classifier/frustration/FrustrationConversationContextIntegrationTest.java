@@ -80,6 +80,30 @@ class FrustrationConversationContextIntegrationTest {
         assertTrue(!ctx.priorTraceIds().contains(later.traceId()), "a later turn is never context");
     }
 
+    /**
+     * The turns shown beside a flag are the session's. Keyed on a thread id a producer reuses for every session of one
+     * user, they came from a session days before.
+     */
+    @Test
+    void aTurnOfTheSameThreadInAnEarlierSessionIsNotContext() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "fr-context-thread").project().id();
+        Instant thursday = Instant.now();
+        String userThread = "whatsapp_u1";
+        String monday = SubstrateV2Fixtures.sessionId();
+        String session = SubstrateV2Fixtures.sessionId();
+
+        turn(pid, monday, userThread, thursday.minusSeconds(3 * 86_400));
+        SpanRef first = turn(pid, session, userThread, thursday);
+        SpanRef flagged = turn(pid, session, userThread, thursday.plusMillis(1_000));
+
+        ConversationContext ctx =
+                Objects.requireNonNull(rates.conversationContext(pid, CHAT, List.of(flagged.traceId()), 2)
+                        .get(flagged.traceId()));
+
+        assertEquals(List.of(first.traceId()), ctx.priorTraceIds());
+    }
+
     @Test
     void aConversationsFirstTurnHasNoPriorTurns() {
         String pid =
@@ -118,6 +142,20 @@ class FrustrationConversationContextIntegrationTest {
 
     private SpanRef turn(String pid, String session, Instant at) {
         return turn(pid, session, at, CHAT);
+    }
+
+    /** A turn on {@link #CHAT} carrying {@code thread} as its {@code thread_id}. */
+    private SpanRef turn(String pid, String session, String thread, Instant at) {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, traceId, session, thread, null, at);
+        return fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(session)
+                .threadId(thread)
+                .callSiteId(CHAT)
+                .at(at)
+                .payload("[{\"role\":\"user\",\"content\":\"q\"}]", null)
+                .writeRef();
     }
 
     /** A turn whose one {@code llm} span is on {@code callSite}. */

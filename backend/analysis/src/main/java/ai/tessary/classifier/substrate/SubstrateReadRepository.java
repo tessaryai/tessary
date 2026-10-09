@@ -350,7 +350,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
      * retrieves once and answers several follow-ups from that context without re-retrieving;
      * scoring a follow-up against its own bare trace produced near-universal false fires (measured
      * 88% on stale-context follow-ups against an 8.6% same-trace baseline). Grouping key is
-     * {@code COALESCE(trace.thread_id, trace.session_id)}, the same key {@link #priorTurns} uses.
+     * {@code trace.session_id}, the same key {@link #priorTurns} uses.
      *
      * <p>Nearest-prior-retrieval, not a conversation-wide blend: a conversation's topic can shift
      * turn to turn, so ranking every candidate across the whole conversation risks stitching a
@@ -394,7 +394,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         java.util.Set<String> reachedOutside = new java.util.HashSet<>();
         // Conversation scope, not trace scope: a follow-up that reuses an earlier turn's retrieval
         // without re-retrieving is a BLIND-vs-GROUNDLESS question about the whole conversation.
-        // Grouping key mirrors priorTurns' COALESCE(thread_id, session_id) exactly. Deliberately not
+        // Grouping key mirrors priorTurns' session_id exactly. Deliberately not
         // time-bounded here: a call site that reaches outside anywhere in the conversation, even later,
         // still reads BLIND rather than GROUNDLESS. Only the evidence text below is time-bounded, so
         // this never lets a future document become a premise.
@@ -408,8 +408,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                                JOIN trace xtr ON xtr.project_id = x.project_id AND xtr.id = x.trace_id
                                WHERE x.project_id = s.project_id AND x.is_deleted IS NOT TRUE
                                  AND (
-                                   COALESCE(xtr.thread_id, xtr.session_id) = COALESCE(tr.thread_id, tr.session_id)
-                                   OR (x.trace_id = s.trace_id AND COALESCE(tr.thread_id, tr.session_id) IS NULL)
+                                   xtr.session_id = tr.session_id
+                                   OR (x.trace_id = s.trace_id AND tr.session_id IS NULL)
                                  )
                                  -- the tool-like kinds that count as external work; omitting one
                                  -- makes its traces read GROUNDLESS instead of BLIND
@@ -437,8 +437,8 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                         JOIN trace r2tr ON r2tr.project_id = r2.project_id AND r2tr.id = r2.trace_id
                        WHERE rd2.project_id = s.project_id AND rd2.is_deleted IS NOT TRUE
                          AND (
-                           COALESCE(r2tr.thread_id, r2tr.session_id) = COALESCE(tr.thread_id, tr.session_id)
-                           OR (r2.trace_id = s.trace_id AND COALESCE(tr.thread_id, tr.session_id) IS NULL)
+                           r2tr.session_id = tr.session_id
+                           OR (r2.trace_id = s.trace_id AND tr.session_id IS NULL)
                          )
                          AND r2.started_at <= s.started_at
                        ORDER BY r2.started_at DESC
@@ -576,10 +576,11 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
 
     /**
      * {@link PriorTurns} of {@code callSiteId} for the scored trace. A turn is a top-level trace ({@code
-     * parent_trace_id IS NULL}) of the scored trace's conversation, {@code COALESCE(thread_id, session_id)},
-     * that started before it in event time, {@code (started_at, id)}, and has an {@code llm} or {@code agent}
-     * span of the call site: the definition the frustration finding page reads its earlier turns by, walked
-     * on {@code ix_trace_conversation}. A turn that never reached the call site is not one of its turns, so a
+     * parent_trace_id IS NULL}) of the scored trace's conversation, its session, that started before it in
+     * event time, {@code (started_at, id)}, and has an {@code llm} or {@code agent} span of the call site: the
+     * definition the frustration finding page reads its earlier turns by, walked on {@code ix_trace_session}.
+     * {@code thread_id} is only a column: a producer that reuses one thread id across sessions still has one
+     * conversation per session. A turn that never reached the call site is not one of its turns, so a
      * router or memory call beside the reply adds nothing. A sub-agent trace is not a turn. A trace in no
      * conversation has no earlier turns: equality on a null key matches nothing.
      */
@@ -589,7 +590,7 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
                   JOIN trace t
                     ON t.project_id = f.project_id
                    AND t.parent_trace_id IS NULL
-                   AND COALESCE(t.thread_id, t.session_id) = COALESCE(f.thread_id, f.session_id)
+                   AND t.session_id = f.session_id
                    AND (t.started_at, t.id) < (f.started_at, f.id)
                 WHERE f.project_id = :pid AND f.id = :scoredTraceId
                   AND EXISTS (SELECT 1 FROM span c

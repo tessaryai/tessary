@@ -18,7 +18,7 @@ The groundedness classifier checks each answer your agent gives against the docu
   - **AWS (production):** Tessary running on AWS, the AWS CLI signed in to the same account, a subnet in Tessary's VPC that reaches the internet, and a quota of at least 4 vCPUs for G instances in Tessary's region.
 - Spans tagged with a call site whose shape is `rag_answer`, `summarize`, or `extract`. A shape comes from the `.tessary/` bundle you import, not from your traces. See [Call-site shapes](/concepts/call-sites#call-site-shapes).
 - Retrieved documents on your spans as `retrieval.documents.<N>.document.content`. See [Retrieval](/instrument/span-requirements#retrieval).
-- Traces that carry a thread ID or a session ID, if your agent answers follow-up questions from documents it retrieved on an earlier turn.
+- Traces that carry a session ID, if your agent answers follow-up questions from documents it retrieved on an earlier turn.
 
 ## Turn it on
 
@@ -83,7 +83,7 @@ An answer is scored only when all of these are true:
 
 An answer is checked against the first of these that applies:
 
-1. **Retrieved documents.** The `document.content` of documents retrieved in the answer's own trace, or in the nearest earlier trace in the same session that retrieved anything. Only documents retrieved before the answer count, and documents a reranker discarded don't. A session here is the traces that share a thread ID, or a session ID when there is no thread.
+1. **Retrieved documents.** The `document.content` of documents retrieved in the answer's own trace, or in the nearest earlier trace in the same session that retrieved anything. Only documents retrieved before the answer count, and documents a reranker discarded don't. A session here is the traces that share a session ID. A thread ID never joins two sessions.
 2. **Nothing, on a `rag_answer` call site that reached outside.** With no retrieved documents to read, an answer on a `rag_answer` call site is not scored when its session called a tool, an MCP server, a retriever, a reranker, or an embedding model. Its source is somewhere Tessary can't read.
 3. **The prompt.** Any other answer with no retrieved documents is checked against its system and user text. This is the usual case on a `summarize` or `extract` call site, where the prompt holds the document.
 

@@ -147,7 +147,7 @@ class FrustrationAssessmentIntegrationTest {
         assertEquals(pid, row.projectId());
         assertEquals(signal.id(), row.classifierId());
         assertEquals("span-tr-flagged", row.spanId());
-        assertEquals("thread-1", row.conversationId(), "the thread wins over the session");
+        assertEquals("sess-1", row.conversationId(), "the session is the conversation; the thread is only a column");
         assertEquals("cs-1", row.callSiteId());
         assertEquals(started, row.turnStartedAt());
         assertTrue(row.frustrated());
@@ -167,7 +167,7 @@ class FrustrationAssessmentIntegrationTest {
 
         Assessment calmRow = find(pid, signal.id(), "tr-calm", version);
         assertFalse(calmRow.frustrated());
-        assertEquals("sess-2", calmRow.conversationId(), "no thread, so the session");
+        assertEquals("sess-2", calmRow.conversationId());
 
         Map<String, Object> detection = jdbc.sql("SELECT subject_session_id, subject_trace_id, severity, confidence,"
                         + " cleared_at, evidence::text AS evidence FROM " + "frustration_detection"
@@ -175,7 +175,7 @@ class FrustrationAssessmentIntegrationTest {
                 .param("pid", pid)
                 .query()
                 .singleRow();
-        assertEquals("thread-1", detection.get("subject_session_id"));
+        assertEquals("sess-1", detection.get("subject_session_id"));
         assertEquals("tr-flagged", detection.get("subject_trace_id"));
         assertEquals("warn", detection.get("severity"));
         assertEquals("high", detection.get("confidence"));
@@ -237,6 +237,37 @@ class FrustrationAssessmentIntegrationTest {
                 detections.unclearedFlaggedSessions(
                         BuiltInDetector.Kind.FRUSTRATION, pid, signal.id(), List.of(new CallSiteTurn("tr-a2", "cs-1"))),
                 "a cleared flag makes the session scorable again");
+    }
+
+    /**
+     * A producer that sends one thread id per user for all time, {@code whatsapp_<user>}, keeps each session apart.
+     * Keyed on the thread, the first flag stopped every later session of that user for good.
+     */
+    @Test
+    void aFlagInOneSessionDoesNotStopTheSameThreadInALaterSession() {
+        String pid = project("fr-thread-two-sessions");
+        ClassifierRow signal = frustration(pid);
+        Instant monday = Instant.now().minus(3, ChronoUnit.DAYS);
+        Instant thursday = Instant.now().minus(1, ChronoUnit.HOURS);
+        SubstrateObservation flagged = turn(pid, "tr-mon-1", "sess-mon", "whatsapp_u1", monday);
+        turn(pid, "tr-mon-2", "sess-mon", "whatsapp_u1", monday.plusSeconds(60));
+        SubstrateObservation later = turn(pid, "tr-thu-1", "sess-thu", "whatsapp_u1", thursday);
+        JevFrustrationDetector detector = detector(Map.of("tr-mon-1", 0.9, "tr-thu-1", 0.1));
+        detector.complete(signal, detector.score(signal, List.of(flagged)), PageAction.PERSIST, 1);
+
+        assertEquals(
+                Set.of(new CallSiteTurn("tr-mon-2", "cs-1")),
+                detections.unclearedFlaggedSessions(
+                        BuiltInDetector.Kind.FRUSTRATION,
+                        pid,
+                        signal.id(),
+                        List.of(new CallSiteTurn("tr-mon-2", "cs-1"), new CallSiteTurn("tr-thu-1", "cs-1"))),
+                "the flag stops Monday's session only");
+
+        detector.complete(signal, detector.score(signal, List.of(later)), PageAction.PERSIST, 1);
+        String version = JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
+        assertEquals("sess-mon", find(pid, signal.id(), "tr-mon-1", version).conversationId());
+        assertEquals("sess-thu", find(pid, signal.id(), "tr-thu-1", version).conversationId());
     }
 
     /**
@@ -333,7 +364,7 @@ class FrustrationAssessmentIntegrationTest {
                 .orElseThrow();
     }
 
-    /** A turn on cs-1 in conversation {@code thread} (else {@code session}), with an eligible thread stubbed. */
+    /** A turn on cs-1 in {@code session}, carrying {@code thread} as a column, with an eligible thread stubbed. */
     private SubstrateObservation turn(
             String pid, String traceId, String session, @Nullable String thread, Instant startedAt) {
         fx.trace(pid, traceId, session, thread, null, startedAt);

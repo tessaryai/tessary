@@ -76,6 +76,9 @@ class MetricSourceTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    MetricSourceRepository sourceRows;
+
     private SubstrateV2Fixtures fx;
 
     @BeforeEach
@@ -325,6 +328,29 @@ class MetricSourceTest {
                 assertInstanceOf(Measurement.Absent.class, turn.cacheReadRatio())
                         .reason());
         assertNull(turn.tokenReadings().cacheReadPct(), "no share is folded into the tokens sketch");
+    }
+
+    /**
+     * Thread depth is the turns before this one in its session. Keyed on a thread id a producer reuses for every
+     * session of one user, it counted that user's earlier sessions as depth.
+     */
+    @Test
+    void threadDepthCountsTheSessionsTurnsNotAThreadsAcrossSessions() {
+        String pid = project("metric-thread-depth");
+        String userThread = "whatsapp_u1";
+        String thursday = SubstrateV2Fixtures.sessionId();
+        fx.trace(
+                pid,
+                SubstrateV2Fixtures.traceId(),
+                SubstrateV2Fixtures.sessionId(),
+                userThread,
+                null,
+                T0.minus(3, ChronoUnit.DAYS));
+        fx.trace(pid, SubstrateV2Fixtures.traceId(), thursday, userThread, null, T0);
+        String second = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, second, thursday, userThread, null, T0.plusSeconds(60));
+
+        assertEquals(1L, sourceRows.turnFacts(pid, List.of(second)).get(0).priorTurns());
     }
 
     @Test

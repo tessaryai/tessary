@@ -83,10 +83,7 @@ class GroundingEvidenceIntegrationTest {
                 .writeRef();
     }
 
-    /**
-     * A span on a trace sharing {@code sessionId}: the {@code COALESCE(thread_id, session_id)} conversation grain,
-     * one trace per turn.
-     */
+    /** A span on a trace sharing {@code sessionId}: the session is the conversation, one trace per turn. */
     private SpanRef spanInSession(
             String pid, String traceId, String sessionId, String kind, @Nullable String output, Instant startedAt) {
         return fx.spanSeed(pid)
@@ -290,6 +287,56 @@ class GroundingEvidenceIntegrationTest {
         assertTrue(
                 got == null || (String.join("\n", got.documents()).isEmpty() && !got.conversationDidExternalWork()),
                 "conversation B must not see conversation A's retrieval");
+    }
+
+    /**
+     * A producer that reuses one thread id for every session of a user: keyed on the thread, an answer was judged
+     * against documents a session days before retrieved.
+     */
+    @Test
+    void anEarlierSessionOfTheSameThreadDoesNotLeakEvidence() {
+        String pid = TenantFixture.bootstrap(tenants, "grounding-thread-two-sessions")
+                .project()
+                .id();
+        Instant thursday = Instant.now();
+        Instant monday = thursday.minusSeconds(3 * 86_400);
+        String userThread = "whatsapp_u1";
+
+        String mondayTrace = trace();
+        String mondaySession = session();
+        SpanRef retrieval = threadedSpan(pid, mondayTrace, mondaySession, userThread, "retrieval", null, monday);
+        doc(pid, retrieval, 0, "result", "Refunds are issued within 5-7 business days.", monday);
+        threadedSpan(pid, mondayTrace, mondaySession, userThread, "llm", "Refunds take 5-7 business days.", monday);
+        SpanRef answer =
+                threadedSpan(pid, trace(), session(), userThread, "llm", "Refunds take 5-7 business days.", thursday);
+
+        GroundingEvidenceReads.Evidence got = substrate
+                .groundingEvidence(pid, Set.of(new GroundingEvidenceReads.SpanRef(answer.traceId(), answer.spanId())))
+                .get(answer.spanId());
+
+        assertTrue(
+                got == null || (String.join("\n", got.documents()).isEmpty() && !got.conversationDidExternalWork()),
+                "Thursday's session must not see Monday's retrieval");
+    }
+
+    private SpanRef threadedSpan(
+            String pid,
+            String traceId,
+            String sessionId,
+            String threadId,
+            String kind,
+            @Nullable String output,
+            Instant startedAt) {
+        return fx.spanSeed(pid)
+                .traceId(traceId)
+                .sessionId(sessionId)
+                .threadId(threadId)
+                .kind(kind)
+                .name("chat")
+                .model("gpt-x")
+                .at(startedAt)
+                .payload(ClassifierObservations.userInput("how long do refunds take?"), output)
+                .writeRef();
     }
 
     @Test

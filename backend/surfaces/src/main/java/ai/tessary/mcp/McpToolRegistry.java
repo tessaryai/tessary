@@ -598,13 +598,13 @@ public class McpToolRegistry {
                 "Fetch one conversation by id, scoped to this token's project: its turns (top-level traces)"
                         + " oldest-first as the same rows list_traces returns, capped at "
                         + SessionReadService.SESSION_TRACE_CAP + " with traces_truncated saying so. A"
-                        + " conversation is a trace's thread_id, else its session_id: the key a frustration"
-                        + " finding's session refs carry. Use get_session for a whole session with its totals.",
+                        + " conversation is a session: the key a frustration finding's session refs carry. Use"
+                        + " get_session for the session's sub-agent traces and totals.",
                 schema(
                         Map.of(
                                 "id",
-                                strField("Conversation id, e.g. a frustration evidence row's sessionId, a trace's"
-                                        + " thread_id, or the session_id of an unthreaded trace.")),
+                                strField("Session id, e.g. a frustration evidence row's sessionId or a trace's"
+                                        + " session_id.")),
                         List.of("id")),
                 (ctx, args) -> getConversation(ctx, requireStr(args, "id"))));
     }

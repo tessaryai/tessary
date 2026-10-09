@@ -15,6 +15,7 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,8 +26,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * {@link ConversationThreadAssembler} walks the whole conversation against real Postgres: user and assistant messages
- * oldest first, the scored message as the current turn, system messages excluded. The conversation is {@code
- * COALESCE(trace.thread_id, trace.session_id)}, one trace per turn.
+ * oldest first, the scored message as the current turn, system messages excluded. The conversation is the session,
+ * one trace per turn; {@code trace.thread_id} is only a column.
  */
 @SpringBootTest
 class ConversationThreadAssemblerIntegrationTest {
@@ -101,15 +102,15 @@ class ConversationThreadAssemblerIntegrationTest {
                 TenantFixture.bootstrap(tenants, "thread-conv-grain").project().id();
         Instant base = Instant.now();
 
-        // One session, two thread_ids: the thread is scoped to c1, and sibling c2 must not bleed in.
+        // Another session carrying the same thread id must not bleed in.
         String sessionId = SubstrateV2Fixtures.sessionId();
+        String sibling = SubstrateV2Fixtures.sessionId();
         String c1 = "conv-1";
-        String c2 = "conv-2";
 
         seedTwinTurn(
                 pid,
-                sessionId,
-                c2,
+                sibling,
+                c1,
                 base.plusMillis(500),
                 user("OTHER CONVERSATION please ignore"),
                 assistant("ok"),
@@ -129,9 +130,56 @@ class ConversationThreadAssemblerIntegrationTest {
         assertEquals(
                 List.of("deploy the app", "On it.", "still failing", "Retrying."),
                 texts(thread),
-                "the sibling conversation never bleeds in, the agent/llm twins give one message each, and the"
+                "the sibling session never bleeds in, the agent/llm twins give one message each, and the"
                         + " tool span leaves no text");
         assertEquals("nevermind", thread.current().text());
+    }
+
+    /**
+     * A producer that sends one thread id per user for all time, {@code whatsapp_<user>}: each session is its own
+     * conversation, and two threads inside one session are one conversation. Keyed on the thread, the scored turn's
+     * earlier messages came from a session days before.
+     */
+    @Test
+    void aThreadThatSpansTwoSessionsIsTwoConversations() {
+        String pid = TenantFixture.bootstrap(tenants, "thread-two-sessions")
+                .project()
+                .id();
+        Instant monday = Instant.now().minus(Duration.ofDays(3));
+        Instant thursday = Instant.now();
+        String userThread = "whatsapp_u1";
+        String mondaySession = SubstrateV2Fixtures.sessionId();
+        String thursdaySession = SubstrateV2Fixtures.sessionId();
+
+        seedTwinTurn(pid, mondaySession, userThread, monday, user("book a table"), assistant("Booked."), null);
+        seedTwinTurn(
+                pid, mondaySession, userThread, monday.plusMillis(1_000), user("for four"), assistant("Done."), null);
+        seedTwinTurn(
+                pid, thursdaySession, userThread, thursday, user("where is my order"), assistant("Checking."), null);
+        seedTwinTurn(
+                pid,
+                thursdaySession,
+                "side-thread",
+                thursday.plusMillis(1_000),
+                user("still nothing"),
+                assistant("Still checking."),
+                null);
+        SpanRef scoredRef =
+                seedTwinTurn(pid, thursdaySession, userThread, thursday.plusMillis(2_000), user("useless"), null, null);
+
+        FrustrationTurnBuilder.EligibleTurn turn = new FrustrationTurnBuilder(assembler)
+                .buildTurn(scored(pid, scoredRef))
+                .orElseThrow();
+
+        assertEquals(
+                List.of(
+                        new FrustrationTurnBuilder.EarlierMessage("user", "where is my order"),
+                        new FrustrationTurnBuilder.EarlierMessage("assistant", "Checking."),
+                        new FrustrationTurnBuilder.EarlierMessage("user", "still nothing"),
+                        new FrustrationTurnBuilder.EarlierMessage("assistant", "Still checking.")),
+                turn.state().earlierMessages(),
+                "Thursday's turns only, across both of its thread ids");
+        assertEquals(3, turn.userTurn(), "Monday's turns are another conversation");
     }
 
     /** One turn: one trace with a root llm span. Returns the span. */

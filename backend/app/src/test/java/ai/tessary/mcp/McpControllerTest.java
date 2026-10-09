@@ -130,43 +130,51 @@ class McpControllerTest {
     }
 
     /**
-     * The frustration classifier keys a conversation on {@code COALESCE(thread_id, session_id)} over top-level
-     * traces, and RCA hands the agent those keys. A read keyed on {@code session_id} alone finds nothing for a
-     * thread key, and for a bare session key it also returns the session's threaded traces and sub-agent traces.
+     * The frustration classifier keys a conversation on the session, and RCA hands the agent those session ids. A
+     * thread id is only a column: keyed on it, one user's thread spanning two sessions read as one conversation and
+     * a session read dropped its threaded turns.
      */
     @Test
-    void toolsCallGetConversationReadsTheFrustrationConversationKey() throws Exception {
+    void toolsCallGetConversationReadsOneSessionsTurnsWhateverTheirThread() throws Exception {
         var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
         String pid = project.id();
         Instant t0 = Instant.parse("2026-09-01T10:00:00Z");
-        String sessionId = SubstrateV2Fixtures.sessionId();
-        String threadA = "thread-a-" + SubstrateV2Fixtures.traceId();
-        String threadB = "thread-b-" + SubstrateV2Fixtures.traceId();
+        String monday = SubstrateV2Fixtures.sessionId();
+        String thursday = SubstrateV2Fixtures.sessionId();
+        String userThread = "whatsapp-" + SubstrateV2Fixtures.traceId();
         String a1 = SubstrateV2Fixtures.traceId();
         String b1 = SubstrateV2Fixtures.traceId();
         String a2 = SubstrateV2Fixtures.traceId();
         String bare = SubstrateV2Fixtures.traceId();
         String subAgent = SubstrateV2Fixtures.traceId();
-        fx.trace(pid, a1, sessionId, threadA, null, t0);
-        fx.trace(pid, b1, sessionId, threadB, null, t0.plusSeconds(1));
-        fx.trace(pid, a2, sessionId, threadA, null, t0.plusSeconds(2));
-        fx.trace(pid, bare, sessionId, null, null, t0.plusSeconds(3));
-        fx.trace(pid, subAgent, sessionId, null, null, t0.plusSeconds(4));
+        String later = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, a1, monday, userThread, null, t0);
+        fx.trace(pid, b1, monday, "side-" + userThread, null, t0.plusSeconds(1));
+        fx.trace(pid, a2, monday, userThread, null, t0.plusSeconds(2));
+        fx.trace(pid, bare, monday, null, null, t0.plusSeconds(3));
+        fx.trace(pid, subAgent, monday, null, null, t0.plusSeconds(4));
+        fx.trace(pid, later, thursday, userThread, null, t0.plusSeconds(3 * 86_400));
         jdbc.sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
                 .param("parent", bare)
                 .param("pid", pid)
                 .param("child", subAgent)
                 .update();
 
-        JsonNode thread = getConversation(threadA);
-        assertEquals(threadA, thread.get("id").asText());
-        assertEquals(List.of(a1, a2), traceIds(thread), "a thread key reads that thread's turns, oldest first");
-        assertEquals(false, thread.get("traces_truncated").asBoolean());
-
+        JsonNode first = getConversation(monday);
+        assertEquals(monday, first.get("id").asText());
         assertEquals(
-                List.of(bare),
-                traceIds(getConversation(sessionId)),
-                "a session key reads only the session's unthreaded turns, never a sub-agent trace");
+                List.of(a1, b1, a2, bare),
+                traceIds(first),
+                "every top-level turn of the session, oldest first, never a sub-agent trace or another session's");
+        assertEquals(false, first.get("traces_truncated").asBoolean());
+
+        assertEquals(List.of(later), traceIds(getConversation(thursday)), "the same thread in a later session");
+
+        JsonNode byThread = call(String.format(Locale.ROOT, """
+            {"jsonrpc":"2.0","id":28,"method":"tools/call",
+             "params":{"name":"get_conversation","arguments":{"id":"%s"}}}
+            """, userThread)).get("result");
+        assertEquals(true, byThread.get("isError").asBoolean(), "a thread id names no conversation");
     }
 
     @Test

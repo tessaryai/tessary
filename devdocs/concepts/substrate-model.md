@@ -44,7 +44,8 @@ Three levels, fixed. No polymorphic grouping table, no parent pointer above the 
 | `span` | One step — an LLM call, a tool call, a sub-agent | Tens of millions | "What work happened, in what order, nested how deep?" |
 
 **Sessions never nest.** A session id is a flat string. Sub-grouping within a session (a
-provider's conversation or thread id) is a column on `trace`, not a second tree level.
+provider's conversation or thread id) is a column on `trace`, not a second tree level. Nothing groups
+by it: a conversation is a session.
 
 **Spans nest arbitrarily, within a trace only.** A span's parent is always another span of the
 same trace. Nesting never crosses a trace boundary.

@@ -62,13 +62,16 @@ replaced by a `[PASTE: n lines, k chars]` marker, and long messages cut to their
 
 A turn is flagged when `P(unhappy_with_assistant)` exceeds `threshold` (0.40, a starting value).
 `unhappy_other_cause`, frustration about something outside the chat, never flags. The question text,
-its shape and the threshold hash into `scorer_version`, so changing any of them starts a new set of
-assessment rows rather than mixing scales.
+its shape, the threshold and the conversation key hash into `scorer_version`, so changing any of them
+starts a new set of assessment rows rather than mixing scales.
 
 ## One flag per session
 
-A session is a conversation on one call site. The conversation is keyed `COALESCE(thread_id,
-session_id)`; the call site is the scored span's, written into the detection's `evidence.call_site_id`
+A session is a conversation on one call site. The conversation is the trace's `session_id`.
+`thread_id` is only a column and never groups turns: a producer that sends one thread id per user for
+all time still has one conversation per session, and one that wants a whole user's history read as one
+conversation sends that id as the session id. A trace with no session is in no conversation and is not
+scored. The call site is the scored span's, written into the detection's `evidence.call_site_id`
 and the assessment's `call_site_id`. A session's first flagged turn writes a `frustration_detection`
 row, and while that row stands uncleared the sweep sends none of the session's later turns. A flag on
 one call site does not stop another call site in the same conversation. Every sent turn, flagged

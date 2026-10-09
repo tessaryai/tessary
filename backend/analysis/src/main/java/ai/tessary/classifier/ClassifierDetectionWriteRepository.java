@@ -201,8 +201,8 @@ public class ClassifierDetectionWriteRepository {
 
     /**
      * Of {@code turns}, the ones whose session this classifier has a detection for that nobody has cleared. A
-     * session is a conversation on one call site: the conversation is {@code COALESCE(trace.thread_id,
-     * trace.session_id)}, the key such a classifier writes into {@code subject_session_id}, and the call site is
+     * session is a conversation on one call site: the conversation is {@code trace.session_id}, the key such a
+     * classifier writes into {@code subject_session_id}, and the call site is
      * the one it writes into {@code evidence.call_site_id}. A trace in no conversation is never returned. Reads
      * the detection table's partial index on uncleared rows.
      */
@@ -214,7 +214,7 @@ public class ClassifierDetectionWriteRepository {
                         "SELECT DISTINCT t.id, COALESCE(d.evidence ->> 'call_site_id', '')"
                                 + " FROM trace t JOIN " + table + " d"
                                 + "   ON d.project_id = t.project_id AND d.classifier_id = :sid"
-                                + "  AND d.subject_session_id = COALESCE(t.thread_id, t.session_id)"
+                                + "  AND d.subject_session_id = t.session_id"
                                 + "  AND d.cleared_at IS NULL"
                                 + " WHERE t.project_id = :pid AND t.id IN (:traces)")
                 .param("pid", projectId)
