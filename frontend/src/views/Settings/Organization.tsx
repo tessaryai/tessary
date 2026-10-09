@@ -13,6 +13,7 @@ import {
   EmptyState,
   Field,
   Input,
+  Modal,
   PageBody,
   PageHeader,
   Section,
@@ -53,6 +54,9 @@ export function Organization() {
   const canManage = me?.role === "owner";
 
   const [name, setName] = useState("");
+  // Asked in the page, not with window.confirm(): a native dialog blocks the tab, and an automated
+  // browser dismisses it unseen, so the delete never runs (#84).
+  const [toDelete, setToDelete] = useState<string | null>(null);
   useEffect(() => {
     if (org.data) setName(org.data.name);
   }, [org.data]);
@@ -198,16 +202,7 @@ export function Organization() {
                       <Button
                         size="sm"
                         variant="danger"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              `Delete project "${p.slug}"? This permanently deletes the project and its data. ` +
-                                `Its API keys stop working immediately.`,
-                            )
-                          ) {
-                            deleteProject.mutate(p.slug);
-                          }
-                        }}
+                        onClick={() => setToDelete(p.slug)}
                         disabled={deleteProject.isPending}
                       >
                         Delete project
@@ -220,6 +215,33 @@ export function Organization() {
           </Table>
         )}
       </Section>
+
+      <Modal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        size="sm"
+        title={toDelete && `Delete project "${toDelete}"?`}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setToDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                deleteProject.mutate(toDelete!);
+                setToDelete(null);
+              }}
+            >
+              Delete project
+            </Button>
+          </>
+        }
+      >
+        <p className="text-small text-muted">
+          This permanently deletes the project and its data. Its API keys stop working immediately.
+        </p>
+      </Modal>
 
       <Section title="Organization ID" subtitle="Use this ID when contacting support or calling the API.">
         <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3.5 py-3 max-w-md">

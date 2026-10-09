@@ -3,7 +3,8 @@
  * Settings → Organization. The controls mirror the server's owner-only rule, and the default project
  * can never be archived or deleted. The bugs worth catching: a non-owner offered a control that will
  * only be refused, a lifecycle action on the default or a deleting project, an action sent for the
- * wrong project, a delete without its confirmation, and a deleting row that never goes away.
+ * wrong project, a delete without its confirmation or one that asks through the browser's blocking
+ * confirm() (#84), and a deleting row that never goes away.
  */
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,11 +66,11 @@ const PROJECTS = [
   project("gone", { deleting_at: "2026-09-01T00:00:00Z" }),
 ];
 
-let confirmReply = true;
+const nativeConfirm = vi.fn(() => true);
 beforeEach(() => {
   session.role = "owner";
-  confirmReply = true;
-  vi.spyOn(window, "confirm").mockImplementation(() => confirmReply);
+  nativeConfirm.mockClear();
+  vi.spyOn(window, "confirm").mockImplementation(nativeConfirm);
   auth.getOrg.mockResolvedValue(ORG);
   auth.listProjects.mockResolvedValue(PROJECTS.filter((p) => !p.deleting_at));
   auth.listMembers.mockImplementation(async () => [member("u-other", "owner"), member("u-me", session.role)]);
@@ -156,6 +157,7 @@ describe("project lifecycle", () => {
     await waitFor(() => expect(buttonsIn("support")).toContain("Archive"));
   };
   const click = (slug: string, name: string) => fireEvent.click(within(row(slug)).getByRole("button", { name }));
+  const dialog = () => screen.getByRole("dialog");
 
   it("makes, archives, and unarchives the project whose row was used", async () => {
     await ready();
@@ -173,17 +175,21 @@ describe("project lifecycle", () => {
     expect(auth.archiveProject).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes only after confirmation, and says the data goes in the background", async () => {
+  it("asks in the page rather than through the browser's blocking confirm, and deletes only on Delete project", async () => {
     await ready();
 
-    confirmReply = false;
     click("old", "Delete project");
+    expect(within(dialog()).getByRole("heading", { name: 'Delete project "old"?' })).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(auth.deleteProject).not.toHaveBeenCalled();
 
-    confirmReply = true;
     click("old", "Delete project");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Delete project" }));
     expect(await screen.findByText("Project deletion started")).toBeTruthy();
     expect(auth.deleteProject).toHaveBeenCalledWith("acme", "old");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(nativeConfirm).not.toHaveBeenCalled();
   });
 
   it("names each refused action", async () => {
@@ -200,6 +206,7 @@ describe("project lifecycle", () => {
     click("old", "Unarchive");
     expect(await screen.findByText("Could not unarchive project")).toBeTruthy();
     click("old", "Delete project");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Delete project" }));
     expect(await screen.findByText("Could not delete project")).toBeTruthy();
   });
 
