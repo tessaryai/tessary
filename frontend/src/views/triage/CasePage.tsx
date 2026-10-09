@@ -142,11 +142,13 @@ export function CasePage() {
       void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
     },
   });
-  // The press sends the case id and nothing else: the server resolves the finding behind it, and
-  // that id is all that reaches the analysis lane. A case with no finding cannot be analysed, which
-  // is what `rca_available` already says.
+  // The first press sends the case id and nothing else: the server locks the case, resolves the finding
+  // behind it, and that id is all that reaches the analysis lane. A case with no finding cannot be analysed,
+  // which is what `rca_available` already says. Once a report exists the case trigger would coalesce onto it,
+  // so "Re-run RCA" re-runs that report instead, which starts a fresh analysis of the same finding.
   const rcaM = useMutation({
-    mutationFn: () => api.runCaseRca(caseId ?? ""),
+    mutationFn: () =>
+      detail?.rca_report_id != null ? api.rerunRca(detail.rca_report_id) : api.runCaseRca(caseId ?? ""),
     onSuccess: invalidate,
   });
   // A report EXISTS from the moment the run is queued, so "is there a report" is the wrong question

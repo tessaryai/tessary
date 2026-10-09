@@ -63,6 +63,7 @@ const api = vi.hoisted(() => ({
   unmuteCase: vi.fn(),
   absorbCase: vi.fn(),
   runCaseRca: vi.fn(),
+  rerunRca: vi.fn(),
 }));
 
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
@@ -226,7 +227,8 @@ beforeEach(() => {
   api.getFrustratedSessions.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
-  for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca]) f.mockResolvedValue({});
+  for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca, api.rerunRca])
+    f.mockResolvedValue({});
 });
 
 function renderPage() {
@@ -396,6 +398,19 @@ describe("running RCA", () => {
     await waitFor(() => expect(api.runCaseRca).toHaveBeenCalledWith("case-1"));
     expect(button("Analyzing…").disabled).toBe(true);
     expect(screen.getByText("Reading the evidence and looking for the cause.")).toBeTruthy();
+  });
+
+  /** Catches "Re-run RCA" coalescing onto the finished report, so the press starts nothing. */
+  it("re-runs the case's report when one exists, instead of asking the case trigger again", async () => {
+    api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1" }));
+    api.getRcaReport.mockResolvedValue(ANSWER_REPORT);
+    renderPage();
+    await heading(BASE.case.title);
+
+    fireEvent.click(button("Re-run RCA"));
+
+    await waitFor(() => expect(api.rerunRca).toHaveBeenCalledWith("rca-1"));
+    expect(api.runCaseRca).not.toHaveBeenCalled();
   });
 
   it("asks a ranked case to run RCA before resolving it", async () => {
