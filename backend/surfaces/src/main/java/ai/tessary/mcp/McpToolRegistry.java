@@ -942,6 +942,7 @@ public class McpToolRegistry {
         }
     }
 
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = not a witness span → the key is omitted
     private static @Nullable List<GroundednessEvidence.FlaggedSentenceText> witnessSentences(
             BehaviorDtos.EvidenceSpanView row, Map<SpanRef, List<GroundednessEvidence.FlaggedSentenceText>> sentences) {
         if (!FindingEvidenceRow.Role.WITNESS.equals(row.role()) || row.traceId() == null || row.spanId() == null) {

@@ -8,36 +8,56 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the prompt prose moved into {@code prompt-craft/} markdown to its exact bytes as a Java constant. A tidied
- * blank line changes what the model reads and nothing else notices, so the markdown must reproduce the goldens in
- * {@code src/test/resources/prompt-golden/} byte for byte. {@code -Dprompt.golden.capture=true} rewrites them, for
- * the initial capture only.
+ * Pins every prompt file in {@code prompt-craft/} to its exact bytes. A tidied blank line changes what the model reads
+ * and nothing else notices, so each pinned text must reproduce its golden in {@code src/test/resources/prompt-golden/}
+ * byte for byte. A text the engine loads into a constant is pinned through that constant; one it loads per run (an
+ * RCA method file) is pinned through its resource. {@code -Dprompt.golden.capture=true} rewrites the goldens.
  */
 class PromptResourceParityTest {
 
     private static final Path GOLDEN = Path.of("src/test/resources/prompt-golden");
 
-    /** Constant name -> owning class, for everything that moved. */
-    private static Map<String, Class<?>> pinned() {
-        Map<String, Class<?>> m = new LinkedHashMap<>();
-        m.put("triage#SYSTEM_PROMPT", ai.tessary.classifier.finding.BehaviorTriageEngine.class);
-        m.put("rca#JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#RULES", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#MCP_DOOR", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#FRUSTRATION_JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#FRUSTRATION_RULES", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#GROUNDEDNESS_JSON_SCHEMA", ai.tessary.rca.AgenticRcaEngine.class);
-        m.put("rca#GROUNDEDNESS_RULES", ai.tessary.rca.AgenticRcaEngine.class);
+    /** Golden name -> the text it pins. */
+    private static Map<String, Supplier<String>> pinned() {
+        Map<String, Supplier<String>> m = new LinkedHashMap<>();
+        constant(m, ai.tessary.classifier.finding.BehaviorTriageEngine.class, "SYSTEM_PROMPT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "PROMPT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_PRESENT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "REPO_ABSENT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "BASELINE_PRESENT");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "TOOLS");
+        constant(m, ai.tessary.rca.AgenticRcaEngine.class, "JSON_SCHEMA");
+        for (String method : List.of(
+                "tool_error", "metric_drift", "secret_leak", "malformed_output", "frustration", "groundedness")) {
+            m.put("rca.methods." + method, () -> PromptCraft.text("rca", "methods/" + method + ".md"));
+        }
         return m;
     }
 
+    private static void constant(Map<String, Supplier<String>> m, Class<?> owner, String name) {
+        m.put(owner.getSimpleName() + "." + name, () -> {
+            try {
+                Field f = owner.getDeclaredField(name);
+                f.setAccessible(true);
+                return (String) f.get(null);
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError(owner.getSimpleName() + "." + name + " is not a pinnable constant", e);
+            }
+        });
+    }
+
     /**
-     * The pin list is hand-written, so this counts the shipped prose files and requires the list to cover them.
-     * {@code response_schema.json} is data, pinned as a constant.
+     * The pin list is hand-written, so this counts the shipped prompt files and requires the list to cover them.
+     * {@code response_schema.json} is data the prompt carries, pinned like the prose.
      */
     @Test
     void every_prompt_file_this_module_ships_is_pinned() throws Exception {
@@ -55,15 +75,12 @@ class PromptResourceParityTest {
     }
 
     @Test
-    void the_prose_that_moved_to_markdown_is_byte_identical() throws Exception {
+    void the_prompt_files_are_byte_identical_to_their_goldens() throws Exception {
         boolean capture = Boolean.getBoolean("prompt.golden.capture");
         if (capture) Files.createDirectories(GOLDEN);
-        for (Map.Entry<String, Class<?>> e : pinned().entrySet()) {
-            String constName = e.getKey().substring(e.getKey().indexOf('#') + 1);
-            Field f = e.getValue().getDeclaredField(constName);
-            f.setAccessible(true);
-            String actual = (String) f.get(null);
-            Path golden = GOLDEN.resolve(e.getValue().getSimpleName() + "." + constName + ".txt");
+        for (Map.Entry<String, Supplier<String>> e : pinned().entrySet()) {
+            String actual = e.getValue().get();
+            Path golden = GOLDEN.resolve(e.getKey() + ".txt");
             if (capture) {
                 Files.writeString(golden, actual, StandardCharsets.UTF_8);
                 continue;
@@ -72,6 +89,16 @@ class PromptResourceParityTest {
                     Files.readString(golden, StandardCharsets.UTF_8),
                     actual,
                     e.getKey() + " no longer matches its golden — the prompt text changed");
+        }
+    }
+
+    /** A golden whose text is no longer pinned would read as coverage while pinning nothing. */
+    @Test
+    void every_golden_belongs_to_a_pinned_text() throws Exception {
+        try (var list = Files.list(GOLDEN)) {
+            Set<String> goldens = list.map(p -> p.getFileName().toString().replaceFirst("\\.txt$", ""))
+                    .collect(Collectors.toCollection(TreeSet::new));
+            assertEquals(new TreeSet<>(pinned().keySet()), goldens);
         }
     }
 }

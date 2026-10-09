@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,8 +22,6 @@ import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.pipeline.PipelineService;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
-import ai.tessary.rca.RcaDtos.RuledOutCheck.Assessment;
-import ai.tessary.rca.RcaSynthesisOutput.ChecklistAssessment;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -39,7 +36,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -51,10 +47,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The RCA worker and pipeline against real Postgres with only {@link AgenticRcaEngine} mocked. Gate-free: a grader-
- * version flip and an empty failing cohort both still reach the agent; the verdict and checklist persist merged with
- * their measurements; an engine failure stamps {@code failed}. A finding's two sides are its evidence rows by role,
- * never by time.
+ * The RCA worker and pipeline against real Postgres with only {@link AgenticRcaEngine} mocked: the evidence the run
+ * may cite and how much was flagged come from the finding's evidence rows by role, never by time; the dossier is the
+ * claim, the numbers, the classifier's method and the tools; the verdict, causes and ruled-out sentences persist; an
+ * engine failure stamps {@code failed}.
  */
 @RcaParkedSpringBootTest
 class RcaWorkerTest {
@@ -91,9 +87,6 @@ class RcaWorkerTest {
 
     @Autowired
     TenantService tenants;
-
-    @Autowired
-    RcaChecklist checklist;
 
     @Autowired
     JdbcClient jdbc;
@@ -139,21 +132,19 @@ class RcaWorkerTest {
                 List.of(FindingEvidenceRepository.Ref.trace(failingTrace)),
                 now);
 
-        stubEngine(RcaReportRow.Verdict.BEHAVIOR_CHANGE, List.of());
+        stubEngine();
         RcaJobRow job = enqueue(pid, findingId);
         worker.run(job);
 
-        String checklist = capturedDossier().get("checklist.md");
-        assertNotNull(checklist);
-        // One failing trace, not three. Asserted on the "N failing trace(s)" count, which the no-readable-
-        // observations branch these span-less traces hit also states.
-        assertTrue(
-                checklist.contains("1 failing trace(s)") && !checklist.contains("3 failing trace(s)"),
-                "the flagged side measured the whole population instead of the failures:\n" + checklist);
+        AgenticRcaEngine.Evidence ev = capturedEvidence();
+        assertEquals(1, ev.flaggedCount(), "the flagged side counted the whole population instead of the failures");
+        assertEquals("traces", ev.grain());
+        assertTrue(ev.baselinePresent());
+        assertEquals(Set.of(baselineTrace, failingTrace, healthyA, healthyB), ev.citableTraceIds());
     }
 
     @Test
-    void agentVerdictAndChecklistPersistMergedWithTheMeasurements() {
+    void theAgentsVerdictCausesAndRuledOutSentencesPersist() {
         var fix = TenantFixture.bootstrap(tenants, "rca-behavior");
         String pid = fix.project().id();
         String sessionId = seedSession(pid);
@@ -161,26 +152,25 @@ class RcaWorkerTest {
         String failingTrace = seedTrace(pid, sessionId, SPLIT.plus(Duration.ofHours(2)));
         String passingTrace = seedTrace(pid, sessionId, FROM.plus(Duration.ofHours(2)));
 
-        // behaviour_change is the agent's to assign.
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+        RcaDtos.Cause cause = new RcaDtos.Cause(
+                "The prompt was made stricter",
+                "high",
+                "change",
+                "prompt",
+                "The prompt now refuses partial answers.",
+                "Every flagged trace is a refusal.",
+                "Restore the earlier wording.",
+                new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Refuse when unsure."),
+                List.of(failingTrace),
+                List.of(),
+                1);
+        RuledOutCheck ruledOut = RuledOutCheck.ruledOut(1, "The serving model did not change.");
+        when(engine.run(any(), any(), anyString(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
-                        RcaReportRow.Verdict.BEHAVIOR_CHANGE,
+                        RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "The prompt was rewritten.",
-                        List.of(new RcaDtos.Cause(
-                                "stricter prompt",
-                                "high",
-                                "because",
-                                null,
-                                null,
-                                null,
-                                List.of(failingTrace),
-                                List.of(),
-                                1)),
-                        List.of(new ChecklistAssessment(
-                                "serving_model",
-                                "Did the serving model change?",
-                                "explains",
-                                "commit abc123 moved the call site to a new model")),
+                        List.of(cause),
+                        List.of(ruledOut),
                         "## Investigation",
                         true));
 
@@ -189,34 +179,21 @@ class RcaWorkerTest {
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
-        assertEquals(RcaReportRow.Verdict.BEHAVIOR_CHANGE, report.verdict());
+        assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
         assertEquals("The prompt was rewritten.", report.summary());
         assertEquals("## Investigation", report.detailedReport());
-        assertTrue(report.causes().contains("stricter prompt"));
         assertNull(report.hypotheses(), "a metric run stores its causes where every other kind does");
+        assertEquals(Map.of("ruled_out_1", ruledOut), storedChecks(report));
 
-        // Each stored item carries the agent's call and the numbers it judged; a skipped check survives as unknown.
-        Map<String, RuledOutCheck> checks = storedChecks(report);
-        RuledOutCheck model = checks.get("serving_model");
-        assertEquals(Assessment.EXPLAINS, model.assessment());
-        assertEquals("commit abc123 moved the call site to a new model", model.detail());
-        assertEquals("Did the serving model change?", model.question());
-        assertTrue(model.measurement().contains("serving model"), model.measurement());
-        assertFalse(model.passed());
+        RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
+        assertEquals(List.of(cause), view.causes(), "change and type survive the round trip");
 
-        RuledOutCheck skipped = checks.get("failing_cohort_shape");
-        assertEquals(Assessment.UNKNOWN, skipped.assessment());
-        assertFalse(skipped.passed());
-        assertNotNull(skipped.measurement());
-
-        // The dossier is the claim, the numbers and the checklist only: the agent pages evidence over MCP, so nothing
-        // pre-chooses a sample.
+        // The dossier is the claim, the numbers, the method and the tools only: the agent pages evidence over MCP,
+        // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
-        assertEquals(Set.of("finding.md", "method.md", "evidence.json", "checklist.md"), dossier.keySet());
-        assertTrue(
-                dossier.get("method.md").contains("**Absent roles**"),
-                "the method card has to say what a MISSING role means, or an absent baseline reads as a lost"
-                        + " write on three of the five detectors");
+        assertEquals(Set.of("finding.md", "evidence.json", "method.md", "tools.md"), dossier.keySet());
+        assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
+        assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
         String findingDoc = dossier.get("finding.md");
         assertTrue(findingDoc.contains("the id every `get_finding_evidence` call takes"), findingDoc);
         assertTrue(findingDoc.contains("`baseline`: 1 ref(s)"), findingDoc);
@@ -247,7 +224,7 @@ class RcaWorkerTest {
                         + "\"stdout\":\"omission_rate=0.94\"}]",
                 Instant.now().toString());
 
-        stubEngine(RcaReportRow.Verdict.BEHAVIOR_CHANGE, List.of());
+        stubEngine();
         worker.run(enqueue(pid, findingId));
 
         String dossier = String.join("\n", capturedDossier().values()).toLowerCase(Locale.ROOT);
@@ -269,7 +246,7 @@ class RcaWorkerTest {
 
         // No evidence door is a deployment fault: fail closed with {@code failed}, since the agent reads everything
         // through MCP.
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+        when(engine.run(any(), any(), anyString(), anyMap(), any()))
                 .thenThrow(new TessaryException(RcaError.NO_EVIDENCE_DOOR, "mcp base url unset"));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
@@ -281,12 +258,11 @@ class RcaWorkerTest {
     }
 
     /**
-     * A frustration finding: only the frustrated sessions become citable receipts, only the cohort shape is measured
-     * (no baseline for serving_model), and causes persist on a frustration_causes report.
+     * A frustration finding: the frustrated sessions are what was flagged, counted in sessions, and causes persist on a
+     * frustration_causes report.
      */
     @Test
-    @SuppressWarnings("unchecked")
-    void aFrustrationReportPersistsItsCausesAndSkipsTheTwoSidedCheck() {
+    void aFrustrationReportCountsSessionsAndPersistsItsCauses() {
         var fix = TenantFixture.bootstrap(tenants, "rca-frustration");
         String pid = fix.project().id();
         String sessionA = seedSession(pid);
@@ -323,58 +299,50 @@ class RcaWorkerTest {
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Ignores the attached file",
                 "medium",
+                "standing",
+                "prompt",
                 "Answers from memory when the user attaches a file.",
                 "The user has to paste the file's contents again.",
                 "Tell the agent to read attachments first.",
-                new RcaDtos.Attribution("prompt", "agent/system.md", "abc123", "Answer briefly."),
+                new RcaDtos.Attribution(null, "agent/system.md", "abc123", "Answer briefly."),
                 List.of(turnA),
                 List.of(sessionA, sessionB),
                 2);
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+        when(engine.run(any(), any(), anyString(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "The agent ignores attachments.",
                         List.of(cause),
-                        List.of(new ChecklistAssessment("failing_cohort_shape", null, "ruled_out", "no concentration")),
+                        List.of(RuledOutCheck.ruledOut(1, "Frustration is not concentrated on one model.")),
                         "## Investigation",
                         true));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.FRUSTRATION_CAUSES);
         worker.run(job);
 
-        ArgumentCaptor<Set<String>> citableSessions = ArgumentCaptor.forClass(Set.class);
-        ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
-        verify(engine)
-                .run(
-                        any(),
-                        any(),
-                        anyString(),
-                        anyMap(),
-                        anySet(),
-                        flagged.capture(),
-                        citableSessions.capture(),
-                        anySet());
-        assertEquals(
-                Set.of(sessionA, sessionB), citableSessions.getValue(), "the frustrated sessions, not the calm one");
-        assertEquals(Set.of(turnA, turnB), flagged.getValue());
+        AgenticRcaEngine.Evidence ev = capturedEvidence();
+        assertEquals(2, ev.flaggedCount(), "the frustrated sessions, not the calm one");
+        assertEquals("sessions", ev.grain());
+        assertFalse(ev.baselinePresent());
+        assertTrue(ev.citableSessionIds().containsAll(Set.of(sessionA, sessionB, calm)), ev.toString());
+        assertTrue(ev.citableTraceIds().containsAll(Set.of(turnA, turnB)), ev.toString());
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
         assertEquals(RcaReportRow.ReportKind.FRUSTRATION_CAUSES, report.reportKind());
         assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
-        assertEquals(Set.of("failing_cohort_shape"), storedChecks(report).keySet());
+        assertEquals(Set.of("ruled_out_1"), storedChecks(report).keySet());
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
         assertEquals(List.of(cause), view.causes());
     }
 
     /**
-     * A groundedness finding: traces with a flagged answer are the only receipts, only the cohort shape is measured,
-     * flagged answers ship as {@code detections.md}, and causes persist on a groundedness_causes report.
+     * A groundedness finding: the traces with a flagged answer are what was flagged, the flagged sentences stay behind
+     * MCP rather than in the dossier, and causes persist on a groundedness_causes report.
      */
     @Test
-    @SuppressWarnings("unchecked")
-    void aGroundednessReportPersistsItsCausesAndHandsOverTheFlaggedAnswers() {
+    void aGroundednessReportCountsFlaggedTracesAndPersistsItsCauses() {
         var fix = TenantFixture.bootstrap(tenants, "rca-groundedness");
         String pid = fix.project().id();
         String flaggedA = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(2)));
@@ -405,135 +373,42 @@ class RcaWorkerTest {
         RcaDtos.Cause cause = new RcaDtos.Cause(
                 "Retrieval returns one document",
                 "medium",
+                "change",
+                "code",
                 "Answers past what the single retrieved document says.",
                 null,
                 "Retrieve more documents.",
-                new RcaDtos.Attribution("code", "rag/retrieve.py", "abc123", "top_k=1"),
+                new RcaDtos.Attribution(null, "rag/retrieve.py", "abc123", "top_k=1"),
                 List.of(flaggedA, flaggedB),
                 List.of(),
                 2);
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
+        when(engine.run(any(), any(), anyString(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "Retrieval returns one document.",
                         List.of(cause),
-                        List.of(new ChecklistAssessment("failing_cohort_shape", null, "ruled_out", "no concentration")),
+                        List.of(RuledOutCheck.ruledOut(1, "Flagged answers are not concentrated on one model.")),
                         "## Investigation",
                         true));
 
         RcaJobRow job = enqueue(pid, findingId, RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
         worker.run(job);
 
-        ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
-        ArgumentCaptor<Set<String>> flagged = ArgumentCaptor.forClass(Set.class);
-        ArgumentCaptor<Set<String>> citableSessions = ArgumentCaptor.forClass(Set.class);
-        verify(engine)
-                .run(
-                        any(),
-                        any(),
-                        anyString(),
-                        files.capture(),
-                        anySet(),
-                        flagged.capture(),
-                        citableSessions.capture(),
-                        anySet());
-        assertEquals(Set.of(flaggedA, flaggedB), flagged.getValue(), "the flagged traces, not the clean member");
-        assertTrue(citableSessions.getValue().isEmpty(), "a groundedness finding cites no sessions");
-        String answers = files.getValue().get("detections.md");
-        assertNotNull(answers, "the flagged answers ride in the dossier");
-        assertTrue(answers.contains("trace `" + flaggedA + "` span `answer-a`"), answers);
-        assertTrue(answers.contains("All 2 flagged answer(s) are shown."), answers);
+        AgenticRcaEngine.Evidence ev = capturedEvidence();
+        assertEquals(2, ev.flaggedCount(), "the flagged traces, not the clean member");
+        assertEquals("traces", ev.grain());
+        assertFalse(ev.baselinePresent());
+        assertEquals(Set.of(flaggedA, clean, flaggedB), ev.citableTraceIds());
+        assertFalse(capturedDossier().containsKey("detections.md"), "flagged sentences are read over MCP");
 
         RcaReportRow report = reports.findByJobId(pid, job.id()).orElseThrow();
         assertEquals("done", report.status());
         assertEquals(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES, report.reportKind());
         assertEquals(RcaReportRow.Verdict.CAUSES_IDENTIFIED, report.verdict());
-        assertEquals(Set.of("failing_cohort_shape"), storedChecks(report).keySet());
+        assertEquals(Set.of("ruled_out_1"), storedChecks(report).keySet());
 
         RcaDtos.RcaReportView view = RcaDtos.RcaReportView.of(report, new ObjectMapper());
         assertEquals(List.of(cause), view.causes());
-    }
-
-    /**
-     * Catches shares and cohorts counted per span instead of per trace, a succeeding tool counted as failing, an
-     * empty dimension rendered as a blank line, and no-data sides read as a zero share.
-     */
-    @Test
-    void theChecklistMeasuresEachSideFromItsOwnSpans() {
-        String pid = TenantFixture.bootstrap(tenants, "rca-checklist").project().id();
-        String baseline = SubstrateV2Fixtures.traceId();
-        fx().spanSeed(pid).traceId(baseline).at(FROM).model("gpt-4o").write();
-        fx().spanSeed(pid).traceId(baseline).at(FROM).model("gpt-4o").write();
-        String tf1 = SubstrateV2Fixtures.traceId();
-        fx().spanSeed(pid).traceId(tf1).at(SPLIT).model("gpt-4o").write();
-        fx().spanSeed(pid)
-                .traceId(tf1)
-                .at(SPLIT)
-                .kind("tool")
-                .name("search")
-                .status("error")
-                .write();
-        String tf2 = SubstrateV2Fixtures.traceId();
-        fx().spanSeed(pid)
-                .traceId(tf2)
-                .at(SPLIT)
-                .model("gpt-5-canary")
-                .errorType("Timeout")
-                .write();
-        fx().spanSeed(pid)
-                .traceId(tf2)
-                .at(SPLIT)
-                .kind("tool")
-                .name("search")
-                .errorType("Timeout")
-                .write();
-        String tf3 = SubstrateV2Fixtures.traceId();
-        fx().spanSeed(pid).traceId(tf3).at(SPLIT).model("gpt-4o").write();
-        fx().spanSeed(pid)
-                .traceId(tf3)
-                .at(SPLIT)
-                .kind("tool")
-                .name("lookup")
-                .status("ok")
-                .write();
-        List<String> flagged = List.of(tf1, tf2, tf3);
-
-        assertEquals(
-                List.of(new RcaChecklist.Measurement(
-                        "serving_model",
-                        "Share of LLM spans by serving model.\n"
-                                + "Baseline side: gpt-4o 100% (2)\n"
-                                + "Flagged side: gpt-4o 67% (2), gpt-5-canary 33% (1)\n"
-                                + "A model appearing only on the flagged side may be the cause, or a canary too"
-                                + " small to move the score — check whether it actually serves the failing traces.")),
-                checklist.measure(pid, List.of(baseline), flagged));
-        assertEquals(
-                new RcaChecklist.Measurement(
-                        "failing_cohort_shape",
-                        "Top facet values across the 3 failing trace(s):\n"
-                                + "- model: 'gpt-4o' on 2 (67%), 'gpt-5-canary' on 1 (33%)\n"
-                                + "- span error: 'Timeout' on 1 (33%)\n"
-                                + "- failing tool: 'search' on 2 (67%)"),
-                checklist.failingCohortShape(pid, new LinkedHashSet<>(flagged)));
-        assertEquals(
-                "Top facet values across the 1 failing trace(s):\n- model: 'gpt-4o' on 1 (100%)",
-                checklist.failingCohortShape(pid, Set.of(baseline)).finding(),
-                "a dimension with no values is left out, not printed empty");
-
-        assertTrue(
-                checklist.measure(pid, List.of(), flagged).get(0).finding().contains("Baseline side: (no traffic)\n"));
-        assertTrue(checklist
-                .measure(pid, List.of("tr_none_a"), List.of("tr_none_b"))
-                .get(0)
-                .finding()
-                .startsWith("No model-tagged traffic on either side"));
-        assertEquals(
-                "No flagged traces on this finding — nothing to group.",
-                checklist.failingCohortShape(pid, Set.of()).finding());
-        assertTrue(checklist
-                .failingCohortShape(pid, Set.of("tr_none"))
-                .finding()
-                .startsWith("1 failing trace(s), but none has readable observations"));
     }
 
     /** Catches a finding with no evidence reaching the agent, which would still stamp a verdict. */
@@ -546,7 +421,7 @@ class RcaWorkerTest {
         worker.run(job);
 
         assertEquals("failed", reports.findByJobId(pid, job.id()).orElseThrow().status());
-        verify(engine, never()).run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet());
+        verify(engine, never()).run(any(), any(), anyString(), anyMap(), any());
     }
 
     /** Catches the finding's title and basis missing from the dossier. */
@@ -561,7 +436,7 @@ class RcaWorkerTest {
                 .param("pid", pid)
                 .param("id", findingId)
                 .update();
-        stubEngine(RcaReportRow.Verdict.INCONCLUSIVE, List.of());
+        stubEngine();
 
         worker.run(enqueue(pid, findingId));
 
@@ -586,9 +461,10 @@ class RcaWorkerTest {
         assertTrue(claimed.contains(enqueued), claimed.toString());
     }
 
-    private void stubEngine(String verdict, List<ChecklistAssessment> checklist) {
-        when(engine.run(any(), any(), anyString(), anyMap(), anySet(), anySet(), anySet(), anySet()))
-                .thenReturn(new AgenticRcaEngine.Result(verdict, "summary", List.of(), checklist, "## report", true));
+    private void stubEngine() {
+        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+                .thenReturn(new AgenticRcaEngine.Result(
+                        RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true));
     }
 
     private static Map<String, RuledOutCheck> storedChecks(RcaReportRow report) {
@@ -599,15 +475,21 @@ class RcaWorkerTest {
             for (RuledOutCheck c : parsed) byCheck.put(c.check(), c);
             return byCheck;
         } catch (Exception e) {
-            throw new AssertionError("ruled_out was not a checklist array: " + report.ruledOut(), e);
+            throw new AssertionError("ruled_out was not an array of entries: " + report.ruledOut(), e);
         }
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedDossier() {
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
-        verify(engine).run(any(), any(), anyString(), files.capture(), anySet(), anySet(), anySet(), anySet());
+        verify(engine).run(any(), any(), anyString(), files.capture(), any());
         return files.getValue();
+    }
+
+    private AgenticRcaEngine.Evidence capturedEvidence() {
+        ArgumentCaptor<AgenticRcaEngine.Evidence> ev = ArgumentCaptor.forClass(AgenticRcaEngine.Evidence.class);
+        verify(engine).run(any(), any(), anyString(), anyMap(), ev.capture());
+        return ev.getValue();
     }
 
     /** An armed-window finding, which rules by the verb alone. */

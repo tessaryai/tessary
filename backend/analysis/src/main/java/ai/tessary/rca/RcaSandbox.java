@@ -18,7 +18,7 @@ public interface RcaSandbox {
      * Run the agent over the finding's evidence and (when the project has one) its repository. This
      * is not fail-open: it always either returns a completed run or throws {@link
      * ai.tessary.open.errors.TessaryException} — a user-triggered RCA must stamp
-     * {@code failed} rather than silently degrade to a bogus "inconclusive" verdict.
+     * {@code failed} rather than silently degrade to a bogus "no cause found" verdict.
      */
     SandboxRun run(SandboxRequest req);
 

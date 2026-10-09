@@ -60,7 +60,7 @@ import org.springframework.stereotype.Service;
  * flows through the same Alloy→Langfuse pipeline as judge calls. Unlike the observer's fail-open
  * drift analysis, every transport/HTTP/parse failure here throws {@link TessaryException} — a
  * user-triggered RCA must stamp {@code failed} rather than silently degrade to a bogus
- * "inconclusive" verdict.
+ * "no cause found" verdict.
  */
 @Service
 public class E2bRcaSandbox implements RcaSandbox {

@@ -33,8 +33,8 @@ import org.slf4j.LoggerFactory;
  *   <li>Each {@code ruled_out} sentence becomes one {@link RuledOutCheck}.</li>
  * </ul>
  *
- * <p>Causes are stored {@code high} first, then by how many flagged rows they explain. A blank summary falls
- * back to the first cause's title, never to the raw reply.
+ * <p>Causes are stored {@code high} first, then by how many flagged rows they explain; a cause explains at least
+ * the rows it cites. A blank summary falls back to the first cause's title, never to the raw reply.
  */
 final class RcaSynthesisOutput {
 
@@ -100,7 +100,8 @@ final class RcaSynthesisOutput {
         List<Cause> causes = new ArrayList<>();
         int unreceipted = 0;
         int belowMedium = 0;
-        for (CauseBody c : body.causes() == null ? List.<CauseBody>of() : body.causes()) {
+        List<CauseBody> bodies = body.causes();
+        for (CauseBody c : bodies == null ? List.<CauseBody>of() : bodies) {
             String title = c.title();
             if (title == null || title.isBlank()) continue;
             if (c.confidence() == null || !CONFIDENCES.contains(c.confidence())) {
@@ -125,7 +126,7 @@ final class RcaSynthesisOutput {
                     attribution(c.attribution(), repoCloned),
                     traces,
                     sessions,
-                    Math.max(claimed == null ? 0 : claimed, 0)));
+                    Math.max(claimed == null ? 0 : claimed, Math.max(traces.size(), sessions.size()))));
         }
         if (unreceipted > 0 || belowMedium > 0) {
             log.warn(

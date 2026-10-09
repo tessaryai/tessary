@@ -1,9 +1,9 @@
 ---
 title: "Root-Cause Analysis"
-description: "Understand what Tessary's agentic RCA run reads, what it is deliberately not told, what a connected repository adds, and what the report returns."
+description: "Understand what Tessary's agentic RCA run reads, what it is deliberately not told, how it grades a cause, and what the report returns."
 ---
 
-Detection says something moved. RCA (root-cause analysis) says what changed. It is an agent session that investigates one case, and it is the reason Tessary treats identifying a problem as the beginning of the work rather than the end of it.
+Detection says something is wrong. RCA (root-cause analysis) says why. It is an agent session that investigates one case, and it is the reason Tessary treats identifying a problem as the beginning of the work rather than the end of it.
 
 An RCA run starts when a person presses **Run RCA** on a case. The decision to run it is a human one, made after reading the case, and the identifier of the finding under that case is the entire input: everything the run works from is read off that finding, never accepted from the caller.
 
@@ -11,7 +11,7 @@ An RCA run starts when a person presses **Run RCA** on a case. The decision to r
 
 The run hands the investigation to an agent session with three sources of evidence.
 
-**The finding's dossier, as files.** What the classifier asserts, over what population, since when, and the measured checklist assembled for this finding. The dossier is a snapshot taken at trigger time, so a report still reads correctly after the finding it analyzed has been resolved.
+**The finding's dossier, as files.** What the classifier asserts, over what population, and since when; the classifier's own numbers, verbatim; how that classifier measures and how its evidence reads, for every built-in classifier; and the tools the agent can call. The dossier is a snapshot taken at trigger time, so a report still reads correctly after the finding it analyzed has been resolved.
 
 **A live connection back to your instance**, over MCP (Model Context Protocol), authenticated with a short-lived key minted for the run and revoked when it ends. This is required rather than optional. The dossier states the claim, and every row of the evidence behind it is fetched on demand, so a run that cannot reach your instance cannot open a single trace it is investigating. Neither the triage agent nor the RCA agent copies trace rows into its prompt.
 
@@ -19,9 +19,9 @@ The run hands the investigation to an agent session with three sources of eviden
 
 ### What a connected repository changes
 
-The repository is what turns "the outputs changed" into "this commit changed them". It deepens every run that has one.
+The repository is what turns "the outputs changed" into "this commit changed them". It deepens every run that has one. The clone is at today's head, which may be newer than the problem, so the agent is given the commit that was live when the problem started and reads the history from there.
 
-A project with no repository still gets an investigation, with a stated ceiling: it can show what changed in production and it cannot show what changed in the code. Connecting a repository is optional and is not required to complete setup, but it is the single largest difference in what a report can conclude.
+A project with no repository still gets an investigation, with a stated ceiling: it can show what happens in production and it cannot show what changed in the code. Its report says the code side was not read, and no cause points at a file or a commit. Connecting a repository is optional and is not required to complete setup, but it is the single largest difference in what a report can conclude.
 
 ## What the run is not told
 
@@ -29,7 +29,26 @@ The agent is never told that a triage pass happened on this finding, what it rul
 
 This is enforced structurally rather than by convention, and in three places at once, because the run could otherwise read the ruling through the dossier, through its prompt, or through the same MCP tools it uses to read evidence.
 
-The reason is one conclusion Tessary wants to keep available: **nothing happened here.** Triage already applied a gate, and RCA is the only independent check on that gate. An investigation told what triage decided cannot provide it.
+The reason is one conclusion Tessary wants to keep available: **no cause found.** Triage already applied a gate, and RCA is the only independent check on that gate. An investigation told what triage decided cannot provide it.
+
+The agent may read the other open findings and cases on the project, to see what else is moving. It never looks up its own finding or the case that holds it.
+
+## How the run grades a cause
+
+The run treats the finding as real and looks for why it happens. A cause is either a change over time, such as a commit, a prompt, a model, a tool, an upstream service, or the traffic, or a standing behavior of the agent, its code, its prompt, its tools, or its data.
+
+The agent is asked to consider every plausible cause and to try to disprove each one before it keeps it. It grades each cause on its own, against a legal standard of proof:
+
+| Confidence | Standard | What it takes |
+| --- | --- | --- |
+| `high` | Beyond reasonable doubt | The mechanism is located, such as a commit, a prompt line, a model, an upstream error, or the data, and its effect is seen in the cited traces. |
+| `medium` | On the balance of probabilities | One of the two is shown, not both. |
+
+Anything weaker is not a cause. It goes on the ruled-out list with its reason. Several causes can be `high` at once, and one flagged trace can belong to more than one cause. The size of the finding does not cap confidence: the standard of proof alone decides.
+
+The agent compares only against baseline traces the finding itself recorded. Today only duration and cost drift against a pinned window record them. Every other finding is investigated from its flagged traces alone, and the agent does not fetch normal traffic to build a comparison of its own.
+
+Each run has a time budget, stated in its instructions. When the budget runs short, the agent returns the causes it has at the confidence they earned and says in the written investigation what it did not check.
 
 ## Where the run happens
 
@@ -41,58 +60,38 @@ The agent needs both credentials and egress, since it clones a repository and ca
 
 ## What the run returns
 
-A report, immutable once written. It carries five things, and every kind of case gets the same shape.
+A report, immutable once written. Every kind of case gets the same shape.
 
-**A one-sentence summary** of why the metric moved, written for a reader who was not watching. It is the line under the case in Triage.
+**A one-sentence summary** of why the problem happens, written for a reader who was not watching. It is the line under the case in Triage.
 
-**A verdict**, one of five:
+**A verdict**, one of two:
 
 | Verdict | Reads as |
 | --- | --- |
-| `behavior_change` | Agent behavior changed. The one verdict that says the agent itself got worse. |
-| `model_change` | Serving model changed. |
-| `traffic_shift` | Traffic mix shifted. |
-| `definition_change` | Grader definition changed. |
-| `inconclusive` | Inconclusive. |
+| `causes_identified` | Causes identified. At least one cause reached `medium`. |
+| `no_cause_found` | No cause found. Nothing reached `medium`. This is a full answer, with what was ruled out. |
 
-Three of these are structural: the agent did not get worse, something around it moved. **Grader definition changed** is the one whose label needs unpacking: it means the criteria an output is judged against changed, and a run reaches that verdict only after locating the change in your repository, citing the commit and the diff hunk.
+**Up to four causes, each with its receipts**, ranked `high` first, then by how many flagged traces or sessions they explain. A cause has a short title and three plain-language parts: what changed, or what the agent does when the cause is a standing behavior; how that caused the problem; and what to do. It also names its kind, such as code, prompt, model, or traffic, and, with a connected repository, the file, commit, and excerpt behind it. The case page shows every cause with a **High** or **Medium** tag.
 
-**Causes, each with its receipts.** A cause has a short title and three plain-language parts: what changed, how that caused the movement, and what to do next. Its confidence is `high` when it is proven, meaning a located change lines up with the traces, and `medium` or `low` when it is a lead. The case page cards every proven cause, and shows the leads only when nothing was proven. Every cause carries the trace identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that was not actually measured is dropped, and a cause whose citations were all invented survives with no receipts rather than with fabricated ones.
+Every cause carries the trace and session identifiers that support it, and every identifier is checked against the finding's own evidence. Anything the agent cites that the finding does not hold is dropped, and a cause left with nothing to cite is dropped too. If no cause survives, a `causes_identified` report is recorded as `no_cause_found`, with a note at the top of the written investigation saying why.
 
 None of the plain-language parts carry trace identifiers, queries, or statistics. Those live in the identifiers, shown as links, and in the written investigation.
 
-**An assessment of every check that was measured**, including the ones ruled out, each asked as a plain question such as "Did the serving model change?". The agent is the judge of those measurements and the prompt demands an explicit assessment of each, because fixed thresholds ruled causes in and out wrongly often enough to poison the verdict. An invented check identifier is dropped the same way an invented trace identifier is.
+**What else was checked**: each candidate the agent ruled out, as one plain sentence with its reason.
 
-**A written investigation**, in full, alongside the summary.
+**A written investigation**, in full, alongside the summary. It ends with an evidence audit, a table that ties each claim to the trace, session, commit, or query behind it, and with what would settle the question. A run that stopped early also lists what it did not check.
 
 <Note>
-  Tessary downgrades a comparative verdict that cites no evidence from the baseline side to `inconclusive`, with a note explaining why. A comparison whose "before" side was never observed is not a finding of fact, and a bad root-cause report is worse than no report.
+  Reports written before this shape keep their verdicts and render as they did: `behavior_change`, `model_change`, `traffic_shift`, `definition_change`, and `inconclusive`, causes at `low` confidence shown as leads, and a checklist of measured checks.
 </Note>
 
 ### On a frustration case
 
-A frustration finding has no before-and-after comparison to explain. It says users at one call site became frustrated with the agent more often than that call site's learned rate, and it cites the frustrated sessions. So a run on one explains those sessions instead: its causes are grouped by what the agent did wrong rather than by what the users said.
-
-The verdict is one of two:
-
-| Verdict | Reads as |
-| --- | --- |
-| `causes_identified` | Causes identified. |
-| `no_cause_found` | No cause found. |
-
-Each cause names what the agent did, how that frustrated users, how many of the frustrated sessions show it, the sessions and flagged messages that support it, where in your repository it comes from when a prompt or code change lines up with it, and what to do. Every cited session is checked against the finding's own evidence, and one the finding does not cite is dropped. A cause left with no session is dropped too, and a report with no cause left reads `no_cause_found`. The baseline-side check in the note above does not apply, because this report compares nothing.
+A frustration finding cites the frustrated sessions, so a run on one counts and cites sessions. The agent is told that the flagged message marks where the user reacted, not the turn that prompted the reaction.
 
 ### On a groundedness case
 
-A groundedness finding has no before-and-after comparison either. It says that at one call site, the share of traces with an answer its documents don't support rose above the rate that call site learned as normal. So a run on one also returns causes, with the same two verdicts: `causes_identified` or `no_cause_found`.
-
-The agent is handed the newest flagged answers the finding cites, each with its question, its flagged sentences, and the documents it was checked against. A flagged sentence is where the model saw no support, not proof that the sentence is wrong. So the agent reads each flag against its documents before grouping, and treats a flag the documents do support as a false alarm rather than a cause. It then groups the rest by why the answers went beyond their documents, for example:
-
-- Retrieval served wrong, stale, or too few documents.
-- The prompt asks for more than the documents hold.
-- The answer merges or misreads the documents.
-
-Each cause names what the agent did, how that left the answers unsupported, how many traces with a flagged answer show it, the traces that support it, where in your repository it comes from when a diff, prompt text, or retrieval code lines up with it, and what to do. The checks on a frustration report apply here with traces in place of sessions: a trace the agent cites that the finding does not is dropped, a cause left with no trace is dropped, and a report with no cause left reads `no_cause_found`.
+A groundedness finding cites the traces with a flagged answer. The agent reads each flagged sentence and its score from the finding's evidence, and the question and the retrieved documents from the trace. The agent is told that a flagged sentence is where the model saw no support in the documents, not proof that the sentence is wrong.
 
 On the case page, each cause has a button such as **Show 12 answers** that narrows the case's **Flagged answers** list to the answers behind that cause. [Run RCA on the case](/classifiers/groundedness#run-rca-on-the-case) covers reading the report.
 
