@@ -136,8 +136,10 @@
 # none of it and carries no `id-token: write`.
 #
 # Required secrets:
-#   DOCKER_USERNAME  - Docker Hub username (for image push from runner)
-#   DOCKER_TOKEN     - Docker Hub access token (for image push from runner)
+#   DOCKER_USERNAME  - the Docker Hub organization name, `tessaryai` — an organization access token
+#                      logs in as the org, never as a person
+#   DOCKER_TOKEN     - a Docker Hub ORGANIZATION access token on tessaryai/tessary, with
+#                      `scope-image-push` (every push) and `scope-tag-admin` (cleanup's rollback)
 #   E2B_API_KEY      - the E2B team that owns tessary/tessary-agent-sandbox. OPTIONAL, and the only
 #                      optional one: a fork with no such key still publishes the four images, and
 #                      the two template jobs no-op with a warning. The gate is inside each step
@@ -1026,8 +1028,12 @@ jobs:
   # Deleting is safe: a multi-arch manifest references its children by digest, never by tag.
   #
   # NEVER FATAL. It must not turn one failure into a confusing second one. Deleting a tag needs the
-  # Docker Hub API rather than the docker CLI, and a DOCKER_TOKEN scoped Read & Write but not
-  # Delete answers 403 — a warning to act on at leisure.
+  # Docker Hub API rather than the docker CLI, and a DOCKER_TOKEN without `scope-tag-admin`
+  # answers 403 — a warning to act on at leisure.
+  #
+  # ONLY THE NAMESPACED API. Docker refuses an organization access token on legacy
+  # `/v2/repositories/` paths and documents `/v2/auth/token` as its login, so the bearer comes from
+  # there and the delete goes to `/v2/namespaces/{namespace}/repositories/{repository}/tags/{tag}`.
   cleanup:
     name: Roll back this run's tags
     runs-on: ubuntu-24.04
@@ -1070,23 +1076,25 @@ jobs:
           tags+=("compose-${VERSION}")
 
           # jq builds the body so neither credential is ever spliced into JSON by the shell.
-          jwt="$(curl -sf -H 'Content-Type: application/json' \
+          bearer="$(curl -sf -H 'Content-Type: application/json' \
                    -d "$(jq -nc --arg u "$DOCKER_USERNAME" --arg p "$DOCKER_TOKEN" \
-                           '{username:$u,password:$p}')" \
-                   https://hub.docker.com/v2/users/login/ | jq -r '.token // empty')" || jwt=""
-          if [ -z "$jwt" ]; then
+                           '{identifier:$u,secret:$p}')" \
+                   https://hub.docker.com/v2/auth/token | jq -r '.access_token // empty')" || bearer=""
+          if [ -z "$bearer" ]; then
             echo "::warning::could not authenticate to the Docker Hub API; ${#tags[@]} tag(s) left in place"
             exit 0
           fi
 
+          namespace="${DOCKER_REPO%%/*}"
+          repository="${DOCKER_REPO#*/}"
           for tag in "${tags[@]}"; do
             code="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-              -H "Authorization: JWT $jwt" \
-              "https://hub.docker.com/v2/repositories/${{ env.DOCKER_REPO }}/tags/${tag}/")"
+              -H "Authorization: Bearer $bearer" \
+              "https://hub.docker.com/v2/namespaces/${namespace}/repositories/${repository}/tags/${tag}")"
             case "$code" in
               20*) echo "deleted  ${tag}" ;;
               404) echo "absent   ${tag}" ;;
-              *)   echo "::warning::could not delete ${tag} (HTTP ${code}; a token without Delete scope answers 403)" ;;
+              *)   echo "::warning::could not delete ${tag} (HTTP ${code}; a token without scope-tag-admin answers 403)" ;;
             esac
           done
 

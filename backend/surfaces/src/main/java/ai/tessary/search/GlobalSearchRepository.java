@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.search;
 
+import static ai.tessary.storage.SpanPayloadRepository.PAYLOAD_TSVECTOR;
+
 import ai.tessary.search.GlobalSearchDtos.HitType;
 import ai.tessary.search.GlobalSearchDtos.SearchHit;
 import java.util.ArrayList;
@@ -27,8 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
  * keep these predicates index-assisted as content grows — most importantly on
  * {@code span_payload}, which holds the bytes.
  *
- * <p><b>The span leg's tsvector expression is copied character for character from migration 0077, and
- * must stay that way.</b> Postgres matches an expression index only against a syntactically identical
+ * <p><b>The span leg's tsvector expression is {@code SpanPayloadRepository.PAYLOAD_TSVECTOR}, shared with the
+ * traces search, and must stay the index's exact text.</b> With {@code p.project_id = :pid} it is served by
+ * {@code ix_span_payload_project_fts}. Postgres matches an expression index only against a syntactically identical
  * expression. The index is
  * {@code to_tsvector('simple', left(coalesce(input,''),100000) || ' ' || left(coalesce(output,''),100000))};
  * writing {@code 'english'} instead of {@code 'simple'}, or {@code left(…, 100_000)} spelled any other
@@ -119,21 +122,12 @@ public class GlobalSearchRepository {
     }
 
     /**
-     * The exact indexed expression from migration 0077's {@code ix_span_payload_fts}. Any divergence —
-     * a different text-search config, a differently-spelled cap, an added column — silently drops the
-     * index and sequentially scans every payload in the project. Kept as one constant so the two places
-     * that need it (the filter and the rank) cannot drift from each other either.
-     */
-    private static final String PAYLOAD_TSVECTOR = "to_tsvector('simple', "
-            + "left(coalesce(p.input, ''), 100000) || ' ' || left(coalesce(p.output, ''), 100000))";
-
-    /**
      * Trace matches over the substrate: the payload full-text leg plus the span-name trigram leg, scoped
      * to {@code projectId}. Both {@code span} and {@code span_payload} carry their own {@code project_id},
      * so the tenant boundary is a direct filter on each — no join upward.
      *
      * <p><b>Two statements, not one OR.</b> The full-text predicate is served by
-     * {@code ix_span_payload_fts} on {@code span_payload} and the trigram predicate by
+     * {@code ix_span_payload_project_fts} on {@code span_payload} and the trigram predicate by
      * {@code ix_span_name_trgm} on {@code span}. OR-ing them across the join gives the planner a choice
      * between two indexes on two different tables and it resolves that by scanning; issued separately,
      * each leg is driven by its own index and the results merge here.
@@ -159,7 +153,7 @@ public class GlobalSearchRepository {
     }
 
     /**
-     * The full-text leg: {@code span_payload} matched through {@code ix_span_payload_fts}, and only the first
+     * The full-text leg: {@code span_payload} matched through {@code ix_span_payload_project_fts}, and only the first
      * {@link #PAYLOAD_CANDIDATE_LIMIT} matches ranked. The inner {@code LIMIT} is what bounds the cost; ranking in the
      * same statement as the match would rank every match before the outer {@code LIMIT} applies.
      */

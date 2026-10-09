@@ -13,11 +13,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JdbcClient repository for the trace table and the rollup protocol that maintains it
@@ -609,6 +611,7 @@ public class TraceV2Repository {
      * @param beforeSort the previous page's last row's sort value, or null when that row had none (or when
      *     the sort has no column). Only meaningful together with {@code beforeStartedAt}/{@code beforeId}.
      */
+    @Transactional(readOnly = true)
     public List<Summary> list(
             String projectId,
             TraceQuery query,
@@ -649,22 +652,26 @@ public class TraceV2Repository {
             params.put("beforeId", beforeId);
         }
 
-        filters.append(projectId, where, params, query);
+        try {
+            filters.append(projectId, where, params, query);
 
-        String orderBy = sortCol == null
-                ? " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit"
-                : " ORDER BY " + sortCol + " DESC NULLS LAST, t.started_at DESC, t.id DESC LIMIT :limit";
+            String orderBy = sortCol == null
+                    ? " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit"
+                    : " ORDER BY " + sortCol + " DESC NULLS LAST, t.started_at DESC, t.id DESC LIMIT :limit";
 
-        String sql = "SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
-                + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens, t.output_tokens,"
-                + " t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens, t.total_tokens,"
-                + " t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans, t.is_settled,"
-                + " t.input_preview, t.output_preview"
-                + " FROM trace t "
-                + where
-                + orderBy;
+            String sql = "SELECT t.id, t.name, t.started_at, t.ended_at, t.latency_ms, t.session_id, t.user_id,"
+                    + " t.thread_id, t.call_site_id, t.span_count, t.error_count, t.input_tokens, t.output_tokens,"
+                    + " t.cache_read_tokens, t.cache_write_tokens, t.reasoning_tokens, t.total_tokens,"
+                    + " t.input_cost, t.output_cost, t.total_cost, t.unpriced_spans, t.is_settled,"
+                    + " t.input_preview, t.output_preview"
+                    + " FROM trace t "
+                    + where
+                    + orderBy;
 
-        return jdbc.sql(sql).params(params).query((rs, n) -> summary(rs)).list();
+            return jdbc.sql(sql).params(params).query((rs, n) -> summary(rs)).list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
+        }
     }
 
     /**
@@ -711,17 +718,22 @@ public class TraceV2Repository {
      * The ids of a session's traces that pass {@code filter}, oldest first: the traces of an expanded session row
      * the traces list would show. Served by {@code ix_trace_session}.
      */
+    @Transactional(readOnly = true)
     public List<String> idsInSessionMatching(String projectId, String sessionId, TraceQuery filter, int limit) {
         var params = new HashMap<String, Object>();
         params.put("pid", projectId);
         params.put("sid", sessionId);
         params.put("limit", limit);
         var where = new StringBuilder("WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted");
-        filters.append(projectId, where, params, filter);
-        return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
-                .params(params)
-                .query(String.class)
-                .list();
+        try {
+            filters.append(projectId, where, params, filter);
+            return jdbc.sql("SELECT t.id FROM trace t " + where + " ORDER BY t.started_at ASC, t.id ASC LIMIT :limit")
+                    .params(params)
+                    .query(String.class)
+                    .list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
+        }
     }
 
     /**

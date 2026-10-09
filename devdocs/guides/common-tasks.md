@@ -61,6 +61,34 @@ with `scripts/sync-evals-contract.sh` if `contract/` predates it). Then absorb i
    thesis*, that lives in Notion, not here — update it there and don't start a strategy doc
    in the repo.
 
+## Building a large index before an upgrade
+
+Liquibase runs at startup, so an index on a large table built by a changeset holds the backend's boot
+for as long as the build takes. The self-host compose file marks the backend unhealthy after 315 s
+without an answer, and `docker compose up -d` then stops with the frontend not started, even though
+the backend finishes and turns healthy later. `0035-span-payload-project-fts.sql` is the first such
+migration: it builds `ix_span_payload_project_fts` over `span_payload`, the largest table, then drops
+`ix_span_payload_fts`, which the new index replaces. The build uses one core: about 2 minutes for
+300,000 spans (1.2 GB of payloads) on a laptop. Above about 500,000 spans, or on a slow disk, do both
+by hand before you upgrade; the changesets then find nothing to do.
+
+1. Check free disk: the new index is about the size of `ix_span_payload_fts`, and both exist until the
+   drop. `SELECT pg_size_pretty(pg_relation_size('ix_span_payload_fts'));`
+2. Run the migration's statements with `psql`, as the database owner, in its order. `CONCURRENTLY` lets
+   ingest keep writing while the index builds and drops:
+   `CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public;`, then the `CREATE INDEX CONCURRENTLY`
+   statement exactly as `0035-span-payload-project-fts.sql` spells it.
+3. A build that fails leaves an invalid index, and the migration halts on one rather than skip it.
+   Find it with `SELECT indisvalid FROM pg_index WHERE indexrelid = 'ix_span_payload_project_fts'::regclass;`,
+   then `DROP INDEX CONCURRENTLY ix_span_payload_project_fts;` and build again.
+4. Once the new index is valid: `DROP INDEX CONCURRENTLY IF EXISTS ix_span_payload_fts;`
+
+If the backend was killed during the build (out of memory, a manual restart), two things can be left
+behind. The build itself usually goes on inside Postgres and ends valid; while it runs, the backend
+halts on the invalid index and restarts until it finishes. The Liquibase lock stays held, and every
+later boot waits 5 minutes for it and exits. Once no backend is running, release it:
+`UPDATE databasechangeloglock SET locked = false, lockgranted = NULL, lockedby = NULL WHERE id = 1;`
+
 ## New classifier
 
 Not a cross-stack recipe with a fixed shape — a classifier attaches through the `ClassifierSweep`

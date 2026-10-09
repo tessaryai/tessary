@@ -11,11 +11,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JdbcClient repository for the v2 {@code session} table (substrate-model.md §5.2).
@@ -177,6 +179,7 @@ public class SessionRepository {
      * traces before the page could be chosen — a scan of the whole project per request, which is exactly
      * the read shape the v2 substrate exists to make impossible.
      */
+    @Transactional(readOnly = true)
     public List<SessionRow> listByProject(
             String projectId,
             TraceV2Repository.TraceQuery filter,
@@ -193,19 +196,24 @@ public class SessionRepository {
             params.put("beforeAt", beforeActivityAt);
             params.put("beforeId", beforeId);
         }
-        if (TraceFilters.narrows(filter)) {
-            // A session matches when one of its traces passes every filter: the traces the traces list shows.
-            var traceWhere = new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
-                    + " AND t.session_id = s.id AND NOT t.is_deleted");
-            filters.append(projectId, traceWhere, params, filter);
-            where.append(traceWhere).append(')');
+        try {
+            if (TraceFilters.narrows(filter)) {
+                // A session matches when one of its traces passes every filter: the traces the traces list shows.
+                var traceWhere =
+                        new StringBuilder(" AND EXISTS (SELECT 1 FROM trace t WHERE t.project_id = s.project_id"
+                                + " AND t.session_id = s.id AND NOT t.is_deleted");
+                filters.append(projectId, traceWhere, params, filter);
+                where.append(traceWhere).append(')');
+            }
+            String cols = Arrays.stream(COLS.split(", ")).map(c -> "s." + c).collect(Collectors.joining(", "));
+            return jdbc.sql("SELECT " + cols + " FROM session s " + where
+                            + " ORDER BY s.last_activity_at DESC, s.id DESC LIMIT :limit")
+                    .params(params)
+                    .query((rs, n) -> map(rs))
+                    .list();
+        } catch (DataAccessException e) {
+            throw TraceFilters.searchFailure(e);
         }
-        String cols = Arrays.stream(COLS.split(", ")).map(c -> "s." + c).collect(Collectors.joining(", "));
-        return jdbc.sql("SELECT " + cols + " FROM session s " + where
-                        + " ORDER BY s.last_activity_at DESC, s.id DESC LIMIT :limit")
-                .params(params)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     private static SessionRow map(ResultSet rs) throws SQLException {
