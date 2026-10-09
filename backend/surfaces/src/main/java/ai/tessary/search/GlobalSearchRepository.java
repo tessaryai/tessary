@@ -64,7 +64,8 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Relevance is the composite {@code ts_rank(...) + word_similarity(:q, name) * 0.3}:
  * an exact FTS hit always outranks a pure-trigram one, since the trigram term is capped at
  * 0.3 while a genuine full-text match contributes a positive {@code ts_rank} on top of
- * its own (typically high) word similarity.
+ * its own (typically high) word similarity. The full-text leg ranks at most {@value #PAYLOAD_CANDIDATE_LIMIT}
+ * matching payloads, because {@code ts_rank} re-parses each one.
  *
  * <p>This is a pure READ surface — it never writes to any store.
  */
@@ -80,6 +81,14 @@ public class GlobalSearchRepository {
      * index.
      */
     static final double TRIGRAM_THRESHOLD = 0.4;
+
+    /**
+     * How many matching payloads the full-text leg ranks. {@code ts_rank} cannot read the index: it re-parses each
+     * payload, at about 0.1 to 0.6 ms a payload, so ranking every match of a word like {@code content} (a key in
+     * every chat message) took 17.7 s on 31,000 spans. 200 bounds a broad word near 100 ms. A broad word therefore
+     * ranks the first 200 matches the scan finds, not the best 200 of all of them.
+     */
+    static final int PAYLOAD_CANDIDATE_LIMIT = 200;
 
     private final JdbcClient jdbc;
 
@@ -143,16 +152,22 @@ public class GlobalSearchRepository {
         return hits.size() > limit ? List.copyOf(hits.subList(0, limit)) : List.copyOf(hits);
     }
 
-    /** The full-text leg: {@code span_payload} matched through {@code ix_span_payload_project_fts}. */
+    /**
+     * The full-text leg: {@code span_payload} matched through {@code ix_span_payload_project_fts}, and only the first
+     * {@link #PAYLOAD_CANDIDATE_LIMIT} matches ranked. The inner {@code LIMIT} is what bounds the cost; ranking in the
+     * same statement as the match would rank every match before the outer {@code LIMIT} applies.
+     */
     private List<SearchHit> searchSpansByPayloadText(String projectId, String query, int limit) {
         return jdbc.sql("SELECT s.trace_id, s.name, p.input,"
                         + " ts_rank(" + PAYLOAD_TSVECTOR + ", plainto_tsquery('simple', :q))"
                         + " + word_similarity(:q, coalesce(s.name, '')) * 0.3 AS score"
+                        + " FROM (SELECT p.project_id, p.trace_id, p.span_id, p.input, p.output"
                         + " FROM span_payload p"
-                        + " JOIN span s ON s.project_id = p.project_id AND s.trace_id = p.trace_id"
-                        + " AND s.id = p.span_id"
                         + " WHERE p.project_id = :pid"
                         + " AND " + PAYLOAD_TSVECTOR + " @@ plainto_tsquery('simple', :q)"
+                        + " LIMIT " + PAYLOAD_CANDIDATE_LIMIT + ") p"
+                        + " JOIN span s ON s.project_id = p.project_id AND s.trace_id = p.trace_id"
+                        + " AND s.id = p.span_id"
                         + " ORDER BY score DESC, s.trace_id ASC"
                         + " LIMIT :lim")
                 .param("pid", projectId)

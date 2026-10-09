@@ -173,6 +173,51 @@ class GlobalSearchServiceIntegrationTest {
                 "the capped to_tsvector predicate must be served by ix_span_payload_project_fts:\n" + plan);
     }
 
+    /**
+     * A word in nearly every payload ({@code content} is a key of every chat message) must not rank every payload: each
+     * {@code ts_rank} re-parses a whole payload, and ranking a project's every span took 17.7 s on 31,000 spans. A
+     * {@code ts_rank} shadowed ahead of {@code pg_catalog} counts the payloads the search ranks.
+     */
+    @Test
+    @Transactional
+    void aBroadWordRanksOnlyTheCandidateCapNotEveryMatchingPayload() {
+        String pid = TenantFixture.bootstrap(tenants, "search-broad").project().id();
+        int matching = GlobalSearchRepository.PAYLOAD_CANDIDATE_LIMIT + 50;
+        jdbc.sql("""
+                        INSERT INTO trace (project_id, id, started_at, event_ts)
+                        SELECT :pid, 'broad-' || g, now(), now() FROM generate_series(1, :n) g
+                        """).param("pid", pid).param("n", matching).update();
+        jdbc.sql("""
+                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+                        SELECT :pid, 'broad-' || g, 'broad-' || g, 'llm', 'chat', now(), now()
+                        FROM generate_series(1, :n) g
+                        """).param("pid", pid).param("n", matching).update();
+        jdbc.sql("""
+                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+                        SELECT :pid, 'broad-' || g, 'broad-' || g,
+                               '[{"role":"user","content":"order ' || g || '"}]', 'ok', now()
+                        FROM generate_series(1, :n) g
+                        """).param("pid", pid).param("n", matching).update();
+        jdbc.sql("CREATE SCHEMA rank_probe").update();
+        jdbc.sql("""
+                        CREATE FUNCTION rank_probe.ts_rank(v tsvector, q tsquery) RETURNS real VOLATILE LANGUAGE plpgsql AS $$
+                        BEGIN
+                          PERFORM set_config('rank_probe.calls',
+                              (coalesce(nullif(current_setting('rank_probe.calls', true), ''), '0')::int + 1)::text, true);
+                          RETURN pg_catalog.ts_rank(v, q);
+                        END $$
+                        """).update();
+        jdbc.sql("SET LOCAL search_path = rank_probe, pg_catalog, public").update();
+
+        List<SearchHit> hits = service.search(pid, "content");
+
+        String ranked = jdbc.sql("SELECT current_setting('rank_probe.calls', true)")
+                .query(String.class)
+                .single();
+        assertEquals(String.valueOf(GlobalSearchRepository.PAYLOAD_CANDIDATE_LIMIT), ranked, "payloads ranked");
+        assertEquals(GlobalSearchService.PER_ENTITY_LIMIT, hits.size(), "a broad word still fills the palette");
+    }
+
     /** The same, for the span-name trigram leg (ix_span_name_trgm, migration 0081). */
     @Test
     @Transactional
