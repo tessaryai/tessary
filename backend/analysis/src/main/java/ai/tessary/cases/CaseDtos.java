@@ -244,7 +244,8 @@ public final class CaseDtos {
      */
     public record CaseFindingView(
             String id,
-            @Nullable String title,
+            /** The finding's sentence, as its own page names it ({@code FindingTitle}). */
+            String title,
             @JsonProperty("window_opened_at") String windowOpenedAt,
             @JsonProperty("window_closed_at") String windowClosedAt,
             @JsonProperty("created_at") String createdAt) {}

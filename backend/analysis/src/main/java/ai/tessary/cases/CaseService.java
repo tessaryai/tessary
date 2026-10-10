@@ -20,6 +20,7 @@ import ai.tessary.classifier.finding.BehaviorTriageVerdict;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.frustration.FrustrationRateRepository;
 import ai.tessary.classifier.frustration.FrustrationSessionClearer;
@@ -321,7 +322,7 @@ public class CaseService {
                         opened = f.onsetAt();
                         closed = f.lastSeenAt();
                     }
-                    return new CaseFindingView(f.id(), f.title(), opened, closed, f.createdAt());
+                    return new CaseFindingView(f.id(), FindingTitle.of(f), opened, closed, f.createdAt());
                 })
                 .toList();
     }
