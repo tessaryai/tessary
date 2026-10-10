@@ -3459,10 +3459,7 @@
             "type" : "string"
           },
           "title" : {
-            "type" : [
-              "string",
-              "null"
-            ]
+            "type" : "string"
           },
           "window_closed_at" : {
             "type" : "string"

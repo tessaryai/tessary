@@ -2789,7 +2789,7 @@ export interface components {
         CaseFindingView: {
             created_at: string;
             id: string;
-            title: string | null;
+            title: string;
             window_closed_at: string;
             window_opened_at: string;
         };

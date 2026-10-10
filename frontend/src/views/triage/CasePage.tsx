@@ -504,8 +504,8 @@ function CaseFindings({ findings, basePath }: { findings: CaseDetail["findings"]
               <TD className="font-mono text-muted text-small">
                 {stamp(f.window_opened_at)} → {stamp(f.window_closed_at)}
               </TD>
-              <TD className="truncate" style={{ maxWidth: 0 }} title={f.title ?? undefined}>
-                {f.title ?? f.id}
+              <TD className="truncate" style={{ maxWidth: 0 }} title={f.title}>
+                {f.title}
               </TD>
               <TD className="text-right text-small">
                 <Link to={findingPath(f.id)} className="text-link hover:text-link-hover transition-colors">

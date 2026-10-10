@@ -423,6 +423,11 @@ class CaseServiceTest {
         assertEquals(List.of(first, second), listed.stream().map(f -> f.id()).toList());
         assertEquals("2026-07-01T10:00:00Z", listed.get(0).windowOpenedAt());
         assertEquals("2026-07-03T10:00:00Z", listed.get(1).windowClosedAt());
+        // Each row is named from its own window's numbers, as the finding page names it: the stored title
+        // column is empty for a drift finding, so a row read from it showed the bare id.
+        assertEquals(
+                List.of("summarize turns are 1.60× slower", "summarize turns are 1.30× slower"),
+                listed.stream().map(f -> f.title()).toList());
 
         // How big draws the window that moved furthest, not the newest: 1.6x beats 1.3x.
         var detail = service.detail(p.id(), row.id());
