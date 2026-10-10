@@ -401,11 +401,6 @@ export type VitalsGroup = S["Group"];
  */
 export type Case = S["CaseView"];
 export type CaseDetail = S["CaseDetailView"];
-/**
- * What a person said a resolved frustration case turned out to be. Both restart the call site's
- * learned rate; `false_alarm` also clears the conversations the case cites. No other case takes one.
- */
-export type CaseDisposition = "fixed" | "false_alarm";
 export type TriageView = S["TriageView"];
 
 // ---- Notifications (alert_rule / alert_channel): how a case reaches a human ----

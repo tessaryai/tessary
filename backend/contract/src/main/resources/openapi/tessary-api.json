@@ -3230,6 +3230,12 @@
             },
             "type" : "array"
           },
+          "findings" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CaseFindingView"
+            },
+            "type" : "array"
+          },
           "frustration" : {
             "anyOf" : [
               {
@@ -3324,6 +3330,12 @@
                 "type" : "null"
               }
             ]
+          },
+          "worst_finding_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -3332,6 +3344,7 @@
           "detector_available",
           "events",
           "exemplars",
+          "findings",
           "frustration",
           "groundedness",
           "latest_finding_id",
@@ -3342,7 +3355,8 @@
           "rca_report_id",
           "ruling",
           "secret_leak",
-          "tool_error"
+          "tool_error",
+          "worst_finding_id"
         ],
         "type" : "object"
       },
@@ -3433,6 +3447,36 @@
           "role",
           "started_at",
           "trace_id"
+        ],
+        "type" : "object"
+      },
+      "CaseFindingView" : {
+        "properties" : {
+          "created_at" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "window_closed_at" : {
+            "type" : "string"
+          },
+          "window_opened_at" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "created_at",
+          "id",
+          "title",
+          "window_closed_at",
+          "window_opened_at"
         ],
         "type" : "object"
       },
@@ -3618,18 +3662,6 @@
           "metric" : {
             "type" : "string"
           },
-          "muted_at" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "muted_by" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
           "onset_at" : {
             "type" : "string"
           },
@@ -3704,8 +3736,6 @@
           "latest_finding_id",
           "locked_at",
           "metric",
-          "muted_at",
-          "muted_by",
           "onset_at",
           "opened_at",
           "rca_verdict",
@@ -8741,12 +8771,12 @@
           "reason" : {
             "maxLength" : 500,
             "minLength" : 0,
-            "type" : "string"
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
-        "required" : [
-          "reason"
-        ],
         "type" : "object"
       },
       "ResponseMeta" : {
@@ -11633,12 +11663,6 @@
             },
             "type" : "array"
           },
-          "muted" : {
-            "items" : {
-              "$ref" : "#/components/schemas/CaseView"
-            },
-            "type" : "array"
-          },
           "recently_resolved" : {
             "items" : {
               "$ref" : "#/components/schemas/CaseView"
@@ -11651,7 +11675,6 @@
         },
         "required" : [
           "cases",
-          "muted",
           "recently_resolved",
           "watching"
         ],
@@ -14267,60 +14290,6 @@
         ]
       }
     },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/mute" : {
-      "post" : {
-        "operationId" : "CaseController_mute",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseCaseView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "case-controller"
-        ]
-      }
-    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/rca" : {
       "post" : {
         "operationId" : "CaseController_runRca",
@@ -14422,60 +14391,6 @@
           },
           "required" : true
         },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseCaseView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "case-controller"
-        ]
-      }
-    },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/unmute" : {
-      "post" : {
-        "operationId" : "CaseController_unmute",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {

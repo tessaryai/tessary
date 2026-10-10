@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * The case surface — Triage's list and one case's page.
  *
- * <p>Lifecycle is deliberately small: open → resolved, plus muted. There is no claim, no owner and no
+ * <p>Lifecycle is deliberately small: open → resolved. There is no claim, no owner and no
  * "on it" state, so there is no endpoint for one. Multiple people can act on any case; the product
  * does not model who is holding it.
  */
@@ -39,8 +39,8 @@ public class CaseController {
         this.resolver = resolver;
     }
 
-    /** Triage: open cases worst first, plus the muted set, the week's closures and the coverage the
-     *  all-clear state cites. */
+    /** Triage: open cases worst first, plus the week's closures and the coverage the all-clear state
+     *  cites. */
     @GetMapping
     public ApiResponse<TriageView> triage(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
@@ -107,25 +107,5 @@ public class CaseController {
             @PathVariable String id) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(service.absorb(r.project().id(), id, ctx.userEmail()));
-    }
-
-    @PostMapping("/{id}/mute")
-    public ApiResponse<CaseView> mute(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.mute(r.project().id(), id, ctx.userEmail()));
-    }
-
-    @PostMapping("/{id}/unmute")
-    public ApiResponse<CaseView> unmute(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.unmute(r.project().id(), id, ctx.userEmail()));
     }
 }

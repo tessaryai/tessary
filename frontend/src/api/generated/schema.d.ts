@@ -500,22 +500,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/mute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["CaseController_mute"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/rca": {
         parameters: {
             query?: never;
@@ -542,22 +526,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["CaseController_resolve"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/unmute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["CaseController_unmute"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2784,6 +2752,7 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
+            findings: components["schemas"]["CaseFindingView"][];
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
@@ -2795,6 +2764,7 @@ export interface components {
             ruling: components["schemas"]["CaseRulingView"] | null;
             secret_leak: components["schemas"]["SecretLeakDetail"] | null;
             tool_error: components["schemas"]["RateDetail"] | null;
+            worst_finding_id: string | null;
         };
         CaseEventView: {
             actor: string | null;
@@ -2815,6 +2785,13 @@ export interface components {
             role: string;
             started_at: string | null;
             trace_id: string;
+        };
+        CaseFindingView: {
+            created_at: string;
+            id: string;
+            title: string | null;
+            window_closed_at: string;
+            window_opened_at: string;
         };
         CaseRulingView: {
             action: string | null;
@@ -2857,8 +2834,6 @@ export interface components {
             latest_finding_id: string | null;
             locked_at: string | null;
             metric: string;
-            muted_at: string | null;
-            muted_by: string | null;
             onset_at: string;
             opened_at: string;
             rca_verdict: string | null;
@@ -4039,7 +4014,7 @@ export interface components {
         };
         ResolveCaseRequest: {
             disposition?: string | null;
-            reason: string;
+            reason?: string | null;
         };
         ResponseMeta: {
             error?: components["schemas"]["ErrorBody"] | null;
@@ -4744,7 +4719,6 @@ export interface components {
         };
         TriageView: {
             cases: components["schemas"]["CaseView"][];
-            muted: components["schemas"]["CaseView"][];
             recently_resolved: components["schemas"]["CaseView"][];
             watching: components["schemas"]["WatchingView"];
         };
@@ -6017,32 +5991,6 @@ export interface operations {
             };
         };
     };
-    CaseController_mute: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseCaseView"];
-                };
-            };
-        };
-    };
     CaseController_runRca: {
         parameters: {
             query: {
@@ -6087,32 +6035,6 @@ export interface operations {
                 "application/json": components["schemas"]["ResolveCaseRequest"];
             };
         };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseCaseView"];
-                };
-            };
-        };
-    };
-    CaseController_unmute: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

@@ -37,8 +37,6 @@ public record CaseEventRow(
         public static final String RCA_COMPLETED = "rca_completed";
 
         public static final String RESOLVED = "resolved";
-        public static final String MUTED = "muted";
-        public static final String UNMUTED = "unmuted";
 
         /** Ruled legitimate, and the detector's reference moved to include it — see
          *  {@link CaseRow.Resolution#ABSORBED} for why that is not the same act as resolving. */

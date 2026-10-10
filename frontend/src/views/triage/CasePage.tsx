@@ -41,8 +41,6 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CaseDetail,
-  CaseDisposition,
-  EvidenceSpan,
   FrustrationDetail,
   GroundednessDetail,
   RcaCause,
@@ -51,7 +49,7 @@ import type {
 import { ApiError } from "../../api/types";
 import { useTenant } from "../../tenant/TenantContext";
 import { useCapabilities } from "../../capabilities/useCapabilities";
-import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, TableSkeleton, cn } from "../../ui";
+import { Button, Card, ErrorNote, Modal, PageHeader, StatusPill, Table, TableSkeleton, TBody, TD, TH, THead, TR } from "../../ui";
 import { rcaRunning, shiftKind, shownAsCause, RCA_VERDICT_LABEL, type CauseKind } from "../rcaLabels";
 import { CauseCard } from "../components/CauseCard";
 import { RateChart, RatePins } from "../classifiers/rateStory";
@@ -65,9 +63,7 @@ import { FlaggedAnswers } from "../classifiers/FlaggedAnswers";
 import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
-import { formatDuration } from "../traces/detail-data";
 import { traceLinker } from "../traceLinker";
-import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
 import { stamp } from "../classifiers/shared";
 
 export function CasePage() {
@@ -103,7 +99,7 @@ export function CasePage() {
   const { canPrompt: canPromptRepo } = useRepoPrompt();
   const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
-  const [resolveOpen, setResolveOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   // Which cause's conversations the list shows: "all", or a cause's index in the report.
   const [causeFilter, setCauseFilter] = useState("all");
   const [absorbOpen, setAbsorbOpen] = useState(false);
@@ -113,17 +109,12 @@ export function CasePage() {
     void qc.invalidateQueries({ queryKey: ["cases", api.base] });
   };
 
-  const resolveM = useMutation({
-    mutationFn: ({ reason, disposition }: { reason: string; disposition?: CaseDisposition }) =>
-      api.resolveCase(c?.id ?? "", reason, disposition),
+  const closeM = useMutation({
+    mutationFn: () => api.closeCase(c?.id ?? ""),
     onSuccess: () => {
-      setResolveOpen(false);
+      setCloseOpen(false);
       invalidate();
     },
-  });
-  const muteM = useMutation({
-    mutationFn: () => (c?.state === "muted" ? api.unmuteCase(c.id) : api.muteCase(c?.id ?? "")),
-    onSuccess: invalidate,
   });
   const absorbM = useMutation({
     mutationFn: () => api.absorbCase(c?.id ?? ""),
@@ -177,7 +168,6 @@ export function CasePage() {
   const live = c.state !== "resolved";
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
-  const ranked = frustration != null || groundedness != null;
   const frustrationCauses =
     frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes : [];
   const groundednessCauses =
@@ -191,7 +181,16 @@ export function CasePage() {
     detail.metric?.windowOpenedAt && detail.metric.windowClosedAt
       ? { openedAt: detail.metric.windowOpenedAt, closedAt: detail.metric.windowClosedAt }
       : null;
+  // A case that gathered several findings spans all of them: from the first window's open to the newest
+  // window's close. Every block below draws only the newest finding, so without this the header would
+  // jump forward each time a window joined.
+  const firstOpenedAt =
+    detail.findings.length > 1
+      ? detail.findings.reduce((a, f) => (Date.parse(f.window_opened_at) < Date.parse(a) ? f.window_opened_at : a),
+          detail.findings[0].window_opened_at)
+      : null;
   const openedAt =
+    firstOpenedAt ??
     detail.tool_error?.onsetAt ??
     detail.malformed_output?.rate?.onsetAt ??
     detail.secret_leak?.firstAt ??
@@ -287,24 +286,14 @@ export function CasePage() {
               <span>analyzed {timeAgo(report.completed_at ?? report.created_at)}</span>
             </>
           )}
-          {/* The way out, for the reader who wants the ruling's prose and its check scripts.
-              Deliberately quiet: it is an escape hatch, not a step in the story. */}
-          {detail.latest_finding_id && (
-            <>
-              <Dot />
-              <Link
-                to={`${basePath}/classifiers/findings/${encodeURIComponent(detail.latest_finding_id)}`}
-                className="text-link hover:text-link-hover transition-colors">
-                Finding
-              </Link>
-            </>
-          )}
         </div>
 
-        {c.state === "resolved" && c.resolution_reason && (
+        {c.state === "resolved" && (
           <p className="text-subtle mt-2.5 mx-0 mb-0 text-small">
-            Resolved{dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
-            {c.resolved_by ? ` by ${c.resolved_by}` : ""}: {c.resolution_reason}
+            {c.resolution === "absorbed" ? "Absorbed" : "Closed"}
+            {dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
+            {c.resolved_by ? ` by ${c.resolved_by}` : ""}
+            {c.resolution !== "absorbed" && c.resolution_reason ? `: ${c.resolution_reason}` : ""}
           </p>
         )}
 
@@ -327,6 +316,20 @@ export function CasePage() {
         <Why
           report={report}
           analysing={analysing}
+          actions={
+            live && detail.detector_available ? (
+              <>
+                {detail.absorb_available && (
+                  <Button size="sm" variant="secondary" onClick={() => setAbsorbOpen(true)}>
+                    Absorb
+                  </Button>
+                )}
+                <Button size="sm" variant="secondary" onClick={() => setCloseOpen(true)}>
+                  Close
+                </Button>
+              </>
+            ) : undefined
+          }
           kind={causeKind(detail)}
           basePath={basePath}
           show={
@@ -393,78 +396,44 @@ export function CasePage() {
           onFilter={setCauseFilter}
           basePath={basePath}
         />
-      ) : (
-        <Failures detail={detail} basePath={basePath} />
-      )}
+      ) : null}
+
+      {/* ----------------------------------------------------- every window */}
+      {detail.findings.length > 0 && <CaseFindings findings={detail.findings} basePath={basePath} />}
 
       <Activity events={detail.events} />
 
-      {/* --------------------------------------------------------- what now */}
-      {/* The end of the story is what to do about it, so the verbs that end a case live at the
-          end of the page. Resolving or absorbing a case nobody has explained yet is a decision
-          taken without the fact that would inform it, so neither appears until there is a report;
-          Mute is not a claim about the shift and is always available. */}
-      {live && detail.detector_available && (
-        <footer className="mt-8.5 pt-3.75" style={{ borderTop: "1px solid var(--color-border)" }}>
-          <div className="flex flex-wrap items-center gap-3">
-            {analysed && (
-              <span className="text-subtle text-small">
-                Close this case
-              </span>
-            )}
-            {!analysed && ranked && (
-              <span className="text-subtle text-small">Run RCA before resolving this case.</span>
-            )}
-            <div className="ml-auto flex items-center gap-2">
-              {analysed && (
-                <Button size="sm" variant="ghost" onClick={() => setResolveOpen(true)}>
-                  {ranked ? "Resolve case" : "Resolve"}
-                </Button>
-              )}
-              {analysed && detail.absorb_available && (
-                <Button size="sm" variant="ghost" onClick={() => setAbsorbOpen(true)}>
-                  Absorb as legitimate
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => muteM.mutate()} disabled={muteM.isPending}>
-                {c.state === "muted" ? (ranked ? "Unmute case" : "Unmute") : ranked ? "Mute case" : "Mute"}
-              </Button>
-            </div>
-          </div>
-          {muteM.isError && <ErrorNote error={muteM.error} />}
-        </footer>
-      )}
-
-      <Modal open={resolveOpen} onClose={() => setResolveOpen(false)} title="Resolve this case?">
-        {/* Mounted only while open, so a reopened dialog starts from an empty reason. */}
-        {resolveOpen && (
-          <ResolveCaseForm
-            detector={c.detector}
-            pending={resolveM.isPending}
-            error={resolveM.isError ? resolveM.error : null}
-            onCancel={() => setResolveOpen(false)}
-            onResolve={(reason, disposition) => resolveM.mutate({ reason, disposition })}
-          />
-        )}
+      {/* Close and Absorb sit on the Why line, so they only appear once there is an analysis to act on. */}
+      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Close this case?">
+        <p className="text-muted m-0 text-body">
+          The evidence in this case's findings is left out when the baseline is set.
+        </p>
+        {closeM.isError && <ErrorNote error={closeM.error} />}
+        <div className="flex justify-end gap-2 mt-4.5">
+          <Button variant="ghost" size="sm" onClick={() => setCloseOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            aria-label="Close case"
+            onClick={() => closeM.mutate()}
+            disabled={closeM.isPending}
+          >
+            {closeM.isPending ? "Closing…" : "Close"}
+          </Button>
+        </div>
       </Modal>
 
-      <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb as legitimate?">
-        <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
-          This tells the classifier that where things sit now is correct. It moves the reference this is
-          measured against, so the same level stops firing and only a further move opens a new case.
-        </p>
-        <p className="text-subtle mt-0 mx-0 mb-3.5 text-small">
-          Resolving instead closes this case and leaves the bar where it is, so an unchanged population
-          opens another case within a day. Absorbing ends the argument rather than this instance of it.
-          It does not silence the classifier: a further shift still fires.
-        </p>
+      <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb this level?">
+        <p className="text-muted m-0 text-body">The evidence in this case's findings counts toward the baseline.</p>
         {absorbM.isError && <ErrorNote error={absorbM.error} />}
         <div className="flex justify-end gap-2 mt-4.5">
           <Button variant="ghost" size="sm" onClick={() => setAbsorbOpen(false)}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => absorbM.mutate()} disabled={absorbM.isPending}>
-            {absorbM.isPending ? "Absorbing…" : "Absorb as legitimate"}
+          <Button size="sm" variant="primary" onClick={() => absorbM.mutate()} disabled={absorbM.isPending}>
+            {absorbM.isPending ? "Absorbing…" : "Absorb"}
           </Button>
         </div>
       </Modal>
@@ -476,7 +445,24 @@ export function CasePage() {
 
 /* ------------------------------------------------------------------ pieces */
 
-function Block({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
+/** How a closed case's disposition reads in its closing line, or nothing for a case without one. */
+function dispositionPhrase(disposition: string | null | undefined): string {
+  if (disposition === "fixed") return " as fixed";
+  if (disposition === "false_alarm") return " as a false alarm";
+  return "";
+}
+
+function Block({
+  label,
+  note,
+  actions,
+  children,
+}: {
+  label: string;
+  note?: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mt-8.5">
       <div className="flex items-baseline gap-2.5 mb-3.5">
@@ -488,9 +474,49 @@ function Block({ label, note, children }: { label: string; note?: string; childr
             {note}
           </span>
         )}
+        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * Every window this case gathered, oldest first, each opening its own finding. It stands where the failures used
+ * to: the figure above draws one window, so this is where the others stay reachable, and each finding page has
+ * that window's evidence.
+ */
+function CaseFindings({ findings, basePath }: { findings: CaseDetail["findings"]; basePath: string }) {
+  const findingPath = (id: string) => `${basePath}/classifiers/findings/${encodeURIComponent(id)}`;
+  return (
+    <Block label="Findings">
+      <Table>
+        <THead>
+          <TR>
+            <TH style={{ width: 280 }}>Window</TH>
+            <TH>Finding</TH>
+            <TH style={{ width: 120 }} />
+          </TR>
+        </THead>
+        <TBody>
+          {findings.map((f) => (
+            <TR key={f.id}>
+              <TD className="font-mono text-muted text-small">
+                {stamp(f.window_opened_at)} → {stamp(f.window_closed_at)}
+              </TD>
+              <TD className="truncate" style={{ maxWidth: 0 }} title={f.title ?? undefined}>
+                {f.title ?? f.id}
+              </TD>
+              <TD className="text-right text-small">
+                <Link to={findingPath(f.id)} className="text-link hover:text-link-hover transition-colors">
+                  Open finding
+                </Link>
+              </TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </Block>
   );
 }
 
@@ -526,15 +552,19 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
   const shift = detail.metric;
   const secretLeak = detail.secret_leak;
   const malformedOutput = detail.malformed_output;
+  // A case holding several windows draws the one that moved furthest, and says which.
+  const worst =
+    detail.findings.length > 1 ? detail.findings.find((f) => f.id === detail.worst_finding_id) : undefined;
+  const worstNote = worst ? ` · worst of ${detail.findings.length} windows, ${stamp(worst.window_opened_at)}` : "";
 
   return (
     <Block
       label="How big"
       note={
         rate
-          ? "share of calls that failed"
+          ? `share of calls that failed${worstNote}`
           : shift
-            ? "median to 95th percentile, log scale"
+            ? `median to 95th percentile, log scale${worstNote}`
             : secretLeak
               ? "one dot per leaking output, one lane per key"
               : malformedOutput
@@ -606,12 +636,15 @@ function affectedUnit(kind: CauseKind): [string, string] {
 function Why({
   report,
   analysing,
+  actions,
   kind,
   basePath,
   show,
 }: {
   report: RcaReport | undefined;
   analysing: boolean;
+  /** Close and Absorb. Shown only beside a finished analysis, never while one runs. */
+  actions?: React.ReactNode;
   kind: CauseKind;
   basePath: string;
   /** How a frustration or groundedness cause filters the list below; the index is the cause's stored one. */
@@ -641,7 +674,7 @@ function Why({
   const summary = report.summary ?? (report.verdict ? RCA_VERDICT_LABEL[report.verdict] : null);
 
   return (
-    <Block label="Why" note={causes.length > 0 ? undefined : "No cause proven"}>
+    <Block label="Why" note={causes.length > 0 ? undefined : "No cause proven"} actions={actions}>
       <div className="flex flex-col gap-3">
         {causes.length === 0 && summary && (
           <p className="m-0 text-body text-fg" style={{ maxWidth: 700 }}>
@@ -756,147 +789,6 @@ function assessmentColour(assessment: string | null): string {
     default:
       return "var(--color-subtle)";
   }
-}
-
-/**
- * The failures themselves — the actual error spans, a page at a time.
- *
- * <p>Spans rather than traces or signatures. A signature summary answers "which failure took over",
- * which is a question about the population; a reader here is asking "what actually broke", which is
- * answered by the error a call returned. `EvidenceSpanView` carries `errorType` beside the span's
- * own name and clock, so this is the failure itself rather than a description of it.
- *
- * <p>Paged off the finding's evidence rather than the case's exemplars: the case caps at five refs
- * per role for the header's sake, and a tool-error cause can cite tens of thousands. `nextCursor`
- * is what makes "more if they want" real instead of a truncation nobody was told about.
- */
-function Failures({ detail, basePath }: { detail: CaseDetail; basePath: string }) {
-  const { api } = useTenant();
-  const rate = detail.tool_error;
-  const findingId = detail.latest_finding_id;
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [rows, setRows] = useState<EvidenceSpan[]>([]);
-
-  const evidenceQ = useQuery({
-    queryKey: ["case-evidence", api.base, findingId, cursor],
-    queryFn: () => api.getBehaviorFindingEvidence(findingId ?? "", { role: "witness", limit: 8, cursor }),
-    enabled: findingId != null,
-  });
-
-  // Accumulate pages rather than replace: "show more" grows the list a reader is already reading.
-  const page = evidenceQ.data;
-  const seen = rows.length > 0 ? rows : (page?.rows ?? []);
-  const all = cursor && page ? [...rows, ...page.rows] : seen;
-
-  if (!findingId) return null;
-
-  const total = rate?.failuresCur ?? page?.recordedCounts?.witness;
-
-  return (
-    <Block label="The failures" note={total != null ? `${total.toLocaleString()} in this window` : undefined}>
-      {evidenceQ.isLoading && all.length === 0 ? (
-        <TableSkeleton rows={4} cols={3} />
-      ) : all.length === 0 ? (
-        <p className="text-subtle m-0 text-body" style={{ maxWidth: 560 }}>
-          The spans behind this finding have aged out of retention. The claim stands on the counts it
-          was measured with; the individual calls are gone.
-        </p>
-      ) : (
-        <>
-          <div className="rounded-card border border-border overflow-hidden">
-            {/* Column widths are duplicated between this row and ErrorSpanRow rather than shared
-                through a grid: the rows are anchors, and wrapping them in a grid to inherit tracks
-                would put the click target on the cell instead of the row. */}
-            <div
-              className="flex items-baseline border-b border-border bg-raised text-column-header text-muted gap-3.5 py-1.75 px-3">
-              <span className="shrink-0" style={{ width: 88 }}>
-                Time
-              </span>
-              <span className="min-w-0 flex-1">Input</span>
-              <span className="min-w-0 flex-1">Output</span>
-              <span className="shrink-0" style={{ width: 118 }}>
-                Call site
-              </span>
-              <span className="shrink-0 text-right" style={{ width: 68 }}>
-                Duration
-              </span>
-            </div>
-            <ul className="m-0 p-0" style={{ listStyle: "none", maxHeight: 300, overflowY: "auto" }}>
-              {all.map((s, i) => (
-                <ErrorSpanRow key={`${s.traceId}-${s.spanId}-${i}`} span={s} basePath={basePath} />
-              ))}
-            </ul>
-          </div>
-          {page?.nextCursor && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setRows(all);
-                setCursor(page.nextCursor ?? undefined);
-              }}
-      className="mt-2.5">
-              {evidenceQ.isFetching ? "Loading…" : "Show more"}
-            </Button>
-          )}
-        </>
-      )}
-    </Block>
-  );
-}
-
-/** One failing call: when, what it was, and what it returned. */
-function ErrorSpanRow({ span, basePath }: { span: EvidenceSpan; basePath: string }) {
-  const to = span.traceId != null ? traceLinker(basePath)(span.traceId, span.spanId) : null;
-
-  const body = (
-    <>
-      <span className="font-mono text-subtle shrink-0 text-label" style={{ width: 88 }}>
-        {span.startedAt ? stamp(span.startedAt) : "—"}
-      </span>
-      {/* What the call was given and what came back, truncated server-side. One line each: enough
-          to recognise the call and read the error it returned, and the row opens the trace for the
-          rest. An aged-out payload renders empty rather than as a dash pretending to be a value. */}
-      <span className="min-w-0 flex-1 truncate font-mono text-subtle text-label">
-        {span.inputPreview ?? ""}
-      </span>
-      <span
-        className={cn("min-w-0 flex-1 truncate font-mono text-label", span.errorType ? "text-error" : "text-muted")}
-        
-      >
-        {span.outputPreview ?? span.errorType ?? ""}
-      </span>
-      <span className="shrink-0 truncate text-muted text-small" style={{ width: 118 }}>
-        {displayCallSite(span.callSiteId) ?? ""}
-      </span>
-      {/* Last, and the only figure on the row. These span 25ms to seventeen minutes: one end is a
-          call refused on arrival, the other one that hung until something gave up. */}
-      <span
-        className="font-mono text-fg shrink-0 text-right text-small"
-        style={{ width: 68, fontVariantNumeric: "tabular-nums" }}
-      >
-        {formatDuration(span.latencyMs)}
-      </span>
-    </>
-  );
-
-  return (
-    <li className="border-b border-border last:border-b-0">
-      {to ? (
-        <Link
-          to={to}
-          className="flex items-baseline hover:bg-hover transition-colors gap-3.5 py-2 px-3"
-          style={{ transitionDuration: "var(--duration-micro)" }}
-        >
-          {body}
-        </Link>
-      ) : (
-        <div className="flex items-baseline gap-3.5 py-2 px-3">
-          {body}
-        </div>
-      )}
-    </li>
-  );
 }
 
 /**

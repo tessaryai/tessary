@@ -3,6 +3,7 @@ package ai.tessary.cases;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseEventView;
+import ai.tessary.cases.CaseDtos.CaseFindingView;
 import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
@@ -47,6 +48,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,12 +58,14 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Read and lifecycle for cases: Triage's list, the case page's assembly, and resolve / mute. */
+/** Read and lifecycle for cases: Triage's list, the case page's assembly, and close / absorb. */
 @Service
 public class CaseService {
 
     /** How far back Triage's quiet history line reaches. */
     private static final Duration HISTORY_WINDOW = Duration.ofDays(7);
+
+    private static final String CLOSED_NOTE = "Closed.";
 
     /** How far back Triage's all-clear line looks to prove that traffic is arriving at all. */
     private static final Duration COVERAGE_WINDOW = Duration.ofDays(1);
@@ -168,16 +172,13 @@ public class CaseService {
         // turned out to be is the least useful row in the history.
         Map<String, CaseLead> leads = leadsFor(projectId, live, closed);
 
-        List<CaseView> open = new ArrayList<>();
-        List<CaseView> muted = new ArrayList<>();
-        for (CaseRow row : live) {
-            (CaseRow.State.MUTED.equals(row.state()) ? muted : open).add(CaseView.of(row, lead(leads, row)));
-        }
+        List<CaseView> open =
+                live.stream().map(row -> CaseView.of(row, lead(leads, row))).toList();
         List<CaseView> resolved =
                 closed.stream().map(row -> CaseView.of(row, lead(leads, row))).toList();
         // The empty-state counts are only rendered when there is nothing in the queue, so a project
         // with open cases never pays for them.
-        return new TriageView(open, muted, resolved, watching(projectId, open.isEmpty()));
+        return new TriageView(open, resolved, watching(projectId, open.isEmpty()));
     }
 
     /** The finished-RCA verdicts behind every case in {@code batches}, in one query — keyed by CASE id
@@ -272,6 +273,10 @@ public class CaseService {
         boolean detectorAvailable = detectorAvailable(projectId, row);
         RcaReportRow report = latestRcaReport(projectId, finding);
         RcaReportView rca = inlinedRcaReport(report);
+        List<FindingRow> held = findings.listByCase(projectId, row.id());
+        FindingRow worst = worstWindow(held, finding);
+        ShiftDetail metric = shiftDetail(worst);
+        RateDetail toolError = rateDetail(worst);
         return new CaseDetailView(
                 // The report is already in hand, so the caption comes off it directly: no second lookup,
                 // and the header cannot disagree with the analysis rendered below it.
@@ -280,14 +285,16 @@ public class CaseService {
                         .map(CaseEventView::of)
                         .toList(),
                 finding == null ? null : finding.id(),
+                caseFindings(held),
+                (metric != null || toolError != null) && worst != null ? worst.id() : null,
                 ruling(finding),
                 exemplars.forCase(
                         projectId,
                         finding == null ? List.of() : findingEvidence.listByFinding(projectId, finding.id())),
                 report == null ? null : report.id(),
                 rca,
-                shiftDetail(finding),
-                rateDetail(finding),
+                metric,
+                toolError,
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding == null ? null : frustrationDetail.detail(finding),
@@ -295,6 +302,55 @@ public class CaseService {
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
+    }
+
+    /**
+     * The case's findings, oldest first, each with the window it measured. A drift finding's window is the
+     * detector's own; any other finding's is its onset to its last sighting.
+     */
+    private static List<CaseFindingView> caseFindings(List<FindingRow> newestFirst) {
+        List<FindingRow> all = new ArrayList<>(newestFirst);
+        Collections.reverse(all);
+        return all.stream()
+                .map(f -> {
+                    // A drift window is taken whole or not at all, as on the case page.
+                    ShiftDetail shift = shiftDetail(f);
+                    String opened = shift == null ? null : shift.windowOpenedAt();
+                    String closed = shift == null ? null : shift.windowClosedAt();
+                    if (opened == null || closed == null) {
+                        opened = f.onsetAt();
+                        closed = f.lastSeenAt();
+                    }
+                    return new CaseFindingView(f.id(), f.title(), opened, closed, f.createdAt());
+                })
+                .toList();
+    }
+
+    /**
+     * The window "How big" draws when a case holds several: the one that moved furthest from its reference — the
+     * largest ratio either way for a drift, the largest rate change for a failure rate. Taken whole, never
+     * assembled from several windows' quantiles, so the figure is one that happened against its own reference.
+     * Any other detector, or a case with one finding, draws the newest.
+     */
+    static @Nullable FindingRow worstWindow(List<FindingRow> held, @Nullable FindingRow newest) {
+        FindingRow worst = newest;
+        double worstSize = magnitude(newest);
+        for (FindingRow f : held) {
+            double size = magnitude(f);
+            if (size > worstSize) {
+                worst = f;
+                worstSize = size;
+            }
+        }
+        return worst;
+    }
+
+    private static double magnitude(@Nullable FindingRow f) {
+        ShiftDetail shift = shiftDetail(f);
+        if (shift != null && shift.ratio() > 0) return Math.abs(Math.log(shift.ratio()));
+        RateDetail rate = rateDetail(f);
+        if (rate != null) return Math.abs(rate.deltaPp());
+        return -1;
     }
 
     /**
@@ -439,8 +495,8 @@ public class CaseService {
     // ---- lifecycle ---------------------------------------------------------------------------
 
     /**
-     * Close a case with the human's one-line reason. The reason is required by the wire contract and
-     * by the table; it is the only thing that makes a closed case worth reading later.
+     * Close a case, with the human's one-line reason when they gave one. The page asks for none; the
+     * trail line and the detector resets fall back to {@link #CLOSED_NOTE} so neither reads blank.
      *
      * @param disposition only on a frustration or groundedness case ({@link CaseRow.Disposition}): {@code fixed}
      *     or {@code false_alarm}, stored on the case and in the trail line's detail. Null is allowed there too and
@@ -448,10 +504,15 @@ public class CaseService {
      */
     @Transactional
     public CaseView resolve(
-            String projectId, String id, String reason, @Nullable String actor, @Nullable String disposition) {
+            String projectId,
+            String id,
+            @Nullable String reason,
+            @Nullable String actor,
+            @Nullable String disposition) {
         CaseRow row = require(projectId, id);
         if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
-        if (reason.isBlank()) throw new TessaryException(CaseError.REASON_REQUIRED);
+        String given = reason == null || reason.isBlank() ? null : reason.strip();
+        String note = given == null ? CLOSED_NOTE : given;
         boolean frustration = CaseRow.Detector.FRUSTRATION.equals(row.detector());
         boolean groundedness = CaseRow.Detector.GROUNDEDNESS.equals(row.detector());
         if (disposition != null && !frustration && !groundedness) {
@@ -459,7 +520,7 @@ public class CaseService {
         }
 
         Instant now = Instant.now();
-        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, reason, actor, disposition, now);
+        cases.resolve(projectId, row.id(), CaseRow.Resolution.HUMAN, given, actor, disposition, now);
 
         // A frustration case restarts its call site whichever disposition closed it, and unlike tool_error it
         // re-learns the reference too: a false alarm means the old normal was learned on noise, and a fix means
@@ -469,7 +530,7 @@ public class CaseService {
         // close, in this transaction.
         String detail = null;
         if (frustration) {
-            frustrationRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            frustrationRates.states().resetAndRelearn(projectId, row.subjectId(), actor, note, now.toString());
             int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
                     ? frustrationSessions.clear(projectId, row.id(), now.toString())
                     : 0;
@@ -481,7 +542,7 @@ public class CaseService {
         // alarm both mean the normal is re-learned from here. A false alarm clears the flag on every answer the
         // case cites, so their traces stop counting as failures.
         if (groundedness) {
-            groundednessRates.states().resetAndRelearn(projectId, row.subjectId(), actor, reason, now.toString());
+            groundednessRates.states().resetAndRelearn(projectId, row.subjectId(), actor, note, now.toString());
             int cleared = CaseRow.Disposition.FALSE_ALARM.equals(disposition)
                     ? groundednessAnswers.clear(projectId, row.id(), now.toString())
                     : 0;
@@ -489,24 +550,24 @@ public class CaseService {
                     ? null
                     : "{\"disposition\":\"" + disposition + "\",\"answers_cleared\":" + cleared + "}";
         }
-        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, reason, detail, now);
+        events.append(projectId, row.id(), CaseEventRow.Kind.RESOLVED, actor, note, detail, now);
 
         // A tool-error case closes on a human saying "dealt with", and the accumulator behind it has to
         // hear that. It is no longer capped, so a serious outage leaves it high enough that draining at
         // the healthy rate would take millions of calls, so the case would reopen on the next sweep and go
         // on reopening for weeks after the fix. Clearing it is the claim "this is over": if it is not,
         // evidence rebuilds from zero and raises a NEW case with an honest new onset, rather than
-        // resurrecting this one off evidence from before the fix. The reason the wire contract already
-        // requires becomes the note on the reset.
+        // resurrecting this one off evidence from before the fix. The person's reason, or the stock
+        // note, becomes the note on the reset.
         if (CaseRow.Detector.TOOL_ERROR.equals(row.detector())) {
-            toolErrorStates.reset(projectId, row.subjectId(), actor, reason, now.toString());
+            toolErrorStates.reset(projectId, row.subjectId(), actor, note, now.toString());
         }
         // Same claim, same reason, for the call site behind a malformed-output case: it replays through
         // tool_error's own engine (MalformedOutputRateService), so its accumulator needs the identical
         // reset or the next sweep would re-derive the pre-fix rate from evidence this close just said
         // was dealt with.
         if (CaseRow.Detector.MALFORMED_OUTPUT.equals(row.detector())) {
-            malformedOutputRates.states().reset(projectId, row.subjectId(), actor, reason, now.toString());
+            malformedOutputRates.states().reset(projectId, row.subjectId(), actor, note, now.toString());
         }
         // Resolving a case closes what it holds — every finding still open on it, whatever detector
         // opened it. A secret-leak finding stays live until a person closes it (SecretLeakCaseSource
@@ -575,10 +636,13 @@ public class CaseService {
      * line to explain it, or a running lane nobody can see was requested, is a state a reader cannot
      * account for.
      *
-     * <p>Not conditional on the case's state otherwise. A closed or muted case is still worth
+     * <p>Not conditional on the case's state otherwise. A closed case is still worth
      * root-causing ("we absorbed this, why did it happen" is a normal question), and the report is an
      * immutable artefact that changes nothing about the case. Re-pressing a locked case coalesces onto
      * its one report, exactly as before locking existed.
+     *
+     * <p>The run reads every finding the case holds; the trigger names the newest, and the RCA lane widens
+     * to its case from there.
      *
      * <p>A case with no finding behind it cannot be analysed: RCA is anchored on a claim and its
      * recorded evidence, and there is nothing here to anchor on. Only rows written before a case's
@@ -601,39 +665,11 @@ public class CaseService {
                     row.id(),
                     CaseEventRow.Kind.RCA_REQUESTED,
                     actor,
-                    "Requested — locks the case to its finding; the cause's next positive opens a new case.",
+                    "Requested — locks the case to its findings; the cause's next positive opens a new case.",
                     null,
                     now);
         }
         return rcaTrigger.trigger(projectId, newestFindingId, actor, null);
-    }
-
-    /** Silence a case without closing it: "known, stop paging". Scoped to this case alone; silencing
-     *  the detector behind it is a heavier decision that belongs with the detector. */
-    @Transactional
-    public CaseView mute(String projectId, String id, @Nullable String actor) {
-        CaseRow row = require(projectId, id);
-        if (!row.isLive()) throw new TessaryException(CaseError.ALREADY_RESOLVED, row.reference());
-        // Already silenced: nothing to do, and nothing to say about it. Two people reaching for mute on
-        // the same case is ordinary, so this is a no-op rather than an error, but it must not append a
-        // second "Muted" line to a trail whose job is to read as a story.
-        if (CaseRow.State.MUTED.equals(row.state())) return CaseView.of(row);
-
-        Instant now = Instant.now();
-        cases.mute(projectId, row.id(), actor, now);
-        events.append(projectId, row.id(), CaseEventRow.Kind.MUTED, actor, "Muted — known, stop paging.", null, now);
-        return CaseView.of(require(projectId, id));
-    }
-
-    @Transactional
-    public CaseView unmute(String projectId, String id, @Nullable String actor) {
-        CaseRow row = require(projectId, id);
-        if (!CaseRow.State.MUTED.equals(row.state())) throw new TessaryException(CaseError.NOT_MUTED, row.reference());
-
-        Instant now = Instant.now();
-        cases.unmute(projectId, row.id(), now);
-        events.append(projectId, row.id(), CaseEventRow.Kind.UNMUTED, actor, "Unmuted.", null, now);
-        return CaseView.of(require(projectId, id));
     }
 
     /**

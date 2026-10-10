@@ -214,6 +214,54 @@ test('providerConfig: BEDROCK declares no models block — it is not an OpenAI-c
   assert.equal('models' in cfg.provider['amazon-bedrock'], false);
 });
 
+// ---- model_cost: the models.dev rates the run is billed at ----
+// OpenCode reports $0 for a model whose block name is not a models.dev provider id unless the model
+// is declared with rates, so every run declares them, whatever its block is called.
+
+const SOL_COST = { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 };
+
+test('providerConfig: an OpenAI-compat run declares its model with the rates it is billed at', () => {
+  const cfg = providerConfig({ provider: 'GROK', api_key: 'k' }, 'grok/grok-4.6', { input: 2, output: 6, cache_read: 0.5 });
+  assert.deepEqual(cfg.provider.grok.models, { 'grok-4.6': { cost: { input: 2, output: 6, cache_read: 0.5 } } });
+});
+
+test('providerConfig: a BEDROCK run declares its model with rates even though its block name is a models.dev id', () => {
+  const cfg = providerConfig(
+    { provider: 'BEDROCK', aws_region: 'us-east-1' },
+    'amazon-bedrock/global.anthropic.claude-sonnet-5-5',
+    { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 },
+  );
+  assert.deepEqual(cfg.provider['amazon-bedrock'].models, {
+    'global.anthropic.claude-sonnet-5-5': { cost: { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 } },
+  });
+});
+
+test('providerConfig: an ANTHROPIC and an OPENROUTER run declare their model with rates too', () => {
+  const anthropic = providerConfig({ provider: 'ANTHROPIC', api_key: 'k' }, 'anthropic/claude-haiku-4-5', SOL_COST);
+  assert.deepEqual(anthropic.provider.anthropic.models, { 'claude-haiku-4-5': { cost: SOL_COST } });
+  const openrouter = providerConfig({ provider: 'OPENROUTER', api_key: 'k' }, 'openrouter/openai/gpt-6-sol', SOL_COST);
+  assert.deepEqual(openrouter.provider.openrouter.models, { 'openai/gpt-6-sol': { cost: SOL_COST } });
+});
+
+test('providerConfig: model_cost keeps only finite, non-negative rate numbers', () => {
+  const cfg = providerConfig({ provider: 'GLM', api_key: 'k' }, 'glm/glm-5.3', {
+    input: 1.4, output: '4.4', cache_read: -1, cache_write: Infinity, note: 'x',
+  });
+  assert.deepEqual(cfg.provider.glm.models, { 'glm-5.3': { cost: { input: 1.4 } } });
+});
+
+test('providerConfig: a model_cost with neither an input nor an output rate declares no rates at all', () => {
+  const cfg = providerConfig({ provider: 'GLM', api_key: 'k' }, 'glm/glm-5.3', { cache_read: 0.26 });
+  assert.deepEqual(cfg.provider.glm.models, { 'glm-5.3': {} });
+});
+
+test('agentEnvs: the declared rates reach OpenCode through OPENCODE_CONFIG_CONTENT', () => {
+  const envs = agentEnvs({ provider: 'MOONSHOT', api_key: 'k' }, 'moonshot/kimi-k2.6', { input: 0.95, output: 4 });
+  assert.deepEqual(JSON.parse(envs.OPENCODE_CONFIG_CONTENT).provider.moonshot.models, {
+    'kimi-k2.6': { cost: { input: 0.95, output: 4 } },
+  });
+});
+
 test('providerConfig: BEDROCK_MANTLE declares its model — `bedrock-mantle-gpt` is not a models.dev id', () => {
   const cfg = providerConfig(
     { provider: 'BEDROCK_MANTLE', aws_region: 'us-east-1', aws_access_key: 'a', aws_secret_key: 's' },

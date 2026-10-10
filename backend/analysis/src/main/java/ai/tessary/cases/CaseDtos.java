@@ -10,7 +10,6 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
@@ -53,8 +52,6 @@ public final class CaseDtos {
             /** {@code fixed} | {@code false_alarm} on a resolved frustration or groundedness case; null on every
              *  other case. */
             @Nullable String disposition,
-            @JsonProperty("muted_at") @Nullable String mutedAt,
-            @JsonProperty("muted_by") @Nullable String mutedBy,
             /** How many findings this case holds (1b: a case reads over all of them; the newest stands
              *  in for the case's own numbers until the multi-finding case page — issue #76 — ships). */
             @JsonProperty("finding_count") long findingCount,
@@ -111,8 +108,6 @@ public final class CaseDtos {
                     row.resolutionReason(),
                     row.resolvedBy(),
                     row.disposition(),
-                    row.mutedAt(),
-                    row.mutedBy(),
                     row.findingCount(),
                     row.latestFindingId(),
                     row.lockedAt(),
@@ -126,15 +121,12 @@ public final class CaseDtos {
      *
      * @param cases the open cases, worst first. One list — no claimed/unclaimed bands, because nothing
      *     in this product is claimed.
-     * @param muted live cases someone has silenced. Carried in full rather than as a count so the
-     *     "muted" filter renders without a second round trip; the set is small by construction.
      * @param recentlyResolved the last week's closures — Triage's one quiet history line.
      * @param watching what the all-clear state says to prove the silence is real coverage rather than
      *     nothing being watched.
      */
     public record TriageView(
             List<CaseView> cases,
-            List<CaseView> muted,
             @JsonProperty("recently_resolved") List<CaseView> recentlyResolved,
             WatchingView watching) {}
 
@@ -241,6 +233,23 @@ public final class CaseDtos {
             @JsonProperty("started_at") @Nullable String startedAt) {}
 
     /**
+     * One finding a case holds, as the case page's "Findings" list reads it. A case gathers every
+     * window that triage ruled positive on its key, so this is the case's history; the rest of the page
+     * draws only the newest of them. No triage field: every finding here was ruled positive to join, and
+     * the MCP case read must not tell an RCA run how triage ruled.
+     *
+     * @param windowOpenedAt when the window this finding measured opened: the detector's own window
+     *     where it has one (a drift window), else the finding's onset.
+     * @param windowClosedAt when that window closed, else the finding's last sighting.
+     */
+    public record CaseFindingView(
+            String id,
+            @Nullable String title,
+            @JsonProperty("window_opened_at") String windowOpenedAt,
+            @JsonProperty("window_closed_at") String windowClosedAt,
+            @JsonProperty("created_at") String createdAt) {}
+
+    /**
      * The case page's whole read.
      *
      * @param ruling who ruled the detection real, and on what; null for an archived case whose
@@ -283,11 +292,17 @@ public final class CaseDtos {
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
             List<CaseEventView> events,
-            /** The newest finding this case holds — the subject an RCA run is anchored on (1c: RCA
-             *  still runs on one finding, always the case's newest). Null only on an archived case from
+            /** The newest finding this case holds — the one an RCA run is triggered on; the run reads every
+             *  finding in {@code findings}. Null only on an archived case from
              *  a retired detector, or one that predates {@code finding.case_id}, either of which never
              *  had one by construction. */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
+            /** Every finding this case holds, oldest first. The case's window runs from the first one's
+             *  open to the newest one's close. */
+            List<CaseFindingView> findings,
+            /** The finding {@code metric} and {@code tool_error} are drawn from: the case's worst window, the one
+             *  that moved furthest from its reference. Null when those blocks are absent. */
+            @JsonProperty("worst_finding_id") @Nullable String worstFindingId,
             @Nullable CaseRulingView ruling,
             List<CaseExemplarView> exemplars,
             @JsonProperty("rca_report_id") @Nullable String rcaReportId,
@@ -310,6 +325,6 @@ public final class CaseDtos {
      *     cites stop counting as flagged). Refused on any other case.
      */
     public record ResolveCaseRequest(
-            @NotBlank @Size(max = 500) String reason,
+            @Nullable @Size(max = 500) String reason,
             @Nullable @Pattern(regexp = "fixed|false_alarm") String disposition) {}
 }

@@ -16,7 +16,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * What the platform's own calls are billed at, pinned per model against the vendored rate file.
+ * The platform-lane rates the price book holds, pinned per model against the vendored rate file: what
+ * a Jev call direct on TypeSafe is billed at, and the rate the settings page shows for each model.
+ * Sandbox runs are not priced from this file (OpenCode prices them from models.dev, see {@code
+ * llm/ModelsDevRates}), and neither is a call to OpenRouter, which is billed at OpenRouter's reported
+ * cost, so no OpenRouter row belongs here.
  *
  * <p>A pinned table, not a property: the flip to the price book found seven disagreements on ten models, since
  * resolved (mantle via {@code BedrockModelProfile.MANTLE_ROUTE_PREFIX}; Nova's cache-write now unpriced). A snapshot
@@ -51,12 +55,9 @@ class PlatformLaneRatesTest {
         m.put("gpt-5.4-nano", new String[] {"0.2", "1.25", "0.02", "-"});
         // Decision 19: without the scope prefix these ids resolved nowhere and every agentic run recorded no cost.
         m.put("xai/grok-4.6", new String[] {"2", "6", "0.5", "-"});
-        m.put("xai/grok-code-fast-1", new String[] {"1", "2", "0.2", "-"});
         m.put("zai/glm-5.3", new String[] {"1.4", "4.4", "0.26", "0"});
         m.put("zai/glm-5.3-flash", new String[] {"0.15", "0.5", "0.03", "0"});
         m.put("moonshot/kimi-k2.6", new String[] {"0.95", "4", "0.16", "-"});
-        m.put("openrouter/openai/gpt-5.6-terra", new String[] {"2", "12", "0.2", "2.5"});
-        m.put("openrouter/openai/gpt-5.6-luna", new String[] {"0.2", "1.2", "0.02", "0.25"});
         // Jev on the deployment's own provider: an unpriced platform call is never debited from the org's credit.
         m.put("typesafe/jev-latest", new String[] {"0.042", "0", "-", "-"});
         return Map.copyOf(m);

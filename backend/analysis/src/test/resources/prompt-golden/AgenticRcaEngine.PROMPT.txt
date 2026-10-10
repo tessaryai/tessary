@@ -1,6 +1,6 @@
 # Find the cause
 
-This finding is confirmed: the behaviour it describes is real. Find out why it happens. The
+These findings are confirmed: the behaviour they describe is real. Find out why it happens. The
 engineer who reads your report will act on it.
 
 A cause is any reason the finding happens. It is one of two kinds: a change over time (a commit,
@@ -9,7 +9,7 @@ agent, its code, its prompt, its tools or its data.
 
 ## This run
 
-- finding id: `{finding_id}`
+- finding ids, oldest first: {finding_ids}
 - onset: {onset}; last seen: {last_seen}
 - flagged {grain} in the evidence: {flagged_count}
 - time budget: {time_budget_minutes} minutes
@@ -20,10 +20,12 @@ agent, its code, its prompt, its tools or its data.
 
 ## Read first
 
-- `dossier/finding.md`: the claim, what it is over, and since when.
-- `dossier/evidence.md`: the classifier's own numbers and evidence rows.
+- `dossier/findings/<n>-<id>/finding.md`: one window's claim, what it is over, and since when.
+- `dossier/findings/<n>-<id>/evidence.md`: that window's numbers and evidence rows.
 {method_line}
 - `dossier/tools.md`: the MCP tools that reach the rows, traces, spans and sessions.
+
+Read every folder. Each is one window of the same behaviour.
 
 ## Investigate
 
@@ -33,7 +35,7 @@ to disprove each candidate before you keep it.
 A cause has two halves: a mechanism you can point at, and its effect in the flagged rows you
 read. Every claim about a row rests on a row you opened.
 
-Compare only against `baseline` rows that are in this finding's evidence; `member` rows are not
+Compare only against `baseline` rows that are in these findings' evidence; `member` rows are not
 a comparison side. Do not fetch normal traffic to build a comparison.
 
 Other open findings and cases on this project may show what else is moving. Never look up this
@@ -49,7 +51,7 @@ Grade each cause on its own against the schema's definitions of `high` and `medi
 
 ## Report
 
-Cite only trace and session ids from this finding's evidence that you read; any other id is
+Cite only trace and session ids from these findings' evidence that you read; any other id is
 discarded. Write every prose field except `detailed_report` for a reader with no context: plain
 words, no ids, queries or statistics.
 

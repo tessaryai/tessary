@@ -62,7 +62,7 @@ public class AlertQueryRepository {
             String projectSlug) {}
 
     /**
-     * Cases that opened in {@code (since, until]}, oldest first, excluding any already resolved or muted.
+     * Cases that opened in {@code (since, until]}, oldest first, excluding any already closed.
      *
      * <p><b>Strictly greater than {@code since}</b>: the anchor is the {@code opened_at} of the last case
      * delivered, so an inclusive bound would re-deliver it on every tick. The idempotent
@@ -75,9 +75,9 @@ public class AlertQueryRepository {
      * milliseconds after the anchor would read as older than it and never be delivered. The cast costs an
      * index scan on a set already narrowed to one project's open cases.
      *
-     * <p>Muted and resolved cases are excluded rather than filtered later. A case can be muted or closed
-     * between opening and the next heartbeat — most often because a human was already looking at Triage
-     * when it appeared — and paging someone about a case they have just dealt with is the fastest way to
+     * <p>Closed cases are excluded rather than filtered later. A case can be closed between opening and
+     * the next heartbeat — most often because a human was already looking at Triage when it appeared —
+     * and paging someone about a case they have just dealt with is the fastest way to
      * teach them the alerts are noise.
      */
     public List<OpenedCase> casesOpenedBetween(String projectId, String since, String until, int limit) {

@@ -9,7 +9,7 @@ import ai.tessary.classifier.finding.FindingRow;
  *
  * <p>This is the extension point the brief calls cause-neutrality. A new detector becomes a case
  * producer by implementing this interface and adding a {@code detector} constant; {@link CaseOpener},
- * the case page, resolve/mute and the activity trail all pick it up with no further change.
+ * the case page, close/absorb and the activity trail all pick it up with no further change.
  *
  * <p><b>Event-driven, not swept.</b> A case used to open from a periodic reconciler asking every source
  * "what is firing right now" and closing whatever a source stopped naming. Under the open/closed finding

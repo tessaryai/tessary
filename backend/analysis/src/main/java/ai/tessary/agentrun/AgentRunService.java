@@ -9,7 +9,9 @@ import ai.tessary.git.GitIntegrationRepository;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitProviderFactory;
 import ai.tessary.llm.AgenticCredentialResolver;
+import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
@@ -58,6 +60,7 @@ public class AgentRunService {
     private final ObserverProperties observerProps;
     private final ProjectModelSettings modelSettings;
     private final AgenticCredentialResolver credentials;
+    private final ModelsDevRates rates;
     private final ApiKeyService apiKeys;
     private final ProjectRepository projects;
     private final OrgMembershipRepository memberships;
@@ -71,6 +74,7 @@ public class AgentRunService {
             ObserverProperties observerProps,
             ProjectModelSettings modelSettings,
             AgenticCredentialResolver credentials,
+            ModelsDevRates rates,
             ApiKeyService apiKeys,
             ProjectRepository projects,
             OrgMembershipRepository memberships,
@@ -84,6 +88,7 @@ public class AgentRunService {
         this.observerProps = observerProps;
         this.modelSettings = modelSettings;
         this.credentials = credentials;
+        this.rates = rates;
         this.apiKeys = apiKeys;
         this.projects = projects;
         this.memberships = memberships;
@@ -131,8 +136,11 @@ public class AgentRunService {
                 modelSettings.resolveAgenticModel(projectId, lane);
         String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                 .orElseGet(() -> observerProps.getAgentic().getModel());
-        String pricingId = resolved.map(ProjectModelSettings.ResolvedAgenticModel::pricingId)
-                .orElseGet(() -> observerProps.getAgentic().getModel());
+        // The deployment default is a Bedrock inference-profile id, so its rates are looked up on Bedrock.
+        String modelsDevId = resolved.isPresent()
+                ? resolved.get().modelsDevId()
+                : ModelCatalog.modelsDevId(ModelProvider.BEDROCK, model).orElse(null);
+        ModelsDevRates.ModelCost modelCost = rates.cost(modelsDevId).orElse(null);
         ModelProvider provider = resolved.map(ProjectModelSettings.ResolvedAgenticModel::provider)
                 .orElse(ModelProvider.BEDROCK);
         // Resolved before the key is minted: an org with no credential fails closed with nothing to revoke.
@@ -148,7 +156,7 @@ public class AgentRunService {
                     subject,
                     mcpBase,
                     model,
-                    pricingId,
+                    modelCost,
                     provider,
                     credential);
         } finally {
@@ -166,7 +174,7 @@ public class AgentRunService {
             LlmUsageAccountant.Subject subject,
             String mcpBase,
             String model,
-            String pricingId,
+            ModelsDevRates.@Nullable ModelCost modelCost,
             ModelProvider provider,
             AgenticCredentialResolver.Credential credential) {
         String principal = orgOwnerPrincipal(projectId);
@@ -188,7 +196,7 @@ public class AgentRunService {
                     clone.map(Clone::url).orElse(null),
                     clone.map(Clone::headSha).orElse(null),
                     model,
-                    pricingId,
+                    modelCost,
                     provider.name(),
                     credential,
                     mcpBase.replaceAll("/+$", "") + "/mcp",

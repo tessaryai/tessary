@@ -23,7 +23,9 @@ Tessary is an open-source reliability platform for AI agents in production. It m
 
 ## Get running
 
-Paste this into your coding agent:
+To try it without installing anything, sign up for Tessary Cloud at <https://app.tessary.ai>. It's free, needs no credit card, and its limits are on the [pricing page](https://tessary.ai/pricing).
+
+To self-host, paste this into your coding agent:
 
 ```text
 Self-host Tessary for me by following https://github.com/tessaryai/tessary/blob/main/setup.md

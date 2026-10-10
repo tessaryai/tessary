@@ -55,7 +55,7 @@ function isAlive(pid) {
 /**
  * One assistant turn in the `{info, parts}` shape `toTurns` reads; no `info.parts` makes it read the outer `parts`.
  */
-function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
+function assistantMessage({ text = '', usage = {}, toolCalls = [], cost }) {
   const parts = [];
   if (text) parts.push({ type: 'text', text });
   for (const tc of toolCalls) parts.push({ type: 'tool', tool: tc, callID: tc, state: { input: {} } });
@@ -69,6 +69,7 @@ function assistantMessage({ text = '', usage = {}, toolCalls = [] }) {
         output: usage.output_tokens || 0,
         cache: { read: usage.cache_read_input_tokens || 0, write: usage.cache_creation_input_tokens || 0 },
       },
+      ...(cost === undefined ? {} : { cost }),
     },
     parts,
   };
@@ -256,6 +257,28 @@ test('C/F3: a schema-miss same-session retry does not double-count usage', async
   assert.deepEqual(envelope.usage, usage, 'the success envelope reports the same, non-doubled sum');
 });
 
+test('the envelope reports the cost OpenCode computed for every turn, as the run\'s bill', async (t) => {
+  t.after(() => mock.reset());
+  const schema = { type: 'object', required: ['foo'], properties: { foo: { type: 'string' } } };
+  const { runAgent } = require('../agent-stream');
+  mockSdk({
+    messagesById: () => [
+      assistantMessage({ toolCalls: ['read_file'], usage: { input_tokens: 400, output_tokens: 100 }, cost: 0.5 }),
+      assistantMessage({ text: JSON.stringify({ foo: 'bar' }), usage: { input_tokens: 50, output_tokens: 20 }, cost: 0.25 }),
+    ],
+  });
+
+  const run = await runAgent({ model: 'grok/grok-4.6', prompt: 'investigate', mcp: MCP, jsonSchema: schema, timeoutMs: 1000 });
+
+  assert.equal(JSON.parse(run.resultRaw).usage.cost_usd, 0.75);
+});
+
+test('a turn that carries no cost adds nothing to the run\'s cost', () => {
+  const { sumUsage } = require('../agent-stream');
+  const turns = [{ usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }];
+  assert.equal(sumUsage(turns).cost_usd, 0);
+});
+
 test('sumUsage: pure reducer over a turns[] array', () => {
   const { sumUsage } = require('../agent-stream');
   const turns = [
@@ -267,12 +290,14 @@ test('sumUsage: pure reducer over a turns[] array', () => {
     output_tokens: 3,
     cache_read_input_tokens: 2,
     cache_creation_input_tokens: 4,
+    cost_usd: 0,
   });
   assert.deepEqual(sumUsage([]), {
     input_tokens: 0,
     output_tokens: 0,
     cache_read_input_tokens: 0,
     cache_creation_input_tokens: 0,
+    cost_usd: 0,
   });
   assert.deepEqual(sumUsage(undefined), sumUsage([]), 'a missing turns array (e.g. a run with no .turns) is safe');
 });

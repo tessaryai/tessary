@@ -106,7 +106,6 @@ public final class LanePriority {
     private static final String GEMINI_3_1_PRO = "GEMINI:gemini-3.1-pro-preview";
     private static final String GEMINI_3_7_FLASH = "GEMINI:gemini-3.7-flash";
     private static final String GROK_4_6 = "GROK:grok-4.6";
-    private static final String GROK_CODE_FAST = "GROK:grok-code-fast-1";
     private static final String GLM_5_3 = "GLM:glm-5.3";
     private static final String GLM_5_3_FLASH = "GLM:glm-5.3-flash";
     // TypeSafe's Jev decision model, direct and over OpenRouter.
@@ -149,7 +148,7 @@ public final class LanePriority {
                 new ProviderOption(ModelProvider.OPENAI, List.of(GPT_6_SOL, GPT_5_6, GPT_6_LUNA), GPT_6_SOL),
                 new ProviderOption(ModelProvider.BEDROCK_MANTLE, List.of(TERRA, MANTLE_LUNA), TERRA),
                 new ProviderOption(ModelProvider.GEMINI, List.of(GEMINI_3_1_PRO, GEMINI_3_7_FLASH), GEMINI_3_1_PRO),
-                new ProviderOption(ModelProvider.GROK, List.of(GROK_4_6, GROK_CODE_FAST), GROK_4_6),
+                new ProviderOption(ModelProvider.GROK, List.of(GROK_4_6), GROK_4_6),
                 new ProviderOption(ModelProvider.GLM, List.of(GLM_5_3, GLM_5_3_FLASH), GLM_5_3),
                 // Both after the direct routes to the models they resolve to: an aggregator
                 // adds a hop and a second price book to the same weights, and Kimi K2.6 is a

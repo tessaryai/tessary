@@ -12,9 +12,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.config.ModelsDevProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.ModelConfigError;
@@ -56,6 +58,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 class E2bTriageSandboxTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** The real lookup over the bundled models.dev copy; a blank URL never fetches. */
+    private static final ModelsDevRates RATES = bundledRates();
+
+    private static ModelsDevRates bundledRates() {
+        ModelsDevProperties p = new ModelsDevProperties();
+        p.setUrl("");
+        return new ModelsDevRates(new ObjectMapper(), p);
+    }
 
     private static ObserverProperties props() {
         ObserverProperties p = new ObserverProperties();
@@ -126,7 +137,7 @@ class E2bTriageSandboxTest {
 
     private static E2bTriageSandbox sandbox(
             AgenticCredentialResolver resolver, LlmUsageAccountant usage, Transport transport) {
-        return new E2bTriageSandbox(props(), noLaneSetting(), resolver, usage, OpenTelemetry.noop(), MAPPER) {
+        return new E2bTriageSandbox(props(), noLaneSetting(), resolver, usage, RATES, OpenTelemetry.noop(), MAPPER) {
             @Override
             HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
                 return transport.send(req);
@@ -184,7 +195,13 @@ class E2bTriageSandboxTest {
         when(resolver.resolve(any(), any()))
                 .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.BEDROCK));
         E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                props(), noLaneSetting(), resolver, mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER);
+                props(),
+                noLaneSetting(),
+                resolver,
+                mock(LlmUsageAccountant.class),
+                RATES,
+                OpenTelemetry.noop(),
+                MAPPER);
 
         assertThrows(TessaryException.class, () -> sandbox.run(request()));
         verify(resolver, never()).release(any());
@@ -231,8 +248,7 @@ class E2bTriageSandboxTest {
 
         assertEquals(ClassifierError.TRIAGE_RUN_INCOMPLETE, ex.error());
         verify(usage)
-                .recordSandboxRun(
-                        eq("proj"), any(), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
+                .recordSandboxRun(eq("proj"), any(), any(), eq(false), eq(120L), eq(40L), eq(0L), eq(0L), any(), any());
     }
 
     @Test
@@ -264,7 +280,13 @@ class E2bTriageSandboxTest {
         ObserverProperties bare = props();
         bare.getAgentic().setLauncherUrl(launcherUrl);
         E2bTriageSandbox sandbox = new E2bTriageSandbox(
-                bare, noLaneSetting(), credentials(), mock(LlmUsageAccountant.class), OpenTelemetry.noop(), MAPPER);
+                bare,
+                noLaneSetting(),
+                credentials(),
+                mock(LlmUsageAccountant.class),
+                RATES,
+                OpenTelemetry.noop(),
+                MAPPER);
 
         TessaryException ex = assertThrows(TessaryException.class, () -> sandbox.run(request()));
 
@@ -283,15 +305,13 @@ class E2bTriageSandboxTest {
                 "result",
                 "{\"verdict\":\"positive\"}",
                 "usage",
-                Map.of("input_tokens", 100, "output_tokens", 20),
-                "total_cost_usd",
-                0.5));
+                Map.of("input_tokens", 100, "output_tokens", 20, "cost_usd", 0.5)));
         try (ServerSocket launcher =
                 launcherAnswering(200, MAPPER.writeValueAsString(Map.of("raw", raw, "startMs", 0)))) {
             ObserverProperties live = props();
             live.getAgentic().setLauncherUrl("http://127.0.0.1:" + launcher.getLocalPort());
-            E2bTriageSandbox sandbox =
-                    new E2bTriageSandbox(live, noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER);
+            E2bTriageSandbox sandbox = new E2bTriageSandbox(
+                    live, noLaneSetting(), credentials(), usage, RATES, OpenTelemetry.noop(), MAPPER);
 
             assertEquals(
                     Optional.of(new TriageSandbox.SandboxRun("{\"verdict\":\"positive\"}")), sandbox.run(request()));
@@ -301,13 +321,12 @@ class E2bTriageSandboxTest {
                         eq("proj"),
                         any(),
                         any(),
-                        any(),
                         eq(false),
                         eq(100L),
                         eq(20L),
                         eq(0L),
                         eq(0L),
-                        eq(BigDecimal.valueOf(0.5)),
+                        eq(new BigDecimal("0.5")),
                         eq(new LlmUsageAccountant.Subject(E2bTriageSandbox.SUBJECT_KIND, "f1")));
     }
 

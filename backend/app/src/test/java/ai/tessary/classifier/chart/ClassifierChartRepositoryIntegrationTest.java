@@ -478,17 +478,17 @@ class ClassifierChartRepositoryIntegrationTest {
     }
 
     /**
-     * The selector counts what the cards count: a muted case is not open, and a tool-grain drift case names its
+     * The selector counts what the cards count: a closed case is not open, and a tool-grain drift case names its
      * busiest caller but belongs to the tool.
      */
     @Test
-    void callSiteOpenCases_excludeToolDurationAndMutedCases() {
+    void callSiteOpenCases_excludeToolDurationAndClosedCases() {
         String pid = project("chart-open", Capability.DURATION_DRIFT);
         ClassifierRow drift = fixture.builtIn(pid, BuiltInDetector.Kind.DURATION_DRIFT);
         String frustration = caseRow(pid, 1, "frustration", "call_site", "cs-a", "open", null);
         finding(pid, "frustration", "classifier", "frustration", "cs-a", "2026-10-01T00:00:00Z", frustration);
-        String muted = caseRow(pid, 2, "classifier", "classifier", "groundedness", "muted", null);
-        finding(pid, "groundedness", "classifier", "groundedness", "cs-a", "2026-10-01T00:00:00Z", muted);
+        String closed = caseRow(pid, 2, "classifier", "classifier", "groundedness", "resolved", "2026-10-02T00:00:00Z");
+        finding(pid, "groundedness", "classifier", "groundedness", "cs-a", "2026-10-01T00:00:00Z", closed);
         String toolBucket = baseline(pid, drift, "tool_duration", "tool", "tool:search");
         String toolCase = caseRow(pid, 3, "metric_drift", "metric_baseline", toolBucket, "open", null);
         finding(pid, "duration_drift", "metric_baseline", toolBucket, "cs-a", "2026-10-01T00:00:00Z", toolCase);

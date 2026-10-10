@@ -647,6 +647,23 @@ public class FindingRepository {
                 .single();
     }
 
+    /**
+     * The ids of every finding in the same case as {@code findingId}, oldest first, or empty when it has no case.
+     * Ids only, so the RCA lane can widen its subject without reading a column {@link #findClaim} keeps from it.
+     */
+    public List<String> caseSiblingIds(String projectId, String findingId) {
+        return jdbc.sql("""
+                        SELECT f.id FROM finding f
+                        JOIN finding anchor ON anchor.project_id = f.project_id AND anchor.case_id = f.case_id
+                        WHERE f.project_id = :pid AND anchor.id = :id
+                        ORDER BY f.created_at, f.id
+                        """)
+                .param("pid", projectId)
+                .param("id", findingId)
+                .query(String.class)
+                .list();
+    }
+
     /** Every finding linked to one case, newest first — a case's own findings, per its {@code case_id}. */
     public List<FindingRow> listByCase(String projectId, String caseId) {
         return jdbc.sql("SELECT " + COLS + " FROM finding WHERE project_id = :pid AND case_id = :caseId"
