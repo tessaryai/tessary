@@ -13,7 +13,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
   CaseDetail,
-  EvidenceSpan,
   FlaggedAnswer,
   FrustratedConversation,
   FrustrationDetail,
@@ -154,19 +153,6 @@ const ANSWER_REPORT: RcaReport = {
 };
 
 const LEADS_ONLY = ANSWER_REPORT.causes.map((k) => ({ ...k, confidence: "medium" }));
-
-const span = (i: number, over: Partial<EvidenceSpan> = {}) =>
-  ({
-    traceId: `trace-${i}`,
-    spanId: `span-${i}`,
-    startedAt: "2026-09-23T14:00:00Z",
-    inputPreview: `input ${i}`,
-    outputPreview: null,
-    errorType: `Timeout${i}`,
-    callSiteId: "support-agent",
-    latencyMs: 1200,
-    ...over,
-  }) as EvidenceSpan;
 
 const conversation = (id: string, message: string): FrustratedConversation =>
   ({
@@ -649,69 +635,34 @@ describe("the answer and the working behind it", () => {
   });
 });
 
-describe("the failures", () => {
-  it("lists the failing calls a page at a time, each opening its trace", async () => {
-    api.getCase.mockResolvedValue(plainCase());
-    api.getBehaviorFindingEvidence
-      .mockResolvedValueOnce({ rows: [span(1), span(2, { traceId: null })], nextCursor: "c2", recordedCounts: { witness: 3 } })
-      .mockResolvedValueOnce({ rows: [span(3, { spanId: null, startedAt: null })], nextCursor: null, recordedCounts: {} });
-    renderPage();
-
-    expect(await screen.findByText("3 in this window")).toBeTruthy();
-    expect(screen.getByText("Timeout1").closest("a")!.getAttribute("href")).toBe(
-      "/orgs/acme/projects/default/traces/trace-1#span-1",
-    );
-    expect(screen.getByText("Timeout2").closest("a")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
-
-    const third = await screen.findByText("Timeout3");
-    expect(screen.getByText("Timeout1")).toBeTruthy();
-    expect(third.closest("a")!.getAttribute("href")).toBe("/orgs/acme/projects/default/traces/trace-3");
-    expect(api.getBehaviorFindingEvidence).toHaveBeenLastCalledWith("fnd-1", { role: "witness", limit: 8, cursor: "c2" });
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
-  });
-
-  it("says the calls aged out when none are stored", async () => {
-    api.getCase.mockResolvedValue(plainCase());
-    renderPage();
-
-    expect(await screen.findByText(/have aged out of retention/)).toBeTruthy();
-  });
-
-  it("draws no failures block for a case with no finding", async () => {
-    api.getCase.mockResolvedValue(plainCase({ latest_finding_id: null }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.queryByText("The failures")).toBeNull();
-    expect(api.getBehaviorFindingEvidence).not.toHaveBeenCalled();
-  });
-});
-
 describe("a case with several findings", () => {
   const findings = [
-    { id: "fnd-0", title: "turns are 1.77x slower", window_opened_at: "2026-09-20T08:00:00Z", window_closed_at: "2026-09-21T08:00:00Z", created_at: "2026-09-21T08:05:00Z", analysed: false },
-    { id: "fnd-1", title: "turns are 1.69x slower", window_opened_at: "2026-09-22T08:00:00Z", window_closed_at: "2026-09-23T08:00:00Z", created_at: "2026-09-23T08:05:00Z", analysed: true },
+    { id: "fnd-0", title: "turns are 1.77x slower", window_opened_at: "2026-09-20T08:00:00Z", window_closed_at: "2026-09-21T08:00:00Z", created_at: "2026-09-21T08:05:00Z" },
+    { id: "fnd-1", title: "turns are 1.69x slower", window_opened_at: "2026-09-22T08:00:00Z", window_closed_at: "2026-09-23T08:00:00Z", created_at: "2026-09-23T08:05:00Z" },
   ];
 
-  it("spans the header from the first window and lists every window", async () => {
+  it("spans the header from the first window and lists every window with its finding", async () => {
     api.getCase.mockResolvedValue(plainCase({ findings }));
     renderPage();
     await heading(BASE.case.title);
 
     // The header and the first window's row both open on the first window.
     expect(screen.getAllByText(new RegExp(`^${escape(stamp("2026-09-20T08:00:00Z"))} →`))).toHaveLength(2);
-    expect(screen.getByText("2 windows, oldest first")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "turns are 1.77x slower" }).getAttribute("href")).toContain("fnd-0");
-    expect(screen.getByText("RCA ran on this")).toBeTruthy();
+    expect(screen.getByText("turns are 1.77x slower")).toBeTruthy();
+    const links = screen.getAllByRole("link", { name: "Open finding" });
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      expect.stringContaining("fnd-0"),
+      expect.stringContaining("fnd-1"),
+    ]);
   });
 
-  it("draws no list for a case with one finding", async () => {
-    api.getCase.mockResolvedValue(plainCase({ findings: findings.slice(1) }));
+  it("no longer lists the failing calls", async () => {
+    api.getCase.mockResolvedValue(plainCase({ findings }));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.queryByText(/windows, oldest first/)).toBeNull();
+    expect(screen.queryByText("The failures")).toBeNull();
+    expect(api.getBehaviorFindingEvidence).not.toHaveBeenCalled();
   });
 });
 

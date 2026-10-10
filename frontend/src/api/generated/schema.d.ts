@@ -2796,6 +2796,7 @@ export interface components {
             ruling: components["schemas"]["CaseRulingView"] | null;
             secret_leak: components["schemas"]["SecretLeakDetail"] | null;
             tool_error: components["schemas"]["RateDetail"] | null;
+            worst_finding_id: string | null;
         };
         CaseEventView: {
             actor: string | null;
@@ -2818,7 +2819,6 @@ export interface components {
             trace_id: string;
         };
         CaseFindingView: {
-            analysed: boolean;
             created_at: string;
             id: string;
             title: string | null;

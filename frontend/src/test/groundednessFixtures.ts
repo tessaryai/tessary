@@ -235,6 +235,7 @@ export const GROUNDEDNESS_CASE_DETAIL: CaseDetail = {
   groundedness: GROUNDEDNESS_DETAIL,
   latest_finding_id: "fnd-1",
   findings: [],
+  worst_finding_id: null,
   malformed_output: null,
   metric: null,
   rca: GROUNDEDNESS_REPORT,

@@ -6,10 +6,10 @@ reference. One finding is one closed window. Duration is measured on the root st
 cost and tokens on a whole-run row are the trace's rollup, and `models` lists every model the
 run called. The reference is one of two: a pinned window, or a rolling control merged from the
 daily windows of the previous three weeks, newer days weighted more, with the days of a
-confirmed regression excluded. `dossier/evidence.md` says which.
+confirmed regression excluded. Each finding's `evidence.md` says which.
 
 ## Reading the evidence
-Numbers are in `dossier/evidence.md`. Its `explains` list is the sibling buckets this drift
+Numbers are in each finding's `evidence.md`. Its `explains` list is the sibling buckets this drift
 accounts for and so suppressed; `covered` is the share of that bucket's own shift this drift
 covers, and above 1 is ordinary. `member` rows are every sample folded into the window, in fold order: span
 grain for a tool measure, whole-run rows for a turn measure. `baseline` rows are the pinned

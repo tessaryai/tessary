@@ -3330,6 +3330,12 @@
                 "type" : "null"
               }
             ]
+          },
+          "worst_finding_id" : {
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
         "required" : [
@@ -3349,7 +3355,8 @@
           "rca_report_id",
           "ruling",
           "secret_leak",
-          "tool_error"
+          "tool_error",
+          "worst_finding_id"
         ],
         "type" : "object"
       },
@@ -3445,9 +3452,6 @@
       },
       "CaseFindingView" : {
         "properties" : {
-          "analysed" : {
-            "type" : "boolean"
-          },
           "created_at" : {
             "type" : "string"
           },
@@ -3468,7 +3472,6 @@
           }
         },
         "required" : [
-          "analysed",
           "created_at",
           "id",
           "title",

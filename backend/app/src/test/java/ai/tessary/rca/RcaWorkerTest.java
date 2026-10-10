@@ -8,11 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.cases.CaseDetection;
+import ai.tessary.cases.CaseKey;
+import ai.tessary.cases.CaseRepository;
+import ai.tessary.cases.CaseRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
@@ -94,6 +97,9 @@ class RcaWorkerTest {
     @Autowired
     AgenticRcaEngine engine;
 
+    @Autowired
+    CaseRepository cases;
+
     private static final Instant TO = Instant.parse("2026-07-15T12:00:00Z");
     private static final Instant SPLIT = TO.minus(Duration.ofHours(24));
     private static final Instant FROM = SPLIT.minus(Duration.ofHours(24));
@@ -165,7 +171,7 @@ class RcaWorkerTest {
                 List.of(),
                 1);
         RuledOutCheck ruledOut = RuledOutCheck.ruledOut(1, "The serving model did not change.");
-        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+        when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "The prompt was rewritten.",
@@ -191,10 +197,11 @@ class RcaWorkerTest {
         // The dossier is the claim, the numbers, the method and the tools only: the agent pages evidence over MCP,
         // so nothing pre-chooses a sample.
         Map<String, String> dossier = capturedDossier();
-        assertEquals(Set.of("finding.md", "evidence.md", "method.md", "tools.md"), dossier.keySet());
+        String folder = "findings/1-" + job.findingId() + "/";
+        assertEquals(Set.of(folder + "finding.md", folder + "evidence.md", "method.md", "tools.md"), dossier.keySet());
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.SECRET_LEAK), dossier.get("method.md"));
         assertEquals(AgenticRcaEngine.TOOLS, dossier.get("tools.md"));
-        String findingDoc = dossier.get("finding.md");
+        String findingDoc = dossier.get(folder + "finding.md");
         assertTrue(findingDoc.contains("the id every `get_finding_evidence` call takes"), findingDoc);
         assertTrue(findingDoc.contains("`baseline`: 1 ref(s)"), findingDoc);
         assertTrue(findingDoc.contains("`exemplar`: 1 ref(s)"), findingDoc);
@@ -246,7 +253,7 @@ class RcaWorkerTest {
 
         // No evidence door is a deployment fault: fail closed with {@code failed}, since the agent reads everything
         // through MCP.
-        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+        when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenThrow(new TessaryException(RcaError.NO_EVIDENCE_DOOR, "mcp base url unset"));
 
         RcaJobRow job = enqueue(pid, seedFinding(pid, List.of(), List.of(failingTrace)));
@@ -308,7 +315,7 @@ class RcaWorkerTest {
                 List.of(turnA),
                 List.of(sessionA, sessionB),
                 2);
-        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+        when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "The agent ignores attachments.",
@@ -383,7 +390,7 @@ class RcaWorkerTest {
                 List.of(flaggedA, flaggedB),
                 List.of(),
                 2);
-        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+        when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.CAUSES_IDENTIFIED,
                         "Retrieval returns one document.",
@@ -422,7 +429,53 @@ class RcaWorkerTest {
         worker.run(job);
 
         assertEquals("failed", reports.findByJobId(pid, job.id()).orElseThrow().status());
-        verify(engine, never()).run(any(), any(), anyString(), anyMap(), any());
+        verify(engine, never()).run(any(), any(), any(), anyMap(), any());
+    }
+
+    /**
+     * A case holding several windows is read whole: one folder per finding, oldest first, the span from the
+     * first onset to the last sighting, and every finding's flagged traces citable.
+     */
+    @Test
+    void aCaseRunReadsEveryFindingTheCaseHoldsOldestFirst() {
+        String pid =
+                TenantFixture.bootstrap(tenants, "rca-every-finding").project().id();
+        String olderTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(1)));
+        String newerTrace = seedTrace(pid, seedSession(pid), SPLIT.plus(Duration.ofHours(3)));
+        String older = seedFinding(pid, List.of(), List.of(olderTrace));
+        String newer = seedFinding(pid, List.of(), List.of(newerTrace));
+        CaseRow row = cases.open(pid, detection(older), Instant.now()).orElseThrow();
+        cases.refresh(pid, row.id(), detection(newer), Instant.now());
+        stubEngine();
+
+        worker.run(enqueue(pid, newer));
+
+        Map<String, String> dossier = capturedDossier();
+        assertTrue(
+                dossier.containsKey("findings/1-" + older + "/finding.md"),
+                dossier.keySet().toString());
+        assertTrue(
+                dossier.containsKey("findings/2-" + newer + "/finding.md"),
+                dossier.keySet().toString());
+        ArgumentCaptor<AgenticRcaEngine.Subject> subject = ArgumentCaptor.forClass(AgenticRcaEngine.Subject.class);
+        verify(engine).run(any(), any(), subject.capture(), anyMap(), any());
+        assertEquals(List.of(older, newer), subject.getValue().findingIds());
+        assertEquals(Set.of(olderTrace, newerTrace), capturedEvidence().citableTraceIds());
+    }
+
+    private static CaseDetection detection(String findingId) {
+        return new CaseDetection(
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "secret_leak", "count"),
+                "cs_extract",
+                null,
+                findingId,
+                "the extract leaks a key",
+                "because",
+                0.4,
+                Instant.now(),
+                null,
+                null,
+                null);
     }
 
     /** Catches the finding's title and basis missing from the dossier. */
@@ -441,7 +494,7 @@ class RcaWorkerTest {
 
         worker.run(enqueue(pid, findingId));
 
-        String findingDoc = capturedDossier().get("finding.md");
+        String findingDoc = capturedDossier().get("findings/1-" + findingId + "/finding.md");
         assertTrue(findingDoc.contains("- title: Extraction skips the deadline\n"), findingDoc);
         assertTrue(findingDoc.contains("- basis: seen on 9 of 10 traces\n"), findingDoc);
     }
@@ -463,7 +516,7 @@ class RcaWorkerTest {
     }
 
     private void stubEngine() {
-        when(engine.run(any(), any(), anyString(), anyMap(), any()))
+        when(engine.run(any(), any(), any(), anyMap(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.NO_CAUSE_FOUND, "summary", List.of(), List.of(), "## report", true));
     }
@@ -483,13 +536,13 @@ class RcaWorkerTest {
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedDossier() {
         ArgumentCaptor<Map<String, String>> files = ArgumentCaptor.forClass(Map.class);
-        verify(engine).run(any(), any(), anyString(), files.capture(), any());
+        verify(engine).run(any(), any(), any(), files.capture(), any());
         return files.getValue();
     }
 
     private AgenticRcaEngine.Evidence capturedEvidence() {
         ArgumentCaptor<AgenticRcaEngine.Evidence> ev = ArgumentCaptor.forClass(AgenticRcaEngine.Evidence.class);
-        verify(engine).run(any(), any(), anyString(), anyMap(), ev.capture());
+        verify(engine).run(any(), any(), any(), anyMap(), ev.capture());
         return ev.getValue();
     }
 

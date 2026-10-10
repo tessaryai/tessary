@@ -231,6 +231,7 @@ class McpCaseToolsTest {
                 "find-9",
                 List.of(),
                 null,
+                null,
                 exemplars,
                 rcaReportId,
                 rca,

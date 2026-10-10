@@ -249,16 +249,13 @@ public final class CaseDtos {
      * @param windowOpenedAt when the window this finding measured opened: the detector's own window
      *     where it has one (a drift window), else the finding's onset.
      * @param windowClosedAt when that window closed, else the finding's last sighting.
-     * @param analysed an RCA report exists for this finding. RCA runs on the case's newest finding and
-     *     locks the case, so at most the newest finding carries this.
      */
     public record CaseFindingView(
             String id,
             @Nullable String title,
             @JsonProperty("window_opened_at") String windowOpenedAt,
             @JsonProperty("window_closed_at") String windowClosedAt,
-            @JsonProperty("created_at") String createdAt,
-            boolean analysed) {}
+            @JsonProperty("created_at") String createdAt) {}
 
     /**
      * The case page's whole read.
@@ -303,14 +300,17 @@ public final class CaseDtos {
     public record CaseDetailView(
             @JsonProperty("case") CaseView caseView,
             List<CaseEventView> events,
-            /** The newest finding this case holds — the subject an RCA run is anchored on (1c: RCA
-             *  still runs on one finding, always the case's newest). Null only on an archived case from
+            /** The newest finding this case holds — the one an RCA run is triggered on; the run reads every
+             *  finding in {@code findings}. Null only on an archived case from
              *  a retired detector, or one that predates {@code finding.case_id}, either of which never
              *  had one by construction. */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
             /** Every finding this case holds, oldest first. The case's window runs from the first one's
              *  open to the newest one's close. */
             List<CaseFindingView> findings,
+            /** The finding {@code metric} and {@code tool_error} are drawn from: the case's worst window, the one
+             *  that moved furthest from its reference. Null when those blocks are absent. */
+            @JsonProperty("worst_finding_id") @Nullable String worstFindingId,
             @Nullable CaseRulingView ruling,
             List<CaseExemplarView> exemplars,
             @JsonProperty("rca_report_id") @Nullable String rcaReportId,

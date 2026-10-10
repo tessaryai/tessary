@@ -2,7 +2,6 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -415,10 +414,10 @@ class CaseServiceTest {
     @Test
     void aCaseListsEveryFindingItHoldsOldestFirstWithTheWindowEachMeasured() {
         Project p = project("svc-drift-findings");
-        String first = driftFinding(p, "clf-drift-1", "2026-07-01T10:00:00Z", "2026-07-02T10:00:00Z");
+        String first = driftFinding(p, "clf-drift-1", 1.6, "2026-07-01T10:00:00Z", "2026-07-02T10:00:00Z");
         CaseDetection opening = driftDetection(first, "1.63x slower");
         CaseRow row = cases.open(p.id(), opening, Instant.now()).orElseThrow();
-        String second = driftFinding(p, "clf-drift-2", "2026-07-02T10:00:00Z", "2026-07-03T10:00:00Z");
+        String second = driftFinding(p, "clf-drift-2", 1.3, "2026-07-02T10:00:00Z", "2026-07-03T10:00:00Z");
         cases.refresh(p.id(), row.id(), driftDetection(second, "1.69x slower"), Instant.now());
 
         var listed = service.detail(p.id(), row.id()).findings();
@@ -426,15 +425,19 @@ class CaseServiceTest {
         assertEquals(List.of(first, second), listed.stream().map(f -> f.id()).toList());
         assertEquals("2026-07-01T10:00:00Z", listed.get(0).windowOpenedAt());
         assertEquals("2026-07-03T10:00:00Z", listed.get(1).windowClosedAt());
-        assertFalse(listed.get(1).analysed(), "no RCA has run, so no finding reads as analysed");
+
+        // How big draws the window that moved furthest, not the newest: 1.6x beats 1.3x.
+        var detail = service.detail(p.id(), row.id());
+        assertEquals(first, detail.worstFindingId());
+        assertEquals(1.6, Objects.requireNonNull(detail.metric()).ratio());
     }
 
     // Two classifier ids stand in for two windows: a ruling would free the cause for the next window's
     // finding, and this test is about what the case reads, not about triage.
-    private String driftFinding(Project p, String classifierId, String openedAt, String closedAt) {
+    private String driftFinding(Project p, String classifierId, double ratio, String openedAt, String closedAt) {
         String payload = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"turn_duration\","
                 + "\"bucket\":{\"kind\":\"call_site\",\"key\":\"summarize\"},\"reference\":\"pinned\","
-                + "\"direction\":\"up\",\"ratio\":1.6,\"w1_log\":0.5,\"n_ref\":800,\"n_cur\":650,"
+                + "\"direction\":\"up\",\"ratio\":" + ratio + ",\"w1_log\":0.5,\"n_ref\":800,\"n_cur\":650,"
                 + "\"window\":{\"opened_at\":\"" + openedAt + "\",\"closed_at\":\"" + closedAt + "\"}}";
         return Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),

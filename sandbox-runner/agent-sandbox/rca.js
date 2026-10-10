@@ -12,12 +12,12 @@
  * The run is READ-ONLY: there is no working-tree change collection. The lane's permission rules state that to the agent as well as to us —
  * nothing here may edit.
  *
- * `files` is the FINDING's dossier (relative path → content), materialized under WORK/dossier/
+ * `files` is the CASE's dossier (relative path → content), materialized under WORK/dossier/
  * so the agent reaches it as ./dossier/ from the directory it runs in — the layout the
- * backend's prompt describes:
+ * backend's prompt describes, one folder per finding the case holds, oldest first:
  *
- *   dossier/finding.md      the claim, its cause, its window, and the size of each evidence role
- *   dossier/evidence.md     the detector's own numbers and evidence rows
+ *   dossier/findings/<n>-<id>/finding.md    the claim, its cause, its window, and the size of each evidence role
+ *   dossier/findings/<n>-<id>/evidence.md   the detector's own numbers and evidence rows
  *   dossier/method.md       how the classifier measures, when it has a method file
  *   dossier/tools.md        the MCP tools that reach the rows
  *

@@ -12,6 +12,7 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.Cause;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,8 +40,9 @@ import org.springframework.stereotype.Service;
  * and its mistakes must not arrive here as premises — the failure to avoid is an RCA that confirms a
  * triage error in more words and with more authority. The enforcement is structural rather than
  * conventional: this class reads {@link FindingRepository#findClaim}, whose SELECT list has no
- * {@code triage_*} column in it, so there is no ruling in scope to leak. The prompt says the finding is
- * confirmed and never says by whom.
+ * {@code triage_*} column in it, so there is no ruling in scope to leak; the case's other findings are
+ * found by id alone ({@link FindingRepository#caseSiblingIds}). The prompt says the findings are confirmed
+ * and never says by whom.
  *
  * <h2>Evidence by reference, not by copy</h2>
  *
@@ -76,16 +78,23 @@ public class RcaAnalysisService {
     public void analyze(RcaJobRow job) {
         RcaReportRow report = reports.findByJobId(job.projectId(), job.id())
                 .orElseThrow(() -> new IllegalStateException("rca job " + job.id() + " has no report row"));
-        FindingClaim finding = findings.findClaim(job.projectId(), job.findingId())
-                .orElseThrow(() -> new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId()));
+        List<FindingClaim> subject = subject(job.projectId(), job.findingId());
 
-        AgenticRcaEngine.Evidence ev = evidence(job.projectId(), finding.id());
+        AgenticRcaEngine.Evidence ev =
+                evidence(job.projectId(), subject.stream().map(FindingClaim::id).toList());
         if (ev.citableTraceIds().isEmpty() && ev.citableSessionIds().isEmpty()) {
-            throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, finding.id());
+            throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, job.findingId());
         }
 
-        AgenticRcaEngine.Result result =
-                agenticEngine.run(job, report, finding.id(), dossierFiles(report, finding), ev);
+        AgenticRcaEngine.Result result = agenticEngine.run(
+                job,
+                report,
+                new AgenticRcaEngine.Subject(
+                        subject.stream().map(FindingClaim::id).toList(),
+                        subject.get(0).onsetAt(),
+                        subject.get(subject.size() - 1).lastSeenAt()),
+                dossierFiles(report, subject),
+                ev);
         complete(
                 job,
                 result.verdict(),
@@ -94,6 +103,21 @@ public class RcaAnalysisService {
                 result.causes(),
                 result.detailedReport(),
                 result.repoAvailable());
+    }
+
+    /**
+     * Every finding the job's case holds, oldest first: RCA reads the whole case. The job names the case's
+     * newest finding, and the case is locked when RCA is pressed, so this set is the one the person saw. A
+     * finding with no case is read alone.
+     */
+    private List<FindingClaim> subject(String projectId, String findingId) {
+        List<String> ids = findings.caseSiblingIds(projectId, findingId);
+        List<FindingClaim> claims = new ArrayList<>();
+        for (String id : ids.isEmpty() ? List.of(findingId) : ids) {
+            findings.findClaim(projectId, id).ifPresent(claims::add);
+        }
+        if (claims.isEmpty()) throw new TessaryException(RcaError.SUBJECT_NOT_FOUND, findingId);
+        return claims;
     }
 
     /**
@@ -106,7 +130,7 @@ public class RcaAnalysisService {
             FindingEvidenceRow.Role.MEMBER, FindingEvidenceRow.Role.EXEMPLAR, FindingEvidenceRow.Role.CHANGEPOINT);
 
     /**
-     * What the run needs from the finding's evidence rows.
+     * What the run needs from the findings' evidence rows, read across every finding as one population.
      *
      * <p>The flagged rows are the narrowest set the classifier drew: {@code witness} rows where it wrote any, since
      * a witness is a member the detector singled out (tool error's members are every call, its witnesses the
@@ -114,7 +138,7 @@ public class RcaAnalysisService {
      * never a member the detector did not flag: it would read as explained when it is healthy. Session-grain refs
      * (no trace id) are counted the same way; only frustration writes them, and its grain is sessions.
      */
-    private AgenticRcaEngine.Evidence evidence(String projectId, String findingId) {
+    private AgenticRcaEngine.Evidence evidence(String projectId, List<String> findingIds) {
         Set<String> baseline = new LinkedHashSet<>();
         Set<String> witnessTraces = new LinkedHashSet<>();
         Set<String> populationTraces = new LinkedHashSet<>();
@@ -124,7 +148,9 @@ public class RcaAnalysisService {
         Set<String> populationSessionRefs = new LinkedHashSet<>();
         Set<String> witnessSessions = new LinkedHashSet<>();
         Set<String> populationSessions = new LinkedHashSet<>();
-        for (FindingEvidenceRow row : evidence.listByFinding(projectId, findingId)) {
+        List<FindingEvidenceRow> rows = new ArrayList<>();
+        for (String findingId : findingIds) rows.addAll(evidence.listByFinding(projectId, findingId));
+        for (FindingEvidenceRow row : rows) {
             if (FindingEvidenceRow.Role.BASELINE.equals(row.role())) {
                 if (row.traceId() != null) baseline.add(row.traceId());
                 continue;
@@ -192,24 +218,29 @@ public class RcaAnalysisService {
      *
      * <p>The layout is the contract {@link AgenticRcaEngine}'s prompt describes; change them together.
      */
-    private Map<String, String> dossierFiles(RcaReportRow report, FindingClaim finding) {
+    private Map<String, String> dossierFiles(RcaReportRow report, List<FindingClaim> subject) {
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("finding.md", findingDoc(report, finding));
-        // A dedicated per-shape assembler writes markdown when this classifier's payload matches one (see
-        // ClassifierDossierAssembler's dispatch-by-shape note); any other payload is the stripped JSON, fenced,
-        // so the file is markdown under one name for every classifier.
-        String payload = ClassifierDossierAssembler.assemble(
-                        mapper,
-                        evidence,
-                        finding.projectId(),
-                        finding.id(),
-                        evidenceCounts(finding),
-                        finding.payloadJson())
-                .orElseGet(() -> fenced(DossierPayload.forAgent(mapper, finding.payloadJson())));
-        if (payload != null && !payload.isBlank()) {
-            files.put(EVIDENCE_FILE, payload);
+        for (int i = 0; i < subject.size(); i++) {
+            FindingClaim finding = subject.get(i);
+            String folder = findingFolder(i, finding);
+            files.put(folder + "finding.md", findingDoc(report, finding));
+            // A dedicated per-shape assembler writes markdown when this classifier's payload matches one (see
+            // ClassifierDossierAssembler's dispatch-by-shape note); any other payload is the stripped JSON, fenced,
+            // so the file is markdown under one name for every classifier.
+            String payload = ClassifierDossierAssembler.assemble(
+                            mapper,
+                            evidence,
+                            finding.projectId(),
+                            finding.id(),
+                            evidenceCounts(finding),
+                            finding.payloadJson())
+                    .orElseGet(() -> fenced(DossierPayload.forAgent(mapper, finding.payloadJson())));
+            if (payload != null && !payload.isBlank()) {
+                files.put(folder + EVIDENCE_FILE, payload);
+            }
         }
-        String method = AgenticRcaEngine.method(finding.classifierKey());
+        // One case, one classifier: the method is the same for every finding.
+        String method = AgenticRcaEngine.method(subject.get(0).classifierKey());
         if (method != null) files.put(AgenticRcaEngine.METHOD_FILE, method);
         files.put(AgenticRcaEngine.TOOLS_FILE, AgenticRcaEngine.TOOLS);
         return files;
@@ -228,6 +259,11 @@ public class RcaAnalysisService {
     }
 
     static final String EVIDENCE_FILE = "evidence.md";
+
+    /** {@code findings/<n>-<id>/}, numbered from 1, oldest first: the layout the prompt describes. */
+    static String findingFolder(int index, FindingClaim finding) {
+        return "findings/" + (index + 1) + "-" + finding.id() + "/";
+    }
 
     /** A raw payload as markdown. The fence is longer than any backtick run in the JSON, so a string value that
      *  holds a code block cannot close it early. */
