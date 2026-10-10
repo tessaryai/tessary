@@ -2752,6 +2752,7 @@ export interface components {
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
+            findings: components["schemas"]["CaseFindingView"][];
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
             latest_finding_id: string | null;
@@ -2763,6 +2764,7 @@ export interface components {
             ruling: components["schemas"]["CaseRulingView"] | null;
             secret_leak: components["schemas"]["SecretLeakDetail"] | null;
             tool_error: components["schemas"]["RateDetail"] | null;
+            worst_finding_id: string | null;
         };
         CaseEventView: {
             actor: string | null;
@@ -2783,6 +2785,13 @@ export interface components {
             role: string;
             started_at: string | null;
             trace_id: string;
+        };
+        CaseFindingView: {
+            created_at: string;
+            id: string;
+            title: string | null;
+            window_closed_at: string;
+            window_opened_at: string;
         };
         CaseRulingView: {
             action: string | null;

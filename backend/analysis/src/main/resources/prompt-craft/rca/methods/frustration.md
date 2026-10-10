@@ -11,7 +11,7 @@ Frustration aimed at something outside the chat never flags. A session stops bei
 its first flag.
 
 ## Reading the evidence
-Numbers are in `dossier/evidence.md`. `witness` session rows are every frustrated session
+Numbers are in each finding's `evidence.md`. `witness` session rows are every frustrated session
 since the onset. `witness` trace rows are the user turn that was flagged inside each of those sessions. `member` session rows are
 every session scored on the call site since the onset. There are no `baseline` rows: the normal
 rate is a number, not a set of rows.

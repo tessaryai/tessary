@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,12 +109,22 @@ public class AgenticRcaEngine {
             boolean repoAvailable) {}
 
     /**
-     * The finding's evidence as the run needs it.
+     * What one run investigates: every finding its case held when RCA was pressed, oldest first, and the span
+     * they cover together.
      *
-     * @param citableTraceIds every trace id in the finding's evidence: what a cause may cite
-     * @param citableSessionIds every session id in the finding's evidence
+     * @param findingIds the findings, oldest first
+     * @param onsetAt the oldest finding's onset
+     * @param lastSeenAt the newest finding's last sighting
+     */
+    public record Subject(List<String> findingIds, String onsetAt, String lastSeenAt) {}
+
+    /**
+     * The findings' evidence as the run needs it.
+     *
+     * @param citableTraceIds every trace id in the findings' evidence: what a cause may cite
+     * @param citableSessionIds every session id in the findings' evidence
      * @param baselinePresent whether the evidence has {@code baseline} rows to compare against
-     * @param flaggedCount how many rows the finding flagged, in {@code grain}
+     * @param flaggedCount how many rows the findings flagged, in {@code grain}
      * @param grain {@code traces} or {@code sessions}
      */
     public record Evidence(
@@ -177,7 +188,7 @@ public class AgenticRcaEngine {
     }
 
     public Result run(
-            RcaJobRow job, RcaReportRow report, String findingId, Map<String, String> dossierFiles, Evidence evidence) {
+            RcaJobRow job, RcaReportRow report, Subject subject, Map<String, String> dossierFiles, Evidence evidence) {
         Agentic cfg = props.getAgentic();
         String mcpBase = cfg.getMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
@@ -202,8 +213,7 @@ public class AgenticRcaEngine {
         }
 
         String prompt = buildPrompt(
-                report,
-                findingId,
+                subject,
                 clone.isPresent(),
                 evidence.baselinePresent(),
                 dossierFiles.containsKey(METHOD_FILE),
@@ -224,7 +234,7 @@ public class AgenticRcaEngine {
                     job.subjectId(),
                     clone.map(Clone::url).orElse(null),
                     clone.map(Clone::headSha).orElse(null),
-                    clone.isPresent() ? report.windowSplit() : null,
+                    clone.isPresent() ? subject.onsetAt() : null,
                     dossierFiles,
                     prompt,
                     JSON_SCHEMA,
@@ -321,8 +331,7 @@ public class AgenticRcaEngine {
      * from the {@code onset_at} this class sends beside the clone URL.
      */
     static String buildPrompt(
-            RcaReportRow report,
-            String findingId,
+            Subject subject,
             boolean repoCloned,
             boolean baselinePresent,
             boolean methodPresent,
@@ -334,9 +343,10 @@ public class AgenticRcaEngine {
                 ? prompt.replace("{baseline}", BASELINE_PRESENT.stripTrailing())
                 : prompt.replace("{baseline}\n\n", "");
         prompt = methodPresent ? prompt.replace("{method_line}", METHOD_LINE) : prompt.replace("{method_line}\n", "");
-        return prompt.replace("{finding_id}", findingId)
-                .replace("{onset}", report.windowSplit())
-                .replace("{last_seen}", report.windowTo())
+        String ids = subject.findingIds().stream().map(id -> "`" + id + "`").collect(Collectors.joining(", "));
+        return prompt.replace("{finding_ids}", ids)
+                .replace("{onset}", subject.onsetAt())
+                .replace("{last_seen}", subject.lastSeenAt())
                 .replace("{flagged_count}", Integer.toString(flaggedCount))
                 .replace("{grain}", grain)
                 .replace("{time_budget_minutes}", Long.toString(timeBudgetMinutes))

@@ -155,7 +155,7 @@ class AgenticRcaEngineTest {
         AgenticRcaEngine.Evidence evidence =
                 new AgenticRcaEngine.Evidence(Set.of("tr-1", "tb-1"), Set.of("s-1", "s-2"), true, 2, "sessions");
 
-        AgenticRcaEngine.Result result = engine(props, sandbox).run(job(), report, "fnd-1", dossier, evidence);
+        AgenticRcaEngine.Result result = engine(props, sandbox).run(job(), report, subject(report), dossier, evidence);
 
         assertEquals(
                 List.of(new RcaSandbox.SandboxRequest(
@@ -166,8 +166,7 @@ class AgenticRcaEngineTest {
                         null,
                         dossier,
                         AgenticRcaEngine.buildPrompt(
-                                report,
-                                "fnd-1",
+                                subject(report),
                                 false,
                                 true,
                                 true,
@@ -194,12 +193,12 @@ class AgenticRcaEngineTest {
         RecordingSandbox sandbox = new RecordingSandbox("{\"verdict\":\"no_cause_found\",\"causes\":[]}");
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
-        engine(props, sandbox).run(job(), report, "fnd-1", Map.of("finding.md", "# f"), traces("tr-1"));
+        engine(props, sandbox).run(job(), report, subject(report), Map.of("finding.md", "# f"), traces("tr-1"));
 
         String prompt = sandbox.requests.get(0).prompt();
         assertEquals(
                 AgenticRcaEngine.buildPrompt(
-                        report, "fnd-1", false, false, false, 1, "traces", AgenticRcaEngine.timeBudgetMinutes(900_000)),
+                        subject(report), false, false, false, 1, "traces", AgenticRcaEngine.timeBudgetMinutes(900_000)),
                 prompt);
         assertFalse(prompt.contains("method.md"), prompt);
     }
@@ -223,7 +222,7 @@ class AgenticRcaEngineTest {
         RcaReportRow report = report(RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES);
 
         AgenticRcaEngine.Result result =
-                engine(props, sandbox).run(job(), report, "fnd-1", Map.of(), traces("tr-1", "tr-2"));
+                engine(props, sandbox).run(job(), report, subject(report), Map.of(), traces("tr-1", "tr-2"));
 
         assertEquals(
                 new AgenticRcaEngine.Result(
@@ -262,7 +261,7 @@ class AgenticRcaEngineTest {
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         AgenticRcaEngine.Result result =
-                engine(props, sandbox).run(job(), report, "fnd-1", Map.of(), traces("tf-1", "tf-2"));
+                engine(props, sandbox).run(job(), report, subject(report), Map.of(), traces("tf-1", "tf-2"));
 
         assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, result.verdict());
         assertEquals(List.of(), result.causes());
@@ -303,7 +302,7 @@ class AgenticRcaEngineTest {
                 new AgenticRcaEngine(props, List.of(sandbox), repo, providers, apiKeys, new ObjectMapper());
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
-        AgenticRcaEngine.Result result = engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1"));
+        AgenticRcaEngine.Result result = engine.run(job(), report, subject(report), Map.of(), traces("tf-1"));
 
         RcaSandbox.SandboxRequest sent = sandbox.requests.get(0);
         assertEquals(expectedCloneUrl, sent.cloneUrl());
@@ -311,8 +310,7 @@ class AgenticRcaEngineTest {
         assertEquals(expectedOnset, sent.onsetAt());
         assertEquals(
                 AgenticRcaEngine.buildPrompt(
-                        report,
-                        "fnd-1",
+                        subject(report),
                         expectedCloneUrl != null,
                         false,
                         false,
@@ -338,7 +336,7 @@ class AgenticRcaEngineTest {
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
 
         TessaryException e = assertThrows(
-                TessaryException.class, () -> engine.run(job(), report, "fnd-1", Map.of(), traces("tf-1")));
+                TessaryException.class, () -> engine.run(job(), report, subject(report), Map.of(), traces("tf-1")));
 
         assertEquals(RcaError.NO_EVIDENCE_DOOR, e.error());
         assertEquals(List.of(), sandbox.requests);
@@ -458,5 +456,10 @@ class AgenticRcaEngineTest {
                 null,
                 "2026-05-08T01:00:00Z",
                 null);
+    }
+
+    /** One finding, over the report's own window: what every run before multi-finding cases read. */
+    private static AgenticRcaEngine.Subject subject(RcaReportRow report) {
+        return new AgenticRcaEngine.Subject(List.of("fnd-1"), report.windowSplit(), report.windowTo());
     }
 }

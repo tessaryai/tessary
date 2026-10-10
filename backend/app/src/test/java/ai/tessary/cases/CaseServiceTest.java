@@ -409,6 +409,65 @@ class CaseServiceTest {
         assertEquals(2.4, shift.ratio());
     }
 
+    @Test
+    void aCaseListsEveryFindingItHoldsOldestFirstWithTheWindowEachMeasured() {
+        Project p = project("svc-drift-findings");
+        String first = driftFinding(p, "clf-drift-1", 1.6, "2026-07-01T10:00:00Z", "2026-07-02T10:00:00Z");
+        CaseDetection opening = driftDetection(first, "1.63x slower");
+        CaseRow row = cases.open(p.id(), opening, Instant.now()).orElseThrow();
+        String second = driftFinding(p, "clf-drift-2", 1.3, "2026-07-02T10:00:00Z", "2026-07-03T10:00:00Z");
+        cases.refresh(p.id(), row.id(), driftDetection(second, "1.69x slower"), Instant.now());
+
+        var listed = service.detail(p.id(), row.id()).findings();
+
+        assertEquals(List.of(first, second), listed.stream().map(f -> f.id()).toList());
+        assertEquals("2026-07-01T10:00:00Z", listed.get(0).windowOpenedAt());
+        assertEquals("2026-07-03T10:00:00Z", listed.get(1).windowClosedAt());
+
+        // How big draws the window that moved furthest, not the newest: 1.6x beats 1.3x.
+        var detail = service.detail(p.id(), row.id());
+        assertEquals(first, detail.worstFindingId());
+        assertEquals(1.6, Objects.requireNonNull(detail.metric()).ratio());
+    }
+
+    // Two classifier ids stand in for two windows: a ruling would free the cause for the next window's
+    // finding, and this test is about what the case reads, not about triage.
+    private String driftFinding(Project p, String classifierId, double ratio, String openedAt, String closedAt) {
+        String payload = "{\"cause_kind\":\"distribution_shift\",\"measure\":\"turn_duration\","
+                + "\"bucket\":{\"kind\":\"call_site\",\"key\":\"summarize\"},\"reference\":\"pinned\","
+                + "\"direction\":\"up\",\"ratio\":" + ratio + ",\"w1_log\":0.5,\"n_ref\":800,\"n_cur\":650,"
+                + "\"window\":{\"opened_at\":\"" + openedAt + "\",\"closed_at\":\"" + closedAt + "\"}}";
+        return Objects.requireNonNull(findings.recordArmedWindow(
+                        Ids.ulid(),
+                        p.id(),
+                        BuiltInDetector.Kind.REGEX,
+                        classifierId,
+                        "cause-drift",
+                        1,
+                        "cs-a",
+                        payload,
+                        closedAt,
+                        closedAt,
+                        closedAt,
+                        closedAt))
+                .findingId();
+    }
+
+    private static CaseDetection driftDetection(String findingId, String title) {
+        return new CaseDetection(
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "drift", "p50"),
+                "summarize",
+                null,
+                findingId,
+                title,
+                "because",
+                0.4,
+                Instant.parse("2026-07-01T10:00:00Z"),
+                null,
+                null,
+                null);
+    }
+
     private static void assertError(ErrorCode expected, Executable call) {
         assertEquals(expected, assertThrows(TessaryException.class, call).error());
     }

@@ -229,6 +229,8 @@ class McpCaseToolsTest {
                 sampleCase("case-118", "C-118", "open"),
                 List.of(),
                 "find-9",
+                List.of(),
+                null,
                 null,
                 exemplars,
                 rcaReportId,

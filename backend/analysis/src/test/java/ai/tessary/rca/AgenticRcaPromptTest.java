@@ -83,7 +83,7 @@ class AgenticRcaPromptTest {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{[a-z_]+\\}");
 
     private static String prompt(boolean repo, boolean baseline, boolean method) {
-        return AgenticRcaEngine.buildPrompt(report(), "fnd-1", repo, baseline, method, 12, "traces", 15);
+        return AgenticRcaEngine.buildPrompt(subject(report()), repo, baseline, method, 12, "traces", 15);
     }
 
     /** Every combination of the three snippets Java chooses. */
@@ -165,8 +165,24 @@ class AgenticRcaPromptTest {
         assertTrue(prompt.contains("flagged traces in the evidence: 12"), prompt);
         assertTrue(prompt.contains("time budget: 15 minutes"), prompt);
         assertTrue(prompt.contains("`dossier/tools.md`"), "tools.md is a first read");
-        assertTrue(prompt.contains("`dossier/evidence.md`"), "evidence.md is a first read");
+        assertTrue(prompt.contains("`dossier/findings/<n>-<id>/evidence.md`"), "evidence.md is a first read");
         assertFalse(prompt.contains("\n\n\n"), "a snippet left out leaves no blank gap");
+    }
+
+    /** A case's run names every finding it reads, oldest first, over the span they cover together. */
+    @Test
+    void aCaseRunNamesEveryFindingOldestFirst() {
+        String prompt = AgenticRcaEngine.buildPrompt(
+                new AgenticRcaEngine.Subject(List.of("fnd-1", "fnd-2"), "2026-05-01T00:00:00Z", "2026-05-09T00:00:00Z"),
+                true,
+                true,
+                true,
+                12,
+                "traces",
+                15);
+
+        assertTrue(prompt.contains("finding ids, oldest first: `fnd-1`, `fnd-2`"), prompt);
+        assertTrue(prompt.contains("onset: 2026-05-01T00:00:00Z; last seen: 2026-05-09T00:00:00Z"), prompt);
     }
 
     /** The sandbox boot and the clone spend part of the hard timeout, so the agent is told less than all of it. */
@@ -237,8 +253,8 @@ class AgenticRcaPromptTest {
      */
     @Test
     void theFlaggedCountChangesTheNumberAndNothingElse() {
-        String few = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 2, "sessions", 15);
-        String many = AgenticRcaEngine.buildPrompt(report(), "fnd-1", true, true, true, 40, "sessions", 15);
+        String few = AgenticRcaEngine.buildPrompt(subject(report()), true, true, true, 2, "sessions", 15);
+        String many = AgenticRcaEngine.buildPrompt(subject(report()), true, true, true, 40, "sessions", 15);
 
         assertEquals(many, few.replace("flagged sessions in the evidence: 2", "flagged sessions in the evidence: 40"));
     }
@@ -318,5 +334,10 @@ class AgenticRcaPromptTest {
                 null,
                 "2026-05-08T01:00:00Z",
                 null);
+    }
+
+    /** One finding, over the report's own window: what every run before multi-finding cases read. */
+    private static AgenticRcaEngine.Subject subject(RcaReportRow report) {
+        return new AgenticRcaEngine.Subject(List.of("fnd-1"), report.windowSplit(), report.windowTo());
     }
 }

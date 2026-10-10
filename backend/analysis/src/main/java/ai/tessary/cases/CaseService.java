@@ -3,6 +3,7 @@ package ai.tessary.cases;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseEventView;
+import ai.tessary.cases.CaseDtos.CaseFindingView;
 import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
@@ -47,6 +48,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -271,6 +273,10 @@ public class CaseService {
         boolean detectorAvailable = detectorAvailable(projectId, row);
         RcaReportRow report = latestRcaReport(projectId, finding);
         RcaReportView rca = inlinedRcaReport(report);
+        List<FindingRow> held = findings.listByCase(projectId, row.id());
+        FindingRow worst = worstWindow(held, finding);
+        ShiftDetail metric = shiftDetail(worst);
+        RateDetail toolError = rateDetail(worst);
         return new CaseDetailView(
                 // The report is already in hand, so the caption comes off it directly: no second lookup,
                 // and the header cannot disagree with the analysis rendered below it.
@@ -279,14 +285,16 @@ public class CaseService {
                         .map(CaseEventView::of)
                         .toList(),
                 finding == null ? null : finding.id(),
+                caseFindings(held),
+                (metric != null || toolError != null) && worst != null ? worst.id() : null,
                 ruling(finding),
                 exemplars.forCase(
                         projectId,
                         finding == null ? List.of() : findingEvidence.listByFinding(projectId, finding.id())),
                 report == null ? null : report.id(),
                 rca,
-                shiftDetail(finding),
-                rateDetail(finding),
+                metric,
+                toolError,
                 finding == null ? null : malformedOutputDetail.detail(finding),
                 finding == null ? null : secretLeakDetail.detail(secretLeakFindings(projectId, row, finding)),
                 finding == null ? null : frustrationDetail.detail(finding),
@@ -294,6 +302,55 @@ public class CaseService {
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
+    }
+
+    /**
+     * The case's findings, oldest first, each with the window it measured. A drift finding's window is the
+     * detector's own; any other finding's is its onset to its last sighting.
+     */
+    private static List<CaseFindingView> caseFindings(List<FindingRow> newestFirst) {
+        List<FindingRow> all = new ArrayList<>(newestFirst);
+        Collections.reverse(all);
+        return all.stream()
+                .map(f -> {
+                    // A drift window is taken whole or not at all, as on the case page.
+                    ShiftDetail shift = shiftDetail(f);
+                    String opened = shift == null ? null : shift.windowOpenedAt();
+                    String closed = shift == null ? null : shift.windowClosedAt();
+                    if (opened == null || closed == null) {
+                        opened = f.onsetAt();
+                        closed = f.lastSeenAt();
+                    }
+                    return new CaseFindingView(f.id(), f.title(), opened, closed, f.createdAt());
+                })
+                .toList();
+    }
+
+    /**
+     * The window "How big" draws when a case holds several: the one that moved furthest from its reference — the
+     * largest ratio either way for a drift, the largest rate change for a failure rate. Taken whole, never
+     * assembled from several windows' quantiles, so the figure is one that happened against its own reference.
+     * Any other detector, or a case with one finding, draws the newest.
+     */
+    static @Nullable FindingRow worstWindow(List<FindingRow> held, @Nullable FindingRow newest) {
+        FindingRow worst = newest;
+        double worstSize = magnitude(newest);
+        for (FindingRow f : held) {
+            double size = magnitude(f);
+            if (size > worstSize) {
+                worst = f;
+                worstSize = size;
+            }
+        }
+        return worst;
+    }
+
+    private static double magnitude(@Nullable FindingRow f) {
+        ShiftDetail shift = shiftDetail(f);
+        if (shift != null && shift.ratio() > 0) return Math.abs(Math.log(shift.ratio()));
+        RateDetail rate = rateDetail(f);
+        if (rate != null) return Math.abs(rate.deltaPp());
+        return -1;
     }
 
     /**
@@ -584,6 +641,9 @@ public class CaseService {
      * immutable artefact that changes nothing about the case. Re-pressing a locked case coalesces onto
      * its one report, exactly as before locking existed.
      *
+     * <p>The run reads every finding the case holds; the trigger names the newest, and the RCA lane widens
+     * to its case from there.
+     *
      * <p>A case with no finding behind it cannot be analysed: RCA is anchored on a claim and its
      * recorded evidence, and there is nothing here to anchor on. Only rows written before a case's
      * first finding link became mandatory can be in that state.
@@ -605,7 +665,7 @@ public class CaseService {
                     row.id(),
                     CaseEventRow.Kind.RCA_REQUESTED,
                     actor,
-                    "Requested — locks the case to its finding; the cause's next positive opens a new case.",
+                    "Requested — locks the case to its findings; the cause's next positive opens a new case.",
                     null,
                     now);
         }

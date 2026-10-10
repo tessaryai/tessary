@@ -1206,6 +1206,8 @@ public class McpToolRegistry {
                     detail.caseView(),
                     detail.events(),
                     detail.latestFindingId(),
+                    detail.findings(),
+                    detail.worstFindingId(),
                     null,
                     List.of(),
                     detail.rcaReportId(),
