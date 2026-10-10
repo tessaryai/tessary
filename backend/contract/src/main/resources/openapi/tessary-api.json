@@ -3618,18 +3618,6 @@
           "metric" : {
             "type" : "string"
           },
-          "muted_at" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
-          "muted_by" : {
-            "type" : [
-              "string",
-              "null"
-            ]
-          },
           "onset_at" : {
             "type" : "string"
           },
@@ -3704,8 +3692,6 @@
           "latest_finding_id",
           "locked_at",
           "metric",
-          "muted_at",
-          "muted_by",
           "onset_at",
           "opened_at",
           "rca_verdict",
@@ -8741,12 +8727,12 @@
           "reason" : {
             "maxLength" : 500,
             "minLength" : 0,
-            "type" : "string"
+            "type" : [
+              "string",
+              "null"
+            ]
           }
         },
-        "required" : [
-          "reason"
-        ],
         "type" : "object"
       },
       "ResponseMeta" : {
@@ -11633,12 +11619,6 @@
             },
             "type" : "array"
           },
-          "muted" : {
-            "items" : {
-              "$ref" : "#/components/schemas/CaseView"
-            },
-            "type" : "array"
-          },
           "recently_resolved" : {
             "items" : {
               "$ref" : "#/components/schemas/CaseView"
@@ -11651,7 +11631,6 @@
         },
         "required" : [
           "cases",
-          "muted",
           "recently_resolved",
           "watching"
         ],
@@ -14267,60 +14246,6 @@
         ]
       }
     },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/mute" : {
-      "post" : {
-        "operationId" : "CaseController_mute",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseCaseView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "case-controller"
-        ]
-      }
-    },
     "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/rca" : {
       "post" : {
         "operationId" : "CaseController_runRca",
@@ -14422,60 +14347,6 @@
           },
           "required" : true
         },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ApiResponseCaseView"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "tags" : [
-          "case-controller"
-        ]
-      }
-    },
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/unmute" : {
-      "post" : {
-        "operationId" : "CaseController_unmute",
-        "parameters" : [
-          {
-            "in" : "query",
-            "name" : "ctx",
-            "required" : true,
-            "schema" : {
-              "$ref" : "#/components/schemas/TenantContext"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "orgSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "projectSlug",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          },
-          {
-            "in" : "path",
-            "name" : "id",
-            "required" : true,
-            "schema" : {
-              "type" : "string"
-            }
-          }
-        ],
         "responses" : {
           "200" : {
             "content" : {

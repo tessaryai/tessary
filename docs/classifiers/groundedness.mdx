@@ -147,20 +147,13 @@ The case page cards every cause, high first. Each cause shows:
 
 [Root-cause analysis](/concepts/root-cause-analysis#on-a-groundedness-case) covers how the report checks its own citations.
 
-## Resolve the case
+## Close or absorb the case
 
-**Resolve case** and **Absorb as legitimate** appear at the end of the case page once RCA has produced a report. Until then, the page reads "Run RCA before resolving this case."
+Once RCA has produced a report, **Close** and **Absorb** appear on the **Why** line. Each asks you to confirm.
 
-Select **Resolve case**, write one line on what happened, and choose what the case turned out to be:
+**Close** says the cause is dealt with. The call site learns its normal share again from the traces after the close, and the answers the case cites stay flagged. Close the case only once the fix is live. Closed earlier, the call site learns the ungrounded share as its normal.
 
-| Choice | What it does |
-| --- | --- |
-| **Fixed** | The call site learns its normal share again from the traces after the resolve. The answers the case cites stay flagged. |
-| **False alarm** | The same, and every flagged answer the case cites is cleared. A trace stops counting as flagged unless another flagged answer in it still stands. A cleared answer reads **Cleared** in the list. |
-
-Resolve as **Fixed** only once the fix is live. Resolved earlier, the call site learns the ungrounded share as its normal.
-
-**Absorb as legitimate** says the new share is correct for this call site. The call site learns its normal share again from the traces after you absorb, and the answers the case cites stay flagged.
+**Absorb** says the new share is correct for this call site. The call site learns its normal share again from the traces after you absorb, and the answers the case cites stay flagged.
 
 ## When it pauses
 
@@ -208,8 +201,8 @@ To turn it back on while the model is still set up, switch the row on. It resume
 ## Read next
 
 <CardGroup cols={2}>
-  <Card title="Cases" icon="folder-open" href="/concepts/cases#resolving-a-groundedness-case">
-    How a groundedness case is resolved or absorbed, and the states a case moves through.
+  <Card title="Cases" icon="folder-open" href="/concepts/cases#closing-a-groundedness-case">
+    How a groundedness case is closed or absorbed, and the states a case moves through.
   </Card>
   <Card title="Troubleshooting" icon="wrench" href="/self-hosting/troubleshooting#the-groundedness-classifier-never-fires">
     What to check when the classifier scores nothing or opens no findings.

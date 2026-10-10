@@ -42,7 +42,7 @@ public class CaseRepository {
             + " AS latest_finding_id, "
             + "state, locked_at, title, basis, severity, onset_at, "
             + "current_value, baseline_value, delta, opened_at, last_seen_at, resolved_at, resolution, "
-            + "resolution_reason, resolved_by, disposition, muted_at, muted_by";
+            + "resolution_reason, resolved_by, disposition";
 
     private static final String LIVE_ORDER = "ORDER BY severity DESC, opened_at DESC";
 
@@ -83,7 +83,7 @@ public class CaseRepository {
      * cursor codec, because a cursor that encodes one order and a query that runs another resume from a point
      * that is not on the ordering — the failure mode watch-out 2 of the MCP v2 plan exists to prevent.
      *
-     * <p>Only a resolved-only page gets the resolved order. A muted page and an unfiltered page both keep the
+     * <p>Only a resolved-only page gets the resolved order. An open page and an unfiltered page both keep the
      * live ranking: {@code severity} and {@code opened_at} are {@code NOT NULL} on every row, so worst-first
      * is total over any selection, while {@code resolved_at} is null on everything that is still open.
      */
@@ -124,7 +124,7 @@ public class CaseRepository {
      * set is small per project and bounded by the history window, so an index for it waits on EXPLAIN
      * against real data rather than on a guess.
      *
-     * @param state {@code open} | {@code muted} | {@code resolved}, or null for every state
+     * @param state {@code open} | {@code resolved}, or null for every state
      * @param limit rows to return. Callers over-fetch by one to detect a next page.
      * @param before the previous page's last row, or null to start at the top
      */
@@ -171,7 +171,7 @@ public class CaseRepository {
         return stmt.query((rs, n) -> map(rs)).list();
     }
 
-    /** The project's live cases — open and muted — worst first. Triage's whole read. */
+    /** The project's open cases, worst first. Triage's whole read. */
     public List<CaseRow> listLive(String projectId) {
         return jdbc.sql("SELECT " + COLS + " FROM eval_case WHERE project_id = :pid AND state <> 'resolved' "
                         + LIVE_ORDER)
@@ -373,30 +373,6 @@ public class CaseRepository {
                 .update();
     }
 
-    /** Mute a live case: it stays the case for its spell, and leaves the default Triage list. */
-    public void mute(String projectId, String id, @Nullable String actor, Instant now) {
-        jdbc.sql("""
-                UPDATE eval_case SET state = 'muted', muted_at = :now, muted_by = :actor, updated_at = :now
-                WHERE project_id = :pid AND id = :id AND state = 'open'
-                """)
-                .param("pid", projectId)
-                .param("id", id)
-                .param("actor", actor)
-                .param("now", now.toString())
-                .update();
-    }
-
-    public void unmute(String projectId, String id, Instant now) {
-        jdbc.sql("""
-                UPDATE eval_case SET state = 'open', muted_at = NULL, muted_by = NULL, updated_at = :now
-                WHERE project_id = :pid AND id = :id AND state = 'muted'
-                """)
-                .param("pid", projectId)
-                .param("id", id)
-                .param("now", now.toString())
-                .update();
-    }
-
     // ---- mapping -----------------------------------------------------------------------------
 
     private static CaseRow map(ResultSet rs) throws SQLException {
@@ -426,9 +402,7 @@ public class CaseRepository {
                 rs.getString("resolution"),
                 rs.getString("resolution_reason"),
                 rs.getString("resolved_by"),
-                rs.getString("disposition"),
-                rs.getString("muted_at"),
-                rs.getString("muted_by"));
+                rs.getString("disposition"));
     }
 
     private static @Nullable Double doubleOrNull(ResultSet rs, String column) throws SQLException {

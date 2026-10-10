@@ -6,13 +6,9 @@ import org.springframework.http.HttpStatus;
 /** Errors raised by the case surface — Triage and the case page. */
 public enum CaseError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "Case not found: %s"),
-    // Closing a case is the one place the product asks for prose, because the reason is the whole
-    // value of the record — "resolved" with no account of why teaches the next reader nothing.
-    REASON_REQUIRED(HttpStatus.BAD_REQUEST, "Resolving a case needs a one-line reason"),
-    ALREADY_RESOLVED(HttpStatus.CONFLICT, "Case %s is already resolved"),
-    NOT_MUTED(HttpStatus.CONFLICT, "Case %s is not muted"),
+    ALREADY_RESOLVED(HttpStatus.CONFLICT, "Case %s is already closed"),
     // Absorbing moves the DETECTOR's reference, so it needs one that can move. Some cases have none (see
-    // CaseService#absorbable); they can still be resolved and muted.
+    // CaseService#absorbable); they can still be closed.
     NOT_ABSORBABLE(HttpStatus.CONFLICT, "Case %s has no detector reference that an absorb could move"),
     // A disposition says what a resolved frustration case turned out to be, and each one changes what the
     // classifier counts next. No other case has anything it would change, so it is refused rather than stored.

@@ -59,9 +59,7 @@ const api = vi.hoisted(() => ({
   getBehaviorFindingEvidence: vi.fn(),
   getGitIntegration: vi.fn(),
   getTrace: vi.fn(),
-  resolveCase: vi.fn(),
-  muteCase: vi.fn(),
-  unmuteCase: vi.fn(),
+  closeCase: vi.fn(),
   absorbCase: vi.fn(),
   runCaseRca: vi.fn(),
   rerunRca: vi.fn(),
@@ -264,7 +262,7 @@ beforeEach(() => {
   api.getFrustratedSessions.mockResolvedValue({ rows: [], total: 0, nextCursor: null });
   api.getBehaviorFindingEvidence.mockResolvedValue({ rows: [], nextCursor: null, counts: {}, recordedCounts: {} });
   api.getTrace.mockReturnValue(new Promise(() => {}));
-  for (const f of [api.resolveCase, api.muteCase, api.unmuteCase, api.absorbCase, api.runCaseRca, api.rerunRca])
+  for (const f of [api.closeCase, api.absorbCase, api.runCaseRca, api.rerunRca])
     f.mockResolvedValue({});
 });
 
@@ -293,41 +291,39 @@ const dialog = () => screen.getByRole("dialog");
 // ---- tests ----------------------------------------------------------------------------------
 
 describe("closing a case", () => {
-  it("resolves the case with the reason given, then closes the dialog", async () => {
+  it("closes the case after the confirmation, then dismisses the dialog", async () => {
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Resolve case"));
-    fireEvent.change(within(dialog()).getByLabelText("Reason"), { target: { value: "prompt fixed" } });
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Resolve case" }));
+    fireEvent.click(button("Close"));
+    expect(within(dialog()).getByText("The evidence in this case's findings is left out when the baseline is set.")).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Close case" }));
 
-    await waitFor(() => expect(api.resolveCase).toHaveBeenCalledWith("case-1", "prompt fixed", "fixed"));
-    await waitFor(() => expect(screen.queryByLabelText("Reason")).toBeNull());
+    await waitFor(() => expect(api.closeCase).toHaveBeenCalledWith("case-1"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(api.getCase).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels a resolve without sending it", async () => {
+  it("cancels a close without sending it", async () => {
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Resolve case"));
+    fireEvent.click(button("Close"));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("Reason")).toBeNull();
-    fireEvent.click(button("Resolve case"));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Close" }));
-    expect(screen.queryByLabelText("Reason")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     await settle();
-    expect(api.resolveCase).not.toHaveBeenCalled();
+    expect(api.closeCase).not.toHaveBeenCalled();
   });
 
-  it("absorbs the case as legitimate, and says why an absorb was refused", async () => {
+  it("absorbs the case after the confirmation, and says why an absorb was refused", async () => {
     api.absorbCase.mockRejectedValueOnce(new ApiError(409, { code: "CASE.LOCKED", message: "Case is locked" }));
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Absorb as legitimate"));
-    const confirmAbsorb = () => within(dialog()).getByRole("button", { name: "Absorb as legitimate" });
+    fireEvent.click(button("Absorb"));
+    expect(within(dialog()).getByText("The evidence in this case's findings counts toward the baseline.")).toBeTruthy();
+    const confirmAbsorb = () => within(dialog()).getByRole("button", { name: "Absorb" });
     fireEvent.click(confirmAbsorb());
     expect(await within(dialog()).findByText("CASE.LOCKED")).toBeTruthy();
 
@@ -337,50 +333,28 @@ describe("closing a case", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("closes the absorb dialog on Cancel without absorbing", async () => {
+  it("dismisses the absorb dialog on Cancel without absorbing", async () => {
     renderPage();
     await heading(BASE.case.title);
 
-    fireEvent.click(button("Absorb as legitimate"));
+    fireEvent.click(button("Absorb"));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(button("Absorb as legitimate"));
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await settle();
     expect(api.absorbCase).not.toHaveBeenCalled();
   });
 
-  it("mutes an open case and unmutes a muted one, and says why a mute failed", async () => {
-    api.muteCase.mockRejectedValue(new ApiError(500, { code: "CASE.FAILED", message: "no" }));
-    renderPage();
-    await heading(BASE.case.title);
-
-    fireEvent.click(button("Mute case"));
-    await waitFor(() => expect(api.muteCase).toHaveBeenCalledWith("case-1"));
-    expect(await screen.findByText("CASE.FAILED")).toBeTruthy();
-    cleanup();
-
-    api.getCase.mockResolvedValue({ ...BASE, case: { ...BASE.case, state: "muted" } });
-    renderPage();
-    await heading(BASE.case.title);
-    fireEvent.click(button("Unmute case"));
-    await waitFor(() => expect(api.unmuteCase).toHaveBeenCalledWith("case-1"));
-  });
-
-  it("names the plain verbs on a case with no ranked causes, and offers absorb only where it is available", async () => {
+  it("offers Close alone where a case cannot be absorbed", async () => {
     api.getCase.mockResolvedValue(plainCase({ rca: ANSWER_REPORT, rca_report_id: "rca-1", absorb_available: false }));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(button("Resolve")).toBeTruthy();
-    expect(button("Mute")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Absorb as legitimate" })).toBeNull();
-    expect(screen.getByText("Close this case")).toBeTruthy();
+    expect(button("Close")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Absorb" })).toBeNull();
   });
 
-  it("offers no verbs on a resolved case, and says who resolved it and why", async () => {
+  it("offers no verbs on a closed case, and says who closed it and why", async () => {
     api.getCase.mockResolvedValue({
       ...BASE,
       case: {
@@ -395,8 +369,8 @@ describe("closing a case", () => {
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.getByText(/by dana@example.com: prompt fixed/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Resolve|Mute|Re-run RCA/ })).toBeNull();
+    expect(screen.getByText(/Closed as fixed .* by dana@example.com: prompt fixed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^(Close|Absorb|Re-run RCA)$/ })).toBeNull();
   });
 
   it("makes a case read-only once its classifier is gone, and says why", async () => {
@@ -405,7 +379,7 @@ describe("closing a case", () => {
     await heading(BASE.case.title);
 
     expect(screen.getByText(/is no longer available to this organization, so this case is read-only/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Resolve|Mute|Re-run RCA/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Close|Absorb|Re-run RCA)$/ })).toBeNull();
   });
 });
 
@@ -450,15 +424,14 @@ describe("a metric-drift case's window", () => {
 });
 
 describe("running RCA", () => {
-  it("runs RCA for this case, and withholds the closing verbs until there is a report", async () => {
+  it("runs RCA for this case, and withholds Close and Absorb until there is a report", async () => {
     api.getCase.mockResolvedValue(plainCase());
     api.runCaseRca.mockReturnValue(new Promise(() => {}));
     renderPage();
     await heading(BASE.case.title);
 
-    expect(screen.queryByRole("button", { name: "Resolve" })).toBeNull();
-    expect(button("Mute")).toBeTruthy();
-    expect(screen.queryByText("Run RCA before resolving this case.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Absorb" })).toBeNull();
     fireEvent.click(button("Run RCA"));
 
     await waitFor(() => expect(api.runCaseRca).toHaveBeenCalledWith("case-1"));
@@ -477,15 +450,6 @@ describe("running RCA", () => {
 
     await waitFor(() => expect(api.rerunRca).toHaveBeenCalledWith("rca-1"));
     expect(api.runCaseRca).not.toHaveBeenCalled();
-  });
-
-  it("asks a ranked case to run RCA before resolving it", async () => {
-    api.getCase.mockResolvedValue({ ...BASE, rca: null, rca_report_id: null });
-    renderPage();
-    await heading(BASE.case.title);
-
-    expect(screen.getByText("Run RCA before resolving this case.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Resolve case" })).toBeNull();
   });
 
   it("says the finding is gone when the analysis cannot find it, and names any other refusal", async () => {
@@ -853,8 +817,8 @@ describe("CasePage, groundedness", () => {
     expect(within(filter).getByRole("button", { name: "Cause 1 · 3" }).getAttribute("aria-pressed")).toBe("true");
 
     expect(screen.getByRole("button", { name: "Re-run RCA" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Resolve case" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Mute case" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Absorb" })).toBeTruthy();
   });
 
   it("offers an owner Connect repository while the project has none, and drops it once one is connected", async () => {

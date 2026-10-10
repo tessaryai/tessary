@@ -35,7 +35,7 @@ public record CaseRow(
         String state,
         /** When a person pressed <em>Run RCA</em> on this case, or null if nobody has. A locked case
          *  never gets a new finding joined to it — the cause's next positive opens a fresh case — but
-         *  stays open/muted/resolved exactly as an unlocked one otherwise. */
+         *  stays open or resolved exactly as an unlocked one otherwise. */
         @Nullable String lockedAt,
         String title,
         String basis,
@@ -51,9 +51,7 @@ public record CaseRow(
         @Nullable String resolutionReason,
         @Nullable String resolvedBy,
         /** What a person said a resolved frustration or groundedness case was ({@link Disposition}); null otherwise. */
-        @Nullable String disposition,
-        @Nullable String mutedAt,
-        @Nullable String mutedBy) {
+        @Nullable String disposition) {
 
     /** The display id a human quotes: {@code C-118}. */
     public String reference() {
@@ -155,20 +153,19 @@ public record CaseRow(
         public static final String SECRET_PATTERN = "secret_pattern";
     }
 
-    /** {@code state} values. Muted is live, not closed: see {@code ux_eval_case_live}. */
+    /** {@code state} values. */
     public static final class State {
         private State() {}
 
         public static final String OPEN = "open";
         public static final String RESOLVED = "resolved";
-        public static final String MUTED = "muted";
     }
 
     /** {@code resolution} values: who closed it. */
     public static final class Resolution {
         private Resolution() {}
 
-        /** A human closed it, with a required one-line reason. */
+        /** A human closed it, with an optional one-line reason. */
         public static final String HUMAN = "human";
 
         /**

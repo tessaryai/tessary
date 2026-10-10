@@ -59,7 +59,6 @@ import {
   type Case,
   type CaseDetail,
   type TriageView,
-  type CaseDisposition,
   type AlertRule,
   type UpsertAlertRule,
   type AlertChannel,
@@ -402,31 +401,20 @@ export function projectApi(orgSlug: string, projectSlug: string) {
   return {
     base,
 
-    // Cases: Triage's list and one case's page. Lifecycle is open → resolved, plus
-    // muted; there is no claim endpoint because nothing in this product is assigned.
+    // Cases: Triage's list and one case's page. Lifecycle is open → closed (Close or Absorb);
+    // there is no claim endpoint because nothing in this product is assigned.
     getTriage: () => http<TriageView>(`${base}/cases`),
     getCase: (id: string) => http<CaseDetail>(`${base}/cases/${encodeURIComponent(id)}`),
-    /**
-     * Close a case with a one-line reason. `disposition` is for a frustration case only: `fixed` restarts
-     * the call site's learned rate, `false_alarm` does that and clears the conversations the case cites.
-     * The server refuses one on any other case.
-     */
-    resolveCase: (id: string, reason: string, disposition?: CaseDisposition) =>
-      http<Case>(`${base}/cases/${encodeURIComponent(id)}/resolve`, {
-        method: "POST",
-        body: JSON.stringify(disposition ? { reason, disposition } : { reason }),
-      }),
+    /** Close a case. The detector's reference stays where it was, so this case's evidence is left out of it. */
+    closeCase: (id: string) =>
+      http<Case>(`${base}/cases/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({}) }),
     /**
      * Close the case and move the detector's reference, so the level it fired on becomes the new
-     * baseline. Distinct from `resolveCase`, which closes this case and leaves the bar where it
+     * baseline. Distinct from `closeCase`, which closes this case and leaves the bar where it
      * was: an unchanged population then opens another case tomorrow.
      */
     absorbCase: (id: string) =>
       http<Case>(`${base}/cases/${encodeURIComponent(id)}/absorb`, { method: "POST" }),
-    muteCase: (id: string) =>
-      http<Case>(`${base}/cases/${encodeURIComponent(id)}/mute`, { method: "POST" }),
-    unmuteCase: (id: string) =>
-      http<Case>(`${base}/cases/${encodeURIComponent(id)}/unmute`, { method: "POST" }),
 
     // Notifications: the alert rules and delivery channels behind Settings → Notifications.
     listAlertRules: () => http<AlertRule[]>(`${base}/alert-rules`),

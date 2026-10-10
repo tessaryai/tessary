@@ -229,7 +229,6 @@ const NOT_FOUND = (resource: string) => () =>
 /** A genuinely empty list is a real response for these endpoints. */
 const EMPTY_TRIAGE = {
   cases: [],
-  muted: [],
   recently_resolved: [],
   // Triage's all-clear state reads this without `?.`.
   watching: { classifiers: 0, call_sites: 0, traces_last_day: 0, traces_total: 0, open_findings: 0 },

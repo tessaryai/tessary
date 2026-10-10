@@ -65,7 +65,7 @@ substrate, findings). Tool inventory and wire details:
 
 **The surface is read-only.** No tool writes a row, spends a token, or starts an agent run, and
 `initialize` states that to every client on connect as a property of the surface rather than of any
-one tool. Case lifecycle (resolve / absorb / mute) and triggering an RCA are both
+one tool. Case lifecycle (close / absorb) and triggering an RCA are both
 REST-and-UI actions, because each records a human judgement or spends the platform's money. So
 adding a write tool is not one more registration: it is a decision that an agent may act on a
 customer's project, and it invalidates that sentence. `McpCapabilityGateTest` pins the invariant —
@@ -147,7 +147,7 @@ an agent gets ids on purpose, one row per unit the detector measured, never a sa
   number of registered sources (200 per source). Nothing in the response marks the
   list as partial. A project with more confirmed findings than the effective cap gets that many
   back with no signal that they aren't all of them.
-- **The resolved-case page sorts, not seeks.** `list_cases` orders open/muted cases off
+- **The resolved-case page sorts, not seeks.** `list_cases` orders open cases off
   `ix_eval_case_live_rank`, but there is no index on `(project_id, resolved_at DESC)` for resolved
   cases — a `state=resolved` page sorts at query time instead of seeking through an index.
 - **`get_trace` reports one span count, not two.** Its response carries the rollup's own

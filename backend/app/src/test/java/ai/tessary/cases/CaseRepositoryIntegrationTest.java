@@ -54,18 +54,6 @@ class CaseRepositoryIntegrationTest {
     }
 
     @Test
-    void mutedCountsAsLiveAndStillHoldsTheKey() {
-        Project p = project("repo-muted");
-        CaseRow row =
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).orElseThrow();
-        cases.mute(p.id(), row.id(), "priya@example.com", Instant.now());
-
-        assertTrue(
-                cases.open(p.id(), detection(p, "grader-a"), Instant.now()).isEmpty(),
-                "a muted case is still THE case for its spell — a continuing detection updates it");
-    }
-
-    @Test
     void displayNumbersCountUpWithinAProjectAndRestartAcrossProjects() {
         Project a = project("repo-seq-a");
         Project b = project("repo-seq-b");
@@ -100,14 +88,11 @@ class CaseRepositoryIntegrationTest {
         open(p, "drift-a", CaseRow.Detector.CLASSIFIER, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
         open(p, "drift-b", CaseRow.Detector.CLASSIFIER, "cs-2", 0.5, at("2026-08-10T00:00:00Z"));
         open(p, "tool-a", CaseRow.Detector.TOOL_ERROR, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
-        CaseRow muted = open(p, "drift-c", CaseRow.Detector.CLASSIFIER, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
-        cases.mute(p.id(), muted.id(), "priya@example.com", Instant.now());
+        CaseRow closed = open(p, "drift-c", CaseRow.Detector.CLASSIFIER, "cs-1", 0.5, at("2026-08-10T00:00:00Z"));
+        cases.resolve(p.id(), closed.id(), CaseRow.Resolution.HUMAN, null, "priya@example.com", Instant.now());
 
-        assertEquals(3, ids(page(p, CaseRow.State.OPEN, null, null)).size(), "the muted case is not open");
-        assertEquals(
-                List.of(muted.id()),
-                ids(page(p, CaseRow.State.MUTED, null, null)),
-                "muted is a state you can ask for, not a hidden bucket");
+        assertEquals(3, ids(page(p, CaseRow.State.OPEN, null, null)).size(), "the closed case is not open");
+        assertEquals(List.of(closed.id()), ids(page(p, CaseRow.State.RESOLVED, null, null)));
         assertEquals(
                 2,
                 ids(page(p, CaseRow.State.OPEN, CaseRow.Detector.CLASSIFIER, null))

@@ -41,64 +41,45 @@ The subject is the population, not the finding. A tool's failure rate rising in 
 
 A case opens the moment a finding's ruling qualifies it (a triage positive, a person's **Real deviation**, or the ruling a high-confidence secret leak or a frustration finding carries when it is filed), never on a later sweep. Every later positive on the same key **joins** the open case rather than opening a second one: the finding is linked to it, the headline (title, basis, the measured value) refreshes to that finding's own account, and the activity trail records the join. Severity only ever rises across a case's findings, and the trail records an escalation only when it has meaningfully deepened, not on every join.
 
-A case closes only when a person resolves or absorbs it. Nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
+A case closes only when a person closes or absorbs it. Nothing closes on silence. A cause that stops firing simply stops adding findings to its case; the case stays open, on **Triage**, until someone acts on it.
 
 ## The states a case moves through
 
 | State | Meaning |
 | --- | --- |
 | `open` | Live. It is on **Triage** and it can notify. |
-| `muted` | Still live, and still tracked. Muting stops it from paging you; it makes no claim about whether the shift is real. |
 | `resolved` | Closed. |
 
-Muted is not a closed state. A muted case is still the live case for its key, which is why muting one does not let a second case open beside it.
-
-A resolved case records why it closed, and the difference between the reasons is load-bearing:
+A closed case records how it closed, and the difference is load-bearing:
 
 | Resolution | What it says |
 | --- | --- |
-| `human` | A person closed it, with a required one-line reason. The classifier's reference did not move, so an unchanged population opens another case. |
-| `absorbed` | A person ruled the shift legitimate and the classifier's reference moved to include every window the case held. This level is the new baseline, and it does not open another case. |
+| `human` | A person pressed **Close**. The evidence in the case's findings is left out when the baseline is set, so an unchanged population opens another case. |
+| `absorbed` | A person pressed **Absorb**. The evidence in the case's findings counts toward the baseline, so this level is the new normal and does not open another case. |
 
-Both close every finding the case still holds open, in the same action. A frustration case cannot be absorbed. Resolving it records a disposition, and the call site learns its normal rate again, as [Resolving a frustration case](#resolving-a-frustration-case) describes. A groundedness case can be resolved or absorbed, and either way its call site learns its normal rate again, as [Resolving a groundedness case](#resolving-a-groundedness-case) describes.
+Both close every finding the case still holds open, in the same action. Use **Close** when you fixed the cause or it was not a real problem. Use **Absorb** when the new level is correct and you want it to become normal.
 
-**Absorb as legitimate** is the one that ends the argument rather than this instance of it. Use **Resolve** when you have shipped a fix and the window has not caught up yet; use **Absorb as legitimate** when the new level is correct and you want it to become normal.
+**Close** and **Absorb** sit on the **Why** line of the case page, beside the RCA (root-cause analysis) response, so they appear only once RCA has produced a report. Each asks you to confirm. A secret leak, malformed output, or frustration case can only be closed.
 
-### Resolving a frustration case
+### Closing a frustration case
 
 A frustration case skips triage. The classifier rules its own finding positive and opens the case when a call site's rate of frustrated sessions rises above the rate it learned, because the numbers on the finding are the claim.
 
-Resolving one asks what it was, and both answers restart that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the sessions after the resolve.
+Closing one restarts that call site's test: the accumulator goes back to zero, and the call site learns its normal rate again from the sessions after the close. The sessions the case cites still count as frustrated. The rate is re-learned from whatever comes next, so close the case once the fix is live. Closed before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
 
-| Disposition | What it does |
-| --- | --- |
-| **Fixed** | Restarts the test. The sessions the case cites still count as frustrated. |
-| **False alarm** | Restarts the test, and every session cited by any finding in the case stops counting as frustrated. Their later user messages can be scored again. |
-
-The rate is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live. Resolved before it lands, the call site learns the frustrated rate as its normal and is flagged only if it gets worse than that.
-
-### Resolving a groundedness case
+### Closing a groundedness case
 
 A groundedness case comes through triage like most cases. Its finding says a call site's share of traces with a flagged answer rose above the share it learned as normal.
 
-On the case page, **Resolve case** and **Absorb as legitimate** appear once RCA (root-cause analysis) has produced a report. Until then the page reads "Run RCA before resolving this case." Resolving asks what the case was, and both answers restart the call site's test: the accumulator goes back to zero, and the call site learns its normal share again from the traces after the resolve.
+Closing it restarts the call site's test the same way: the accumulator goes back to zero, and the call site learns its normal share again from the traces after the close. **Absorb** restarts the test too, because a groundedness call site has no reference to pin, only one it learns. What differs is the record: an absorbed case says the new level is correct. Either way, the answers the case cites stay flagged.
 
-| Disposition | What it does |
-| --- | --- |
-| **Fixed** | Restarts the test. The answers the case cites stay flagged. |
-| **False alarm** | Restarts the test, and every flagged answer cited by any finding in the case is cleared. A trace stops counting as flagged unless another flagged answer in it still stands. |
-
-**Absorb as legitimate** restarts the test the same way, because a groundedness call site has no reference to pin, only one it learns. What differs is the record: an absorbed case says the new level is correct, and the answers it cites stay flagged.
-
-As with frustration, the share is re-learned from whatever comes next, so resolve as **Fixed** once the fix is live.
-
-Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA requests and completions, resolution, muting and unmuting, and absorption.
+Every state change writes a line to the case's activity trail in the same transaction, so a case with no trail entry cannot exist. The trail records opening, a later finding joining, escalation, RCA requests and completions, closing, and absorption. Cases that were muted before Mute was removed went back to open, with a trail line that says so.
 
 ## Running RCA locks the case
 
 Pressing **Run RCA** locks the case, at the moment of the press: no later finding can join a locked case, so the case an agent is reading stays exactly what the person saw when they pressed the button. The cause's next positive opens a **new** case instead of joining the locked one. Re-pressing on an already-locked case coalesces onto the same report, exactly as before locking existed. It only ever analyzes one finding, the one the case held when it was first pressed.
 
-A locked case is otherwise ordinary: it can still be muted, resolved, or absorbed, and a person can still read it and its report at any time.
+A locked case is otherwise ordinary: it can still be closed or absorbed, and a person can still read it and its report at any time.
 
 ## Where a case reaches you
 

@@ -4,7 +4,7 @@
  *
  * Two sections. Cases is ONE ranked list, worst first. No claimed/unclaimed bands and no owner column:
  * nothing in this product is assigned, so ranking is magnitude then recency and the server does it
- * (`ix_eval_case_live_rank`). Muted cases and the week's closures are a filter, not furniture. Findings
+ * (`ix_eval_case_live_rank`). The week's closures are a filter, not furniture. Findings
  * below it holds what has not become a case yet (see `OpenFindings`).
  *
  * Until a case or a finding is open, the setup screen (traces → findings → cases) takes the Cases section and
@@ -29,7 +29,7 @@ import { OpenFindings } from "./OpenFindings";
 import { useOnboarding } from "../onboarding/useOnboarding";
 import { useCapabilities } from "../../capabilities/useCapabilities";
 
-type Lens = "open" | "muted" | "resolved";
+type Lens = "open" | "resolved";
 
 export function Triage() {
   const { orgSlug, projectSlug, api } = useTenant();
@@ -60,9 +60,8 @@ export function Triage() {
   const [lens, setLens] = useState<Lens>("open");
 
   const open = triageQ.data?.cases ?? [];
-  const muted = triageQ.data?.muted ?? [];
   const resolved = triageQ.data?.recently_resolved ?? [];
-  const shown = lens === "open" ? open : lens === "muted" ? muted : resolved;
+  const shown = lens === "open" ? open : resolved;
 
   const openCase = (id: string) => navigate(`${basePath}/cases/${id}`);
   const setup =
@@ -86,24 +85,14 @@ export function Triage() {
         <Section
           title="Cases"
           actions={
-            <>
-              <Button
-                size="sm"
-                variant={lens === "muted" ? "secondary" : "ghost"}
-                onClick={() => setLens((l) => (l === "muted" ? "open" : "muted"))}
-                aria-pressed={lens === "muted"}
-              >
-                Muted · {muted.length}
-              </Button>
-              <Button
-                size="sm"
-                variant={lens === "resolved" ? "secondary" : "ghost"}
-                onClick={() => setLens((l) => (l === "resolved" ? "open" : "resolved"))}
-                aria-pressed={lens === "resolved"}
-              >
-                Resolved 7d · {resolved.length}
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant={lens === "resolved" ? "secondary" : "ghost"}
+              onClick={() => setLens((l) => (l === "resolved" ? "open" : "resolved"))}
+              aria-pressed={lens === "resolved"}
+            >
+              Closed 7d · {resolved.length}
+            </Button>
           }
         >
           {triageQ.isLoading && <TableSkeleton rows={5} cols={3} />}
@@ -124,7 +113,7 @@ export function Triage() {
 
               {lens === "open" && (
                 <p className="mt-4.5 mx-0 mb-0 text-small text-subtle">
-                  Resolved 7d{" "}·{" "}{resolved.length}{" "}·{" "}Muted{" "}·{" "}{muted.length}
+                  Closed 7d{" "}·{" "}{resolved.length}
                 </p>
               )}
             </>
@@ -143,12 +132,7 @@ export function Triage() {
 }
 
 function EmptyRow({ lens }: { lens: Lens }) {
-  const text =
-    lens === "muted"
-      ? "Nothing is muted."
-      : lens === "resolved"
-        ? "No cases resolved in the last 7 days."
-        : "Nothing needs you.";
+  const text = lens === "resolved" ? "No cases closed in the last 7 days." : "Nothing needs you.";
   return (
     <div className="bg-surface text-subtle py-3.5 px-4 text-small">
       {text}
@@ -190,7 +174,7 @@ function CaseRow({ item, onOpen }: { item: Case; onOpen: (id: string) => void })
             </>
           )}
           <Dot />
-          <span>{resolved ? `resolved ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
+          <span>{resolved ? `closed ${timeAgo(item.resolved_at ?? item.opened_at)}` : timeAgo(item.opened_at)}</span>
         </span>
       </span>
     </button>

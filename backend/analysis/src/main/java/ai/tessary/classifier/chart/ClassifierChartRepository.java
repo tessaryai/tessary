@@ -704,7 +704,7 @@ public class ClassifierChartRepository {
 
     /**
      * Open cases per call site, over the scopes the call-site cards read: findings of {@code classifierKeys} filed
-     * with a call site, and turn-duration and cost drift on a call-site bucket. A muted case is not open, and a
+     * with a call site, and turn-duration and cost drift on a call-site bucket. A
      * tool-grain drift case counts for its tool, never for the call site it names.
      */
     public Map<String, Integer> openCasesByCallSite(String projectId, Collection<String> classifierKeys) {
