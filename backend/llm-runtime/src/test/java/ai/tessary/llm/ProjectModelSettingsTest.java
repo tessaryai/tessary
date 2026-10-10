@@ -3,6 +3,7 @@ package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -407,7 +408,10 @@ class ProjectModelSettingsTest {
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK, resolved.provider());
         assertEquals("global.anthropic.claude-haiku-4-5-20251001-v1:0", resolved.modelId());
-        assertEquals(resolved.modelId(), resolved.pricingId(), "Bedrock's inferenceProfileId is already priceable");
+        assertEquals(
+                "amazon-bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                resolved.modelsDevId(),
+                "models.dev prices a Bedrock model under its region-scoped inference-profile id");
     }
 
     @Test
@@ -415,18 +419,21 @@ class ProjectModelSettingsTest {
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, TERRA, ServiceTier.STANDARD)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.BEDROCK_MANTLE, resolved.provider());
-        assertEquals(resolved.modelId(), resolved.pricingId(), "mantle's inferenceProfileId is already priceable");
+        assertEquals(
+                "amazon-bedrock/openai.gpt-5.6-terra",
+                resolved.modelsDevId(),
+                "LiteLLM's bedrock_mantle/ route prefix is not part of the models.dev id");
     }
 
     @Test
-    void resolveAgenticModel_forACatalogRowOnARoutePrefixedProvider_pricingIdCarriesThePrefix() {
-        // Decision 19: book keys carry a route prefix. modelId stays bare, pricingId carries it, or these price as
-        // unknown.
+    void resolveAgenticModel_forACatalogRow_modelsDevIdNamesTheModelsDevProvider() {
+        // modelId stays the name a person chose; the models.dev id carries models.dev's provider id, or the run's
+        // rates are never found and it books unpriced.
         when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, "GROK:grok-4.6", ServiceTier.STANDARD)));
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.GROK, resolved.provider());
         assertEquals("grok-4.6", resolved.modelId());
-        assertEquals("xai/grok-4.6", resolved.pricingId());
+        assertEquals("xai/grok-4.6", resolved.modelsDevId());
     }
 
     @Test
@@ -440,6 +447,6 @@ class ProjectModelSettingsTest {
         var resolved = settings.resolveAgenticModel(PID, ModelLane.RCA).orElseThrow();
         assertEquals(ModelProvider.CUSTOM, resolved.provider());
         assertEquals("my-self-hosted-model", resolved.modelId());
-        assertEquals("my-self-hosted-model", resolved.pricingId(), "no book carries a rate for a custom endpoint");
+        assertNull(resolved.modelsDevId(), "models.dev cannot know a customer's own endpoint");
     }
 }

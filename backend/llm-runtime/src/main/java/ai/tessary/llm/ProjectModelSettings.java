@@ -231,28 +231,30 @@ public class ProjectModelSettings {
                 ModelProvider provider = d.endpoint() == BedrockModelProfile.Endpoint.MANTLE
                         ? ModelProvider.BEDROCK_MANTLE
                         : ModelProvider.BEDROCK;
-                // Bedrock's inferenceProfileId is already the id it is priced AND reported under (see
-                // that field's javadoc), so both ResolvedAgenticModel fields carry the same string.
-                return new ResolvedAgenticModel(provider, d.inferenceProfileId(), d.inferenceProfileId());
+                return new ResolvedAgenticModel(
+                        provider,
+                        d.inferenceProfileId(),
+                        ModelCatalog.modelsDevId(provider, d.inferenceProfileId())
+                                .orElse(null));
             }
             CatalogKey key = parseCatalogKey(selection.modelKey()).orElseThrow();
             return new ResolvedAgenticModel(
-                    key.provider(), key.modelName(), ModelCatalog.pricingId(key.provider(), key.modelName()));
+                    key.provider(),
+                    key.modelName(),
+                    ModelCatalog.modelsDevId(key.provider(), key.modelName()).orElse(null));
         });
     }
 
     /**
      * See {@link #resolveAgenticModel}. {@code modelId} is what the sandbox agent runs and what
-     * {@code llm_call.model} records — the name a person actually chose. {@code pricingId} is a
-     * rate-lookup id only, handed to {@link ai.tessary.pricing.PlatformCallPricer} and nowhere else:
-     * on the four catalog providers whose book keys carry a prefix this catalog's names do not (see
-     * {@link ModelCatalog#pricingId}), pricing {@code modelId} directly would read the run as
-     * unpriced.
+     * {@code llm_call.model} records — the name a person actually chose. {@code modelsDevId} names the
+     * model's rates in models.dev ({@link ModelCatalog#modelsDevId}), the rates the run is billed at;
+     * null where models.dev cannot know the model, and the run is then unpriced.
      */
     public record ResolvedAgenticModel(
             ModelProvider provider,
             @JsonProperty("model_id") String modelId,
-            @JsonProperty("pricing_id") String pricingId) {}
+            @JsonProperty("models_dev_id") @Nullable String modelsDevId) {}
 
     /**
      * The {@code (provider, modelId)} a {@link LaneGroup#DECISION_CALLS} lane runs for this project,

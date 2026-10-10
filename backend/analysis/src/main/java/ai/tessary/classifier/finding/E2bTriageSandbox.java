@@ -4,7 +4,9 @@ package ai.tessary.classifier.finding;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.ObserverProperties.Agentic;
 import ai.tessary.llm.AgenticCredentialResolver;
+import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.ClassifierError;
@@ -92,6 +94,7 @@ public class E2bTriageSandbox implements TriageSandbox {
     private final AgenticCredentialResolver credentials;
 
     private final LlmUsageAccountant usage;
+    private final ModelsDevRates rates;
     private final Tracer tracer;
     private final ObjectMapper mapper;
     private final HttpClient client =
@@ -102,12 +105,14 @@ public class E2bTriageSandbox implements TriageSandbox {
             ProjectModelSettings modelSettings,
             AgenticCredentialResolver credentials,
             LlmUsageAccountant usage,
+            ModelsDevRates rates,
             OpenTelemetry openTelemetry,
             ObjectMapper mapper) {
         this.props = props;
         this.modelSettings = modelSettings;
         this.credentials = credentials;
         this.usage = usage;
+        this.rates = rates;
         // The instrumentation scope is this class's own package, matching the convention every other
         // sandbox here follows (E2bRcaSandbox names ai.tessary.rca). A trace query filtering on a stale scope goes
         // empty rather than
@@ -163,8 +168,10 @@ public class E2bTriageSandbox implements TriageSandbox {
             Optional<ProjectModelSettings.ResolvedAgenticModel> resolved = resolvedModel(req.projectId());
             String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                     .orElseGet(() -> props.getAgentic().getModel());
-            String pricingId = resolved.map(ProjectModelSettings.ResolvedAgenticModel::pricingId)
-                    .orElseGet(() -> props.getAgentic().getModel());
+            // The deployment default is a Bedrock inference-profile id; see E2bRcaSandbox#modelsDevId.
+            String modelsDevId = resolved.isPresent()
+                    ? resolved.get().modelsDevId()
+                    : ModelCatalog.modelsDevId(ModelProvider.BEDROCK, model).orElse(null);
             span.setAttribute("langfuse.trace.name", OPERATION);
             span.setAttribute("tessary.project.id", req.projectId());
             span.setAttribute("langfuse.trace.metadata.project_id", req.projectId());
@@ -180,6 +187,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             body.put("prompt", req.prompt());
             body.put("json_schema", req.jsonSchema());
             body.put("model", model);
+            rates.putModelCost(body, modelsDevId);
             // The org's own credential travels on the request, decrypted here and never logged (see
             // AgenticCredentialResolver's class javadoc). Throws MISSING_CREDENTIALS or
             // AGENTIC_IAM_ROLE_UNSUPPORTED before the launcher is ever called when there is no usable
@@ -213,7 +221,6 @@ public class E2bTriageSandbox implements TriageSandbox {
                     req.projectId(),
                     req.findingId(),
                     model,
-                    pricingId,
                     credential.platformFunded());
             if (respBody == null) {
                 markError(span, "launcher did not answer");
@@ -229,7 +236,7 @@ public class E2bTriageSandbox implements TriageSandbox {
                 return Optional.empty();
             }
             AgentSpanTelemetry.recordUsage(span, mapper, raw);
-            bookUsage(req.projectId(), req.findingId(), model, pricingId, raw, credential.platformFunded());
+            bookUsage(req.projectId(), req.findingId(), model, raw, credential.platformFunded());
             String resultText = mapper.readTree(raw).path("result").asText("");
             if (resultText.isBlank()) {
                 markError(span, "agent returned no result");
@@ -286,7 +293,7 @@ public class E2bTriageSandbox implements TriageSandbox {
      *       fact about this request.
      * </ul>
      *
-     * <p>{@code projectId}/{@code findingId}/{@code model}/{@code pricingId} are here only so a
+     * <p>{@code projectId}/{@code findingId}/{@code model} are here only so a
      * failing run's body can be booked against the ledger before this method returns or throws:
      * server.js's {@code buildErrorBody} carries a {@code usage} object whenever the agent burned
      * tokens before the run failed. {@link #bookUsage} already no-ops on a body with nothing usable,
@@ -294,13 +301,7 @@ public class E2bTriageSandbox implements TriageSandbox {
      * is at fault, since a run failure spends tokens exactly as a completed run does.
      */
     private @Nullable String postLauncher(
-            String bodyJson,
-            Agentic cfg,
-            String projectId,
-            String findingId,
-            String model,
-            String pricingId,
-            boolean platformFunded)
+            String bodyJson, Agentic cfg, String projectId, String findingId, String model, boolean platformFunded)
             throws InterruptedException {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/triage"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
@@ -347,7 +348,7 @@ public class E2bTriageSandbox implements TriageSandbox {
             // Book what the run spent before it failed, regardless of which bucket the status falls
             // into below: a launcher outage carries no usage (bookUsage no-ops on one), and a run
             // failure is exactly the case this exists for.
-            bookUsage(projectId, findingId, model, pricingId, resp.body(), platformFunded);
+            bookUsage(projectId, findingId, model, resp.body(), platformFunded);
             FailureClass failure = classifyFailure(resp.statusCode(), resp.body());
             if (failure == FailureClass.MISCONFIGURED) {
                 // A refusal is not an outage. 401/403/404 will answer identically until somebody
@@ -442,19 +443,13 @@ public class E2bTriageSandbox implements TriageSandbox {
      * One run is one ledger entry.
      */
     private void bookUsage(
-            String projectId,
-            String findingId,
-            String model,
-            String pricingId,
-            String envelopeJson,
-            boolean platformFunded) {
+            String projectId, String findingId, String model, String envelopeJson, boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
         if (u == null) return;
         usage.recordSandboxRun(
                 projectId,
                 ModelLane.TRIAGE.wire(),
                 model,
-                pricingId,
                 platformFunded,
                 u.inputTokens(),
                 u.outputTokens(),

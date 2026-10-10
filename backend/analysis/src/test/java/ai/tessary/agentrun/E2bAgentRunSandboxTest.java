@@ -13,6 +13,7 @@ import ai.tessary.config.AgentRunProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
@@ -114,7 +115,8 @@ class E2bAgentRunSandboxTest {
                 cloneUrl,
                 headSha,
                 "claude-sonnet-5-5",
-                "anthropic/claude-sonnet-5-5",
+                new ModelsDevRates.ModelCost(
+                        new BigDecimal("2"), new BigDecimal("10"), new BigDecimal("0.1"), new BigDecimal("2.5")),
                 "ANTHROPIC",
                 CREDENTIAL,
                 "https://api.example/mcp",
@@ -155,7 +157,9 @@ class E2bAgentRunSandboxTest {
                  "system_prompt":"You write classifiers.",
                  "prompt":"Write one for timeouts.",
                  "json_schema":"{\\"type\\":\\"object\\",\\"required\\":[\\"builder\\"]}",
-                 "model":"claude-sonnet-5-5","provider":"ANTHROPIC",
+                 "model":"claude-sonnet-5-5",
+                 "model_cost":{"input":2,"output":10,"cache_read":0.1,"cache_write":2.5},
+                 "provider":"ANTHROPIC",
                  "credential":{"provider":"ANTHROPIC","api_key":"sk-ant-secretkey","platform_funded":false},
                  "mcp":{"url":"https://api.example/mcp","token":"%s"},
                  "timeout_ms":900000,"max_turns":40}
@@ -245,9 +249,9 @@ class E2bAgentRunSandboxTest {
                         "cache_read_input_tokens",
                         5,
                         "cache_creation_input_tokens",
-                        3),
-                "total_cost_usd",
-                0.5));
+                        3,
+                        "cost_usd",
+                        0.5)));
 
         AgentRunSandbox.Result result =
                 sandbox(ScriptedHttpClient.answering(200, body)).run(fullRequest());
@@ -260,13 +264,12 @@ class E2bAgentRunSandboxTest {
                         "proj",
                         "authoring",
                         "claude-sonnet-5-5",
-                        "anthropic/claude-sonnet-5-5",
                         false,
                         100L,
                         20L,
                         5L,
                         3L,
-                        BigDecimal.valueOf(0.5),
+                        new BigDecimal("0.5"),
                         SUBJECT);
     }
 
@@ -393,18 +396,7 @@ class E2bAgentRunSandboxTest {
 
         assertEquals(AgentRunError.RUN_FAILED, ex.error());
         verify(usage)
-                .recordSandboxRun(
-                        "proj",
-                        "authoring",
-                        "claude-sonnet-5-5",
-                        "anthropic/claude-sonnet-5-5",
-                        false,
-                        120L,
-                        40L,
-                        0L,
-                        0L,
-                        null,
-                        SUBJECT);
+                .recordSandboxRun("proj", "authoring", "claude-sonnet-5-5", false, 120L, 40L, 0L, 0L, null, SUBJECT);
     }
 
     /** One real round trip over a loopback socket: the path, the bearer and the body the launcher actually sees. */

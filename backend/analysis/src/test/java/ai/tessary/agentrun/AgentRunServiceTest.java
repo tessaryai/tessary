@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.AgentRunProperties;
+import ai.tessary.config.ModelsDevProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.git.GitIntegrationRepository;
@@ -19,6 +20,7 @@ import ai.tessary.git.GitProviderFactory;
 import ai.tessary.git.GitTokenService;
 import ai.tessary.llm.AgenticCredentialResolver;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
@@ -54,6 +56,16 @@ class AgentRunServiceTest {
     private static final String PROJECT_ID = "proj1";
     private static final String ORG_ID = "org1";
     private static final String OBSERVER_MODEL = "global.anthropic.claude-sonnet-5-5";
+
+    /** The real lookup over the bundled models.dev copy; a blank URL never fetches. */
+    private static final ModelsDevRates RATES = bundledRates();
+
+    private static ModelsDevRates bundledRates() {
+        ModelsDevProperties p = new ModelsDevProperties();
+        p.setUrl("");
+        return new ModelsDevRates(new ObjectMapper(), p);
+    }
+
     private static final AgenticCredentialResolver.Credential CREDENTIAL =
             new AgenticCredentialResolver.Credential(ModelProvider.GROK, "xai-key", null, null, null, null, null);
     private static final LlmUsageAccountant.Subject SUBJECT = new LlmUsageAccountant.Subject("classifier_draft", "d1");
@@ -160,6 +172,7 @@ class AgentRunServiceTest {
                 observer(),
                 modelSettings,
                 credentials,
+                RATES,
                 apiKeys,
                 projects,
                 memberships,
@@ -233,7 +246,7 @@ class AgentRunServiceTest {
                         null,
                         null,
                         "grok-4.6",
-                        "xai/grok-4.6",
+                        RATES.cost("xai/grok-4.6").orElseThrow(),
                         "GROK",
                         CREDENTIAL,
                         "https://app.example/mcp",
@@ -300,7 +313,10 @@ class AgentRunServiceTest {
         run(service(sandbox));
 
         assertEquals(OBSERVER_MODEL, sandbox.seen().model());
-        assertEquals(OBSERVER_MODEL, sandbox.seen().pricingId());
+        assertEquals(
+                RATES.cost("amazon-bedrock/" + OBSERVER_MODEL).orElseThrow(),
+                sandbox.seen().modelCost(),
+                "the deployment default is billed at its Bedrock rates, or the run books unpriced");
         assertEquals("BEDROCK", sandbox.seen().provider());
         assertEquals(bedrock, sandbox.seen().credential());
     }

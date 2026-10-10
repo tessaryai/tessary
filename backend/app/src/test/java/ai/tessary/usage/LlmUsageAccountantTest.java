@@ -4,18 +4,16 @@ package ai.tessary.usage;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.pricing.ModelRate;
 import ai.tessary.pricing.ModelResolver;
 import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.storage.Timestamps;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.UUID;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,16 +46,20 @@ class LlmUsageAccountantTest {
     @Autowired
     TenantService tenants;
 
+    /**
+     * A sandbox run is billed at the cost OpenCode reported, from models.dev rates. Pricing a run that reported none
+     * from the book would put a second, different calculation on the same run.
+     */
     @Test
-    void aSandboxRunWithNoReportedCostIsPricedFromTheBookThatNamesIt() {
+    void aSandboxRunWithNoReportedCostStaysUnpricedEvenWhenTheBookCarriesItsModel() {
         String pid = project();
-        ModelRate rate = books.rateFor(models.resolve(PRICED_MODEL).orElseThrow())
-                .orElseThrow(() -> new AssertionError("precondition: the boot-imported book prices " + PRICED_MODEL));
+        assertTrue(
+                books.rateFor(models.resolve(PRICED_MODEL).orElseThrow()).isPresent(),
+                "precondition: the boot-imported book prices " + PRICED_MODEL);
 
         accountant.recordSandboxRun(
                 pid,
                 "rca",
-                PRICED_MODEL,
                 PRICED_MODEL,
                 false,
                 1_000_000L,
@@ -68,11 +70,6 @@ class LlmUsageAccountantTest {
                 new LlmUsageAccountant.Subject(SUBJECT_KIND, "finding-1"));
 
         LlmCallRow row = only(pid);
-        // One million input tokens cost the per-MTok input rate, two million cache reads twice the cache-read
-        // rate; the zero-count buckets are absent, not free, so they add nothing.
-        BigDecimal expected = perMtok(rate.rates().inputPerMtok())
-                .add(perMtok(rate.rates().cacheReadPerMtok()).multiply(BigDecimal.TWO))
-                .setScale(10, RoundingMode.UNNECESSARY);
         assertEquals(
                 new LlmCallRow(
                         row.id(),
@@ -85,8 +82,8 @@ class LlmUsageAccountantTest {
                         null,
                         2_000_000,
                         null,
-                        expected,
-                        rate.priceBookVersion(),
+                        null,
+                        null,
                         null,
                         SUBJECT_KIND,
                         "finding-1",
@@ -98,10 +95,10 @@ class LlmUsageAccountantTest {
     void aReportedCostIsKeptVerbatimAndNamesNoBook() {
         String sandbox = project();
         accountant.recordSandboxRun(
-                sandbox, "triage", PRICED_MODEL, PRICED_MODEL, false, 10L, 20L, 0L, 0L, new BigDecimal("0.5"), null);
+                sandbox, "triage", PRICED_MODEL, false, 10L, 20L, 0L, 0L, new BigDecimal("0.5"), null);
         LlmCallRow run = only(sandbox);
         assertEquals(new BigDecimal("0.5000000000"), run.costUsd());
-        assertEquals(null, run.priceBookVersion(), "no book produced a harness-reported figure");
+        assertEquals(null, run.priceBookVersion(), "no book produced an OpenCode-reported figure");
         assertEquals(null, run.subjectKind());
 
         String decisions = project();
@@ -155,22 +152,17 @@ class LlmUsageAccountantTest {
 
         // A count past the integer column is clamped to its ceiling rather than wrapped negative...
         String clamped = project();
-        accountant.recordSandboxRun(
-                clamped, "rca", "unpriced-model", "unpriced-model", false, Long.MAX_VALUE, 0L, 0L, 0L, null, null);
+        accountant.recordSandboxRun(clamped, "rca", "unpriced-model", false, Long.MAX_VALUE, 0L, 0L, 0L, null, null);
         LlmCallRow row = only(clamped);
         assertEquals(Integer.MAX_VALUE, row.inputTokens());
-        assertEquals(null, row.costUsd(), "a model no book carries is unpriced, not free");
+        assertEquals(null, row.costUsd(), "a run that reported no cost is unpriced, not free");
 
         // ...and a row the ledger refuses (here: its project was deleted mid-run) is lost from the ledger, not
         // from the run that spent the money.
         String deleted = "proj-" + UUID.randomUUID();
-        assertDoesNotThrow(() -> accountant.recordSandboxRun(
-                deleted, "rca", "unpriced-model", "unpriced-model", false, 10L, 1L, 0L, 0L, null, null));
+        assertDoesNotThrow(() ->
+                accountant.recordSandboxRun(deleted, "rca", "unpriced-model", false, 10L, 1L, 0L, 0L, null, null));
         assertEquals(List.of(), rows(deleted));
-    }
-
-    private static BigDecimal perMtok(@Nullable BigDecimal rate) {
-        return rate == null ? BigDecimal.ZERO : rate;
     }
 
     private String project() {

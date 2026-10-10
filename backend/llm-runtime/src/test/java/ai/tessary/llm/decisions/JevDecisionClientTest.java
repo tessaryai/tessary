@@ -172,8 +172,9 @@ class JevDecisionClientTest {
         assertEquals("jev-latest", answer.requestBody().path("model").asText());
     }
 
+    /** OpenRouter bills Jev at its own price, which can differ from TypeSafe's: the call costs what OpenRouter says. */
     @Test
-    void openRouterCall_postsToAlphaDecisionsAndPricesUnderTheTypeSafeBookKey() throws Exception {
+    void openRouterCall_postsToAlphaDecisionsAndBooksOpenRoutersReportedCost() throws Exception {
         stub(response(200, answer(",\"cost\":0.00005")));
 
         DecisionAnswer answer = client().decide("p1", "frustration", openrouter(), request());
@@ -183,9 +184,9 @@ class JevDecisionClientTest {
         assertEquals(List.of("Bearer or-key"), sent.headers().allValues("Authorization"));
         assertEquals(
                 0,
-                new BigDecimal("0.000042").compareTo(answer.costUsd()),
-                "the book prices it, not the provider's usage.cost");
-        assertEquals(0.00005, answer.responseBody().path("usage").path("cost").doubleValue());
+                new BigDecimal("0.00005").compareTo(answer.costUsd()),
+                "OpenRouter's usage.cost, not TypeSafe's book rate");
+        assertNull(answer.priceBookVersion(), "no book produced OpenRouter's figure");
         verify(accountant)
                 .recordDecisionCall(
                         eq("p1"),
@@ -194,15 +195,45 @@ class JevDecisionClientTest {
                         eq(false),
                         eq(1000),
                         eq(12),
-                        any(),
-                        eq(BOOK),
+                        argThat(cost -> cost != null && new BigDecimal("0.00005").compareTo(cost) == 0),
+                        eq(null),
                         anyInt());
     }
 
-    /** The credit worker debits only platform-funded rows that carry a cost, so both halves matter. */
+    /** A missing usage.cost leaves the call visibly unpriced; TypeSafe's rate would be a guess at another bill. */
     @Test
-    void aPlatformProviderCall_isBookedAsPlatformFundedWithItsBookCost() throws Exception {
+    void anOpenRouterAnswerWithNoCost_isUnpricedRatherThanPricedAtTypeSafesRate() throws Exception {
         stub(response(200, answer("")));
+
+        DecisionAnswer answer = client().decide("p1", "frustration", openrouter(), request());
+
+        assertNull(answer.costUsd());
+        assertNull(answer.priceBookVersion());
+    }
+
+    /** An org that fronts OpenRouter with its own URL is still billed by OpenRouter, not at TypeSafe's rate. */
+    @Test
+    void anOpenRouterKeyBehindAProxyStillBooksOpenRoutersReportedCost() throws Exception {
+        stub(response(200, answer(",\"cost\":0.00005")));
+        DecisionTarget proxied = new DecisionTarget(
+                ModelProvider.OPENROUTER,
+                "~typesafe/jev-latest",
+                URI.create("https://llm-gateway.internal/api/alpha/decisions"),
+                "or-key");
+
+        DecisionAnswer answer = client().decide("p1", "frustration", proxied, request());
+
+        assertEquals(0, new BigDecimal("0.00005").compareTo(answer.costUsd()));
+        assertNull(answer.priceBookVersion());
+    }
+
+    /**
+     * The credit worker debits only platform-funded rows that carry a cost, so both halves matter. The platform
+     * provider calls OpenRouter, so its cost is OpenRouter's too.
+     */
+    @Test
+    void aPlatformProviderCall_isBookedAsPlatformFundedWithOpenRoutersReportedCost() throws Exception {
+        stub(response(200, answer(",\"cost\":0.00005")));
 
         client().decide("p1", "frustration", platform(), request());
 
@@ -214,8 +245,8 @@ class JevDecisionClientTest {
                         eq(true),
                         eq(1000),
                         eq(12),
-                        argThat(cost -> cost != null && new BigDecimal("0.000042").compareTo(cost) == 0),
-                        eq(BOOK),
+                        argThat(cost -> cost != null && new BigDecimal("0.00005").compareTo(cost) == 0),
+                        eq(null),
                         anyInt());
     }
 

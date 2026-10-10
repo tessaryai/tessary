@@ -13,11 +13,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.config.ModelsDevProperties;
 import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.RcaProperties.Agentic;
 import ai.tessary.llm.AgenticCredentialResolver;
+import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.CommonError;
@@ -95,8 +98,7 @@ class E2bRcaSandboxTest {
         java.util.Map<String, Object> inner = new java.util.LinkedHashMap<>();
         inner.put("result", resultText);
         if (structuredJson != null) inner.put("structured_output", MAPPER.readTree(structuredJson));
-        inner.put("total_cost_usd", 0.42);
-        inner.put("usage", Map.of("input_tokens", 10, "output_tokens", 5));
+        inner.put("usage", Map.of("input_tokens", 10, "output_tokens", 5, "cost_usd", 0.42));
         return MAPPER.writeValueAsString(
                 Map.of("raw", MAPPER.writeValueAsString(inner), "turns", java.util.List.of(), "startMs", 0));
     }
@@ -152,12 +154,53 @@ class E2bRcaSandboxTest {
     void projectRcaLaneOverridesTheObserverModel(ModelProvider provider, String model) throws Exception {
         ProjectModelSettings settings = mock(ProjectModelSettings.class);
         when(settings.resolveAgenticModel("proj", ModelLane.RCA))
-                .thenReturn(Optional.of(new ProjectModelSettings.ResolvedAgenticModel(provider, model, model)));
+                .thenReturn(Optional.of(new ProjectModelSettings.ResolvedAgenticModel(
+                        provider,
+                        model,
+                        ModelCatalog.modelsDevId(provider, model).orElse(null))));
 
         var body = postedBody(settings, request());
 
         assertEquals(model, body.path("model").asText());
         assertEquals(provider.name(), body.path("provider").asText());
+    }
+
+    /**
+     * The run's models.dev rates ride on the request for the launcher to declare to OpenCode; without them a model
+     * whose provider block is not a models.dev id runs at $0 and books unpriced.
+     */
+    @Test
+    void theRequestCarriesTheRatesOfTheModelTheLaneRuns() throws Exception {
+        ProjectModelSettings settings = mock(ProjectModelSettings.class);
+        when(settings.resolveAgenticModel("proj", ModelLane.RCA))
+                .thenReturn(Optional.of(
+                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
+
+        var body = postedBody(settings, request());
+
+        assertEquals(wire(RATES.cost("xai/grok-4.6").orElseThrow()), body.path("model_cost"));
+    }
+
+    /** The deployment default is a Bedrock inference-profile id, and is billed at that profile's rates. */
+    @Test
+    void anUnsetLaneCarriesTheRatesOfTheDeploymentDefaultOnBedrock() throws Exception {
+        var body = postedBody(noLaneSetting(), request());
+
+        String defaultModel = new ObserverProperties().getAgentic().getModel();
+        assertEquals(wire(RATES.cost("amazon-bedrock/" + defaultModel).orElseThrow()), body.path("model_cost"));
+    }
+
+    /** A model models.dev cannot know sends no rates, and the run books unpriced rather than at some guess. */
+    @Test
+    void aCustomEndpointCarriesNoRates() throws Exception {
+        ProjectModelSettings settings = mock(ProjectModelSettings.class);
+        when(settings.resolveAgenticModel("proj", ModelLane.RCA))
+                .thenReturn(Optional.of(
+                        new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.CUSTOM, "my-model", null)));
+
+        var body = postedBody(settings, request());
+
+        assertTrue(body.path("model_cost").isMissingNode());
     }
 
     /** No git integration: the clone fields and the onset are omitted, not empty, because the script branches on
@@ -383,7 +426,7 @@ class E2bRcaSandboxTest {
             LlmUsageAccountant usage,
             Launcher launcher) {
         return new E2bRcaSandbox(
-                props(), new ObserverProperties(), settings, resolver, usage, OpenTelemetry.noop(), MAPPER) {
+                props(), new ObserverProperties(), settings, resolver, usage, RATES, OpenTelemetry.noop(), MAPPER) {
             @Override
             String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
                 try {
@@ -406,13 +449,34 @@ class E2bRcaSandboxTest {
         return MAPPER.readTree(posted.toString());
     }
 
+    /** The real lookup over the bundled models.dev copy; a blank URL never fetches. */
+    private static final ModelsDevRates RATES = bundledRates();
+
+    /** The cost as the launcher reads it off the wire. */
+    private static JsonNode wire(ModelsDevRates.ModelCost cost) throws Exception {
+        return MAPPER.readTree(MAPPER.writeValueAsString(cost.toOpencodeCost(MAPPER)));
+    }
+
+    private static ModelsDevRates bundledRates() {
+        ModelsDevProperties p = new ModelsDevProperties();
+        p.setUrl("");
+        return new ModelsDevRates(new ObjectMapper(), p);
+    }
+
     private static E2bRcaSandbox sandbox(RcaProperties p) {
         return sandbox(p, mock(LlmUsageAccountant.class));
     }
 
     private static E2bRcaSandbox sandbox(RcaProperties p, LlmUsageAccountant usage) {
         return new E2bRcaSandbox(
-                p, new ObserverProperties(), noLaneSetting(), credentials(), usage, OpenTelemetry.noop(), MAPPER);
+                p,
+                new ObserverProperties(),
+                noLaneSetting(),
+                credentials(),
+                usage,
+                RATES,
+                OpenTelemetry.noop(),
+                MAPPER);
     }
 
     private static RcaProperties launcherAt(String url) {
@@ -426,7 +490,6 @@ class E2bRcaSandboxTest {
                 .recordSandboxRun(
                         eq("proj"),
                         eq("rca"),
-                        any(),
                         any(),
                         eq(false),
                         eq(in),

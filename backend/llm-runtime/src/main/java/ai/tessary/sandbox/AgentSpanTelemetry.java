@@ -120,9 +120,10 @@ public final class AgentSpanTelemetry {
      * One sandbox run's token buckets and cost, as the runner's result envelope reports them — the
      * shape both the span enrichment below and the usage ledger read.
      *
-     * <p>{@code costUsd} is what the agent itself reported for the run ({@code total_cost_usd}), not a
-     * catalog price: the platform never assembles these requests, so it cannot re-derive them. Null
-     * when the envelope carried no cost — the same unpriced sentinel the rest of the accounting uses.
+     * <p>{@code costUsd} is the cost OpenCode computed for the run ({@code usage.cost_usd}), from the
+     * models.dev rates the launcher declared for its model. Null when the envelope carried none, and
+     * also when it says $0 for a run that used tokens: that is a model OpenCode had no rate for, and
+     * booking it as free would hide that the cost is missing.
      */
     public record AgentUsage(
             long inputTokens,
@@ -139,16 +140,17 @@ public final class AgentSpanTelemetry {
     public static @Nullable AgentUsage parseUsage(ObjectMapper mapper, @Nullable String envelopeJson) {
         if (envelopeJson == null || envelopeJson.isBlank()) return null;
         try {
-            JsonNode env = mapper.readTree(envelopeJson);
-            JsonNode u = env.path("usage");
-            return new AgentUsage(
-                    u.path("input_tokens").asLong(0),
-                    u.path("output_tokens").asLong(0),
-                    u.path("cache_read_input_tokens").asLong(0),
-                    u.path("cache_creation_input_tokens").asLong(0),
-                    env.hasNonNull("total_cost_usd")
-                            ? BigDecimal.valueOf(env.get("total_cost_usd").asDouble())
-                            : null);
+            JsonNode u = mapper.readTree(envelopeJson).path("usage");
+            long in = u.path("input_tokens").asLong(0);
+            long out = u.path("output_tokens").asLong(0);
+            long cacheRead = u.path("cache_read_input_tokens").asLong(0);
+            long cacheWrite = u.path("cache_creation_input_tokens").asLong(0);
+            BigDecimal cost = u.path("cost_usd").isNumber()
+                    ? new BigDecimal(u.path("cost_usd").asText())
+                    : null;
+            boolean usedTokens = in + out + cacheRead + cacheWrite > 0;
+            if (cost != null && cost.signum() == 0 && usedTokens) cost = null;
+            return new AgentUsage(in, out, cacheRead, cacheWrite, cost);
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException unreadable) {
             return null;
         }
@@ -162,8 +164,10 @@ public final class AgentSpanTelemetry {
         if (envelopeJson == null || envelopeJson.isBlank()) return;
         try {
             JsonNode env = mapper.readTree(envelopeJson);
-            if (env.has("total_cost_usd")) {
-                double cost = env.get("total_cost_usd").asDouble();
+            AgentUsage priced = parseUsage(mapper, envelopeJson);
+            BigDecimal costUsd = priced == null ? null : priced.costUsd();
+            if (costUsd != null) {
+                double cost = costUsd.doubleValue();
                 span.setAttribute("gen_ai.usage.cost", cost);
                 ObjectNode costDetails = mapper.createObjectNode();
                 costDetails.put("total", cost);

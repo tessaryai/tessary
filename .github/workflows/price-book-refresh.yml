@@ -46,8 +46,11 @@ permissions:
   pull-requests: write   # net-new in this repo — see the header above
 
 jobs:
+  # Both vendored rate files, LiteLLM's price book and the models.dev copy sandbox runs fall back
+  # to (scripts/refresh-models-dev.sh), refresh in this one job and land in one PR, so a day's price
+  # changes are one review rather than two.
   refresh:
-    name: Refresh vendored LiteLLM price book
+    name: Refresh vendored price files
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,14 +62,36 @@ jobs:
       - name: price book contract
         run: bash scripts/check-price-book-contract.sh
 
+      - name: refresh vendored models.dev copy
+        run: bash scripts/refresh-models-dev.sh
+
       - name: check for changes
         id: diff
         run: |
           if git diff --quiet -- backend/substrate/src/main/resources/pricing/litellm-model-prices.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "litellm=false" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "litellm=true" >> "$GITHUB_OUTPUT"
           fi
+          if git diff --quiet -- backend/llm-runtime/src/main/resources/models-dev/api.json; then
+            echo "models_dev=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "models_dev=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The PR this opens gets no CI run (see the header), so the one check that matters to the
+      # models.dev copy runs here: every sandbox model still has a rate in it.
+      - uses: actions/setup-java@v6
+        if: steps.diff.outputs.models_dev == 'true'
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: every sandbox model is priced in the new models.dev copy
+        if: steps.diff.outputs.models_dev == 'true'
+        working-directory: backend
+        run: mvn -B -q -pl llm-runtime -am -Dtest=ModelsDevCatalogTest -Dsurefire.failIfNoSpecifiedTests=false test
 
       # A FIXED BRANCH NAME, FORCE-PUSHED AND REUSED IF ALREADY OPEN — load-bearing at a daily
       # cadence, not just tidy. A date-stamped or per-run branch would open a brand-new PR every
@@ -77,26 +102,25 @@ jobs:
       # always carries exactly one commit: today's upstream state against main. Without that, a PR
       # left open for a week would grow a week of intermediate commits nobody wants to read.
       - name: open or update PR
-        if: steps.diff.outputs.changed == 'true'
+        if: steps.diff.outputs.litellm == 'true' || steps.diff.outputs.models_dev == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B automation/price-book-refresh
-          git add backend/substrate/src/main/resources/pricing/litellm-model-prices.json
-          git commit -m "chore(pricing): refresh vendored LiteLLM price book"
+          git add backend/substrate/src/main/resources/pricing/litellm-model-prices.json \
+            backend/llm-runtime/src/main/resources/models-dev/api.json
+          git commit -m "chore(pricing): refresh vendored LiteLLM and models.dev prices"
           git push --force origin automation/price-book-refresh
           if gh pr list --head automation/price-book-refresh --state open --json number -q '.[0].number' | grep -q .; then
             echo "PR already open for automation/price-book-refresh; force-push updated it in place."
           else
             gh pr create --head automation/price-book-refresh --base main \
-              --title "chore(pricing): refresh vendored LiteLLM price book" \
-              --body "Automated daily refresh of the vendored LiteLLM price book, opened by \`.github/workflows/price-book-refresh.yml\`.
+              --title "chore(pricing): refresh vendored LiteLLM and models.dev prices" \
+              --body "Automated daily refresh of the two vendored price files, opened by \`.github/workflows/price-book-refresh.yml\`.
 
-          The file is a verbatim copy of [BerriAI/litellm's \`model_prices_and_context_window.json\`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json). Review the diff below: it is exactly what upstream published, with no transformation in between.
-
-          Entries carrying neither an input nor an output token rate are vendored but read as unpriced rather than as \$0.00 — see \`PriceSnapshot.pricesTokens\`.
-
-          There is no hand-maintained correction file layered over this one (\`manual-overrides.json\` is retired) — a stale or wrong row is a bug to raise with LiteLLM upstream."
+          Both are verbatim copies of their upstream, with no transformation in between:
+          - The LiteLLM price book is [BerriAI/litellm's \`model_prices_and_context_window.json\`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json), the price book for ingested spans and Jev calls direct on TypeSafe. Entries carrying neither an input nor an output token rate are vendored but read as unpriced rather than as \$0.00 — see \`PriceSnapshot.pricesTokens\`. There is no hand-maintained correction file layered over it (\`manual-overrides.json\` is retired) — a stale or wrong row is a bug to raise with LiteLLM upstream.
+          - The models.dev copy is [models.dev's \`api.json\`](https://models.dev/api.json). Sandbox runs read models.dev live and use this copy only when that fetch fails, so it moves the fallback, not the live rates. This job already checked that every sandbox model still has a rate in it."
           fi

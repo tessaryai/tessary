@@ -592,13 +592,14 @@ function describeSchemaMiss(text, turns, jsonSchema) {
  * backend), so nothing added to this object may ever become a string.
  */
 function sumUsage(turns) {
-  const z = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+  const z = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0 };
   return (turns || []).reduce(
     (a, t) => ({
       input_tokens: a.input_tokens + t.usage.input_tokens,
       output_tokens: a.output_tokens + t.usage.output_tokens,
       cache_read_input_tokens: a.cache_read_input_tokens + t.usage.cache_read_input_tokens,
       cache_creation_input_tokens: a.cache_creation_input_tokens + t.usage.cache_creation_input_tokens,
+      cost_usd: a.cost_usd + (t.usage.cost_usd || 0),
     }),
     z,
   );
@@ -608,7 +609,7 @@ function usageLine(turns) {
   const u = sumUsage(turns);
   return (
     `spend (booked on failure by the caller — see triage.js/rca.js): in=${u.input_tokens} out=${u.output_tokens} ` +
-    `cache_read=${u.cache_read_input_tokens} cache_write=${u.cache_creation_input_tokens} ` +
+    `cache_read=${u.cache_read_input_tokens} cache_write=${u.cache_creation_input_tokens} cost_usd=${u.cost_usd} ` +
     `turns=${(turns || []).length}`
   );
 }
@@ -655,14 +656,19 @@ function toolResultsOf(parts) {
   return out;
 }
 
+// `cost_usd` is OpenCode's own figure for the message, summed over every model call in it, from the
+// rates the launcher declared for the model (its `model_cost`). That is the run's bill: the backend
+// books it as reported and no longer prices tokens itself.
 function usageOf(message) {
   const t = (message && message.tokens) || {};
   const cache = t.cache || {};
+  const cost = Number(message && message.cost);
   return {
     input_tokens: Number(t.input || 0),
     output_tokens: Number(t.output || 0),
     cache_read_input_tokens: Number(cache.read || 0),
     cache_creation_input_tokens: Number(cache.write || 0),
+    cost_usd: Number.isFinite(cost) && cost > 0 ? cost : 0,
   };
 }
 
@@ -715,9 +721,9 @@ function toTurns(messages, prompt) {
  * sandboxes read `usage`, `num_turns` and `structured_output` by name — so it is a contract between
  * this file and Java, not an artifact of the harness that used to produce it.
  *
- * It carries NO cost field, on purpose. The harness's own figure does not price cache reads
- * (anomalyco/opencode#28494), and cache reads are most of a repo-grounded run's bill, so the
- * platform prices these raw token counts itself (LlmUsageAccountant.recordSandboxRun).
+ * The run's cost travels inside `usage` as `cost_usd`: OpenCode's own figure, from the models.dev
+ * rates the launcher declared for the model. The backend books it as reported; a run that used
+ * tokens but reports $0 had no rate, and the backend books it unpriced, not free.
  */
 function toEnvelope(turns, structured, text) {
   const usage = sumUsage(turns);
