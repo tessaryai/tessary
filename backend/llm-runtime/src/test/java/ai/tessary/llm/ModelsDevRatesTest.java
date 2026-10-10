@@ -117,6 +117,16 @@ class ModelsDevRatesTest {
         fetches(2);
     }
 
+    /** A typo in the configured URL must cost the live file, never every sandbox run. */
+    @Test
+    void aMalformedUrlFallsBackToTheBundledCopy() {
+        ModelsDevProperties props = new ModelsDevProperties();
+        props.setUrl("not a url");
+        ModelsDevRates rates = new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
+
+        assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));
+    }
+
     @Test
     void aBlankUrlNeverFetches() throws Exception {
         ModelsDevProperties props = new ModelsDevProperties();

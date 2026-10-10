@@ -174,7 +174,8 @@ public class ModelsDevRates {
                     .durationMs(start)
                     .log();
             return new Rates(byId, now);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // A malformed tessary.models-dev.url throws from URI.create: it must cost the live file, never the run.
             warnUnreachable(start, e.getClass().getSimpleName());
             return null;
         } catch (InterruptedException e) {

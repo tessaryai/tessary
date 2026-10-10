@@ -165,9 +165,13 @@ public class JevDecisionClient implements DecisionClient {
         }
     }
 
-    /** OpenRouter's own endpoint, on either the org's key or the deployment's: it reports its bill per call. */
+    /**
+     * A call OpenRouter bills: the org's OpenRouter key, whatever base URL it is pointed at, or any target on
+     * OpenRouter's own host, which is how the deployment's provider reaches it. OpenRouter reports that bill per call.
+     */
     static boolean billedByOpenRouter(DecisionTarget target) {
-        return OPENROUTER_HOST.equalsIgnoreCase(target.endpoint().getHost());
+        return target.provider() == ModelProvider.OPENROUTER
+                || OPENROUTER_HOST.equalsIgnoreCase(target.endpoint().getHost());
     }
 
     /** OpenRouter's reported cost in USD, or null when it reported none. */

@@ -211,6 +211,22 @@ class JevDecisionClientTest {
         assertNull(answer.priceBookVersion());
     }
 
+    /** An org that fronts OpenRouter with its own URL is still billed by OpenRouter, not at TypeSafe's rate. */
+    @Test
+    void anOpenRouterKeyBehindAProxyStillBooksOpenRoutersReportedCost() throws Exception {
+        stub(response(200, answer(",\"cost\":0.00005")));
+        DecisionTarget proxied = new DecisionTarget(
+                ModelProvider.OPENROUTER,
+                "~typesafe/jev-latest",
+                URI.create("https://llm-gateway.internal/api/alpha/decisions"),
+                "or-key");
+
+        DecisionAnswer answer = client().decide("p1", "frustration", proxied, request());
+
+        assertEquals(0, new BigDecimal("0.00005").compareTo(answer.costUsd()));
+        assertNull(answer.priceBookVersion());
+    }
+
     /**
      * The credit worker debits only platform-funded rows that carry a cost, so both halves matter. The platform
      * provider calls OpenRouter, so its cost is OpenRouter's too.
