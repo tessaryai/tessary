@@ -500,22 +500,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/mute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["CaseController_mute"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/rca": {
         parameters: {
             query?: never;
@@ -542,22 +526,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["CaseController_resolve"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/unmute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["CaseController_unmute"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2857,8 +2825,6 @@ export interface components {
             latest_finding_id: string | null;
             locked_at: string | null;
             metric: string;
-            muted_at: string | null;
-            muted_by: string | null;
             onset_at: string;
             opened_at: string;
             rca_verdict: string | null;
@@ -4039,7 +4005,7 @@ export interface components {
         };
         ResolveCaseRequest: {
             disposition?: string | null;
-            reason: string;
+            reason?: string | null;
         };
         ResponseMeta: {
             error?: components["schemas"]["ErrorBody"] | null;
@@ -4744,7 +4710,6 @@ export interface components {
         };
         TriageView: {
             cases: components["schemas"]["CaseView"][];
-            muted: components["schemas"]["CaseView"][];
             recently_resolved: components["schemas"]["CaseView"][];
             watching: components["schemas"]["WatchingView"];
         };
@@ -6017,32 +5982,6 @@ export interface operations {
             };
         };
     };
-    CaseController_mute: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseCaseView"];
-                };
-            };
-        };
-    };
     CaseController_runRca: {
         parameters: {
             query: {
@@ -6087,32 +6026,6 @@ export interface operations {
                 "application/json": components["schemas"]["ResolveCaseRequest"];
             };
         };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseCaseView"];
-                };
-            };
-        };
-    };
-    CaseController_unmute: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

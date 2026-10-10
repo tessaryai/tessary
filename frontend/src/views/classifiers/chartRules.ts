@@ -277,9 +277,7 @@ function howItEnded(span: ChartCaseSpan): string {
 export function laneTooltip(span: ChartCaseSpan): string[] {
   const when =
     span.end_at == null
-      ? span.case_state === "muted"
-        ? `Open since ${utcDay(span.start_at)}, muted`
-        : `Open since ${utcDay(span.start_at)}`
+      ? `Open since ${utcDay(span.start_at)}`
       : `${utcDay(span.start_at)} to ${utcDay(span.end_at)}, ${howItEnded(span)}`;
   return [`Opens ${span.case_reference}`, span.case_title, when];
 }

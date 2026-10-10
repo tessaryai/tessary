@@ -138,8 +138,6 @@ class CasePageCodecTest {
                 resolvedAt == null ? null : CaseRow.Resolution.ABSORBED,
                 null,
                 null,
-                null,
-                null,
                 null);
     }
 }

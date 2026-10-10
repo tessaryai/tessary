@@ -435,7 +435,7 @@ Flat inputs beside moved outputs is the entire argument for "the agent changed, 
 ### 8.1 Cases — the `CaseSource` seam
 
 `cases/CaseSource` is the cause-neutral extension point: implement it, add a
-`CaseRow.Detector` constant, and Triage, the case page, resolve/mute and the activity trail all
+`CaseRow.Detector` constant, and Triage, the case page, close/absorb and the activity trail all
 pick it up with no further change. `GraderDegradationSource` was the closest template — a
 statistical detector feeding cases — until it was deleted with grader Layer 1; the live templates are
 `MetricDriftSource` and `ToolErrorCaseSource`.

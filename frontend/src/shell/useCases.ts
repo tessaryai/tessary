@@ -2,9 +2,7 @@
 /*
  * The Triage nav badge's data source — the ONLY nav count in the app.
  *
- * Reads `GET {projectBase}/cases` and counts what is open. Muted cases are
- * deliberately excluded: muting one is exactly the act of saying "stop telling
- * me about this", and a badge that kept counting it would ignore that.
+ * Reads `GET {projectBase}/cases` and counts what is open.
  *
  * Resilient by design: while loading or on error the badge simply doesn't render
  * (count 0) — the shell never blocks on the cases endpoint.

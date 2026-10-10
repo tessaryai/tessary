@@ -126,8 +126,7 @@ public class McpToolRegistry {
      * handler runs cannot drift apart. The persisted vocabulary itself lives on {@link CaseRow.State}; this is
      * only the subset a page may ask for, which today is all of it.
      */
-    private static final List<String> CASE_STATES =
-            List.of(CaseRow.State.OPEN, CaseRow.State.MUTED, CaseRow.State.RESOLVED);
+    private static final List<String> CASE_STATES = List.of(CaseRow.State.OPEN, CaseRow.State.RESOLVED);
 
     private final PipelineService pipelineService;
     private final ProjectRepository projects;
@@ -285,7 +284,7 @@ public class McpToolRegistry {
      * capability that's off for every partner would withhold the product's own output. The RCA report a
      * case owns rides along inline for the same reason, via {@link CaseService#detail}.
      *
-     * <p>Lifecycle writes ({@code resolve}, {@code absorb}, {@code mute}, {@code unmute}) stay on the
+     * <p>Lifecycle writes ({@code resolve}, {@code absorb}) stay on the
      * controller and are deliberately not tools: each records a human judgement, and {@code absorb} moves
      * the detector's baseline, which an agent should not do on its own reasoning.
      */
@@ -294,8 +293,7 @@ public class McpToolRegistry {
                 "list_cases",
                 "List this token's project's cases — what is wrong with it right now. Defaults to state=open,"
                         + " worst-first (severity, then most recently opened), which is the answer to 'what needs"
-                        + " me'. Narrow with detector and call_site_id; ask for state=muted (live but silenced) or"
-                        + " state=resolved, which pages newest-closure-first instead. Rows are the case itself —"
+                        + " me'. Narrow with detector and call_site_id; ask for state=resolved, which pages newest-closure-first instead. Rows are the case itself —"
                         + " title, the basis sentence in its own detector's terms, severity, the subject and its"
                         + " call site, timestamps. Pass a row's id (or the C-118 reference a person quoted) to"
                         + " get_case for its trail, its finding, and the RCA report when one has been written."
@@ -307,8 +305,7 @@ public class McpToolRegistry {
                                 Map.entry(
                                         "state",
                                         enumField(
-                                                "Optional. Which cases to page; defaults to 'open'. 'muted' is"
-                                                        + " live-but-silenced and still holds its subject;"
+                                                "Optional. Which cases to page; defaults to 'open'."
                                                         + " 'resolved' is closed history, ordered by when it"
                                                         + " closed rather than by severity.",
                                                 CASE_STATES)),

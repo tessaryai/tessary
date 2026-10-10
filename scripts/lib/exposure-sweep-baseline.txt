@@ -205,10 +205,8 @@ POST /api/orgs/{orgSlug}/projects/{projectSlug}/api-keys -> 401
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/api-keys/{keyId}/rotate -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/archive -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/absorb -> 401  
-POST /api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/mute -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/rca -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/resolve -> 401  
-POST /api/orgs/{orgSlug}/projects/{projectSlug}/cases/{id}/unmute -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/default -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/analysis -> 401  
 POST /api/orgs/{orgSlug}/projects/{projectSlug}/findings/{id}/resolution -> 401  
