@@ -44,11 +44,10 @@ import org.springframework.stereotype.Component;
  * <p>A call on {@link ModelProvider#PLATFORM} is booked platform-funded: the deployment pays the provider
  * and recovers it from the org's credit. Every other call is on the org's own key.
  *
- * <p><b>Pricing.</b> Every call is priced under {@code typesafe/<bare model id>} whichever gateway
- * carried it, on the REQUESTED id: the book has no
- * {@code openrouter/typesafe/...} key, and the echoed dated version is not a book key. A cost the
- * provider reports in its body stays in the returned response body as an audit copy and is never the
- * booked figure.
+ * <p><b>Pricing.</b> A call to OpenRouter costs what OpenRouter reports in {@code usage.cost}: its own
+ * bill, never TypeSafe's rate for the same model. A response without one leaves the call unpriced.
+ * Every other call is priced from the book under {@code typesafe/<bare model id>}, on the REQUESTED
+ * id: the echoed dated version is not a book key.
  */
 @Component
 public class JevDecisionClient implements DecisionClient {
@@ -56,6 +55,8 @@ public class JevDecisionClient implements DecisionClient {
     private static final Logger log = LoggerFactory.getLogger(JevDecisionClient.class);
 
     static final String SPAN_NAME = "decision-call";
+
+    private static final String OPENROUTER_HOST = "openrouter.ai";
     static final long BASE_BACKOFF_MS = 1_000L;
 
     /** A provider asking for a longer wait than this is treated as down for this call. */
@@ -132,8 +133,13 @@ public class JevDecisionClient implements DecisionClient {
             Integer in = intOrNull(response.path("usage").path("input_tokens"));
             Integer out = intOrNull(response.path("usage").path("output_tokens"));
             String responded = response.path("model").asText("");
-            PlatformCallPricer.PricedCall priced =
-                    pricer.price(pricingId(target), in, out, null, null).orElse(null);
+            boolean openRouter = billedByOpenRouter(target);
+            PlatformCallPricer.PricedCall priced = openRouter
+                    ? null
+                    : pricer.price(pricingId(target), in, out, null, null).orElse(null);
+            BigDecimal cost = openRouter
+                    ? reportedCost(response.path("usage").path("cost"))
+                    : priced == null ? null : priced.total();
             DecisionAnswer answer = new DecisionAnswer(
                     target.provider(),
                     target.modelId(),
@@ -141,7 +147,7 @@ public class JevDecisionClient implements DecisionClient {
                     answers,
                     in,
                     out,
-                    priced == null ? null : priced.total(),
+                    cost,
                     priced == null ? null : priced.priceBookVersion(),
                     latencyMs,
                     body,
@@ -157,6 +163,16 @@ public class JevDecisionClient implements DecisionClient {
         } finally {
             span.end();
         }
+    }
+
+    /** OpenRouter's own endpoint, on either the org's key or the deployment's: it reports its bill per call. */
+    static boolean billedByOpenRouter(DecisionTarget target) {
+        return OPENROUTER_HOST.equalsIgnoreCase(target.endpoint().getHost());
+    }
+
+    /** OpenRouter's reported cost in USD, or null when it reported none. */
+    private static @Nullable BigDecimal reportedCost(JsonNode cost) {
+        return cost.isNumber() ? new BigDecimal(cost.asText()) : null;
     }
 
     /** The id this call is priced under, see {@link ModelCatalog#decisionPricingId}. */

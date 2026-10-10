@@ -147,6 +147,11 @@
  *                                                             egressNetwork)
  *   platform_funded (either shape)                         -- backend-only ledger flag; ignored here
  *
+ * `model_cost` (request body field, optional): { input, output, cache_read?, cache_write? }, the
+ *   run's models.dev rates in USD per million tokens. Declared on the run's model in the OpenCode
+ *   config (declareModelCost), so the cost OpenCode reports is the one the run is billed at. Absent
+ *   when models.dev does not price the model, and the run is then unpriced.
+ *
  *   MANTLE_PROJECT_ID             the Bedrock Project (proj_…) mantle inference is attributed to
  *                                 and authorized against; blank = the account default project. Not a
  *                                 secret (an attribution scope, not a credential) and not
@@ -434,6 +439,32 @@ function openAiCompatProviderBlock(mode, credential, model) {
   return { [OPENCODE_PROVIDER_NAME[mode]]: block };
 }
 
+// The rates a run is billed at: models.dev's, sent by the backend as `model_cost` (USD per million
+// tokens, OpenCode's own `cost` shape). Every run declares its model with them, whatever its provider
+// block is called. OpenCode only finds models.dev rates itself under a models.dev provider id, and
+// most of our blocks are not one (openai-direct, grok, glm, moonshot, gemini, bedrock-mantle-gpt), so
+// without this it bills those runs at $0. Only the four finite, non-negative numbers survive.
+const MODEL_COST_FIELDS = ['input', 'output', 'cache_read', 'cache_write'];
+
+function sanitizeModelCost(modelCost) {
+  if (!modelCost || typeof modelCost !== 'object') return undefined;
+  const out = {};
+  for (const k of MODEL_COST_FIELDS) {
+    const v = modelCost[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return out.input === undefined && out.output === undefined ? undefined : out;
+}
+
+function declareModelCost(config, bareModel, modelCost) {
+  const cost = sanitizeModelCost(modelCost);
+  if (!bareModel || !cost) return;
+  for (const block of Object.values(config.provider)) {
+    const models = block.models || {};
+    block.models = { ...models, [bareModel]: { ...(models[bareModel] || {}), cost } };
+  }
+}
+
 /**
  * The provider config OpenCode runs with, injected per run rather than baked into the image so
  * the region and the served model list stay with the launcher that already resolves credentials.
@@ -449,7 +480,7 @@ function openAiCompatProviderBlock(mode, credential, model) {
  * @param credential the request's own `credential` object (never logged — see the file-header doc
  *   and `requireCredential`). Required; every caller resolves and validates it first.
  */
-function providerConfig(credential, qualifiedModel) {
+function providerConfig(credential, qualifiedModel, modelCost) {
   const config = { provider: {} };
   // The bare id the provider block has to declare, recovered from the id toProviderModel already
   // built. Split on the FIRST slash only, exactly as agent-stream.js's splitModel does, so an
@@ -485,6 +516,7 @@ function providerConfig(credential, qualifiedModel) {
     const extra = mode && openAiCompatProviderBlock(mode, credential, bareModel);
     if (extra) Object.assign(config.provider, extra);
   }
+  declareModelCost(config, bareModel, modelCost);
   if (process.env.OPENCODE_SMALL_MODEL) config.small_model = process.env.OPENCODE_SMALL_MODEL;
   // An egress credential pays for one model: background work (titles) runs on it too, never on a
   // second model OpenCode would otherwise pick.
@@ -524,9 +556,9 @@ function requirePosture(posture, where) {
 // unlike an E2B microVM or a HOST spawn, both of which pick their own per-run directory. `credential`
 // is UNUSED under UNTRUSTED_POSTURE (that branch returns before it is ever read) — it exists so
 // AGENT_POSTURE can build agentEnvs() from it.
-function containerEnvFor(posture, credential, qualifiedModel) {
+function containerEnvFor(posture, credential, qualifiedModel, modelCost) {
   requirePosture(posture, 'containerEnvFor');
-  const envs = posture === AGENT_POSTURE ? agentEnvs(credential, qualifiedModel) : {};
+  const envs = posture === AGENT_POSTURE ? agentEnvs(credential, qualifiedModel, modelCost) : {};
   return [...Object.entries(envs).map(([k, v]) => `${k}=${v}`), 'WORK_DIR=/work'];
 }
 
@@ -606,7 +638,7 @@ function egressNetwork(credential, payload) {
  *
  * @param credential the request's own `credential` object — see {@link providerConfig}'s doc.
  */
-function agentEnvs(credential, qualifiedModel) {
+function agentEnvs(credential, qualifiedModel, modelCost) {
   const envs = {};
   if (credential.provider === 'BEDROCK' || credential.provider === 'BEDROCK_MANTLE') {
     envs.AWS_REGION = credential.aws_region || '';
@@ -623,7 +655,7 @@ function agentEnvs(credential, qualifiedModel) {
     const mode = REQUEST_PROVIDER_TO_MODE[credential.provider];
     if (mode) Object.assign(envs, openAiCompatEnvVars(mode, credential));
   }
-  envs.OPENCODE_CONFIG_CONTENT = JSON.stringify(providerConfig(credential, qualifiedModel));
+  envs.OPENCODE_CONFIG_CONTENT = JSON.stringify(providerConfig(credential, qualifiedModel, modelCost));
   return envs;
 }
 
@@ -793,7 +825,7 @@ function safeDetail(err, cls, meta) {
 // F1: the numeric fields triage.js/rca.js's failure envelope carries (agent-stream.js's sumUsage
 // shape). Named once so usageFromFailureStdout and buildErrorBody's re-validation of `err.usage`
 // (belt and braces — see there) can never drift into allow-listing different keys.
-const USAGE_FIELDS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
+const USAGE_FIELDS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens', 'cost_usd'];
 
 // F1: triage.js/rca.js write `{is_error:true, error, usage}` to stdout before exiting non-zero, so a
 // failing agentic run's spend is not silently discarded (agent-stream.js's sumUsage/the two scripts'
@@ -1140,7 +1172,7 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   // shared volume's root (see LAUNCHER_WORK_DIR's comment).
   const workSubpath = path.basename(workDir);
 
-  const envList = containerEnvFor(posture, credential, payload.model);
+  const envList = containerEnvFor(posture, credential, payload.model, payload.model_cost);
 
   let containerId;
   try {
@@ -1391,7 +1423,7 @@ async function runAgenticScript(scriptName, rawPayload) {
     try {
       res = await sbx.commands.run(`node /home/user/${scriptName} /home/user/input.json`, {
         timeoutMs,
-        envs: agentEnvs(credential, payload.model),
+        envs: agentEnvs(credential, payload.model, payload.model_cost),
         onStdout: (d) => { outBuf += d; },
         onStderr: (d) => { errBuf += d; },
       });

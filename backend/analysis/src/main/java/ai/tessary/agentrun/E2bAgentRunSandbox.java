@@ -3,6 +3,7 @@ package ai.tessary.agentrun;
 
 import ai.tessary.config.AgentRunProperties;
 import ai.tessary.config.ObserverProperties;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
@@ -211,6 +212,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         body.put("prompt", req.prompt());
         if (req.jsonSchema() != null) body.put("json_schema", req.jsonSchema());
         body.put("model", req.model());
+        ModelsDevRates.ModelCost modelCost = req.modelCost();
+        if (modelCost != null) body.set("model_cost", modelCost.toOpencodeCost(mapper));
         body.put("provider", req.provider());
         body.set("credential", mapper.valueToTree(req.credential()));
         ObjectNode mcp = body.putObject("mcp");
@@ -323,7 +326,6 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 req.projectId(),
                 req.lane(),
                 req.model(),
-                req.pricingId(),
                 req.credential().platformFunded(),
                 u.inputTokens(),
                 u.outputTokens(),

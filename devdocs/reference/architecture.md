@@ -141,11 +141,14 @@ of grading before the migration history was squashed into the current `0000-base
   (`TenantContext`, `TenantPathResolver`, `TenantArgumentResolver`, the filters). `tenant/` owns
   org/project/user *persistence and CRUD*. The split is "enforce at the edge" vs "store and
   manage"; keep it.
-- **There is one price source, and it is `price_book`.** Both hand-maintained rate tables are
+- **Each call has one price source, and there are three.** Both hand-maintained rate tables are
   gone: `run/PricingCatalog` (a run-level cross-provider estimate with no callers) and
-  `llmspi/ModelPricingCatalog` (the per-call cost). Producer telemetry and the platform's
-  own spend now read the same versioned tables through `pricing/ModelResolver` +
-  `pricing/PlatformCallPricer`. Do not start a third.
+  `llmspi/ModelPricingCatalog` (the per-call cost). Producer telemetry and decision calls direct
+  on TypeSafe read the versioned `price_book` tables through `pricing/ModelResolver` +
+  `pricing/PlatformCallPricer`. A sandbox run is billed at the cost OpenCode computes from
+  models.dev's rates (`llm/ModelsDevRates`), because that is the catalog the agent itself prices
+  from. A call to OpenRouter books OpenRouter's reported cost. Do not start a fourth, and never
+  price one call from two of them.
 - **`git/` is an integration layer with no closed loop above it.** It owns the `GitProvider`
   SPI and token/app plumbing. The
   `observer/` slice that consumed it — the push-triggered drift worker, the `DriftAnalyzer` SPI, the

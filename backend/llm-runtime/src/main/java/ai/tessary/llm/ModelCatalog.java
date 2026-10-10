@@ -412,16 +412,6 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://open.bigmodel.cn/api/paas/v4",
                     true),
-            // xAI's small model: every grok-4.x chat model starts at $1.25 input, so its coding tier.
-            new CatalogEntry(
-                    ModelProvider.GROK,
-                    "xAI",
-                    "grok-code-fast-1",
-                    "Grok Code Fast 1",
-                    false,
-                    NO_EFFORT,
-                    "https://api.x.ai/v1",
-                    true),
             // TypeSafe's Jev decision model, direct and over OpenRouter. Only the moving pointer is
             // offered: the provider echoes the version that answered, which is what gets recorded.
             // OpenRouter spells that pointer with a leading ~ and answers 400 "does not exist" to
@@ -511,6 +501,36 @@ public final class ModelCatalog {
             case TYPESAFE -> DECISION_PRICING_PREFIX + modelName;
             default -> modelName;
         };
+    }
+
+    /**
+     * The {@code <provider>/<model>} key models.dev lists this pair under, or empty where models.dev
+     * cannot know the model: a customer's own endpoint, the platform provider, or a decision model.
+     *
+     * <p>A sandbox run is billed at the cost OpenCode computes from these rates, not from the price
+     * book, so every agentic catalog row must resolve here ({@code ModelsDevCatalogTest}). On
+     * {@link ModelProvider#BEDROCK} {@code modelName} is the inference-profile id, which models.dev
+     * prices per region scope; on {@link ModelProvider#BEDROCK_MANTLE} it is the bare model id, with
+     * or without LiteLLM's route prefix.
+     */
+    public static Optional<String> modelsDevId(ModelProvider provider, String modelName) {
+        String prefix =
+                switch (provider) {
+                    case ANTHROPIC -> "anthropic/";
+                    case OPENAI -> "openai/";
+                    case GEMINI -> "google/";
+                    case GROK -> "xai/";
+                    case GLM -> "zai/";
+                    case MOONSHOT -> "moonshotai/";
+                    case OPENROUTER -> "openrouter/";
+                    case BEDROCK, BEDROCK_MANTLE -> "amazon-bedrock/";
+                    default -> null;
+                };
+        if (prefix == null) return Optional.empty();
+        String bare = modelName.startsWith(BedrockModelProfile.MANTLE_ROUTE_PREFIX)
+                ? modelName.substring(BedrockModelProfile.MANTLE_ROUTE_PREFIX.length())
+                : modelName;
+        return Optional.of(prefix + bare);
     }
 
     /**

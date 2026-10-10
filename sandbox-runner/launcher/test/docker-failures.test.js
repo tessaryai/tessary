@@ -18,7 +18,7 @@ const { withoutElapsed } = require('./fixtures/launcher-harness');
 
 const SERVER_JS = path.join(__dirname, '..', 'server.js');
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
-const FAILURE_ENVELOPE = JSON.stringify({ is_error: true, error: 'agent gave up', usage: { input_tokens: 90, cache_read_input_tokens: 4 } });
+const FAILURE_ENVELOPE = JSON.stringify({ is_error: true, error: 'agent gave up', usage: { input_tokens: 90, cache_read_input_tokens: 4, cost_usd: 0.04 } });
 
 function frame(streamType, text) {
   const payload = Buffer.isBuffer(text) ? text : Buffer.from(text);
@@ -158,7 +158,8 @@ test('a container that exits non-zero answers script_exit with its spend, and it
         exit_code: 3,
         script: 'triage.js',
         timeout_ms: 10000,
-        usage: { input_tokens: 90, cache_read_input_tokens: 4 },
+        // A failed run's cost reaches the backend with its tokens, or it books the spend as unpriced.
+        usage: { input_tokens: 90, cache_read_input_tokens: 4, cost_usd: 0.04 },
       });
       assert.ok(calls.includes('DELETE /containers/c1?force=true'), 'the container is removed after a failed run');
       assert.deepEqual(fs.readdirSync(workDir), [], 'and so is its work dir');

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.usage;
 
-import ai.tessary.pricing.PlatformCallPricer;
 import ai.tessary.tenant.Ids;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -39,11 +38,9 @@ public class LlmUsageAccountant {
     public record Subject(String kind, String id) {}
 
     private final LlmCallWriteRepository ledger;
-    private final PlatformCallPricer pricer;
 
-    public LlmUsageAccountant(LlmCallWriteRepository ledger, PlatformCallPricer pricer) {
+    public LlmUsageAccountant(LlmCallWriteRepository ledger) {
         this.ledger = ledger;
-        this.pricer = pricer;
     }
 
     /**
@@ -61,24 +58,19 @@ public class LlmUsageAccountant {
      * this project $40" into "these eleven rulings cost $40". Null where the caller genuinely has no
      * single subject.
      *
-     * <p>The harness is not the pricing authority: it either reports no cost at all, or reports one
-     * that omits cache reads, and cache reads dominate a repo-grounded run, so a harness-reported
-     * figure would understate the lane by most of its actual spend. A null {@code costUsd} is
-     * therefore priced here from the raw token counts against the same {@code price_book} every
-     * in-process call is priced from, and the row is stamped with the book that did it. Still null
-     * when no book in force carries the model: an absent cost is honest, a wrong one is not.
+     * <p>The cost is the one the sandbox reported: OpenCode's, computed from the models.dev rates the
+     * launcher declared for the run's model (see {@code llm/ModelsDevRates}). The price book does not
+     * price a sandbox run, so no row of this kind names a book version. A null {@code costUsd} is the
+     * run reporting no cost it can stand behind, and the row stays unpriced: an absent cost is
+     * honest, a wrong one is not.
      *
      * @param model the name to store on the ledger row — what a person actually chose, e.g.
      *     {@code grok-4.6}
-     * @param pricingId the id to price the run under, e.g. {@code xai/grok-4.6}; equal to
-     *     {@code model} for every model whose book key needs no route prefix. See {@code
-     *     ModelCatalog#pricingId} and {@code ResolvedAgenticModel} for why the two differ.
      */
     public void recordSandboxRun(
             @Nullable String projectId,
             String lane,
             @Nullable String model,
-            @Nullable String pricingId,
             boolean platformFunded,
             long inputTokens,
             long outputTokens,
@@ -86,25 +78,17 @@ public class LlmUsageAccountant {
             long cacheWriteTokens,
             @Nullable BigDecimal costUsd,
             @Nullable Subject subject) {
-        Integer in = toInt(inputTokens);
-        Integer out = toInt(outputTokens);
-        Integer cacheRead = toInt(cacheReadTokens);
-        Integer cacheWrite = toInt(cacheWriteTokens);
-        PlatformCallPricer.PricedCall priced =
-                pricer.price(pricingId, in, out, cacheRead, cacheWrite).orElse(null);
         record(
                 projectId,
                 lane,
                 model,
                 platformFunded,
-                in,
-                out,
-                cacheRead,
-                cacheWrite,
-                // A harness-reported cost is taken verbatim when there is one, but it is not stamped with a
-                // book version: no book produced it, and naming one would misattribute the number.
-                costUsd != null ? costUsd : (priced == null ? null : priced.total()),
-                costUsd != null ? null : (priced == null ? null : priced.priceBookVersion()),
+                toInt(inputTokens),
+                toInt(outputTokens),
+                toInt(cacheReadTokens),
+                toInt(cacheWriteTokens),
+                costUsd,
+                null,
                 null,
                 subject);
     }

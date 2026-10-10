@@ -99,7 +99,6 @@ class ProjectModelSettingControllerTest {
                         "OPENAI",
                         "GEMINI",
                         "GLM",
-                        "GROK",
                         "TYPESAFE",
                         "OPENROUTER",
                         "CUSTOM"),

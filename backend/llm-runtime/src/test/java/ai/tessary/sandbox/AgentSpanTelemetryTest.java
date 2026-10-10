@@ -20,6 +20,7 @@ import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -206,6 +207,35 @@ class AgentSpanTelemetryTest {
         span.end();
 
         assertTrue(exported.get(0).getAttributes().isEmpty(), "a bad envelope is skipped, not half-stamped");
+    }
+
+    /** OpenCode's cost is the run's bill, carried inside {@code usage} beside the tokens it was computed from. */
+    @Test
+    void parseUsage_readsTheRunsCostFromTheUsageObject() {
+        AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(
+                JSON,
+                "{\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"cache_read_input_tokens\":5,"
+                        + "\"cache_creation_input_tokens\":3,\"cost_usd\":0.125}}");
+
+        assertEquals(new AgentSpanTelemetry.AgentUsage(100, 20, 5, 3, new BigDecimal("0.125")), u);
+    }
+
+    /** $0 for a run that used tokens is a model OpenCode had no rate for: booked as free, the missing cost hides. */
+    @Test
+    void parseUsage_readsAZeroCostForARunThatUsedTokensAsUnpriced() {
+        AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(
+                JSON, "{\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"cost_usd\":0}}");
+
+        assertEquals(new AgentSpanTelemetry.AgentUsage(100, 20, 0, 0, null), u);
+    }
+
+    /** A run that spent no tokens did cost nothing, which is a fact rather than a missing rate. */
+    @Test
+    void parseUsage_keepsAZeroCostForARunThatUsedNoTokens() {
+        AgentSpanTelemetry.AgentUsage u =
+                AgentSpanTelemetry.parseUsage(JSON, "{\"usage\":{\"input_tokens\":0,\"cost_usd\":0}}");
+
+        assertEquals(new AgentSpanTelemetry.AgentUsage(0, 0, 0, 0, new BigDecimal("0")), u);
     }
 
     @Test

@@ -5,7 +5,9 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.RcaProperties.Agentic;
 import ai.tessary.llm.AgenticCredentialResolver;
+import ai.tessary.llm.ModelCatalog;
 import ai.tessary.llm.ModelProvider;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.coverage.ExcludeFromJacocoGeneratedReport;
@@ -81,6 +83,7 @@ public class E2bRcaSandbox implements RcaSandbox {
     private final AgenticCredentialResolver credentials;
 
     private final LlmUsageAccountant usage;
+    private final ModelsDevRates rates;
     private final ObjectMapper mapper;
     private final HttpClient client =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -92,6 +95,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             ProjectModelSettings modelSettings,
             AgenticCredentialResolver credentials,
             LlmUsageAccountant usage,
+            ModelsDevRates rates,
             OpenTelemetry openTelemetry,
             ObjectMapper mapper) {
         this.props = props;
@@ -99,6 +103,7 @@ public class E2bRcaSandbox implements RcaSandbox {
         this.modelSettings = modelSettings;
         this.credentials = credentials;
         this.usage = usage;
+        this.rates = rates;
         this.tracer = openTelemetry.getTracer("ai.tessary.rca");
         this.mapper = mapper;
     }
@@ -129,7 +134,6 @@ public class E2bRcaSandbox implements RcaSandbox {
                 projectId,
                 ModelLane.RCA.wire(),
                 model(projectId),
-                pricingId(projectId),
                 // Whose bill: the credential the run carried says so (AgenticCredentialResolver).
                 platformFunded,
                 u.inputTokens(),
@@ -159,14 +163,16 @@ public class E2bRcaSandbox implements RcaSandbox {
     }
 
     /**
-     * The id this run is priced under — equal to {@link #model} for the deployment default (a Bedrock
-     * inference-profile id, already the priced spelling) and for a resolved Bedrock row, but distinct
-     * for a resolved catalog row on the four providers {@code ModelCatalog#pricingId} route-prefixes.
+     * The models.dev id of the model this run is billed at, see {@link ModelCatalog#modelsDevId}. The
+     * deployment default is a Bedrock inference-profile id, so it is looked up on Bedrock.
      */
-    private String pricingId(String projectId) {
-        return resolvedModel(projectId)
-                .map(ProjectModelSettings.ResolvedAgenticModel::pricingId)
-                .orElseGet(() -> observerProps.getAgentic().getModel());
+    private @Nullable String modelsDevId(String projectId) {
+        Optional<ProjectModelSettings.ResolvedAgenticModel> resolved = resolvedModel(projectId);
+        // A resolved model with no models.dev id is unpriced; it must never fall back to the default's rates.
+        if (resolved.isPresent()) return resolved.get().modelsDevId();
+        return ModelCatalog.modelsDevId(
+                        ModelProvider.BEDROCK, observerProps.getAgentic().getModel())
+                .orElse(null);
     }
 
     /**
@@ -244,6 +250,7 @@ public class E2bRcaSandbox implements RcaSandbox {
                     "model",
                     resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                             .orElseGet(() -> model(req.projectId())));
+            rates.putModelCost(body, modelsDevId(req.projectId()));
             // Full removal of the launcher's deployment-env-var credential path — the org's
             // own credential now travels ON the request, decrypted here and never logged (see
             // AgenticCredentialResolver's class javadoc). Throws MISSING_CREDENTIALS /

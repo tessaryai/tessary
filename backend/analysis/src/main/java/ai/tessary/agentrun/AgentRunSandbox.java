@@ -2,6 +2,7 @@
 package ai.tessary.agentrun;
 
 import ai.tessary.llm.AgenticCredentialResolver;
+import ai.tessary.llm.ModelsDevRates;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Map;
@@ -43,8 +44,8 @@ public interface AgentRunSandbox {
      *     never logged
      * @param headSha the commit to check out, present exactly when {@code cloneUrl} is
      * @param model the model id the agent runs, and the name the ledger row stores
-     * @param pricingId the id the run is priced under; equal to {@code model} except on the catalog
-     *     providers whose price-book keys carry a route prefix (see {@code ModelCatalog#pricingId})
+     * @param modelCost the models.dev rates the run is billed at, declared to OpenCode for {@code model};
+     *     null when models.dev does not price the model, and the run is then unpriced
      * @param provider the {@code ModelProvider} wire value the credential belongs to
      * @param credential the org's decrypted credential; sent to the launcher, never logged or filed
      * @param mcpUrl this platform's MCP endpoint
@@ -63,7 +64,7 @@ public interface AgentRunSandbox {
             @Nullable String cloneUrl,
             @Nullable String headSha,
             String model,
-            String pricingId,
+            ModelsDevRates.@Nullable ModelCost modelCost,
             String provider,
             AgenticCredentialResolver.Credential credential,
             String mcpUrl,
