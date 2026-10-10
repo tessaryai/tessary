@@ -212,8 +212,6 @@ export const GROUNDEDNESS_CASE_DETAIL: CaseDetail = {
     latest_finding_id: "fnd-1",
     locked_at: null,
     metric: "groundedness_rate",
-    muted_at: null,
-    muted_by: null,
     onset_at: "2026-09-23T09:12:00Z",
     opened_at: "2026-09-23T13:52:00Z",
     rca_verdict: "causes_identified",

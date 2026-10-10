@@ -41,7 +41,6 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CaseDetail,
-  CaseDisposition,
   FrustrationDetail,
   GroundednessDetail,
   RcaCause,
@@ -65,7 +64,6 @@ import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } f
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 import { useRepoPrompt } from "../components/useRepoPrompt";
 import { traceLinker } from "../traceLinker";
-import { ResolveCaseForm, dispositionPhrase } from "./ResolveCaseForm";
 import { stamp } from "../classifiers/shared";
 
 export function CasePage() {
@@ -101,7 +99,7 @@ export function CasePage() {
   const { canPrompt: canPromptRepo } = useRepoPrompt();
   const [connectRepoOpen, setConnectRepoOpen] = useState(false);
 
-  const [resolveOpen, setResolveOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   // Which cause's conversations the list shows: "all", or a cause's index in the report.
   const [causeFilter, setCauseFilter] = useState("all");
   const [absorbOpen, setAbsorbOpen] = useState(false);
@@ -111,17 +109,12 @@ export function CasePage() {
     void qc.invalidateQueries({ queryKey: ["cases", api.base] });
   };
 
-  const resolveM = useMutation({
-    mutationFn: ({ reason, disposition }: { reason: string; disposition?: CaseDisposition }) =>
-      api.resolveCase(c?.id ?? "", reason, disposition),
+  const closeM = useMutation({
+    mutationFn: () => api.closeCase(c?.id ?? ""),
     onSuccess: () => {
-      setResolveOpen(false);
+      setCloseOpen(false);
       invalidate();
     },
-  });
-  const muteM = useMutation({
-    mutationFn: () => (c?.state === "muted" ? api.unmuteCase(c.id) : api.muteCase(c?.id ?? "")),
-    onSuccess: invalidate,
   });
   const absorbM = useMutation({
     mutationFn: () => api.absorbCase(c?.id ?? ""),
@@ -175,7 +168,6 @@ export function CasePage() {
   const live = c.state !== "resolved";
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
-  const ranked = frustration != null || groundedness != null;
   const frustrationCauses =
     frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes : [];
   const groundednessCauses =
@@ -296,10 +288,12 @@ export function CasePage() {
           )}
         </div>
 
-        {c.state === "resolved" && c.resolution_reason && (
+        {c.state === "resolved" && (
           <p className="text-subtle mt-2.5 mx-0 mb-0 text-small">
-            Resolved{dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
-            {c.resolved_by ? ` by ${c.resolved_by}` : ""}: {c.resolution_reason}
+            {c.resolution === "absorbed" ? "Absorbed" : "Closed"}
+            {dispositionPhrase(c.disposition)} {timeAgo(c.resolved_at ?? c.opened_at)}
+            {c.resolved_by ? ` by ${c.resolved_by}` : ""}
+            {c.resolution !== "absorbed" && c.resolution_reason ? `: ${c.resolution_reason}` : ""}
           </p>
         )}
 
@@ -322,6 +316,20 @@ export function CasePage() {
         <Why
           report={report}
           analysing={analysing}
+          actions={
+            live && detail.detector_available ? (
+              <>
+                {detail.absorb_available && (
+                  <Button size="sm" variant="secondary" onClick={() => setAbsorbOpen(true)}>
+                    Absorb
+                  </Button>
+                )}
+                <Button size="sm" variant="secondary" onClick={() => setCloseOpen(true)}>
+                  Close
+                </Button>
+              </>
+            ) : undefined
+          }
           kind={causeKind(detail)}
           basePath={basePath}
           show={
@@ -395,72 +403,37 @@ export function CasePage() {
 
       <Activity events={detail.events} />
 
-      {/* --------------------------------------------------------- what now */}
-      {/* The end of the story is what to do about it, so the verbs that end a case live at the
-          end of the page. Resolving or absorbing a case nobody has explained yet is a decision
-          taken without the fact that would inform it, so neither appears until there is a report;
-          Mute is not a claim about the shift and is always available. */}
-      {live && detail.detector_available && (
-        <footer className="mt-8.5 pt-3.75" style={{ borderTop: "1px solid var(--color-border)" }}>
-          <div className="flex flex-wrap items-center gap-3">
-            {analysed && (
-              <span className="text-subtle text-small">
-                Close this case
-              </span>
-            )}
-            {!analysed && ranked && (
-              <span className="text-subtle text-small">Run RCA before resolving this case.</span>
-            )}
-            <div className="ml-auto flex items-center gap-2">
-              {analysed && (
-                <Button size="sm" variant="ghost" onClick={() => setResolveOpen(true)}>
-                  {ranked ? "Resolve case" : "Resolve"}
-                </Button>
-              )}
-              {analysed && detail.absorb_available && (
-                <Button size="sm" variant="ghost" onClick={() => setAbsorbOpen(true)}>
-                  Absorb as legitimate
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => muteM.mutate()} disabled={muteM.isPending}>
-                {c.state === "muted" ? (ranked ? "Unmute case" : "Unmute") : ranked ? "Mute case" : "Mute"}
-              </Button>
-            </div>
-          </div>
-          {muteM.isError && <ErrorNote error={muteM.error} />}
-        </footer>
-      )}
-
-      <Modal open={resolveOpen} onClose={() => setResolveOpen(false)} title="Resolve this case?">
-        {/* Mounted only while open, so a reopened dialog starts from an empty reason. */}
-        {resolveOpen && (
-          <ResolveCaseForm
-            detector={c.detector}
-            pending={resolveM.isPending}
-            error={resolveM.isError ? resolveM.error : null}
-            onCancel={() => setResolveOpen(false)}
-            onResolve={(reason, disposition) => resolveM.mutate({ reason, disposition })}
-          />
-        )}
+      {/* Close and Absorb sit on the Why line, so they only appear once there is an analysis to act on. */}
+      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Close this case?">
+        <p className="text-muted m-0 text-body">
+          The evidence in this case's findings is left out when the baseline is set.
+        </p>
+        {closeM.isError && <ErrorNote error={closeM.error} />}
+        <div className="flex justify-end gap-2 mt-4.5">
+          <Button variant="ghost" size="sm" onClick={() => setCloseOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            aria-label="Close case"
+            onClick={() => closeM.mutate()}
+            disabled={closeM.isPending}
+          >
+            {closeM.isPending ? "Closing…" : "Close"}
+          </Button>
+        </div>
       </Modal>
 
-      <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb as legitimate?">
-        <p className="text-muted mt-0 mx-0 mb-3.5 text-body">
-          This tells the classifier that where things sit now is correct. It moves the reference this is
-          measured against, so the same level stops firing and only a further move opens a new case.
-        </p>
-        <p className="text-subtle mt-0 mx-0 mb-3.5 text-small">
-          Resolving instead closes this case and leaves the bar where it is, so an unchanged population
-          opens another case within a day. Absorbing ends the argument rather than this instance of it.
-          It does not silence the classifier: a further shift still fires.
-        </p>
+      <Modal open={absorbOpen} onClose={() => setAbsorbOpen(false)} title="Absorb this level?">
+        <p className="text-muted m-0 text-body">The evidence in this case's findings counts toward the baseline.</p>
         {absorbM.isError && <ErrorNote error={absorbM.error} />}
         <div className="flex justify-end gap-2 mt-4.5">
           <Button variant="ghost" size="sm" onClick={() => setAbsorbOpen(false)}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => absorbM.mutate()} disabled={absorbM.isPending}>
-            {absorbM.isPending ? "Absorbing…" : "Absorb as legitimate"}
+          <Button size="sm" variant="primary" onClick={() => absorbM.mutate()} disabled={absorbM.isPending}>
+            {absorbM.isPending ? "Absorbing…" : "Absorb"}
           </Button>
         </div>
       </Modal>
@@ -472,7 +445,24 @@ export function CasePage() {
 
 /* ------------------------------------------------------------------ pieces */
 
-function Block({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
+/** How a closed case's disposition reads in its closing line, or nothing for a case without one. */
+function dispositionPhrase(disposition: string | null | undefined): string {
+  if (disposition === "fixed") return " as fixed";
+  if (disposition === "false_alarm") return " as a false alarm";
+  return "";
+}
+
+function Block({
+  label,
+  note,
+  actions,
+  children,
+}: {
+  label: string;
+  note?: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mt-8.5">
       <div className="flex items-baseline gap-2.5 mb-3.5">
@@ -484,6 +474,7 @@ function Block({ label, note, children }: { label: string; note?: string; childr
             {note}
           </span>
         )}
+        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
       {children}
     </section>
@@ -645,12 +636,15 @@ function affectedUnit(kind: CauseKind): [string, string] {
 function Why({
   report,
   analysing,
+  actions,
   kind,
   basePath,
   show,
 }: {
   report: RcaReport | undefined;
   analysing: boolean;
+  /** Close and Absorb. Shown only beside a finished analysis, never while one runs. */
+  actions?: React.ReactNode;
   kind: CauseKind;
   basePath: string;
   /** How a frustration or groundedness cause filters the list below; the index is the cause's stored one. */
@@ -680,7 +674,7 @@ function Why({
   const summary = report.summary ?? (report.verdict ? RCA_VERDICT_LABEL[report.verdict] : null);
 
   return (
-    <Block label="Why" note={causes.length > 0 ? undefined : "No cause proven"}>
+    <Block label="Why" note={causes.length > 0 ? undefined : "No cause proven"} actions={actions}>
       <div className="flex flex-col gap-3">
         {causes.length === 0 && summary && (
           <p className="m-0 text-body text-fg" style={{ maxWidth: 700 }}>

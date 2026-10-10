@@ -41,7 +41,6 @@ const triage = (over: Partial<TriageView> = {}): TriageView => ({
     kase("a", { rca_verdict: "inconclusive", cause: "a prompt change" }),
     kase("b", { rca_verdict: null, call_site_id: null }),
   ],
-  muted: [kase("m", { state: "muted", title: "A muted case" })],
   recently_resolved: [
     kase("r", { state: "resolved", title: "A resolved case", resolved_at: new Date(Date.now() - 2 * 60_000).toISOString() }),
   ],
@@ -77,9 +76,8 @@ describe("the page", () => {
     await screen.findByText("Case a");
     expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
     const cases = section("Cases");
-    expect(within(cases).getByRole("button", { name: /Muted · 1/ })).toBeTruthy();
-    expect(within(cases).getByRole("button", { name: /Resolved 7d · 1/ })).toBeTruthy();
-    expect(within(section("Findings")).queryByRole("button", { name: /Muted/ })).toBeNull();
+    expect(within(cases).getByRole("button", { name: /Closed 7d · 1/ })).toBeTruthy();
+    expect(within(section("Findings")).queryByRole("button", { name: /Closed/ })).toBeNull();
     expect(cases.compareDocumentPosition(section("Findings")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
@@ -118,7 +116,7 @@ describe("the open cases", () => {
     // Reference, classifier, and age: no separator left dangling for the call site it does not have.
     expect(b.textContent!.match(/·/g)).toHaveLength(2);
     expect(a.textContent!.match(/·/g)).toHaveLength(3);
-    expect(screen.getByText(/Resolved 7d · 1 · Muted · 1/)).toBeTruthy();
+    expect(screen.getByText(/Closed 7d · 1/, { selector: "p" })).toBeTruthy();
 
     fireEvent.click(b);
     expect(currentLocation()).toBe("/orgs/acme/projects/default/cases/b");
@@ -182,36 +180,28 @@ describe("the open cases", () => {
 });
 
 describe("the lenses", () => {
-  it("switches to the muted and resolved buckets and back, each pressed while it shows", async () => {
+  it("switches to the closed bucket and back, pressed while it shows", async () => {
     renderPage();
     await screen.findByText("Case a");
 
-    fireEvent.click(lens(/Muted · 1/));
-    expect(screen.getByText("A muted case")).toBeTruthy();
-    expect(screen.queryByText("Case a")).toBeNull();
-    expect(lens(/Muted · 1/).getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(lens(/Resolved 7d · 1/));
+    fireEvent.click(lens(/Closed 7d · 1/));
     const resolved = screen.getByText("A resolved case").closest("button")!;
-    expect(resolved.textContent).toContain("resolved 2m ago");
-    expect(lens(/Muted · 1/).getAttribute("aria-pressed")).toBe("false");
+    expect(resolved.textContent).toContain("closed 2m ago");
+    expect(screen.queryByText("Case a")).toBeNull();
+    expect(lens(/Closed 7d · 1/).getAttribute("aria-pressed")).toBe("true");
 
-    fireEvent.click(lens(/Resolved 7d · 1/));
+    fireEvent.click(lens(/Closed 7d · 1/));
     expect(screen.getByText("Case a")).toBeTruthy();
-    fireEvent.click(lens(/Muted · 1/));
-    fireEvent.click(lens(/Muted · 1/));
-    expect(screen.getByText("Case a")).toBeTruthy();
+    expect(lens(/Closed 7d · 1/).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("says when a lens has nothing in it", async () => {
-    api.getTriage.mockResolvedValue(triage({ muted: [], recently_resolved: [] }));
+    api.getTriage.mockResolvedValue(triage({ recently_resolved: [] }));
     renderPage();
     await screen.findByText("Case a");
 
-    fireEvent.click(lens(/Muted · 0/));
-    expect(screen.getByText("Nothing is muted.")).toBeTruthy();
-    fireEvent.click(lens(/Resolved 7d · 0/));
-    expect(screen.getByText("No cases resolved in the last 7 days.")).toBeTruthy();
+    fireEvent.click(lens(/Closed 7d · 0/));
+    expect(screen.getByText("No cases closed in the last 7 days.")).toBeTruthy();
   });
 
   it("dates a resolved case from when it opened if it carries no resolution time", async () => {
@@ -221,8 +211,8 @@ describe("the lenses", () => {
     renderPage();
     await screen.findByText("Case a");
 
-    fireEvent.click(lens(/Resolved 7d · 1/));
-    expect(screen.getByText("A resolved case").closest("button")!.textContent).toContain("resolved 5m ago");
+    fireEvent.click(lens(/Closed 7d · 1/));
+    expect(screen.getByText("A resolved case").closest("button")!.textContent).toContain("closed 5m ago");
   });
 });
 

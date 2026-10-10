@@ -103,8 +103,6 @@ class CaseLedgerOpenRaceTest {
                 null,
                 null,
                 null,
-                null,
-                null,
                 null);
     }
 }

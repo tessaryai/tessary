@@ -10,7 +10,6 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.rca.RcaReportRepository.CaseLead;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
@@ -53,8 +52,6 @@ public final class CaseDtos {
             /** {@code fixed} | {@code false_alarm} on a resolved frustration or groundedness case; null on every
              *  other case. */
             @Nullable String disposition,
-            @JsonProperty("muted_at") @Nullable String mutedAt,
-            @JsonProperty("muted_by") @Nullable String mutedBy,
             /** How many findings this case holds (1b: a case reads over all of them; the newest stands
              *  in for the case's own numbers until the multi-finding case page — issue #76 — ships). */
             @JsonProperty("finding_count") long findingCount,
@@ -111,8 +108,6 @@ public final class CaseDtos {
                     row.resolutionReason(),
                     row.resolvedBy(),
                     row.disposition(),
-                    row.mutedAt(),
-                    row.mutedBy(),
                     row.findingCount(),
                     row.latestFindingId(),
                     row.lockedAt(),
@@ -126,15 +121,12 @@ public final class CaseDtos {
      *
      * @param cases the open cases, worst first. One list — no claimed/unclaimed bands, because nothing
      *     in this product is claimed.
-     * @param muted live cases someone has silenced. Carried in full rather than as a count so the
-     *     "muted" filter renders without a second round trip; the set is small by construction.
      * @param recentlyResolved the last week's closures — Triage's one quiet history line.
      * @param watching what the all-clear state says to prove the silence is real coverage rather than
      *     nothing being watched.
      */
     public record TriageView(
             List<CaseView> cases,
-            List<CaseView> muted,
             @JsonProperty("recently_resolved") List<CaseView> recentlyResolved,
             WatchingView watching) {}
 
@@ -333,6 +325,6 @@ public final class CaseDtos {
      *     cites stop counting as flagged). Refused on any other case.
      */
     public record ResolveCaseRequest(
-            @NotBlank @Size(max = 500) String reason,
+            @Nullable @Size(max = 500) String reason,
             @Nullable @Pattern(regexp = "fixed|false_alarm") String disposition) {}
 }

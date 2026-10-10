@@ -86,11 +86,9 @@ class CaseServiceTest {
     JdbcClient jdbc;
 
     @Test
-    void resolvingRequiresAReasonAndKeepsIt() {
+    void resolvingKeepsTheReasonGiven() {
         Project p = project("svc-resolve");
         CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
-
-        assertThrows(TessaryException.class, () -> service.resolve(p.id(), row.id(), "  ", "priya@example.com", null));
 
         service.resolve(p.id(), row.id(), "traffic mix shifted", "priya@example.com", null);
         CaseRow closed = cases.findById(p.id(), row.id()).orElseThrow();
@@ -110,20 +108,20 @@ class CaseServiceTest {
     }
 
     @Test
-    void muteIsIdempotentAndDoesNotNarrateItselfTwice() {
-        Project p = project("svc-mute");
+    void resolve_withNoReasonStoresNoneAndWritesTheStockTrailLine() {
+        Project p = project("svc-close-no-reason");
         CaseRow row = open(p, CaseRow.Detector.CLASSIFIER);
 
-        service.mute(p.id(), row.id(), "priya@example.com");
-        service.mute(p.id(), row.id(), "sam@example.com");
+        service.resolve(p.id(), row.id(), null, "priya@example.com", null);
 
-        assertEquals(
-                CaseRow.State.MUTED,
-                cases.findById(p.id(), row.id()).orElseThrow().state());
-        assertEquals(
-                1,
-                kinds(p, row).stream().filter(CaseEventRow.Kind.MUTED::equals).count(),
-                "two people reaching for mute is ordinary; a second trail line is not");
+        CaseRow closed = cases.findById(p.id(), row.id()).orElseThrow();
+        assertEquals(CaseRow.State.RESOLVED, closed.state());
+        assertNull(closed.resolutionReason());
+        CaseEventRow line = events.listByCase(p.id(), row.id()).stream()
+                .filter(e -> CaseEventRow.Kind.RESOLVED.equals(e.kind()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Closed.", line.summary());
     }
 
     /**

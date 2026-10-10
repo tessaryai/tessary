@@ -81,20 +81,13 @@ export function Dot() {
  * A case row's ONE colored element (constitution rule 2), and it reads as how far along the case is:
  * red needs someone, amber has been explained and needs a decision, green is closed.
  *
- * <p>Muted is GREY, not amber. It used to be amber, which is the colour this palette uses for "look
- * at this" — the exact opposite of what muting a case means. A muted case is one somebody decided
- * to stop being told about, so it recedes.
- *
  * <p>`analysed` is a second axis rather than a fourth state: a case is open whether or not an RCA has
  * run, and the dot says which of those two an open case is. There is no claimed state — nothing in
  * this product is assigned.
  */
 export function StateDot({ state, analysed }: { state: string; analysed?: boolean }) {
-  if (state === "muted") {
-    return <Dotted colour="var(--color-subtle)" label="Muted" />;
-  }
   if (state === "resolved") {
-    return <Dotted colour="var(--color-success)" label="Resolved" />;
+    return <Dotted colour="var(--color-success)" label="Closed" />;
   }
   return analysed ? (
     <Dotted colour="var(--color-warning)" label="Open, analyzed" />

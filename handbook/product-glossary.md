@@ -121,13 +121,7 @@ Do not describe a flagged answer as a confirmed error. A flag says the model fou
 
 ## Disposition
 
-What a person says a resolved frustration or groundedness case turned out to be: **Fixed** or **False alarm**.
-
-Use:
-
-- Resolve the case with the disposition that matches what happened.
-
-Only a frustration or groundedness case has a disposition. Other cases close on a one-line reason alone.
+What a person said a closed frustration or groundedness case turned out to be: **Fixed** or **False alarm**. The case page no longer asks for one, so only cases closed before that change carry it, and their closing line still names it.
 
 ## How the terms relate
 

@@ -36,7 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * The case API a person drives from Triage. Every call resolves the path's project first and hands the
  * service only that project's id, so the bugs are a case from another project readable or writable through
- * this project's path, a bucket that files a muted or resolved case under the open queue, and RCA pressable
+ * this project's path, a bucket that files a resolved case under the open queue, and RCA pressable
  * by someone the org does not let spend a strong model's time.
  */
 @RcaParkedSpringBootTest
@@ -58,8 +58,8 @@ class CaseControllerTest {
     OrgMembershipRepository memberships;
 
     /**
-     * Each case files under its state's bucket: open in the queue, muted beside it, closed in the week's history.
-     * Unmute returns it to the queue; a case is read by stored id or quoted reference.
+     * Each case files under its state's bucket: open in the queue, closed in the week's history. A case is read
+     * by stored id or quoted reference.
      */
     @Test
     void triageFilesEachCaseUnderItsStateAndACaseReadsByIdOrReference() {
@@ -68,13 +68,9 @@ class CaseControllerTest {
         String org = fix.org().slug();
         String project = fix.project().slug();
         CaseRow open = open(fix.project(), "a");
-        CaseRow muted = open(fix.project(), "b");
         CaseRow resolved = open(fix.project(), "c");
-        CaseRow unmuted = open(fix.project(), "d");
+        CaseRow alsoOpen = open(fix.project(), "d");
 
-        controller.mute(owner, org, project, muted.id());
-        controller.mute(owner, org, project, unmuted.id());
-        controller.unmute(owner, org, project, unmuted.id());
         CaseView closed = requireNonNull(controller
                 .resolve(owner, org, project, resolved.id(), new ResolveCaseRequest("shipped a fix", null))
                 .data());
@@ -82,8 +78,7 @@ class CaseControllerTest {
                 requireNonNull(controller.triage(owner, org, project).data());
 
         assertEquals(CaseRow.State.RESOLVED, closed.state());
-        assertEquals(Set.of(open.id(), unmuted.id()), Set.copyOf(ids(triage.cases())));
-        assertEquals(List.of(muted.id()), ids(triage.muted()));
+        assertEquals(Set.of(open.id(), alsoOpen.id()), Set.copyOf(ids(triage.cases())));
         assertEquals(List.of(resolved.id()), ids(triage.recentlyResolved()));
         assertEquals(
                 open.id(),

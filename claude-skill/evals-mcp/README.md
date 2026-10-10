@@ -94,7 +94,7 @@ Conventions the tools share, stated here once rather than per row:
 | `get_project` | — | project identity, counts, packs, judge runtime, **`watching`** (classifiers enabled, call sites swept, `traces_last_day`) |
 | `list_call_sites` | — | call sites + observed stats |
 | `list_failure_modes` | `call_site_id`, `chain_id`, `scope`, `severity`, `layer`, `pack_id`, `compliance_tag` | taxonomy rows |
-| `list_cases` | `state` (open\|muted\|resolved), `detector`, `call_site_id` | paged case rows; open is worst-first, resolved is newest-closure-first |
+| `list_cases` | `state` (open\|resolved), `detector`, `call_site_id` | paged case rows; open is worst-first, resolved is newest-closure-first |
 | `get_case` | `id` (stored id or `C-118`) | case + activity trail + `latest_finding_id` + `finding_count` + exemplars + the **RCA report inline in `rca`** when one has finished: `summary`, `verdict`, `causes` (one shape for every case type), `ruled_out`, `detailed_report` |
 | `list_findings` | `status`, `call_site_id`, `detector`, `include` | headline finding rows (no evidence blob) |
 | `get_finding` | `id` | finding + parsed evidence |
