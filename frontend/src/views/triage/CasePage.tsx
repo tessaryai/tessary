@@ -294,18 +294,6 @@ export function CasePage() {
               <span>analyzed {timeAgo(report.completed_at ?? report.created_at)}</span>
             </>
           )}
-          {/* The way out, for the reader who wants the ruling's prose and its check scripts.
-              Deliberately quiet: it is an escape hatch, not a step in the story. */}
-          {detail.latest_finding_id && (
-            <>
-              <Dot />
-              <Link
-                to={`${basePath}/classifiers/findings/${encodeURIComponent(detail.latest_finding_id)}`}
-                className="text-link hover:text-link-hover transition-colors">
-                Finding
-              </Link>
-            </>
-          )}
         </div>
 
         {c.state === "resolved" && c.resolution_reason && (
