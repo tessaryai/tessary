@@ -688,6 +688,37 @@ describe("the failures", () => {
   });
 });
 
+describe("a case with several findings", () => {
+  const findings = [
+    { id: "fnd-0", title: "turns are 1.77x slower", window_opened_at: "2026-09-20T08:00:00Z", window_closed_at: "2026-09-21T08:00:00Z", created_at: "2026-09-21T08:05:00Z", analysed: false },
+    { id: "fnd-1", title: "turns are 1.69x slower", window_opened_at: "2026-09-22T08:00:00Z", window_closed_at: "2026-09-23T08:00:00Z", created_at: "2026-09-23T08:05:00Z", analysed: true },
+  ];
+
+  it("spans the header from the first window and lists every window", async () => {
+    api.getCase.mockResolvedValue(plainCase({ findings }));
+    renderPage();
+    await heading(BASE.case.title);
+
+    // The header and the first window's row both open on the first window.
+    expect(screen.getAllByText(new RegExp(`^${escape(stamp("2026-09-20T08:00:00Z"))} →`))).toHaveLength(2);
+    expect(screen.getByText("2 windows, oldest first")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "turns are 1.77x slower" }).getAttribute("href")).toContain("fnd-0");
+    expect(screen.getByText("RCA ran on this")).toBeTruthy();
+  });
+
+  it("draws no list for a case with one finding", async () => {
+    api.getCase.mockResolvedValue(plainCase({ findings: findings.slice(1) }));
+    renderPage();
+    await heading(BASE.case.title);
+
+    expect(screen.queryByText(/windows, oldest first/)).toBeNull();
+  });
+});
+
+function escape(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 describe("the activity", () => {
   it("stays collapsed until asked, then lists each event and who did it", async () => {
     api.getCase.mockResolvedValue({

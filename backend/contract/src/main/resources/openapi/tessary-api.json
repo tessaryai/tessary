@@ -3230,6 +3230,12 @@
             },
             "type" : "array"
           },
+          "findings" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CaseFindingView"
+            },
+            "type" : "array"
+          },
           "frustration" : {
             "anyOf" : [
               {
@@ -3332,6 +3338,7 @@
           "detector_available",
           "events",
           "exemplars",
+          "findings",
           "frustration",
           "groundedness",
           "latest_finding_id",
@@ -3433,6 +3440,40 @@
           "role",
           "started_at",
           "trace_id"
+        ],
+        "type" : "object"
+      },
+      "CaseFindingView" : {
+        "properties" : {
+          "analysed" : {
+            "type" : "boolean"
+          },
+          "created_at" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "window_closed_at" : {
+            "type" : "string"
+          },
+          "window_opened_at" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "analysed",
+          "created_at",
+          "id",
+          "title",
+          "window_closed_at",
+          "window_opened_at"
         ],
         "type" : "object"
       },

@@ -3,6 +3,7 @@ package ai.tessary.cases;
 
 import ai.tessary.cases.CaseDtos.CaseDetailView;
 import ai.tessary.cases.CaseDtos.CaseEventView;
+import ai.tessary.cases.CaseDtos.CaseFindingView;
 import ai.tessary.cases.CaseDtos.CaseRulingView;
 import ai.tessary.cases.CaseDtos.CaseView;
 import ai.tessary.cases.CaseDtos.CasesPage;
@@ -47,6 +48,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -280,6 +282,7 @@ public class CaseService {
                         .map(CaseEventView::of)
                         .toList(),
                 finding == null ? null : finding.id(),
+                caseFindings(projectId, row, report),
                 ruling(finding),
                 exemplars.forCase(
                         projectId,
@@ -295,6 +298,31 @@ public class CaseService {
                 finding != null && detectorAvailable,
                 finding != null && row.isLive() && detectorAvailable && absorbable(row),
                 detectorAvailable);
+    }
+
+    /**
+     * The case's findings, oldest first, each with the window it measured. A drift finding's window is
+     * the detector's own; any other finding's is its onset to its last sighting. The RCA report, when one
+     * exists, belongs to the newest finding (RCA locks the case), so only that one reads as analysed.
+     */
+    private List<CaseFindingView> caseFindings(String projectId, CaseRow row, @Nullable RcaReportRow report) {
+        List<FindingRow> all = new ArrayList<>(findings.listByCase(projectId, row.id()));
+        String analysedId = report == null || all.isEmpty() ? null : all.get(0).id();
+        Collections.reverse(all);
+        return all.stream()
+                .map(f -> {
+                    // A drift window is taken whole or not at all, as on the case page.
+                    ShiftDetail shift = shiftDetail(f);
+                    String opened = shift == null ? null : shift.windowOpenedAt();
+                    String closed = shift == null ? null : shift.windowClosedAt();
+                    if (opened == null || closed == null) {
+                        opened = f.onsetAt();
+                        closed = f.lastSeenAt();
+                    }
+                    return new CaseFindingView(
+                            f.id(), f.title(), opened, closed, f.createdAt(), f.id().equals(analysedId));
+                })
+                .toList();
     }
 
     /**

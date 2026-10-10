@@ -191,7 +191,16 @@ export function CasePage() {
     detail.metric?.windowOpenedAt && detail.metric.windowClosedAt
       ? { openedAt: detail.metric.windowOpenedAt, closedAt: detail.metric.windowClosedAt }
       : null;
+  // A case that gathered several findings spans all of them: from the first window's open to the newest
+  // window's close. Every block below draws only the newest finding, so without this the header would
+  // jump forward each time a window joined.
+  const firstOpenedAt =
+    detail.findings.length > 1
+      ? detail.findings.reduce((a, f) => (Date.parse(f.window_opened_at) < Date.parse(a) ? f.window_opened_at : a),
+          detail.findings[0].window_opened_at)
+      : null;
   const openedAt =
+    firstOpenedAt ??
     detail.tool_error?.onsetAt ??
     detail.malformed_output?.rate?.onsetAt ??
     detail.secret_leak?.firstAt ??
@@ -356,6 +365,11 @@ export function CasePage() {
       {/* -------------------------------------------------------------- how big */}
       <Magnitude detail={detail} basis={c.basis} basePath={basePath} />
 
+      {/* ----------------------------------------------------- every window */}
+      {detail.findings.length > 1 && (
+        <CaseFindings findings={detail.findings} basePath={basePath} />
+      )}
+
       {/* ---------------------------------------------------- how outputs broke */}
       {detail.malformed_output && detail.latest_finding_id && (
         <Block label="How outputs broke" note="each schema field with its failures, beside one failing output">
@@ -491,6 +505,38 @@ function Block({ label, note, children }: { label: string; note?: string; childr
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * The windows this case gathered, oldest first. The figure above draws only the newest, so this is
+ * where an earlier window stays readable. RCA ran on the finding marked analysed, and it locked the
+ * case, so no window joins after it.
+ */
+function CaseFindings({ findings, basePath }: { findings: CaseDetail["findings"]; basePath: string }) {
+  return (
+    <Block label="Findings" note={`${findings.length} windows, oldest first`}>
+      <ol className="m-0 p-0 list-none">
+        {findings.map((f) => (
+          <li
+            key={f.id}
+            className="flex items-baseline gap-3 py-2 text-small"
+            style={{ borderTop: "1px solid var(--color-border)" }}
+          >
+            <span className="font-mono text-subtle shrink-0">
+              {stamp(f.window_opened_at)} → {stamp(f.window_closed_at)}
+            </span>
+            <Link
+              to={`${basePath}/classifiers/findings/${encodeURIComponent(f.id)}`}
+              className="min-w-0 flex-1 text-fg hover:text-link-hover transition-colors"
+            >
+              {f.title ?? f.id}
+            </Link>
+            {f.analysed && <span className="text-subtle shrink-0">RCA ran on this</span>}
+          </li>
+        ))}
+      </ol>
+    </Block>
   );
 }
 

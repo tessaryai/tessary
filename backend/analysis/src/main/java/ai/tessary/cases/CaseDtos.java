@@ -241,6 +241,26 @@ public final class CaseDtos {
             @JsonProperty("started_at") @Nullable String startedAt) {}
 
     /**
+     * One finding a case holds, as the case page's "Findings" list reads it. A case gathers every
+     * window that triage ruled positive on its key, so this is the case's history; the rest of the page
+     * draws only the newest of them. No triage field: every finding here was ruled positive to join, and
+     * the MCP case read must not tell an RCA run how triage ruled.
+     *
+     * @param windowOpenedAt when the window this finding measured opened: the detector's own window
+     *     where it has one (a drift window), else the finding's onset.
+     * @param windowClosedAt when that window closed, else the finding's last sighting.
+     * @param analysed an RCA report exists for this finding. RCA runs on the case's newest finding and
+     *     locks the case, so at most the newest finding carries this.
+     */
+    public record CaseFindingView(
+            String id,
+            @Nullable String title,
+            @JsonProperty("window_opened_at") String windowOpenedAt,
+            @JsonProperty("window_closed_at") String windowClosedAt,
+            @JsonProperty("created_at") String createdAt,
+            boolean analysed) {}
+
+    /**
      * The case page's whole read.
      *
      * @param ruling who ruled the detection real, and on what; null for an archived case whose
@@ -288,6 +308,9 @@ public final class CaseDtos {
              *  a retired detector, or one that predates {@code finding.case_id}, either of which never
              *  had one by construction. */
             @JsonProperty("latest_finding_id") @Nullable String latestFindingId,
+            /** Every finding this case holds, oldest first. The case's window runs from the first one's
+             *  open to the newest one's close. */
+            List<CaseFindingView> findings,
             @Nullable CaseRulingView ruling,
             List<CaseExemplarView> exemplars,
             @JsonProperty("rca_report_id") @Nullable String rcaReportId,
