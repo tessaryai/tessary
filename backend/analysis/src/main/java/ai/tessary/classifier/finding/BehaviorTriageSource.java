@@ -31,6 +31,7 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -130,6 +131,10 @@ public class BehaviorTriageSource implements TriageSource {
     /** The {@code groundedness_rate} branch of {@link #detail}; every other cause never touches it. */
     private final GroundednessDetailService groundednessDetail;
 
+    /** Findings a classifier outside the catalog filed: their escalation, and the detector-state half of
+     *  absorbing them. Empty in the open edition. */
+    private final FindingAdapters adapters;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -148,7 +153,8 @@ public class BehaviorTriageSource implements TriageSource {
             SecretLeakDetailService secretLeaks,
             FrustrationDetailService frustrations,
             GroundednessRateRepository groundednessRates,
-            GroundednessDetailService groundednessDetail) {
+            GroundednessDetailService groundednessDetail,
+            FindingAdapters adapters) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -167,6 +173,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.frustrations = frustrations;
         this.groundednessRates = groundednessRates;
         this.groundednessDetail = groundednessDetail;
+        this.adapters = adapters;
     }
 
     @Override
@@ -222,8 +229,9 @@ public class BehaviorTriageSource implements TriageSource {
 
     @Override
     public List<Escalatable> listAutoEscalatable(String projectId, long minObservations, int limit) {
-        List<FindingRow> rows = findings.listAutoEscalatable(projectId, BEHAVIOR_CLASSIFIERS, minObservations, limit);
-        List<Escalatable> out = new java.util.ArrayList<>();
+        List<FindingRow> rows = findings.listAutoEscalatable(
+                projectId, escalatableKeys(projectId, minObservations), minObservations, limit);
+        List<Escalatable> out = new ArrayList<>();
         for (FindingRow f : rows) {
             // No per-row re-read: eligibility is listAutoEscalatable's own predicate, and the population
             // is behind MCP, so nothing downstream needs a trace looked up per row.
@@ -233,15 +241,33 @@ public class BehaviorTriageSource implements TriageSource {
     }
 
     /**
+     * The built-in keys this source rules on, plus every key an adapter owns among the project's escalatable
+     * findings. With no adapter this is the built-in list and the candidate read never runs.
+     */
+    private List<String> escalatableKeys(String projectId, long minObservations) {
+        if (adapters.isEmpty()) return BEHAVIOR_CLASSIFIERS;
+        List<String> keys = new ArrayList<>(BEHAVIOR_CLASSIFIERS);
+        for (FindingClaim candidate :
+                findings.escalationCandidatesByKey(projectId, BEHAVIOR_CLASSIFIERS, minObservations)) {
+            if (adapters.ownerOf(candidate).isPresent()) keys.add(candidate.classifierKey());
+        }
+        return List.copyOf(keys);
+    }
+
+    /**
      * A finding whose classifier the org does not have reads as not-owned, the same 404 the rest of
-     * the surface gives it, so a stale tab cannot hand a withheld finding to Layer 2 by id.
+     * the surface gives it, so a stale tab cannot hand a withheld finding to Layer 2 by id. A finding no
+     * built-in rules on is escalated only when an adapter owns it.
      */
     @Override
     public Optional<BehaviorAnalysisView> analyze(String projectId, String findingId) {
         Optional<FindingRow> found = findings.findById(projectId, findingId);
         if (found.isEmpty()) return Optional.empty();
         FindingRow finding = found.get();
-        if (!BEHAVIOR_CLASSIFIERS.contains(finding.classifierKey())) return Optional.empty();
+        if (!BEHAVIOR_CLASSIFIERS.contains(finding.classifierKey())
+                && adapters.ownerOf(finding.claim()).isEmpty()) {
+            return Optional.empty();
+        }
         if (classifiers.unavailableDetectorKinds(projectId).contains(finding.classifierKey())) {
             return Optional.empty();
         }
