@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -39,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.SyncTaskExecutor;
@@ -393,6 +395,89 @@ class BehaviorTriageSourceTest {
 
         verify(findings).listAutoEscalatable(PROJECT, BUILT_IN_KEYS, 30, 50);
         verify(findings, never()).escalationCandidatesByKey(any(), any(), anyLong());
+    }
+
+    /**
+     * A person's absorb on an owned finding calls the adapter's hook once, with the ruling's own clock, and then
+     * writes the negative ruling; a real deviation calls no hook and opens the case. The bugs are an owned
+     * {@code custom_rate} finding hitting the "no branch claims it" refusal, the hook running on a real deviation,
+     * and the hook running twice.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"expected", "not_expected"})
+    void absorbingAnOwnedFindingCallsTheHookOnceThenRules(String action) {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        boolean absorb = "expected".equals(action);
+
+        source(FindingAdapters.of(List.of(adapter))).resolve(PROJECT, "f1", action, "u1");
+
+        ArgumentCaptor<String> now = ArgumentCaptor.forClass(String.class);
+        verify(findings)
+                .recordHumanRuling(
+                        eq(PROJECT),
+                        eq("f1"),
+                        eq(absorb ? "negative" : "positive"),
+                        eq(absorb ? "A person ruled this legitimate." : "A person ruled this a real deviation."),
+                        now.capture());
+        if (absorb) {
+            assertEquals(List.of(new FakeFindingAdapter.Absorbed("f1", "u1", now.getValue())), adapter.absorbedCalls());
+            verify(caseOpener, never()).ensureCaseFor(any(), any(), any());
+        } else {
+            assertEquals(List.of(), adapter.absorbedCalls());
+            verify(caseOpener).ensureCaseFor(PROJECT, "f1", "u1");
+        }
+    }
+
+    /** A hook that throws refuses the absorb before the ruling is written. The bug is a ruling written while the
+     *  detector state did not move. */
+    @Test
+    void aThrowingHookRefusesTheAbsorb() {
+        IllegalStateException failure = new IllegalStateException("state write failed");
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> source(FindingAdapters.of(List.of(FakeFindingAdapter.failingToAbsorb(CUSTOM_KEY, failure))))
+                        .resolve(PROJECT, "f1", "expected", "u1"));
+
+        assertSame(failure, thrown);
+        verify(findings, never()).recordHumanRuling(any(), any(), any(), any(), any());
+    }
+
+    /** Re-pinning an owned finding calls its hook and moves no built-in state. The bug is a case absorb on a custom
+     *  case that moves nothing. */
+    @Test
+    void repinningAnOwnedFindingCallsTheHook() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repin(PROJECT, "f1", "u1");
+
+        assertEquals(1, adapter.absorbedCalls().size());
+        assertEquals("f1", adapter.absorbedCalls().get(0).findingId());
+        assertEquals("u1", adapter.absorbedCalls().get(0).userId());
+        verifyNoInteractions(toolErrorStates, toolErrorReferences, baselines, groundednessRates);
+    }
+
+    /** Absorbing a case of owned findings calls the hook once, on the newest finding. The bugs are a hook skipped on a
+     *  case and a hook run once per finding. */
+    @Test
+    void absorbingAnOwnedCaseCallsTheHookOnTheNewestFindingOnce() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(custom("f2")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repinCase(PROJECT, List.of(custom("f2"), custom("f1")), "u1");
+
+        assertEquals(
+                List.of("f2"),
+                adapter.absorbedCalls().stream()
+                        .map(FakeFindingAdapter.Absorbed::findingId)
+                        .toList());
     }
 
     private static FindingRow toolError(String id, long nCur, long failures) {

@@ -389,7 +389,9 @@ public class BehaviorTriageSource implements TriageSource {
      * the classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
      * tool error corrects a rate (see {@link #resolveRateShift}); a groundedness rate re-learns its
      * call site's reference on absorb (see {@link #relearnGroundedness}); malformed-output and armed-window
-     * causes have no fitted state to move. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
+     * causes have no fitted state to move. A finding a {@link FindingAdapter} owns is checked first, whatever its cause
+     * kind: absorbing it calls the adapter's {@link FindingAdapter#absorbed} before the ruling write, so a hook that
+     * throws rolls the ruling back. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
      * which is what actually opens or closes the finding.
      *
      * <p><b>A ruling freezes the finding by construction.</b> This is the same {@code status = 'open' AND
@@ -412,6 +414,14 @@ public class BehaviorTriageSource implements TriageSource {
         }
 
         String now = Instant.now().toString();
+        // Owner first: an adapter's finding may carry any cause kind, including one no branch below claims.
+        Optional<FindingAdapter> owner = adapters.ownerOf(finding.claim());
+        if (owner.isPresent()) {
+            if (expected) absorb(owner.get(), finding, userId, now);
+            writeHumanRuling(projectId, finding.id(), expected, userId, now);
+            logResolved(projectId, findingId, finding.causeKind(), action);
+            return Optional.of(reread(projectId, findingId));
+        }
         if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
             return Optional.of(resolveShift(projectId, finding, expected, action, userId, now));
         }
@@ -448,6 +458,11 @@ public class BehaviorTriageSource implements TriageSource {
     public void repin(String projectId, String findingId, @Nullable String userId) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         String now = Instant.now().toString();
+        Optional<FindingAdapter> owner = adapters.ownerOf(finding.claim());
+        if (owner.isPresent()) {
+            absorb(owner.get(), finding, userId, now);
+            return;
+        }
         if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
             repinShift(projectId, finding, userId, now);
             return;
@@ -472,7 +487,9 @@ public class BehaviorTriageSource implements TriageSource {
      * newest one would leave the reference blind to every earlier spell the case also held. A
      * distribution_shift case's findings all read the SAME metric baseline's rolling control, so
      * re-pinning off any one of them (the newest, via {@link #repin}) already picks up the reference the
-     * whole case sits on; malformed_rate and armed_window causes have no fitted state to move at all.
+     * whole case sits on; malformed_rate and armed_window causes have no fitted state to move at all. A case of
+     * findings a {@link FindingAdapter} owns takes the same {@link #repin} of the newest finding, so the adapter's
+     * hook runs once per case absorb.
      *
      * @param caseFindings the case's own findings, newest first, as {@code FindingRepository#listByCase}
      *     returns them; a no-op for an empty list (an archived case with none)
@@ -509,6 +526,18 @@ public class BehaviorTriageSource implements TriageSource {
                 userId,
                 Instant.now().toString(),
                 "Absorbed.");
+    }
+
+    /** The detector-state half of absorbing a finding an adapter owns: the adapter's own hook, timed and logged. */
+    private void absorb(FindingAdapter owner, FindingRow finding, @Nullable String userId, String now) {
+        long start = System.nanoTime();
+        owner.absorbed(finding, userId, now);
+        StructuredLog.info(log, Markers.OPS, "finding.adapter.absorbed")
+                .field("project", finding.projectId())
+                .field("finding", finding.id())
+                .field("adapter", owner.getClass().getSimpleName())
+                .field("durationMs", (System.nanoTime() - start) / 1_000_000)
+                .log();
     }
 
     /** The finding's own ruling write: negative (absorbed) closes it, positive (real deviation) opens
