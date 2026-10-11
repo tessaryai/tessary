@@ -16,13 +16,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Loads the {@link SessionTimeline} of a session from the substrate: the session's traces a page at a time, newest
- * first, each trace whole (its spans, payloads and tool calls), so the builder derives every trace on its own.
+ * Loads the {@link SessionTimeline} of a session from the substrate: the session's traces latest end first, a page at
+ * a time, each trace whole (its spans, payloads and tool calls), so the builder derives every trace on its own.
  */
 @Service
 public class SessionTimelineService {
@@ -53,9 +54,15 @@ public class SessionTimelineService {
     }
 
     /**
-     * The newest events of the session whose summed size is at most {@code maxBytes}. Reads whole traces, newest
-     * first, until their events reach the budget, so older traces are never read. Truncated when an event was cut or
-     * a trace was left unread.
+     * {@code load(projectId, sessionId).tail(maxBytes)}, without reading the traces that cannot reach it: the same
+     * events, with the same ids, sizes and data, numbered from 0. Reads whole traces latest end first and stops before a
+     * trace when the events loaded after its end already weigh more than {@code maxBytes}: every event of that trace
+     * and of the traces after it is at or before that end, so it sorts before the first event the tail leaves out. A
+     * trace that is not settled has no end yet, so it is always read.
+     *
+     * <p>The one event a trace row does not bound: a user message whose carrying span never ended, in a settled trace,
+     * which the builder places at that span's start; when the start is later than the trace's latest span end, a tail
+     * can miss it.
      */
     public SessionTimeline loadTail(String projectId, String sessionId, long maxBytes) {
         return read(projectId, sessionId, maxBytes).tail(maxBytes);
@@ -63,31 +70,29 @@ public class SessionTimelineService {
 
     private SessionTimeline read(String projectId, String sessionId, long maxBytes) {
         Instant start = Instant.now();
+        List<SessionTrace> all = traces.listSessionTraces(projectId, sessionId);
         List<SessionTimelineBuilder.Derived> derived = new ArrayList<>();
         long bytes = 0;
         int traceCount = 0;
         int spanCount = 0;
         boolean tracesRemain = false;
-        SessionTrace before = null;
         pages:
-        while (true) {
-            List<SessionTrace> page = traces.listSessionTraces(projectId, sessionId, before, TRACES_PER_READ);
+        for (int from = 0; from < all.size(); from += TRACES_PER_READ) {
+            List<SessionTrace> page = all.subList(from, Math.min(from + TRACES_PER_READ, all.size()));
             Map<String, List<TimelineSpan>> byTrace = timelineSpans(projectId, page);
-            for (int i = 0; i < page.size(); i++) {
-                List<TimelineSpan> trace = byTrace.getOrDefault(page.get(i).id(), List.of());
-                for (SessionTimelineBuilder.Derived d : SessionTimelineBuilder.derive(trace)) {
+            for (SessionTrace trace : page) {
+                if (bytes > maxBytes && bytesAfter(derived, trace.settledEnd()) > maxBytes) {
+                    tracesRemain = true;
+                    break pages;
+                }
+                List<TimelineSpan> spansOfTrace = byTrace.getOrDefault(trace.id(), List.of());
+                for (SessionTimelineBuilder.Derived d : SessionTimelineBuilder.derive(spansOfTrace)) {
                     derived.add(d);
                     bytes += d.event().bytes();
                 }
                 traceCount++;
-                spanCount += trace.size();
-                if (bytes >= maxBytes) {
-                    tracesRemain = i < page.size() - 1 || page.size() == TRACES_PER_READ;
-                    break pages;
-                }
+                spanCount += spansOfTrace.size();
             }
-            if (page.size() < TRACES_PER_READ) break;
-            before = page.get(page.size() - 1);
         }
         SessionTimeline timeline = SessionTimelineBuilder.assemble(projectId, sessionId, derived, tracesRemain);
         StructuredLog.debug(log, Markers.OPS, "timeline.load")
@@ -102,6 +107,17 @@ public class SessionTimelineService {
                 .durationMs(start)
                 .log();
         return timeline;
+    }
+
+    /** The summed size of the events later than {@code end}; 0 for a trace with no end, so that trace is read. */
+    private static long bytesAfter(List<SessionTimelineBuilder.Derived> derived, @Nullable String end) {
+        if (end == null) return 0;
+        Instant bound = Instant.parse(end);
+        long sum = 0;
+        for (SessionTimelineBuilder.Derived d : derived) {
+            if (d.event().at().isAfter(bound)) sum += d.event().bytes();
+        }
+        return sum;
     }
 
     /** The spans of a page of traces, each with its payload and its first tool call, grouped by trace. */

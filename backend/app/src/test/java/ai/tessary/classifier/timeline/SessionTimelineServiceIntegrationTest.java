@@ -2,6 +2,7 @@
 package ai.tessary.classifier.timeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
@@ -319,8 +320,10 @@ class SessionTimelineServiceIntegrationTest {
     @Test
     void loadTailStopsAtTheBudget() {
         Seeded s = seedAcceptanceSession();
+        fx.settle(pid, s.trA(), at(900));
+        fx.settle(pid, s.trB(), at(1500));
         SessionTimeline full = timelines.load(pid, s.sessionId());
-        List<Event> newest = full.events().subList(8, 14);
+        List<Event> newest = full.events().subList(9, 14);
         long budget = newest.stream().mapToLong(Event::bytes).sum();
 
         SessionTimeline tail = timelines.loadTail(pid, s.sessionId(), budget);
@@ -330,9 +333,72 @@ class SessionTimelineServiceIntegrationTest {
                 tail.events().stream().map(Event::id).toList(),
                 "a tail that loads the oldest traces, or ignores the budget");
         assertEquals(
-                List.of(0, 1, 2, 3, 4, 5),
+                List.of(0, 1, 2, 3, 4),
                 tail.events().stream().map(Event::position).toList());
         assertEquals(true, tail.truncated(), "the first turn was left out, so the tail is truncated");
+    }
+
+    @Test
+    void loadTailReadsATurnThatEndsAfterItsSubAgent() {
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String parent = SubstrateV2Fixtures.traceId();
+        String child = SubstrateV2Fixtures.traceId();
+        String p1 = SubstrateV2Fixtures.spanId();
+        fx.spanSeed(pid)
+                .traceId(parent)
+                .spanId(p1)
+                .sessionId(sessionId)
+                .kind("agent")
+                .name("support")
+                .at(at(0))
+                .endedAt(at(1000))
+                .payload("[" + Q1 + "]", "All three checks passed.")
+                .write();
+        List<String> tools = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            String id = SubstrateV2Fixtures.spanId();
+            fx.spanSeed(pid)
+                    .traceId(child)
+                    .spanId(id)
+                    .sessionId(sessionId)
+                    .kind("tool")
+                    .name("check")
+                    .at(at(100 + i * 200L))
+                    .endedAt(at(200 + i * 200L))
+                    .payload(i == 0 ? "\"" + "x".repeat(4000) + "\"" : "\"ok\"", null)
+                    .write();
+            tools.add(child + "/" + id);
+        }
+        fx.detachUnder(pid, child, parent);
+        fx.settle(pid, parent, at(1000));
+        fx.settle(pid, child, at(600));
+        SessionTimeline full = timelines.load(pid, sessionId);
+        List<String> newest = List.of(tools.get(1), tools.get(2), parent + "/" + p1, parent + "/" + p1 + "#reply:0");
+        assertEquals(
+                List.of(
+                        parent + "/" + p1 + "#user:0",
+                        tools.get(0),
+                        newest.get(0),
+                        newest.get(1),
+                        newest.get(2),
+                        newest.get(3)),
+                full.events().stream().map(Event::id).toList());
+        long budget =
+                full.events().subList(2, 6).stream().mapToLong(Event::bytes).sum();
+        assertTrue(
+                full.events().get(1).bytes()
+                        > full.events().get(4).bytes() + full.events().get(5).bytes(),
+                "the first check must outweigh the turn's own events, so the sub-agent alone fills the budget");
+
+        SessionTimeline tail = timelines.loadTail(pid, sessionId, budget);
+
+        assertEquals(
+                newest,
+                tail.events().stream().map(Event::id).toList(),
+                "a load in start order reads the sub-agent first, stops there and drops the turn's end and reply");
+        assertEquals(
+                List.of(0, 1, 2, 3), tail.events().stream().map(Event::position).toList());
+        assertEquals(true, tail.truncated());
     }
 
     @Test
