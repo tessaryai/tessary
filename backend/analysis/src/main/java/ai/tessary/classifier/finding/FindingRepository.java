@@ -52,6 +52,19 @@ public class FindingRepository {
             + "subject_id, subject_label, call_site_id, onset_at, last_seen_at, title, basis, severity, "
             + "sample_count, payload, evidence_counts, created_at";
 
+    /**
+     * The rows automatic escalation may pick, as {@code AND} clauses over {@code finding f}: open, never escalated,
+     * never ruled, observed over {@code :minCount} samples, and citing a trace. One home for
+     * {@link #listAutoEscalatable} and {@link #escalationCandidatesByKey}, so the two cannot disagree on eligibility.
+     */
+    private static final String AUTO_ESCALATABLE = "   AND f.status = '" + FindingRow.Status.OPEN + "'"
+            + "   AND f.escalated_at IS NULL"
+            + "   AND f.human_verdict_at IS NULL"
+            + "   AND f.triage_verdict IS NULL"
+            + "   AND f.sample_count >= :minCount"
+            + "   AND EXISTS (SELECT 1 FROM finding_evidence e"
+            + "                WHERE e.finding_id = f.id AND e.trace_id IS NOT NULL)";
+
     /** Every finding, ruled or not, still short of a settled negative. */
     private static final String LIVE = "status = 'open'";
 
@@ -738,19 +751,36 @@ public class FindingRepository {
         if (classifierKeys.isEmpty()) return List.of();
         return jdbc.sql("SELECT " + COLS + " FROM finding f"
                         + " WHERE f.project_id = :pid AND f.classifier_key IN (:classifiers)"
-                        + "   AND f.status = '" + FindingRow.Status.OPEN + "'"
-                        + "   AND f.escalated_at IS NULL"
-                        + "   AND f.human_verdict_at IS NULL"
-                        + "   AND f.triage_verdict IS NULL"
-                        + "   AND f.sample_count >= :minCount"
-                        + "   AND EXISTS (SELECT 1 FROM finding_evidence e"
-                        + "                WHERE e.finding_id = f.id AND e.trace_id IS NOT NULL)"
+                        + AUTO_ESCALATABLE
                         + " ORDER BY f.sample_count DESC, f.onset_at ASC LIMIT :limit")
                 .param("pid", projectId)
                 .param("classifiers", classifierKeys)
                 .param("minCount", minSampleCount)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /**
+     * One claim per classifier key among the rows {@link #listAutoEscalatable} would admit, for keys outside
+     * {@code excludedKeys}: what each {@link FindingAdapter} is asked whether it owns. One row per key rather than
+     * every row, so an un-owned key with many open findings cannot fill a page before an owned one is seen.
+     *
+     * @param excludedKeys the keys the caller already escalates for; never empty
+     */
+    public List<FindingClaim> escalationCandidatesByKey(
+            String projectId, Collection<String> excludedKeys, long minSampleCount) {
+        if (excludedKeys.isEmpty()) {
+            throw new IllegalArgumentException("escalationCandidatesByKey needs at least one excluded key");
+        }
+        return jdbc.sql("SELECT DISTINCT ON (f.classifier_key) " + CLAIM_COLS + " FROM finding f"
+                        + " WHERE f.project_id = :pid AND f.classifier_key NOT IN (:excluded)"
+                        + AUTO_ESCALATABLE
+                        + " ORDER BY f.classifier_key, f.id")
+                .param("pid", projectId)
+                .param("excluded", excludedKeys)
+                .param("minCount", minSampleCount)
+                .query((rs, n) -> mapClaim(rs))
                 .list();
     }
 

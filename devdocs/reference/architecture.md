@@ -172,8 +172,8 @@ of grading before the migration history was squashed into the current `0000-base
   (`span`/`span_payload`/`trace`/`session`/`tool_call`) it owns a raw-SQL
   `SubstrateReadRepository`, which the `jdbc_client_only_in_repositories` rule allows.
 - **`classifier/` extension seam is *multi-impl and open to code this repo does not build*** —
-  `ClassifierSweep` (in `classifier/worker/`) plus one read-side port (`TriageSource`) are what a
-  classifier attaches through, and `ClassifierSweepRegistry` indexes every sweep on the classpath by
+  `ClassifierSweep` (in `classifier/worker/`) plus two read-side ports (`TriageSource`,
+  `FindingAdapter`) are what a classifier attaches through, and `ClassifierSweepRegistry` indexes every sweep on the classpath by
   the detector kinds it claims. Unlike every other seam in this file, an implementation may ship from
   a jar outside this reactor: discovery is a Spring Boot `AutoConfiguration.imports` read off the
   runtime classpath, which is what lets a self-hoster run their own classifier and what lets the paid
@@ -209,7 +209,7 @@ each one is competent to answer.
 | **2 — Triage** | `classifier/finding/` (`BehaviorTriageEngine`, `E2bTriageSandbox`) | An agent in a microVM, same model choices as RCA. No repo. The substrate on demand over MCP. A workspace to write check scripts in | *Does the CLAIM hold — true, sampled enough, carried by its evidence?* | `finding.triage_*`: `positive` opens a case, `negative` closes the finding |
 | **3 — RCA** | `rca/` | A strong model in a microVM. The repository when one is connected | *What change caused it?* | An `rca_report` on the case, which may conclude that no change is locatable |
 
-**Two Layer-1 findings skip Layer 2.** A high-confidence secret leak (`SecretLeakCaseSource`) and a `frustration_rate` finding (`FrustrationCaseSource`) are filed already ruled `positive` and open their case in the same transaction, because the numbers on the finding are the claim; neither ever enters the triage lane. Frustration is also the one Layer-1 detector that calls a model: a hosted decision model (TypeSafe's Jev), one call per eligible user turn, on the org's own key, off until a person turns it on. The 2-to-3 firewall below still holds for both, since RCA receives the finding id only. See [concepts/frustration.md](../concepts/frustration.md).
+**Two Layer-1 findings skip Layer 2.** A high-confidence secret leak (`SecretLeakCaseSource`) and a `frustration_rate` finding (`FrustrationCaseSource`) are filed already ruled `positive` and open their case in the same transaction, because the numbers on the finding are the claim; neither ever enters the triage lane. In the open edition, Frustration is also the one Layer-1 detector that calls a model: a hosted decision model (TypeSafe's Jev), one call per eligible user turn, on the org's own key, off until a person turns it on. The paid custom classifiers are the other recorded exception (see [principles.md](principles.md)). The 2-to-3 firewall below still holds for both, since RCA receives the finding id only. See [concepts/frustration.md](../concepts/frustration.md).
 
 **Layer 2 never judges impact.** A cost or duration *drop* passes its gate like any other sound claim,
 because "improvement" is a judgment about intent and triage has no evidence for intent. Layer 2 is also

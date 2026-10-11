@@ -85,7 +85,8 @@ class BehaviorTriageSourceDetailTest {
                 mock(SecretLeakDetailService.class),
                 mock(FrustrationDetailService.class),
                 null,
-                mock(GroundednessDetailService.class));
+                mock(GroundednessDetailService.class),
+                FindingAdapters.of(List.of()));
     }
 
     private static FindingRow escalatedRow(String id) {

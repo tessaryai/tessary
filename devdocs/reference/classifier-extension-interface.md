@@ -31,11 +31,13 @@ enforce this would be a different decision, tracked separately.
 
 ---
 
-## 2. The seam is four ports
+## 2. The seam is five ports
 
 A classifier is not one interface. It is a set of small ports it may implement as many or as few of
-as it needs, each keyed on the open `BuiltInDetector.Kind` constants. **Three of the four are discovered
-by Spring collection injection outright. `BuiltInDetector` is hybrid**: its CATALOG
+as it needs, each keyed on the open `BuiltInDetector.Kind` constants, except `FindingAdapter`, which
+keys on a predicate over the finding's claim because a paid classifier's key is per row
+(`custom-<ulid>`). **Four of the five are discovered by Spring collection injection outright.
+`BuiltInDetector` is hybrid**: its CATALOG
 ENTRY — name, description, capability, grain, config — is still in-tree-manifest-only, but the
 detector object itself can now ALSO be supplied from off the classpath, through a
 sibling, `DetectorSupplier`. The `Registered by` column below says which is which, and the difference
@@ -46,7 +48,14 @@ decides what an out-of-tree jar can actually contribute — see §8.
 | `BuiltInDetector` | `classifier/catalog/` | observation, turn | in-tree manifest, **or** Spring `ObjectProvider<DetectorSupplier>` (generic, unguarded, see below) | Score one span (or a batch of them). Pure: no database, no clock, no writes. |
 | `ClassifierSweep` | `classifier/worker/` | trace, window | Spring, `ObjectProvider` | Run one leased pass over a larger unit and write findings. Stateful. |
 | `TriageSource` | `classifier/finding/` | — | Spring, `List` | Serve this classifier's findings into the shared read surface and triage queue. `@Order`-ranked. |
+| `FindingAdapter` | `classifier/finding/` | — | Spring, `ObjectProvider`, folded by `FindingAdapters` (two owners of one finding fail at lookup) | Claim the findings a classifier outside the catalog filed: their triage eligibility, the `method.md` text for triage and RCA (read from the `FindingClaim`, so the RCA firewall holds), and the detector-state half of a person's absorb (`absorbed`, in the caller's transaction). |
 | `DetectionTable` | `detection/` (`backend/shared`) | span, trace | Spring, `ObjectProvider`, folded by `DetectionTableRegistry` (`toUnmodifiableMap`, duplicate kind fails boot) | Name the table this classifier's fired detections land in and the grain (`span`/`trace`) its rows carry. Replaces the old `classifier_detection_v` view's hard-coded six-table list; a kind with no registered table takes one `writesDetections`-gated WARN from `ClassifierWorker` and scores nothing rather than throwing. |
+
+`FindingAdapter`'s consumers are `BehaviorTriageSource` (`analyze` and `listAutoEscalatable` for
+eligibility, `resolve` and `repin` for the absorb hook), `BehaviorTriageEngine.methodCard` and
+`RcaAnalysisService.dossierFiles` (the `method.md` text, after the built-in card or RCA method for the
+key). An owned finding is ruled by its adapter whatever its cause kind; a case of owned findings calls
+the hook once, on its newest finding.
 
 `ProfileSource` used to be a port here, serving `/behavior/profiles`. That route later moved
 into the behaviour-drift classifier's own module — it is now an internal wiring detail of that one
@@ -278,7 +287,9 @@ kind has exactly one open sweep.
 **An absent adapter degrades; it does not fail to wire.** Spring treats a required collection
 parameter with no candidates as an *unsatisfied dependency* rather than an empty list. `TriageSource`
 is safe as a `List<T>` because its own built-in implementation, `BehaviorTriageSource`, never left the
-open package. `ContextLoadsTest` boots the open edition, which ships no adapter, and holds it.
+open package. `FindingAdapter` has no open implementation, so `FindingAdapters` takes it through an
+`ObjectProvider` for the same reason. `ContextLoadsTest` boots the open edition, which ships no adapter,
+and holds it.
 
 ---
 
@@ -299,7 +310,8 @@ open package. `ContextLoadsTest` boots the open edition, which ships no adapter,
    seam, so a `DetectorSupplier` for a kind of your own registers and is never dispatched to. A brand
    new kind needs a catalog entry, which is hard stop 3 below either way — see §2.)
 4. Optionally, adapters on the read-side ports for what the surfaces show: `TriageSource`
-   (`@Order`-ranked) and `CaseSource`.
+   (`@Order`-ranked), `CaseSource`, and `FindingAdapter` when your sweep files into the shared
+   `finding` table under a key the built-in triage lane does not rule on.
 5. If your classifier writes per-span/per-trace detections it needs a table to put them in:
    own your own `SpringLiquibase` bean, `@DependsOn(LiquibaseConfig.BEAN_NAME)`
    so it runs strictly after the open one, applying a changelog that creates your table — then
@@ -329,8 +341,8 @@ not loaded": Boot reads the imports file, the component scan reaches your class,
 in condition evaluation with `NoClassDefFoundError` before the application starts. Emit it from your own build, as the
 second command above does, or shade your dependencies into the jar.
 
-**What works end to end today, precisely.** The read side is real: a third-party `TriageSource`
-or `CaseSource` is discovered by Spring injection and feeds the existing findings, triage and case
+**What works end to end today, precisely.** The read side is real: a third-party `TriageSource`,
+`CaseSource` or `FindingAdapter` is discovered by Spring injection and feeds the existing findings, triage and case
 surfaces with no further prerequisite. `/behavior/profiles` is not one of these — it is served from
 inside the behaviour-drift module by a port that module owns itself, not one an out-of-tree jar can
 implement (§2). On the write side the **dispatch** is real: `ClassifierSweepRegistry`

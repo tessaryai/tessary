@@ -20,6 +20,7 @@ public final class FindingRowBuilder {
     private String status = FindingRow.Status.OPEN;
     private String onsetAt = "2026-09-01T00:00:00Z";
     private String lastSeenAt = "2026-09-02T00:00:00Z";
+    private @Nullable String title;
     private @Nullable String basis;
     private @Nullable Double severity;
     private long sampleCount = 12;
@@ -96,6 +97,16 @@ public final class FindingRowBuilder {
         return this;
     }
 
+    public FindingRowBuilder title(@Nullable String value) {
+        this.title = value;
+        return this;
+    }
+
+    public FindingRowBuilder createdAt(String value) {
+        this.createdAt = value;
+        return this;
+    }
+
     public FindingRowBuilder basis(@Nullable String value) {
         this.basis = value;
         return this;
@@ -160,7 +171,7 @@ public final class FindingRowBuilder {
                 status,
                 onsetAt,
                 lastSeenAt,
-                null,
+                title,
                 basis,
                 severity,
                 sampleCount,
