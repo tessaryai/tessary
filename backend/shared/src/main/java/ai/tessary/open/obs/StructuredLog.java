@@ -53,6 +53,11 @@ public final class StructuredLog {
         return new Builder(emitDebug(log), null, event);
     }
 
+    /** Developer detail whose every field is bounded, so it may leave the box when DEBUG is on. */
+    public static Builder debug(Logger log, Marker marker, String event) {
+        return new Builder(emitDebug(log), marker, event);
+    }
+
     public static Builder warn(Logger log, Marker marker, String event) {
         return new Builder(emitWarn(log), marker, event);
     }

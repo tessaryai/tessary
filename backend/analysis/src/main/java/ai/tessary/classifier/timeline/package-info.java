@@ -22,9 +22,11 @@
  *
  * <h2>Ids</h2>
  *
- * <p>A span event's id is its span id. A message event's id is {@code <span_id>#user:<n>} or {@code
- * <span_id>#reply:<n>}, {@code n} counted from 0 among the user messages or reply texts of the span that first carries
- * the message. The {@code turn} of an event is its trace id.
+ * <p>An event id is unique in the session. A span id is unique only inside its trace, so a span event's id is {@code
+ * <trace_id>/<span_id>}. A message event's id is {@code <trace_id>/<span_id>#user:<n>} or {@code
+ * <trace_id>/<span_id>#reply:<n>}, {@code n} counted from 0 among the user messages or reply texts of the span that
+ * first carries the message. The {@code span_id}, {@code parent_id} and {@code agent_id} fields stay bare span ids of
+ * the event's trace. The {@code turn} of an event is its trace id.
  *
  * <h2>Order</h2>
  *
