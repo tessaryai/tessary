@@ -736,6 +736,36 @@ public class TraceV2Repository {
         }
     }
 
+    /** One trace of a session, with the facts the session timeline reads from the trace row. */
+    public record SessionTrace(
+            String id,
+            @Nullable String parentTraceId,
+            @Nullable String callSiteId,
+            String startedAt) {}
+
+    /**
+     * A session's traces, newest first, a page at a time: every trace of the session that is not deleted, including a
+     * detached sub-agent trace ({@code parent_trace_id} set). Pass the last trace of a page as {@code before} to read
+     * the next, older page. Served by {@code ix_trace_session}.
+     */
+    public List<SessionTrace> listSessionTraces(
+            String projectId, String sessionId, @Nullable SessionTrace before, int limit) {
+        String sql = "SELECT t.id, t.parent_trace_id, t.call_site_id, t.started_at FROM trace t"
+                + " WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted"
+                + (before == null ? "" : " AND (t.started_at, t.id) < (:beforeTs::timestamptz, :beforeId)")
+                + " ORDER BY t.started_at DESC, t.id DESC LIMIT :limit";
+        var spec = jdbc.sql(sql).param("pid", projectId).param("sid", sessionId).param("limit", limit);
+        if (before != null) {
+            spec = spec.param("beforeTs", before.startedAt()).param("beforeId", before.id());
+        }
+        return spec.query((rs, n) -> new SessionTrace(
+                        rs.getString("id"),
+                        rs.getString("parent_trace_id"),
+                        rs.getString("call_site_id"),
+                        requireIso(rs, "started_at")))
+                .list();
+    }
+
     /**
      * A conversation's turns, oldest first. A conversation is a session and a turn is a top-level trace: the key
      * and grain the frustration classifier scores at. Served by {@code ix_trace_session}.

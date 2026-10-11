@@ -5,6 +5,7 @@ import static ai.tessary.storage.SessionRepository.requireIso;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -172,6 +173,21 @@ public class SpanPayloadRepository {
         return jdbc.sql("SELECT " + COLS + " FROM span_payload WHERE project_id = :pid AND trace_id = :tid")
                 .param("pid", projectId)
                 .param("tid", traceId)
+                .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /**
+     * Every payload of a set of traces (a session's), in one read through the same primary-key prefix as {@link
+     * #listByTrace}. Unordered; a payload that has aged out is absent.
+     */
+    public List<SpanPayloadRow> listByTraceIds(String projectId, Collection<String> traceIds) {
+        if (traceIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + COLS + " FROM span_payload WHERE project_id = :pid AND trace_id = ANY(:ids)")
+                .param("pid", projectId)
+                .param("ids", traceIds.toArray(String[]::new))
                 .query((rs, n) -> map(rs))
                 .list();
     }
