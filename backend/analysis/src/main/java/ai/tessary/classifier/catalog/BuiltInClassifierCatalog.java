@@ -467,10 +467,20 @@ public class BuiltInClassifierCatalog {
     }
 
     /**
+     * Whether a module in the manifest declares this detector kind, so {@link #grainFor} answers
+     * from the manifest and not from its default. A kind with a detector and no module, such as
+     * {@code regex}, is not declared.
+     */
+    public boolean declares(String detectorKind) {
+        return grains.containsKey(detectorKind);
+    }
+
+    /**
      * The sweep {@link Grain} a {@code signal.detector} value scores at: what one scored unit is
      * for that classifier. Defaults to {@link Grain#OBSERVATION} for anything not declared by a
      * module (user-authored regex/classifiers, and inert or unknown kinds), since a classifier is
-     * per-span unless it says otherwise.
+     * per-span unless it says otherwise. {@code ClassifierWorker} does not ask this for an
+     * undeclared kind that a {@code ClassifierSweep} claims: it runs that kind at window grain.
      */
     public Grain grainFor(String detectorKind) {
         return grains.getOrDefault(detectorKind, Grain.OBSERVATION);
