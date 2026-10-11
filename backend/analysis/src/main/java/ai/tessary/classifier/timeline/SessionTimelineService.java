@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.timeline;
 
+import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
@@ -89,7 +90,7 @@ public class SessionTimelineService {
             before = page.get(page.size() - 1);
         }
         SessionTimeline timeline = SessionTimelineBuilder.assemble(projectId, sessionId, derived, tracesRemain);
-        StructuredLog.debug(log, "timeline.load")
+        StructuredLog.debug(log, Markers.OPS, "timeline.load")
                 .message(
                         "built a timeline of %d events (%d bytes) from %d traces",
                         timeline.events().size(), bytes, traceCount)
