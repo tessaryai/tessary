@@ -601,7 +601,10 @@ class ClassifierWorkerTest {
         ClassifierWorker worker = worker(new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
         when(catalog.detectorFor(UNDECLARED)).thenReturn(detector, (BuiltInDetector) null);
 
-        assertThrows(IllegalStateException.class, worker::validateRouting, "the kind has a detector and a sweep");
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class, worker::validateRouting, "the kind has a detector and a sweep");
+        String message = String.valueOf(failure.getMessage());
+        assertTrue(message.contains(UNDECLARED), "the boot failure names the kind: " + message);
         assertDoesNotThrow(worker::validateRouting, "the kind has only a sweep");
     }
 
