@@ -479,8 +479,9 @@ public class BuiltInClassifierCatalog {
      * The sweep {@link Grain} a {@code signal.detector} value scores at: what one scored unit is
      * for that classifier. Defaults to {@link Grain#OBSERVATION} for anything not declared by a
      * module (user-authored regex/classifiers, and inert or unknown kinds), since a classifier is
-     * per-span unless it says otherwise. {@code ClassifierWorker} does not ask this for an
-     * undeclared kind that a {@code ClassifierSweep} claims: it runs that kind at window grain.
+     * per-span unless it says otherwise. For an undeclared kind that a {@code ClassifierSweep}
+     * claims, {@code SweepRouting} answers window grain instead; the worker and {@code
+     * ClassifierService} read a kind's grain from there.
      */
     public Grain grainFor(String detectorKind) {
         return grains.getOrDefault(detectorKind, Grain.OBSERVATION);
