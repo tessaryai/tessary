@@ -2,10 +2,12 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRowBuilder;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -70,5 +72,24 @@ class GenericFindingCaseSourceTest {
                         null,
                         null),
                 source.shape(finding));
+    }
+
+    /**
+     * A custom classifier's finding (key {@code custom-<ulid>}) is owned by this source and keyed on its own cause and
+     * classifier key. The bug is a positive ruling on a custom finding that opens no case because a dedicated source,
+     * or no source, claims it.
+     */
+    @Test
+    void aCustomClassifiersFindingOpensAGenericCase() {
+        String key = "custom-01j9z3k5m2";
+        var finding = FindingRowBuilder.of(key)
+                .causeKey("cls-1:cs-1")
+                .payload("{\"cause_kind\":\"custom_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+
+        assertTrue(source.owns(key));
+        assertEquals(
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "cls-1:cs-1", key),
+                source.shape(finding).key());
     }
 }
