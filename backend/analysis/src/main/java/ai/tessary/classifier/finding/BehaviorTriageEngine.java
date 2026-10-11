@@ -89,6 +89,8 @@ public class BehaviorTriageEngine {
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
     private final ClassifierDetectionWriteRepository detections;
+    /** The {@code method.md} of a finding a classifier outside the catalog filed; empty in the open edition. */
+    private final FindingAdapters adapters;
 
     public BehaviorTriageEngine(
             List<TriageSandbox> sandboxList,
@@ -98,7 +100,8 @@ public class BehaviorTriageEngine {
             ProjectRepository projects,
             OrgMembershipRepository memberships,
             ObjectMapper mapper,
-            ClassifierDetectionWriteRepository detections) {
+            ClassifierDetectionWriteRepository detections,
+            FindingAdapters adapters) {
         Map<String, TriageSandbox> byKey = new HashMap<>();
         for (TriageSandbox s : sandboxList) byKey.put(s.key(), s);
         this.sandboxes = Map.copyOf(byKey);
@@ -109,6 +112,7 @@ public class BehaviorTriageEngine {
         this.memberships = memberships;
         this.mapper = mapper;
         this.detections = detections;
+        this.adapters = adapters;
     }
 
     /**
@@ -241,8 +245,9 @@ public class BehaviorTriageEngine {
      */
     public Map<String, String> dossier(BehaviorTriageJobRow job, FindingRow finding) {
         Map<String, String> files = new LinkedHashMap<>();
-        files.put("finding.md", findingFile(finding));
-        methodCard(finding.classifierKey()).ifPresent(card -> files.put("method.md", card));
+        Optional<String> card = methodCard(finding);
+        files.put("finding.md", findingFile(finding, card.isPresent()));
+        card.ifPresent(text -> files.put("method.md", text));
         detectionsFile(finding).ifPresent(text -> files.put(DETECTIONS_FILE, text));
         return files;
     }
@@ -347,7 +352,7 @@ public class BehaviorTriageEngine {
      * (that is the cause section of {@code method.md}) and no detector numbers beyond the one-sentence
      * claim — those are frozen on {@code get_finding} once the finding is triaged.
      */
-    private String findingFile(FindingRow finding) {
+    private String findingFile(FindingRow finding, boolean hasMethod) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n")
                 .append("- finding id: `")
@@ -361,10 +366,7 @@ public class BehaviorTriageEngine {
                 .append("- cause: `")
                 .append(finding.causeKind())
                 .append('`')
-                .append(
-                        methodCard(finding.classifierKey()).isPresent()
-                                ? ". Read the matching section of `dossier/method.md`.\n"
-                                : "\n")
+                .append(hasMethod ? ". Read the matching section of `dossier/method.md`.\n" : "\n")
                 .append("- pattern: `")
                 .append(finding.causeKey())
                 .append("`\n")
@@ -440,9 +442,13 @@ public class BehaviorTriageEngine {
 
     // ---- the user message ------------------------------------------------------------------------
 
-    /** The classifier's method card, when one exists: absent for a user-authored classifier. */
-    public static Optional<String> methodCard(@Nullable String classifierKey) {
-        return Optional.ofNullable(ClassifierMethodCard.forClassifier(classifierKey));
+    /**
+     * The method card for this finding: the built-in card for its classifier key, else the {@code method.md} of the
+     * adapter that owns it. Absent for a user-authored classifier no adapter owns.
+     */
+    public Optional<String> methodCard(FindingRow finding) {
+        String card = ClassifierMethodCard.forClassifier(finding.classifierKey());
+        return card != null ? Optional.of(card) : adapters.method(finding.claim());
     }
 
     /**
@@ -451,7 +457,7 @@ public class BehaviorTriageEngine {
      * work is in {@link #SYSTEM_PROMPT}, which carries nothing per-run.
      */
     public String buildPrompt(BehaviorTriageJobRow job, FindingRow finding) {
-        boolean hasMethodCard = methodCard(finding.classifierKey()).isPresent();
+        boolean hasMethodCard = methodCard(finding).isPresent();
         ObserverProperties.Agentic agentic = observerProps.getAgentic();
         int maxTurns = Math.max(0, agentic.getMaxTurns() - TURN_RESERVE);
 

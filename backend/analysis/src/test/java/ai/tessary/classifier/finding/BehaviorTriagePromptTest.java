@@ -58,8 +58,17 @@ class BehaviorTriagePromptTest {
         return engine(observerProps, mock(ClassifierDetectionWriteRepository.class));
     }
 
+    private static BehaviorTriageEngine engine(ObserverProperties observerProps, FindingAdapters adapters) {
+        return engine(observerProps, mock(ClassifierDetectionWriteRepository.class), adapters);
+    }
+
     private static BehaviorTriageEngine engine(
             ObserverProperties observerProps, ClassifierDetectionWriteRepository detections) {
+        return engine(observerProps, detections, FindingAdapters.of(List.of()));
+    }
+
+    private static BehaviorTriageEngine engine(
+            ObserverProperties observerProps, ClassifierDetectionWriteRepository detections, FindingAdapters adapters) {
         return new BehaviorTriageEngine(
                 List.of(),
                 new ClassifierProperties(),
@@ -68,7 +77,8 @@ class BehaviorTriagePromptTest {
                 mock(ProjectRepository.class),
                 mock(OrgMembershipRepository.class),
                 new ObjectMapper(),
-                detections);
+                detections,
+                adapters);
     }
 
     private static FindingRow finding(
@@ -345,5 +355,39 @@ class BehaviorTriagePromptTest {
 
         assertFalse(prompt.contains("`dossier/method.md`"));
         assertTrue(prompt.contains("This detector has no method card; its rule is whatever its author configured."));
+    }
+
+    /** An engine with one adapter that owns {@code custom-x} and writes {@code # Method x}. */
+    private static BehaviorTriageEngine engineOwningCustomX() {
+        return engine(
+                new ObserverProperties(),
+                FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n"))));
+    }
+
+    /**
+     * An owned finding's dossier is {@code finding.md} plus its adapter's {@code method.md}, and {@code finding.md}
+     * points at it. The bugs are a custom finding triaged with no method and a groundedness-only file leaking in.
+     */
+    @Test
+    void anOwnedFindingShipsItsAdaptersMethod() {
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"custom_rate\"}", null);
+
+        Map<String, String> dossier = engineOwningCustomX().dossier(JOB, row);
+
+        assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
+        assertEquals("# Method x\n", dossier.get("method.md"));
+        String findingMd = findingMd(engineOwningCustomX(), row);
+        assertTrue(findingMd.contains("Read the matching section of `dossier/method.md`"), findingMd);
+    }
+
+    /** An owned finding's user message lists {@code method.md}. The bug is the no-card branch taken for it. */
+    @Test
+    void anOwnedFindingsPromptListsTheMethodFile() {
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"custom_rate\"}", null);
+
+        String prompt = engineOwningCustomX().buildPrompt(JOB, row);
+
+        assertTrue(prompt.contains("- `dossier/method.md`"), prompt);
+        assertFalse(prompt.contains("This detector has no method card"), prompt);
     }
 }
