@@ -161,16 +161,19 @@ never really about grading:
   **The first recorded exception is `frustration`**, which calls a hosted decision model per eligible
   user turn in Layer 1. It is allowed only under all five conditions it meets today: off until a
   person turns it on, on the org's own provider key, filtered by an eligibility rule before any
-  call, stopped at a conversation's first flag, and booked in the usage ledger. A new per-event model
-  call that misses any of the five is the thing this rule forbids. See
+  call, stopped at a conversation's first flag, and booked in the usage ledger. See
   [concepts/frustration.md](../concepts/frustration.md).
-  The paid custom classifiers are the second recorded exception. A custom classifier calls the
-  decision model (Jev) one time for each match of its pattern. It is allowed only under these
-  conditions: a new classifier is disabled until a person turns it on; the call uses the org's own
-  provider key; a deterministic pattern over the session timeline selects the matches before any
-  call, and the classifier's code can skip a match; each match is judged one time, keyed by its
-  match key, and a match with no answer is offered again; the JSON the judge gets is at most 250 KB;
-  and each call is booked in the usage ledger under lane `custom`.
+  **The second recorded exception is the paid custom classifiers.** A custom classifier calls the
+  decision model (Jev) one time for each match of its pattern. It is allowed only under all five
+  conditions it meets: off until a person turns it on, on the org's own provider key, filtered by a
+  deterministic pattern over the session timeline before any call, booked in the usage ledger under
+  lane `custom`, and a limit on the matches one sweep judges. The limit works like this: a sweep
+  sends matches to the sandbox in requests of at most 25 matches and 16 MiB, the matches that do not
+  fit in one sweep wait for the next sweep, and the cursor never moves past a match that has no
+  answer. The classifier's code can also skip a match, each match is judged one time, keyed by its
+  match key, and the JSON the judge gets is at most 250 KB.
+  A new per-event model call that does not meet every condition of one of these two records is the
+  thing this rule forbids.
 
 ## Signals & subsystems
 
