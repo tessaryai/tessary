@@ -125,6 +125,26 @@ class ClassifierModelModuleCatalogTest {
         }
     }
 
+    /**
+     * The worker routes a kind no module declares to a registered sweep, so a declaration read from the detector map
+     * would call {@code regex} declared and the window kinds undeclared, and a shipped window classifier would stop
+     * taking its grain from the manifest.
+     */
+    @Test
+    void declaresAnswersFromTheManifestNotFromTheDetectorMap() {
+        BuiltInClassifierCatalog catalog = catalog();
+        for (String kind : List.of(
+                BuiltInDetector.Kind.TOOL_ERROR,
+                BuiltInDetector.Kind.DURATION_DRIFT,
+                BuiltInDetector.Kind.COST_DRIFT,
+                BuiltInDetector.Kind.FRUSTRATION,
+                BuiltInDetector.Kind.SECRET_LEAK)) {
+            assertTrue(catalog.declares(kind), kind + " has a module in the manifest");
+        }
+        assertFalse(catalog.declares(BuiltInDetector.Kind.REGEX), "regex has a detector but no module");
+        assertFalse(catalog.declares("undeclared_kind"), "no module names this kind");
+    }
+
     private static BuiltInDetector detector(BuiltInClassifierCatalog catalog, String kind) {
         BuiltInDetector d = catalog.detectorFor(kind);
         assertNotNull(d, kind + " is dispatched");

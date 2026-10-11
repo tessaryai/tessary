@@ -18,7 +18,9 @@
  *   <li>Ports key on the open {@code BuiltInDetector.Kind} constants, and the CATALOG stays constant.
  *       The registry is never consulted to decide what the catalog contains — see
  *       {@link ai.tessary.classifier.worker.ClassifierSweepRegistry} for the irreversible
- *       retirement that rule prevents.
+ *       retirement that rule prevents. It is consulted to route a kind the catalog does not declare:
+ *       a sweep for such a kind runs it at window grain, and a kind with both a detector and a sweep
+ *       fails the boot.
  *   <li>An unregistered kind is inert: one WARN, the job completes, no other sweep runs in its place.
  * </ol>
  *

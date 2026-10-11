@@ -25,17 +25,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every catalog kind that sweeps at a fitting tier has exactly one sweep claiming it, the invariant the registry
- * depends on and nothing else pins ({@code ClassifierWorkerTest} stubs {@code kinds()}). An unmatched kind is
- * inert by design, so dropping one silently stops that classifier's findings everywhere, with only a {@code
- * signal.sweep.no-handler} WARN. Sweeps are built with mocks, since {@code kinds()} is a declaration; add a new one
- * to {@link #openSweeps()}.
+ * Every catalog kind that sweeps at a fitting tier has exactly one open sweep claiming it, the invariant the
+ * registry depends on and nothing else pins ({@code ClassifierWorkerTest} stubs {@code kinds()}). An unmatched kind
+ * is inert by design, so dropping one silently stops that classifier's findings everywhere, with only a {@code
+ * signal.sweep.no-handler} WARN. An out-of-tree sweep may claim a kind the catalog does not declare; an open one may
+ * not. Sweeps are built with mocks, since {@code kinds()} is a declaration; add a new one to {@link #openSweeps()}.
  */
 class SweepCatalogCoverageTest {
 
     @Test
     @DisplayName(
-            "every WINDOW catalog kind is claimed by exactly one sweep, and no sweep claims a kind the catalog does not define")
+            "every WINDOW catalog kind is claimed by exactly one sweep, and no open sweep claims a kind the catalog does not define")
     void fitting_tier_kinds_and_registered_sweeps_agree() {
         BuiltInClassifierCatalog catalog = catalog();
 

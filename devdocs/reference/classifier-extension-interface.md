@@ -101,7 +101,8 @@ hard stop 3 in §8 below: a new catalog entry is closed to an outsider, only a d
 in-tree kind can be supplied this way. `DetectorSupplier` also fails loud on a duplicate kind, the same
 invariant `ClassifierSweepRegistry` already enforces for `ClassifierSweep` — two sources (in-tree or
 discovered, in any combination) claiming one kind throws `IllegalStateException` at construction
-rather than letting classpath order pick a winner.
+rather than letting classpath order pick a winner. A kind also cannot have both a detector and a
+sweep: `ClassifierWorker` checks this at startup and fails the context, naming the kind (§6).
 
 Trace or window judgement of your own still goes through `ClassifierSweep` only; observation/turn-grain
 detector SUPPLY is now real, and observation/turn-grain catalog AUTHORSHIP (a brand-new kind, name,
@@ -126,6 +127,18 @@ public record SweepOutcome(int scanned, int fired) {}
 
 `kinds()` is a set rather than a single value because one sweep legitimately serves a family:
 `MetricDriftSweep` runs both `duration_drift` and `cost_drift` from one bean over one baseline store.
+
+**A sweep for a kind the catalog does not declare.** `ClassifierWorker` routes each job before it
+picks a grain. For a kind a catalog module declares (`BuiltInClassifierCatalog#declares`), the
+catalog's grain decides. For a kind no module declares, the worker asks the registry: a registered
+sweep means window grain, and the sweep gets the job's cursor, lease and attempt budget like the
+in-tree sweeps. With no sweep, the kind keeps the catalog default, `Grain.OBSERVATION`, and the
+detector path. `signal.sweep.complete` carries `route=registry` for a registry route and
+`route=catalog` for every other. A non-built-in classifier row is enqueued whatever its `detector`
+value, so an extension only creates its rows and registers its sweep. The catalog entry, the
+capability and the case key stay closed (§8, hard stops). A sweep that claims a declared
+observation or turn kind is still never dispatched, because the catalog's grain wins for a
+declared kind.
 
 **A sweep applies the classifier's call-site list itself.** `ClassifierRow.callSiteIds()` is the
 list, null for every call site, and `ClassifierRow.runsOn` is the test. The worker filters what an
@@ -231,6 +244,11 @@ id. Nothing failed loudly.
 writing findings under one classifier row; picking one by bean order would make which analysis ran
 depend on classpath order.
 
+**A kind with both a detector and a sweep fails the context at startup.** The worker dispatches a
+kind through one of them, so the other would stop scoring and nothing would say so.
+`ClassifierWorker#validateRouting` runs at `@PostConstruct` and names every such kind. The rule
+covers a `DetectorSupplier`, an in-tree detector factory and `regex` alike.
+
 ---
 
 ## 7. Absence is not withdrawal — the invariant with teeth
@@ -253,8 +271,9 @@ So there are two distinct endings and only one of them writes:
 | This edition does not ship the classifier | the flag/capability layer; `withheldBuiltInKeys` | nothing |
 | The classifier left the catalog | `retireDroppedBuiltIns` | permanent disable |
 
-`ClassifierSweepRegistry` never touches the catalog. `SweepCatalogCoverageTest` pins the other side:
-every fitting-tier catalog kind has exactly one sweep.
+`ClassifierSweepRegistry` never touches the catalog. `ClassifierWorker` is the one place that reads
+both, to route a job (§2). `SweepCatalogCoverageTest` pins the other side: every fitting-tier catalog
+kind has exactly one open sweep.
 
 **An absent adapter degrades; it does not fail to wire.** Spring treats a required collection
 parameter with no candidates as an *unsatisfied dependency* rather than an empty list. `TriageSource`
@@ -272,7 +291,9 @@ open package. `ContextLoadsTest` boots the open edition, which ships no adapter,
 2. `src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`,
    one line, naming that class.
 3. A `@Component` implementing `ClassifierSweep` — `kinds()` returning the detector kind(s) it claims,
-   `sweep(SweepContext)` returning a `SweepOutcome`. (Or a `@Bean` `DetectorSupplier`
+   `sweep(SweepContext)` returning a `SweepOutcome`. A sweep may claim a new kind of its own: the
+   worker runs a kind the catalog does not declare at window grain, with no catalog entry (§2).
+   (Or a `@Bean` `DetectorSupplier`
    for observation/turn grain instead — but ONLY for a kind the in-tree catalog manifest already
    declares: seeding, the capability gate and `grainFor` all still read `MODULES` independently of this
    seam, so a `DetectorSupplier` for a kind of your own registers and is never dispatched to. A brand
@@ -312,11 +333,11 @@ second command above does, or shade your dependencies into the jar.
 or `CaseSource` is discovered by Spring injection and feeds the existing findings, triage and case
 surfaces with no further prerequisite. `/behavior/profiles` is not one of these — it is served from
 inside the behaviour-drift module by a port that module owns itself, not one an out-of-tree jar can
-implement (§2). On the write side the **dispatch** is real — `ClassifierSweepRegistry`
+implement (§2). On the write side the **dispatch** is real: `ClassifierSweepRegistry`
 discovers your sweep, and `ClassifierWorker` runs the kind it claims on the worker's cadence with the
-lease and dead-letter budget — but in the builds this repo produces today **there is no kind left for
-an out-of-tree sweep to claim**, so nothing of yours actually runs yet. Two closed doors, and it is
-worth knowing which one you are at:
+lease and dead-letter budget. **A sweep for a kind of your own runs**: a kind no catalog module
+declares is routed to the sweep that claims it, at window grain (§2). What stays closed is a kind the
+catalog already declares. Two closed doors, and it is worth knowing which one you are at:
 
 **A third door exists but is currently closed: `DetectorSupplier` for an existing
 observation/turn-grain kind whose in-tree manifest entry has `detectorFactory: null`.** Until
@@ -339,11 +360,10 @@ extensibility rather than as a byproduct of one detector's extraction.
   registry's `toUnmodifiableMap` throws and **the application context refuses to start**. That is the
   designed answer, not a bug, but it means "drop in a sweep for an existing kind" bricks the backend
   on first boot rather than overriding anything.
-- **Any other kind never reaches the registry.** `grainFor` defaults an undeclared kind to
-  `Grain.OBSERVATION`, and `sweepSignal` consults `sweeps.forKind(...)` only in its `TRACE, WINDOW`
-  arm — so a sweep claiming a kind of your own, or an observation-grain kind like `frustration` or
-  `secret_leak`, registers successfully and is never dispatched. Giving a new kind trace or window
-  grain means a catalog manifest entry, which is hard stop 3 below.
+- **A declared observation or turn kind keeps its catalog grain.** For a kind the catalog declares,
+  the catalog's grain wins over the registry, so a sweep claiming `frustration` or `secret_leak` is
+  never dispatched. Both kinds have a detector, so such a sweep fails the context at startup (§6)
+  rather than registering in silence.
 
 **Three hard stops bound an extension, and each is somebody else's issue.** They are tracked on
 the roadmap with owners; naming them here is the honest version of the promise:
@@ -369,12 +389,12 @@ the roadmap with owners; naming them here is the honest version of the promise:
 What each of those blocks: a new capability, a new case key, a new catalog module. What none of them
 blocks: feeding the read-side surfaces — findings, triage and cases — which works
 today; and supplying the detector object for an EXISTING observation/turn-grain
-kind, which works too. Running a sweep of your own is blocked by neither of them and by the two doors
-above instead: every trace- and window-grain kind is claimed, and an unclaimed kind needs the catalog
-entry hard stop 3 (in its still-closed, brand-new-entry sense) forbids. So hard stop 3 is the one to
-watch — it gates third-party catalog contribution *and*, transitively, the only unclaimed way to get a
-sweep dispatched, while its narrower carve-out is what makes `DetectorSupplier` possible for a kind
-that already has a home.
+kind, which works too; and running a sweep for a kind of your own, which needs no catalog entry,
+because the worker routes a kind the catalog does not declare to the sweep that claims it. Such a
+classifier has no capability switch and no case key of its own, since hard stops 1 and 2 still
+apply. So hard stop 3 is the one to watch for catalog contribution: it gates a third-party catalog
+entry, while its narrower carve-out is what makes `DetectorSupplier` possible for a kind that already
+has a home.
 
 ---
 

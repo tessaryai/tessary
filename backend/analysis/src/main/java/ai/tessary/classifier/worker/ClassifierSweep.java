@@ -24,11 +24,14 @@ import java.util.Set;
  *       @Component}s collected by {@link ClassifierSweepRegistry}; no open class names a concrete
  *       sweep, and an implementation may ship from any jar on the runtime classpath. See {@code
  *       devdocs/reference/classifier-extension-interface.md}.
- *   <li>Sweeps key on the open {@link BuiltInDetector.Kind} constants, which stay constant. {@code
+ *   <li>Sweeps key on the open {@link BuiltInDetector.Kind} constants, which stay constant, or on a
+ *       kind of their own that no catalog module declares. {@code
  *       BuiltInClassifierCatalog.builtIns()} is never filtered by what is registered here: {@code
  *       ClassifierService.retireDroppedBuiltIns} keys on catalog membership and retirement is
  *       irreversible, so a classifier dropping out of the catalog because its jar is absent would
- *       permanently disable every customer row that classifier ever wrote.
+ *       permanently disable every customer row that classifier ever wrote. A kind no module declares
+ *       runs at window grain when a sweep claims it; a kind that also has a {@link BuiltInDetector}
+ *       fails the context at startup.
  *   <li>An unregistered kind is inert, not an error. The worker logs one warning and completes the
  *       job: it does not throw, does not dead-letter, and above all does not fall through to
  *       another sweep, since an unrecognized kind silently routed to the wrong sweep would keep a
@@ -41,9 +44,11 @@ import java.util.Set;
 public interface ClassifierSweep {
 
     /**
-     * The {@link BuiltInDetector.Kind} values this sweep claims. A kind claimed by two beans fails
-     * the context at startup rather than picking one; an empty set registers nothing and can never
-     * be dispatched; see {@link ClassifierSweepRegistry}.
+     * The detector kinds this sweep claims: {@link BuiltInDetector.Kind} values, or kinds no catalog
+     * module declares, which the worker then runs at window grain. A kind claimed by two beans fails
+     * the context at startup rather than picking one, and so does a kind that also has a {@link
+     * BuiltInDetector}; an empty set registers nothing and can never be dispatched; see {@link
+     * ClassifierSweepRegistry}.
      *
      * <p>A {@code Set} rather than a single kind because one sweep legitimately serves a family:
      * {@code MetricDriftSweep} runs both {@code duration_drift} and {@code cost_drift} from one bean

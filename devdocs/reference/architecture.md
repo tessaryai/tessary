@@ -177,8 +177,9 @@ of grading before the migration history was squashed into the current `0000-base
   the detector kinds it claims. Unlike every other seam in this file, an implementation may ship from
   a jar outside this reactor: discovery is a Spring Boot `AutoConfiguration.imports` read off the
   runtime classpath, which is what lets a self-hoster run their own classifier and what lets the paid
-  classifiers leave the open tree. An unregistered kind is inert, and the catalog is never filtered by
-  what is registered. Full contract in
+  classifiers leave the open tree. An unregistered kind is inert, a sweep for a kind the catalog does
+  not declare is dispatched at window grain, and the catalog is never filtered by what is registered.
+  Full contract in
   [classifier-extension-interface.md](./classifier-extension-interface.md).
 - **`alert/` channel registry is a *multi-impl* seam, not a single-provider SPI.** The
   `AlertChannel` seam under `alert/channel/` holds every implementation at once: a `ChannelFactory` (EnumMap keyed by `AlertChannelKind`: slack | webhook |

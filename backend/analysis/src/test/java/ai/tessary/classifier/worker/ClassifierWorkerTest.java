@@ -3,6 +3,7 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -80,6 +81,9 @@ class ClassifierWorkerTest {
     private static final int PAGE = 2;
     private static final int RETRY_PAGE = 4;
     private static final int MAX_HOLDS = 3;
+    private static final String UNDECLARED = "undeclared_kind";
+    private static final String CURSOR_AT = "2026-10-01T00:00:00Z";
+    private static final String CURSOR_ID = "trace-9:span-9";
 
     @Mock
     ClassifierService signalService;
@@ -117,6 +121,10 @@ class ClassifierWorkerTest {
 
     @Mock
     ClassifierSweep toolErrorSweep;
+
+    /** A sweep from outside the tree, for a kind no catalog module declares. */
+    @Mock
+    ClassifierSweep undeclaredSweep;
 
     @Mock
     Tracer tracer;
@@ -487,6 +495,7 @@ class ClassifierWorkerTest {
                 .build();
         SweepContext expected = new SweepContext(job, signal);
         when(signals.findById("proj-1", "sig-te")).thenReturn(Optional.of(signal));
+        when(catalog.declares(BuiltInDetector.Kind.TOOL_ERROR)).thenReturn(true);
         when(catalog.grainFor(BuiltInDetector.Kind.TOOL_ERROR)).thenReturn(Grain.WINDOW);
         when(toolErrorSweep.sweep(expected)).thenReturn(new SweepOutcome(0, 2));
 
@@ -525,6 +534,101 @@ class ClassifierWorkerTest {
         verify(jobs).markSwept("job-unclaimed", null, null);
         verify(metricSweep, never()).sweep(any());
         verify(toolErrorSweep, never()).sweep(any());
+        assertEquals(
+                Map.of("grain", "window", "route", "catalog"),
+                fields(event("signal.sweep.no-handler"), "grain", "route"),
+                "a declared window kind takes its grain from the catalog");
+    }
+
+    /**
+     * A kind no catalog module declares runs the sweep registered for it, at window grain, on the job's own cursor.
+     * Without the registry route it defaults to observation grain, so an out-of-tree sweep for a kind of its own is
+     * never dispatched and its classifier scores nothing.
+     */
+    @Test
+    void anUndeclaredKindWithARegisteredSweepRunsThatSweepOnTheJobsCursor() {
+        when(undeclaredSweep.kinds()).thenReturn(Set.of(UNDECLARED));
+        ClassifierWorker worker = worker(new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
+        ClassifierRow signal =
+                ClassifierRowBuilder.of(UNDECLARED).id("sig-u").custom().build();
+        ClassifierJobRow job = jobAt("job-u", "sig-u", CURSOR_AT, CURSOR_ID);
+        when(signals.findById(PROJECT, "sig-u")).thenReturn(Optional.of(signal));
+        when(undeclaredSweep.sweep(new SweepContext(job, signal))).thenReturn(new SweepOutcome(3, 1));
+
+        worker.sweepForTest(job);
+
+        verify(undeclaredSweep).sweep(new SweepContext(job, signal));
+        verify(catalog, never()).grainFor(any());
+        verify(jobs, never()).markSwept(any(), any(), any());
+        verify(jobs, never()).markFailed(any(), any(), anyInt());
+        verifyNoInteractions(substrate);
+        verify(detections, never()).writesDetections(any());
+        assertEquals(
+                Map.of("grain", "window", "route", "registry", "scanned", 3, "fired", 1, "pages", 1),
+                fields(event("signal.sweep.complete"), "grain", "route", "scanned", "fired", "pages"));
+    }
+
+    /**
+     * An undeclared kind with no sweep of its own keeps the span-grain path, even while another undeclared kind has
+     * one. Routing on "some sweep is registered" would send it to a sweep that is not its own and stop it scoring.
+     */
+    @Test
+    void anUndeclaredKindWithNoSweepStillRunsTheSpanGrainPath() {
+        when(undeclaredSweep.kinds()).thenReturn(Set.of("other_undeclared_kind"));
+        ClassifierWorker worker = worker(PAGE, new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
+        armSignal(ClassifierRowBuilder.of(UNDECLARED).custom().build());
+        List<SubstrateObservation> tail = page(0, 1);
+        when(substrate.observationsAfter(PROJECT, CURSOR_AT, CURSOR_ID, PAGE)).thenReturn(tail);
+
+        worker.sweepForTest(jobAt("job-1", CLASSIFIER, CURSOR_AT, CURSOR_ID));
+
+        verify(substrate, times(1)).observationsAfter(PROJECT, CURSOR_AT, CURSOR_ID, PAGE);
+        verify(jobs).markSwept("job-1", createdAt(tail), handle(tail));
+        verify(undeclaredSweep, never()).sweep(any());
+        assertEquals(
+                Map.of("grain", "observation", "route", "catalog"),
+                fields(event("signal.sweep.complete"), "grain", "route"));
+    }
+
+    /**
+     * A kind with both a detector and a sweep fails at boot, and a sweep for a kind with no detector boots. Booting
+     * with both would leave one of them silently unused: the sweep wins an undeclared kind and the detector stops
+     * scoring.
+     */
+    @Test
+    void aKindWithBothADetectorAndASweepFailsAtBoot() {
+        when(undeclaredSweep.kinds()).thenReturn(Set.of(UNDECLARED));
+        ClassifierWorker worker = worker(new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
+        when(catalog.detectorFor(UNDECLARED)).thenReturn(detector, (BuiltInDetector) null);
+
+        assertThrows(IllegalStateException.class, worker::validateRouting, "the kind has a detector and a sweep");
+        assertDoesNotThrow(worker::validateRouting, "the kind has only a sweep");
+    }
+
+    /**
+     * A kind the catalog declares keeps the catalog's grain when a sweep also claims it. Letting the registry win would
+     * change the grain of a shipped classifier because a jar is on the classpath.
+     */
+    @Test
+    void aDeclaredKindKeepsItsCatalogGrainEvenWithASweepRegistered() {
+        when(undeclaredSweep.kinds()).thenReturn(Set.of(BuiltInDetector.Kind.FRUSTRATION));
+        ClassifierWorker worker = worker(new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
+        ClassifierRow signal = ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
+                .id("sig-fr")
+                .build();
+        when(signals.findById(PROJECT, "sig-fr")).thenReturn(Optional.of(signal));
+        when(catalog.declares(BuiltInDetector.Kind.FRUSTRATION)).thenReturn(true);
+        when(catalog.grainFor(BuiltInDetector.Kind.FRUSTRATION)).thenReturn(Grain.TURN);
+        when(detections.writesDetections(BuiltInDetector.Kind.FRUSTRATION)).thenReturn(false);
+
+        worker.sweepForTest(job("job-fr", "sig-fr"));
+
+        verify(undeclaredSweep, never()).sweep(any());
+        verify(jobs).markSwept("job-fr", null, null);
+        assertEquals(
+                Map.of("grain", "turn"),
+                fields(event("signal.sweep.no-table"), "grain"),
+                "the turn grain from the catalog reached the observation-grain path");
     }
 
     /**
@@ -705,6 +809,12 @@ class ClassifierWorkerTest {
         return worker(new ClassifierProperties(), sweeps);
     }
 
+    private ClassifierWorker worker(int pageSize, ClassifierSweepRegistry sweeps) {
+        ClassifierProperties props = new ClassifierProperties();
+        props.setBatchSize(pageSize);
+        return worker(props, sweeps);
+    }
+
     private ClassifierWorker worker(ClassifierProperties props, ClassifierSweepRegistry sweeps) {
         return new ClassifierWorker(
                 signalService,
@@ -792,6 +902,46 @@ class ClassifierWorkerTest {
                 "now",
                 "now",
                 pageRetries);
+    }
+
+    /** A job whose cursor already stands at {@code (cursorAt, cursorId)}. */
+    private static ClassifierJobRow jobAt(String id, String classifier, String cursorAt, String cursorId) {
+        return new ClassifierJobRow(
+                id,
+                PROJECT,
+                classifier,
+                ClassifierJobRow.PENDING,
+                cursorAt,
+                cursorId,
+                null,
+                null,
+                0,
+                null,
+                "now",
+                "now",
+                0);
+    }
+
+    /** The structured fields of the one logged event named {@code name}. */
+    private Map<String, Object> event(String name) {
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (ILoggingEvent e : appender.list) {
+            if (e.getKeyValuePairs() == null) continue;
+            Map<String, Object> fields = new java.util.HashMap<>();
+            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
+            if (name.equals(fields.get("event"))) matches.add(fields);
+        }
+        assertEquals(1, matches.size(), "exactly one " + name + " event: " + appender.list);
+        return matches.get(0);
+    }
+
+    /** The named entries of {@code fields}, for comparing a whole set at once. */
+    private static Map<String, Object> fields(Map<String, Object> fields, String... keys) {
+        Map<String, Object> out = new java.util.HashMap<>();
+        for (String key : keys) {
+            if (fields.containsKey(key)) out.put(key, fields.get(key));
+        }
+        return out;
     }
 
     /** {@code size} observations numbered from {@code from}, in cursor order. */
