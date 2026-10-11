@@ -3,17 +3,13 @@ package ai.tessary.classifier.frustration;
 
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
-import ai.tessary.model.ContentExtractor;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import ai.tessary.classifier.timeline.DialogueMessages;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.StringJoiner;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -36,16 +32,6 @@ class ConversationThreadAssembler {
     // Only dialogue-bearing spans carry a scored user turn; a tool/retrieval span has no thread.
     private static final Set<String> CONVERSATIONAL_KINDS = Set.of("llm", "agent");
 
-    // Part types the structured form reads as the user-visible text of a message.
-    private static final Set<String> TEXT_PART_TYPES = Set.of("", "text", "input_text", "output_text");
-    // Tool parts leave no text in the structured form; a tool call only marks where an assistant turn ended.
-    private static final Set<String> TOOL_CALL_PART_TYPES = Set.of("tool_call", "tool_use", "function_call");
-    private static final Set<String> TOOL_RESULT_PART_TYPES =
-            Set.of("tool_result", "tool_call_response", "function_call_output");
-    // Model reasoning is never shown to the user, so it is not part of what the user reacted to.
-    private static final Set<String> HIDDEN_PART_TYPES = Set.of("reasoning", "thinking", "redacted_thinking");
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     // The four messages before the scored one are two exchanges: two turns.
     private static final int PRIOR_TURNS = 2;
 
@@ -91,7 +77,7 @@ class ConversationThreadAssembler {
             if (obs.observationId().equals(dialogueBearer.get(turnKey(obs)))) {
                 appendMessages(earlier, ownUserMessages(obs.input()));
             }
-            appendMessages(earlier, columnStructuredMessages(obs.output(), "assistant", DIALOGUE_ROLES));
+            appendMessages(earlier, dialogue(DialogueMessages.read(obs.output(), "assistant")));
         }
         return Optional.of(new StructuredThread(earlier, joined(scoredUser), prior.count() + 1));
     }
@@ -102,12 +88,9 @@ class ConversationThreadAssembler {
      * role, in each turn's input; only what follows the last reply is new in that turn.
      */
     private static List<StructuredThread.Message> ownUserMessages(@Nullable String input) {
-        List<StructuredThread.Message> messages = columnStructuredMessages(input, "user", DIALOGUE_ROLES);
-        int afterLastReply = 0;
-        for (int i = 0; i < messages.size(); i++) {
-            if ("assistant".equals(messages.get(i).role())) afterLastReply = i + 1;
-        }
-        return messages.subList(afterLastReply, messages.size());
+        return dialogue(DialogueMessages.afterLastAssistant(DialogueMessages.read(input, "user"))).stream()
+                .filter(m -> "user".equals(m.role()))
+                .toList();
     }
 
     /**
@@ -144,88 +127,14 @@ class ConversationThreadAssembler {
     }
 
     /**
-     * The {@code roles} messages of one stored column, part by part: text parts kept, media parts as
-     * their contract-v2 placeholders ({@link ContentExtractor#partPlaceholder}), tool parts and
-     * reasoning dropped. A message left with nothing but a tool result (a tool-result carrier sent under
-     * the user role) is not a message. A plain-string or non-envelope column is one text message under
-     * {@code fallbackRole}, as {@link ContentExtractor#columnMessages} reads it.
+     * The user and assistant dialogue messages of one stored column ({@link DialogueMessages#read}). A message left
+     * with nothing but a tool result (a tool-result carrier sent under the user role) is not a message.
      */
-    private static List<StructuredThread.Message> columnStructuredMessages(
-            @Nullable String raw, String fallbackRole, Set<String> roles) {
-        if (raw == null || raw.isBlank()) return List.of();
-        JsonNode node;
-        try {
-            node = MAPPER.readTree(raw);
-        } catch (JsonProcessingException e) {
-            return textMessage(fallbackRole, raw.strip());
-        }
-        if (!ContentExtractor.isMessageEnvelope(node)) {
-            // Every caller's fallback role is one of the roles it reads, so the bare payload is that turn.
-            return textMessage(
-                    fallbackRole, ContentExtractor.flattenContentText(node).strip());
-        }
-        List<StructuredThread.Message> out = new ArrayList<>();
-        for (JsonNode msg : node) {
-            if (!msg.isObject()) continue;
-            String role = msg.path("role").asText("");
-            if (!roles.contains(role)) continue;
-            PartWalk walk = new PartWalk();
-            JsonNode content = msg.get("content");
-            if (content != null && !content.isNull()) {
-                walk.node(content);
-            } else if (msg.path("parts").isArray()) {
-                walk.node(msg.get("parts"));
-            }
-            JsonNode toolCalls = msg.get("tool_calls");
-            if (toolCalls != null && toolCalls.isArray() && !toolCalls.isEmpty()) {
-                walk.endsInToolCall = true; // OpenAI puts tool_calls after the message content
-            }
-            if (walk.text.length() > 0 || walk.endsInToolCall) {
-                out.add(new StructuredThread.Message(
-                        role, walk.text.toString(), walk.hasText, "assistant".equals(role) && walk.endsInToolCall));
-            }
-        }
-        return List.copyOf(out);
-    }
-
-    private static List<StructuredThread.Message> textMessage(String role, String text) {
-        return text.isEmpty() ? List.of() : List.of(new StructuredThread.Message(role, text, true, false));
-    }
-
-    /** Walks one message's content in order, collecting its text and whether it ended on a tool call. */
-    private static final class PartWalk {
-        private final StringJoiner text = new StringJoiner(" ");
-        private boolean hasText;
-        private boolean endsInToolCall;
-
-        void node(JsonNode node) {
-            if (node.isArray()) {
-                for (JsonNode part : node) part(part);
-            } else {
-                part(node);
-            }
-        }
-
-        private void part(JsonNode part) {
-            if (part.isTextual()) {
-                append(part.asText().strip(), true);
-                return;
-            }
-            if (!part.isObject()) return;
-            String type = part.path("type").asText("");
-            if (TOOL_CALL_PART_TYPES.contains(type)) {
-                endsInToolCall = true;
-            } else if (!TOOL_RESULT_PART_TYPES.contains(type) && !HIDDEN_PART_TYPES.contains(type)) {
-                append(ContentExtractor.partPlaceholder(part), TEXT_PART_TYPES.contains(type));
-            }
-        }
-
-        private void append(String rendered, boolean isText) {
-            if (rendered.isEmpty()) return;
-            text.add(rendered);
-            hasText |= isText;
-            endsInToolCall = false;
-        }
+    private static List<StructuredThread.Message> dialogue(List<DialogueMessages.DialogueMessage> messages) {
+        return messages.stream()
+                .filter(m -> m.dialogue() && DIALOGUE_ROLES.contains(m.role()))
+                .map(m -> new StructuredThread.Message(m.role(), m.text(), m.hasText(), m.endsInToolCall()))
+                .toList();
     }
 
     /**
