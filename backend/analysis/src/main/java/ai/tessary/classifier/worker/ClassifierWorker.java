@@ -24,6 +24,7 @@ import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import jakarta.annotation.PostConstruct;
 import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
@@ -145,6 +146,24 @@ public class ClassifierWorker {
         this.props = props;
         this.traceBridge = traceBridge;
         this.executor = executor;
+    }
+
+    /**
+     * Fail the boot when a detector kind has both a {@link BuiltInDetector} and a {@link
+     * ClassifierSweep}. The worker dispatches a kind through one of them, so the other would stop
+     * scoring with nothing to say so.
+     */
+    @PostConstruct
+    void validateRouting() {
+        List<String> both = sweeps.registeredKinds().stream()
+                .filter(kind -> catalog.detectorFor(kind) != null)
+                .sorted()
+                .toList();
+        if (!both.isEmpty()) {
+            throw new IllegalStateException("detector kind(s) " + both
+                    + " have both a BuiltInDetector and a ClassifierSweep; a kind is dispatched through"
+                    + " one of them, so remove the other");
+        }
     }
 
     /**

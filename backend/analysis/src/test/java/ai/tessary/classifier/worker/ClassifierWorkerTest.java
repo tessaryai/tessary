@@ -3,6 +3,7 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -587,6 +588,21 @@ class ClassifierWorkerTest {
         assertEquals(
                 Map.of("grain", "observation", "route", "catalog"),
                 fields(event("signal.sweep.complete"), "grain", "route"));
+    }
+
+    /**
+     * A kind with both a detector and a sweep fails at boot, and a sweep for a kind with no detector boots. Booting
+     * with both would leave one of them silently unused: the sweep wins an undeclared kind and the detector stops
+     * scoring.
+     */
+    @Test
+    void aKindWithBothADetectorAndASweepFailsAtBoot() {
+        when(undeclaredSweep.kinds()).thenReturn(Set.of(UNDECLARED));
+        ClassifierWorker worker = worker(new ClassifierSweepRegistry(TestObjectProvider.of(undeclaredSweep)));
+        when(catalog.detectorFor(UNDECLARED)).thenReturn(detector, (BuiltInDetector) null);
+
+        assertThrows(IllegalStateException.class, worker::validateRouting, "the kind has a detector and a sweep");
+        assertDoesNotThrow(worker::validateRouting, "the kind has only a sweep");
     }
 
     /**
