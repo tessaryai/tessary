@@ -12,7 +12,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * One event of a session timeline: a span, or a message inside a span.
  *
- * @param id a span event's span id; a message event's {@code <span_id>#user:<n>} or {@code <span_id>#reply:<n>}
+ * @param id unique in the session: a span event's {@code <trace_id>/<span_id>}; a message event's {@code
+ *     <trace_id>/<span_id>#user:<n>} or {@code <trace_id>/<span_id>#reply:<n>}
  * @param kind the span's canonical kind ({@code mcp} folded into {@code tool}), or {@link #USER_MESSAGE} or {@link
  *     #ASSISTANT_REPLY}
  * @param position the 0-based index in the timeline

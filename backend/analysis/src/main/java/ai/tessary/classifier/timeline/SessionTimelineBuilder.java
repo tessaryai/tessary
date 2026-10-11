@@ -45,7 +45,7 @@ public final class SessionTimelineBuilder {
     private static final Set<String> SYSTEM_ROLES = Set.of("system", "developer");
     private static final String SETTINGS_PREFIX = "gen_ai.request.";
     private static final String MODEL_SETTING = "gen_ai.request.model";
-    // A span event sorts after the user messages its span carries when both fall on one instant.
+    // Only span events carry it: a span event sorts after the user messages its span carries on one instant.
     private static final int SPAN_ORDINAL = Integer.MAX_VALUE;
 
     private SessionTimelineBuilder() {}
@@ -97,7 +97,7 @@ public final class SessionTimelineBuilder {
         for (Derived d : others) {
             Event event = d.event();
             ordered.add(event.withPosition(ordered.size()));
-            if (!event.id().equals(event.spanId())) continue;
+            if (d.ordinal() != SPAN_ORDINAL) continue;
             List<Derived> replies = repliesByWriter.get(List.of(event.traceId(), event.spanId()));
             if (replies == null) continue;
             replies.sort(Comparator.comparingInt(Derived::ordinal));
@@ -139,7 +139,7 @@ public final class SessionTimelineBuilder {
                 Facts f = facts(span);
                 out.add(new Derived(
                         event(
-                                span.spanId(),
+                                spanEventId(span),
                                 eventKind(span),
                                 ended,
                                 span,
@@ -187,7 +187,7 @@ public final class SessionTimelineBuilder {
                     out.add(new Derived(
                             messageEvent(
                                     carrier,
-                                    carrier.spanId() + "#user:" + n,
+                                    spanEventId(carrier) + "#user:" + n,
                                     Event.USER_MESSAGE,
                                     carrier.startedAt(),
                                     data),
@@ -260,7 +260,7 @@ public final class SessionTimelineBuilder {
             ObjectNode data = MAPPER.createObjectNode().put("text", text);
             Instant ended = Objects.requireNonNull(writer.endedAt());
             return new Derived(
-                    messageEvent(writer, writer.spanId() + "#reply:" + n, Event.ASSISTANT_REPLY, ended, data),
+                    messageEvent(writer, spanEventId(writer) + "#reply:" + n, Event.ASSISTANT_REPLY, ended, data),
                     writer.spanId(),
                     n);
         }
@@ -314,6 +314,11 @@ public final class SessionTimelineBuilder {
             }
             return new Facts(kinds.isEmpty() ? null : kinds.get(kinds.size() - 1), kinds, up.size(), agentId);
         }
+    }
+
+    /** A span id is unique only inside its trace, so the event id carries the trace id too. */
+    private static String spanEventId(TimelineSpan span) {
+        return span.traceId() + "/" + span.spanId();
     }
 
     private static String eventKind(TimelineSpan span) {

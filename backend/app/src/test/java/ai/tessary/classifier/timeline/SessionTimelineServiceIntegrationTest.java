@@ -110,7 +110,7 @@ class SessionTimelineServiceIntegrationTest {
         assertEquals(
                 List.of(
                         new Row(
-                                s.id("a1") + "#user:0",
+                                trA + "/" + s.id("a1") + "#user:0",
                                 "user_message",
                                 0,
                                 at(0),
@@ -122,7 +122,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-agent"),
                         new Row(
-                                s.id("a2"),
+                                trA + "/" + s.id("a2"),
                                 "llm",
                                 1,
                                 at(200),
@@ -134,7 +134,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-llm"),
                         new Row(
-                                s.id("a3"),
+                                trA + "/" + s.id("a3"),
                                 "tool",
                                 2,
                                 at(300),
@@ -146,7 +146,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-turn-a"),
                         new Row(
-                                s.id("a5"),
+                                trA + "/" + s.id("a5"),
                                 "llm",
                                 3,
                                 at(590),
@@ -158,7 +158,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-billing-llm"),
                         new Row(
-                                s.id("a4"),
+                                trA + "/" + s.id("a4"),
                                 "agent",
                                 4,
                                 at(600),
@@ -170,7 +170,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-billing"),
                         new Row(
-                                s.id("a6"),
+                                trA + "/" + s.id("a6"),
                                 "llm",
                                 5,
                                 at(900),
@@ -182,7 +182,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trA,
                                 "cs-llm"),
                         new Row(
-                                s.id("a6") + "#reply:0",
+                                trA + "/" + s.id("a6") + "#reply:0",
                                 "assistant_reply",
                                 6,
                                 at(900),
@@ -193,9 +193,20 @@ class SessionTimelineServiceIntegrationTest {
                                 s.id("a1"),
                                 trA,
                                 "cs-llm"),
-                        new Row(s.id("a1"), "agent", 7, at(900), 0, null, null, List.of(), null, trA, "cs-agent"),
                         new Row(
-                                s.id("b1") + "#user:0",
+                                trA + "/" + s.id("a1"),
+                                "agent",
+                                7,
+                                at(900),
+                                0,
+                                null,
+                                null,
+                                List.of(),
+                                null,
+                                trA,
+                                "cs-agent"),
+                        new Row(
+                                trB + "/" + s.id("b1") + "#user:0",
                                 "user_message",
                                 8,
                                 at(1000),
@@ -207,7 +218,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trB,
                                 "cs-agent"),
                         new Row(
-                                s.id("b4"),
+                                trB + "/" + s.id("b4"),
                                 "step",
                                 9,
                                 at(1005),
@@ -219,7 +230,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trB,
                                 "cs-turn-b"),
                         new Row(
-                                s.id("b2"),
+                                trB + "/" + s.id("b2"),
                                 "llm",
                                 10,
                                 at(1400),
@@ -231,7 +242,7 @@ class SessionTimelineServiceIntegrationTest {
                                 trB,
                                 "cs-llm"),
                         new Row(
-                                s.id("b3"),
+                                trB + "/" + s.id("b3"),
                                 "tool",
                                 11,
                                 at(1450),
@@ -242,9 +253,20 @@ class SessionTimelineServiceIntegrationTest {
                                 s.id("b1"),
                                 trB,
                                 "cs-turn-b"),
-                        new Row(s.id("b1"), "agent", 12, at(1500), 0, null, null, List.of(), null, trB, "cs-agent"),
                         new Row(
-                                s.id("b1") + "#reply:0",
+                                trB + "/" + s.id("b1"),
+                                "agent",
+                                12,
+                                at(1500),
+                                0,
+                                null,
+                                null,
+                                List.of(),
+                                null,
+                                trB,
+                                "cs-agent"),
+                        new Row(
+                                trB + "/" + s.id("b1") + "#reply:0",
                                 "assistant_reply",
                                 13,
                                 at(1500),
@@ -316,22 +338,22 @@ class SessionTimelineServiceIntegrationTest {
     @Test
     void loadReadsPastTheFirstPageOfTraces() {
         String sessionId = SubstrateV2Fixtures.sessionId();
-        List<String> spanIds = new ArrayList<>();
+        List<String> eventIds = new ArrayList<>();
         for (int i = 0; i < 21; i++) {
-            spanIds.add(fx.spanSeed(pid)
+            SpanRef ref = fx.spanSeed(pid)
                     .sessionId(sessionId)
                     .kind("tool")
                     .name("execute_tool")
                     .at(at(i * 100L))
                     .endedAt(at(i * 100L + 50))
-                    .writeRef()
-                    .spanId());
+                    .writeRef();
+            eventIds.add(ref.traceId() + "/" + ref.spanId());
         }
 
         SessionTimeline timeline = timelines.load(pid, sessionId);
 
         assertEquals(
-                spanIds,
+                eventIds,
                 timeline.events().stream().map(Event::id).toList(),
                 "the cursor between pages of 20 traces repeats or drops a trace, so a long session loses its start");
         assertEquals(false, timeline.truncated());

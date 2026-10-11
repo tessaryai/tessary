@@ -46,7 +46,7 @@ class SessionTimelineBuilderTest {
         assertEquals(
                 List.of(
                         new Row(
-                                "a1#user:0",
+                                "tr-a/a1#user:0",
                                 "user_message",
                                 0,
                                 at(0),
@@ -57,9 +57,20 @@ class SessionTimelineBuilderTest {
                                 "a1",
                                 "tr-a",
                                 "cs-agent"),
-                        new Row("a2", "llm", 1, at(200), 1, "a1", "agent", List.of("agent"), "a1", "tr-a", "cs-llm"),
                         new Row(
-                                "a3",
+                                "tr-a/a2",
+                                "llm",
+                                1,
+                                at(200),
+                                1,
+                                "a1",
+                                "agent",
+                                List.of("agent"),
+                                "a1",
+                                "tr-a",
+                                "cs-llm"),
+                        new Row(
+                                "tr-a/a3",
                                 "tool",
                                 2,
                                 at(300),
@@ -71,7 +82,7 @@ class SessionTimelineBuilderTest {
                                 "tr-a",
                                 "cs-turn-a"),
                         new Row(
-                                "a5",
+                                "tr-a/a5",
                                 "llm",
                                 3,
                                 at(590),
@@ -83,7 +94,7 @@ class SessionTimelineBuilderTest {
                                 "tr-a",
                                 "cs-billing-llm"),
                         new Row(
-                                "a4",
+                                "tr-a/a4",
                                 "agent",
                                 4,
                                 at(600),
@@ -94,9 +105,20 @@ class SessionTimelineBuilderTest {
                                 "a1",
                                 "tr-a",
                                 "cs-billing"),
-                        new Row("a6", "llm", 5, at(900), 1, "a1", "agent", List.of("agent"), "a1", "tr-a", "cs-llm"),
                         new Row(
-                                "a6#reply:0",
+                                "tr-a/a6",
+                                "llm",
+                                5,
+                                at(900),
+                                1,
+                                "a1",
+                                "agent",
+                                List.of("agent"),
+                                "a1",
+                                "tr-a",
+                                "cs-llm"),
+                        new Row(
+                                "tr-a/a6#reply:0",
                                 "assistant_reply",
                                 6,
                                 at(900),
@@ -107,9 +129,9 @@ class SessionTimelineBuilderTest {
                                 "a1",
                                 "tr-a",
                                 "cs-llm"),
-                        new Row("a1", "agent", 7, at(900), 0, null, null, List.of(), null, "tr-a", "cs-agent"),
+                        new Row("tr-a/a1", "agent", 7, at(900), 0, null, null, List.of(), null, "tr-a", "cs-agent"),
                         new Row(
-                                "b1#user:0",
+                                "tr-b/b1#user:0",
                                 "user_message",
                                 8,
                                 at(1000),
@@ -121,7 +143,7 @@ class SessionTimelineBuilderTest {
                                 "tr-b",
                                 "cs-agent"),
                         new Row(
-                                "b4",
+                                "tr-b/b4",
                                 "step",
                                 9,
                                 at(1005),
@@ -132,9 +154,20 @@ class SessionTimelineBuilderTest {
                                 "b1",
                                 "tr-b",
                                 "cs-turn-b"),
-                        new Row("b2", "llm", 10, at(1400), 1, "b1", "agent", List.of("agent"), "b1", "tr-b", "cs-llm"),
                         new Row(
-                                "b3",
+                                "tr-b/b2",
+                                "llm",
+                                10,
+                                at(1400),
+                                1,
+                                "b1",
+                                "agent",
+                                List.of("agent"),
+                                "b1",
+                                "tr-b",
+                                "cs-llm"),
+                        new Row(
+                                "tr-b/b3",
                                 "tool",
                                 11,
                                 at(1450),
@@ -145,9 +178,9 @@ class SessionTimelineBuilderTest {
                                 "b1",
                                 "tr-b",
                                 "cs-turn-b"),
-                        new Row("b1", "agent", 12, at(1500), 0, null, null, List.of(), null, "tr-b", "cs-agent"),
+                        new Row("tr-b/b1", "agent", 12, at(1500), 0, null, null, List.of(), null, "tr-b", "cs-agent"),
                         new Row(
-                                "b1#reply:0",
+                                "tr-b/b1#reply:0",
                                 "assistant_reply",
                                 13,
                                 at(1500),
@@ -225,7 +258,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("r3#reply:0"),
+                List.of("tr-r/r3#reply:0"),
                 replyIds(timeline),
                 "a router's text is never shown to the user, so only the text the agent returned is a reply");
     }
@@ -257,7 +290,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("g2#reply:0", "g4#reply:0"),
+                List.of("tr-g/g2#reply:0", "tr-g/g4#reply:0"),
                 replyIds(timeline),
                 "treating the agent output as the only reply loses the first reply of the turn");
         assertEquals(
@@ -280,7 +313,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("l1#reply:0", "l3#reply:0"),
+                List.of("tr-l/l1#reply:0", "tr-l/l3#reply:0"),
                 replyIds(timeline),
                 "a tool-call-only output is not a reply, and an app with no agent span still has replies");
     }
@@ -297,7 +330,17 @@ class SessionTimelineBuilderTest {
 
         assertEquals(
                 List.of(new Row(
-                        "o1#user:0", "user_message", 0, at(0), 1, "o1", "llm", List.of("llm"), null, "tr-o", null)),
+                        "tr-o/o1#user:0",
+                        "user_message",
+                        0,
+                        at(0),
+                        1,
+                        "o1",
+                        "llm",
+                        List.of("llm"),
+                        null,
+                        "tr-o",
+                        null)),
                 rows(timeline),
                 "an incomplete span is judged, or the user message is lost while the span runs");
     }
@@ -314,7 +357,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of(new Row("d1", "agent", 0, at(100), 0, null, null, List.of(), null, "tr-d", null)),
+                List.of(new Row("tr-d/d1", "agent", 0, at(100), 0, null, null, List.of(), null, "tr-d", null)),
                 rows(timeline),
                 "a message a model wrote to a detached sub-agent is counted as the person's");
     }
@@ -347,7 +390,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of(new Row("x1", "llm", 0, at(100), 0, "missing", null, List.of(), null, "tr-x", null)),
+                List.of(new Row("tr-x/x1", "llm", 0, at(100), 0, "missing", null, List.of(), null, "tr-x", null)),
                 rows(timeline),
                 "a span whose parent never arrived crashes the builder or gets a wrong depth");
     }
@@ -376,7 +419,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline one = full.tail(b12 + b13 - 1);
 
         assertEquals(
-                List.of("b1", "b1#reply:0"),
+                List.of("tr-b/b1", "tr-b/b1#reply:0"),
                 two.events().stream().map(Event::id).toList());
         assertEquals(
                 List.of(0, 1),
@@ -384,11 +427,33 @@ class SessionTimelineBuilderTest {
                 "a tail that keeps the old positions");
         assertEquals(true, two.truncated());
         assertEquals(
-                List.of("b1#reply:0"),
+                List.of("tr-b/b1#reply:0"),
                 one.events().stream().map(Event::id).toList(),
                 "a tail that cuts from the wrong end");
         assertEquals(full, full.tail(full.bytes()), "a tail that fits the whole timeline is the timeline");
         assertEquals(false, full.truncated());
+    }
+
+    @Test
+    void twoTracesThatReuseASpanIdGiveDistinctEventIds() {
+        List<TimelineSpan> spans = List.of(
+                span("tr-1", "s1", "llm")
+                        .at(0, 100)
+                        .in("[{\"role\":\"user\",\"content\":\"hi\"}]")
+                        .out("hello")
+                        .build(),
+                span("tr-2", "s1", "llm")
+                        .at(200, 300)
+                        .in("[{\"role\":\"user\",\"content\":\"bye\"}]")
+                        .out("goodbye")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-1/s1#user:0", "tr-1/s1", "tr-1/s1#reply:0", "tr-2/s1#user:0", "tr-2/s1", "tr-2/s1#reply:0"),
+                timeline.events().stream().map(Event::id).toList(),
+                "a span id is unique only inside its trace, so a bare span id gives two events one id");
     }
 
     @Test
@@ -399,7 +464,7 @@ class SessionTimelineBuilderTest {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
 
         assertEquals(
-                List.of("p1#user:0", "p1"),
+                List.of("tr-p/p1#user:0", "tr-p/p1"),
                 timeline.events().stream().map(Event::id).toList(),
                 "a producer that sends a plain string loses the person's message");
         assertEquals(
