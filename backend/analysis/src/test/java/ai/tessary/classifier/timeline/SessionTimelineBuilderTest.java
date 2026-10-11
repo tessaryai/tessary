@@ -302,6 +302,63 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void theAgentLoopsOwnTextIsAReplyWhenTheNextCallStartsTheSameMillisecond() {
+        String letMeCheck = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c9\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"expedite\",\"arguments\":\"{}\"}}]}";
+        List<TimelineSpan> spans = List.of(
+                span("tr-g", "g1", "agent")
+                        .at(0, 500)
+                        .out("Done: order 42 is expedited.")
+                        .build(),
+                span("tr-g", "g2", "llm")
+                        .parent("g1")
+                        .at(10, 100)
+                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}]")
+                        .out("[" + letMeCheck + "]")
+                        .build(),
+                span("tr-g", "g4", "llm")
+                        .parent("g1")
+                        .at(100, 490)
+                        .in("[{\"role\":\"user\",\"content\":\"expedite 42\"}," + letMeCheck
+                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c9\",\"content\":\"ok\"}]")
+                        .out("Done: order 42 is expedited.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-g/g2#reply:0", "tr-g/g4#reply:0"),
+                replyIds(timeline),
+                "a clock boundary drops a reply when the next model call starts in the millisecond the last one ended");
+    }
+
+    @Test
+    void aSummaryThatRepeatsAnEarlierReplyIsNotAReply() {
+        String history = "{\"role\":\"user\",\"content\":\"where is my order 42?\"}," + R1;
+        List<TimelineSpan> spans = List.of(
+                span("tr-m", "m1", "agent").at(0, 500).out("Yes, expedited.").build(),
+                span("tr-m", "m2", "llm")
+                        .parent("m1")
+                        .at(10, 100)
+                        .in("[" + history + ",{\"role\":\"user\",\"content\":\"summarise the chat\"}]")
+                        .out("Order 42 ships tomorrow.")
+                        .build(),
+                span("tr-m", "m3", "llm")
+                        .parent("m1")
+                        .at(110, 490)
+                        .in("[" + history + "," + EXPEDITE + "]")
+                        .out("Yes, expedited.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-m/m3#reply:0"),
+                replyIds(timeline),
+                "a text a later call carries only as old history is counted as shown again");
+    }
+
+    @Test
     void anAppWithoutAgentSpansRepliesFromEachTextCall() {
         String toolCallOnly = "[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
                 + "\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}]";

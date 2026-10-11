@@ -200,10 +200,11 @@ public final class SessionTimelineBuilder {
 
         /**
          * The replies of the turn. When a top agent span returned text, the agent output is the authority: an
-         * {@code llm} text is a reply when the agent returned it, or when a later person-facing {@code llm} call
-         * received it as its own assistant message (the agent loop showed it); an agent text no {@code llm} wrote is
-         * a reply of the agent span. Without agent text, every text of a person-facing {@code llm} span is a reply.
-         * One text is one reply per turn.
+         * {@code llm} text is a reply when the agent returned it, or when another person-facing {@code llm} call
+         * received it as an assistant message more times than the writer's own input holds it (the agent loop carried
+         * the new text on, not only the old history); an agent text no {@code llm} wrote is a reply of the agent span.
+         * Without agent text, every text of a person-facing {@code llm} span is a reply. One text is one reply per
+         * turn. No clock decides a reply, because the next call can start in the instant the last one ended.
          */
         private void replies(List<TimelineSpan> facing) {
             Comparator<TimelineSpan> endOrder = Comparator.comparing(
@@ -225,12 +226,11 @@ public final class SessionTimelineBuilder {
                     .filter(s -> s.endedAt() != null)
                     .sorted(endOrder)
                     .toList()) {
-                Instant ended = Objects.requireNonNull(writer.endedAt());
                 List<String> texts = assistantTexts(writer.output());
                 for (int n = 0; n < texts.size(); n++) {
                     String text = texts.get(n);
                     boolean shown =
-                            agentTexts.isEmpty() || agentTexts.contains(text) || receivedLater(facingLlms, text, ended);
+                            agentTexts.isEmpty() || agentTexts.contains(text) || carriedOn(facingLlms, writer, text);
                     if (shown && replied.add(text)) {
                         out.add(reply(writer, n, text));
                     }
@@ -246,14 +246,20 @@ public final class SessionTimelineBuilder {
             }
         }
 
-        private boolean receivedLater(List<TimelineSpan> llms, String text, Instant ended) {
-            for (TimelineSpan later : llms) {
-                if (!later.startedAt().isAfter(ended)) continue;
-                for (DialogueMessage m : DialogueMessages.read(later.input(), USER)) {
-                    if (ASSISTANT.equals(m.role()) && m.hasText() && m.text().equals(text)) return true;
-                }
+        private boolean carriedOn(List<TimelineSpan> llms, TimelineSpan writer, String text) {
+            long history = timesReceived(writer, text);
+            for (TimelineSpan other : llms) {
+                if (!other.spanId().equals(writer.spanId()) && timesReceived(other, text) > history) return true;
             }
             return false;
+        }
+
+        private static long timesReceived(TimelineSpan span, String text) {
+            return DialogueMessages.read(span.input(), USER).stream()
+                    .filter(m -> ASSISTANT.equals(m.role())
+                            && m.hasText()
+                            && m.text().equals(text))
+                    .count();
         }
 
         private Derived reply(TimelineSpan writer, int n, String text) {
