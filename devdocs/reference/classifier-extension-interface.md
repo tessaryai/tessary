@@ -34,7 +34,8 @@ enforce this would be a different decision, tracked separately.
 ## 2. The seam is four ports
 
 A classifier is not one interface. It is a set of small ports it may implement as many or as few of
-as it needs, each keyed on the open `BuiltInDetector.Kind` constants. **Three of the four are discovered
+as it needs, each keyed on a detector kind: an open `BuiltInDetector.Kind` constant, or, for a
+`ClassifierSweep` only, a kind of its own that no catalog module declares. **Three of the four are discovered
 by Spring collection injection outright. `BuiltInDetector` is hybrid**: its CATALOG
 ENTRY — name, description, capability, grain, config — is still in-tree-manifest-only, but the
 detector object itself can now ALSO be supplied from off the classpath, through a
@@ -117,7 +118,7 @@ which is precisely why the open engine could not compile without the paid classi
 
 ```java
 public interface ClassifierSweep {
-    Set<String> kinds();                 // the BuiltInDetector.Kind values this sweep claims
+    Set<String> kinds();                 // the detector kinds this sweep claims
     SweepOutcome sweep(SweepContext ctx); // one leased pass
 }
 
@@ -134,7 +135,10 @@ catalog's grain decides. For a kind no module declares, the worker asks the regi
 sweep means window grain, and the sweep gets the job's cursor, lease and attempt budget like the
 in-tree sweeps. With no sweep, the kind keeps the catalog default, `Grain.OBSERVATION`, and the
 detector path. `signal.sweep.complete` carries `route=registry` for a registry route and
-`route=catalog` for every other. A non-built-in classifier row is enqueued whatever its `detector`
+`route=catalog` for every other. `SweepRouting` (`classifier/worker/`) is the one home of this
+decision: the worker dispatches on it, and `ClassifierService#setCallSiteIds` reads the same grain,
+so widening the call sites of a registry-routed classifier does not rewind its cursor, as for every
+window classifier. A non-built-in classifier row is enqueued whatever its `detector`
 value, so an extension only creates its rows and registers its sweep. The catalog entry, the
 capability and the case key stay closed (§8, hard stops). A sweep that claims a declared
 observation or turn kind is still never dispatched, because the catalog's grain wins for a
@@ -271,8 +275,8 @@ So there are two distinct endings and only one of them writes:
 | This edition does not ship the classifier | the flag/capability layer; `withheldBuiltInKeys` | nothing |
 | The classifier left the catalog | `retireDroppedBuiltIns` | permanent disable |
 
-`ClassifierSweepRegistry` never touches the catalog. `ClassifierWorker` is the one place that reads
-both, to route a job (§2). `SweepCatalogCoverageTest` pins the other side: every fitting-tier catalog
+`ClassifierSweepRegistry` never touches the catalog. `SweepRouting` is the one place that reads
+both, to give a kind its grain (§2). `SweepCatalogCoverageTest` pins the other side: every fitting-tier catalog
 kind has exactly one open sweep.
 
 **An absent adapter degrades; it does not fail to wire.** Spring treats a required collection
@@ -297,7 +301,8 @@ open package. `ContextLoadsTest` boots the open edition, which ships no adapter,
    for observation/turn grain instead — but ONLY for a kind the in-tree catalog manifest already
    declares: seeding, the capability gate and `grainFor` all still read `MODULES` independently of this
    seam, so a `DetectorSupplier` for a kind of your own registers and is never dispatched to. A brand
-   new kind needs a catalog entry, which is hard stop 3 below either way — see §2.)
+   new detector kind needs a catalog entry, which is hard stop 3 below — see §2. A new sweep kind
+   does not.)
 4. Optionally, adapters on the read-side ports for what the surfaces show: `TriageSource`
    (`@Order`-ranked) and `CaseSource`.
 5. If your classifier writes per-span/per-trace detections it needs a table to put them in:
