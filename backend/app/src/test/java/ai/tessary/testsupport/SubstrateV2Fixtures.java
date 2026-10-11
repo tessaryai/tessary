@@ -627,6 +627,16 @@ public final class SubstrateV2Fixtures {
                 .update();
     }
 
+    /** Settle a trace as its rollup does: its latest span end recorded, no more spans expected. */
+    public void settle(String projectId, String traceId, Instant endedAt) {
+        jdbc().sql(
+                        "UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND id = :tid")
+                .param("end", endedAt.toString())
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .update();
+    }
+
     // ---- side tables ------------------------------------------------------------------------------
 
     /** A {@code tool_call} row keyed by the span's producer keys, exactly what ingest writes. */
