@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * A {@link FindingAdapter} on the classpath, against the real schema and the real Spring wiring: a finding under the
@@ -48,9 +49,14 @@ class FindingAdapterIntegrationTest {
         }
     }
 
-    /** Owns {@link #OWNED_KEY}, hands back {@link #METHOD}, and records the finding id of each absorb. */
+    /**
+     * Owns {@link #OWNED_KEY}, hands back {@link #METHOD}, and records the finding id of each absorb with the name of
+     * the transaction it ran in.
+     */
     static final class RecordingAdapter implements FindingAdapter {
-        private final List<String> absorbed = Collections.synchronizedList(new ArrayList<>());
+        record Absorb(String findingId, @Nullable String transaction) {}
+
+        private final List<Absorb> absorbed = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public boolean owns(FindingClaim finding) {
@@ -64,12 +70,17 @@ class FindingAdapterIntegrationTest {
 
         @Override
         public void absorbed(FindingRow finding, @Nullable String userId, String now) {
-            absorbed.add(finding.id());
+            String transaction = TransactionSynchronizationManager.isActualTransactionActive()
+                    ? TransactionSynchronizationManager.getCurrentTransactionName()
+                    : null;
+            absorbed.add(new Absorb(finding.id(), transaction));
         }
 
-        long absorbCalls(String findingId) {
+        List<Absorb> absorbsOf(String findingId) {
             synchronized (absorbed) {
-                return absorbed.stream().filter(findingId::equals).count();
+                return absorbed.stream()
+                        .filter(a -> a.findingId().equals(findingId))
+                        .toList();
             }
         }
     }
@@ -127,16 +138,19 @@ class FindingAdapterIntegrationTest {
     }
 
     /** A person's absorb on an owned finding calls the hook once, inside the ruling's transaction, and closes the
-     *  finding negative. */
+     *  finding negative. The ruling's transaction is the one {@code FindingService.resolve} opens; the bug is a hook
+     *  that runs outside it, so a ruling commits while the detector state it absorbs does not. */
     @Test
-    @DisplayName("absorbing an owned finding calls the adapter's hook once and closes it")
+    @DisplayName("absorbing an owned finding calls the adapter's hook once, in the ruling's transaction, and closes it")
     void absorbingAnOwnedFindingCallsTheHookOnceAndClosesIt() {
         String pid = project("fa-absorb");
         String id = finding(pid, OWNED_KEY, "clf-owned");
 
         findingService.resolve(pid, id, BehaviorResolutionRequest.EXPECTED, "u1");
 
-        assertEquals(1, adapter.absorbCalls(id));
+        assertEquals(
+                List.of(new RecordingAdapter.Absorb(id, FindingService.class.getName() + ".resolve")),
+                adapter.absorbsOf(id));
         FindingRow row = findings.findById(pid, id).orElseThrow();
         assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
         assertNotNull(row.humanVerdictAt());

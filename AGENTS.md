@@ -163,8 +163,8 @@ The moat is that cheap filter, which yields two rules for code in this repo:
 
 - **Anything that scales per-event LLM cost with ingest volume attacks the product directly.**
   LLM work is the *escalation*, applied to what a cheap filter already flagged — never the
-  default detection path. (`frustration` is the one recorded exception; its conditions are in
-  `devdocs/reference/principles.md`.)
+  default detection path. (There are two recorded exceptions, `frustration` and the paid custom
+  classifiers' per-match call; their conditions are in `devdocs/reference/principles.md`.)
 - **An unmeasured detector is a liability, not a feature.** A filter's false-positive rate at a
   stated alert budget is the asset.
 

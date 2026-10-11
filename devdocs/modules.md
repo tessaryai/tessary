@@ -102,7 +102,7 @@ share a lifecycle — but a package split, so the module boundary stops it regre
 
 | subpackage | files | holds |
 |---|---|---|
-| `finding/` | 34 | the shared findings + triage feature every classifier serves through: the `finding`/`finding_evidence` store, the read surface and its DTOs, the Layer-2 queue, engine, worker, sandbox client and auto-escalator, and the port a classifier attaches through (`TriageSource`) — see its `package-info.java` for the seam contract |
+| `finding/` | 32 | the shared findings + triage feature every classifier serves through: the `finding`/`finding_evidence` store, the read surface and its DTOs, the Layer-2 queue, engine, worker, sandbox client and auto-escalator, and the two ports a classifier attaches through (`TriageSource`, and `FindingAdapter` for a classifier outside the catalog, folded by `FindingAdapters`) — see its `package-info.java` for the seam contract |
 | `metric/` | 16 | duration + cost drift |
 | `toolerror/` | 13 | tool-error rate drift |
 | `substrate/` | 8 | call-site reads, the trace/action reader all three drift classifiers share |
