@@ -81,6 +81,28 @@ public record FindingRow(
         return FindingPayload.count(evidenceCountsJson, role);
     }
 
+    /** What the detector asserted, without any ruling: the {@link FindingClaim} projection of this row. */
+    public FindingClaim claim() {
+        return new FindingClaim(
+                id,
+                projectId,
+                classifierKey,
+                causeKey,
+                subjectKind,
+                subjectId,
+                subjectLabel,
+                callSiteId,
+                onsetAt,
+                lastSeenAt,
+                title,
+                basis,
+                severity,
+                sampleCount,
+                payloadJson,
+                evidenceCountsJson,
+                createdAt);
+    }
+
     /** The classifier's own cause key, with the uniqueness scope stripped back off. */
     public String nativeCauseKey() {
         String native0 = payloadText("native_cause_key");
