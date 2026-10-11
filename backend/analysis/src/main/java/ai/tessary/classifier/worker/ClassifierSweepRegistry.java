@@ -16,6 +16,10 @@ import org.springframework.stereotype.Component;
  * constructor field and an {@code if/else} on the kind, so the build does not require every
  * classifier the platform ships.
  *
+ * <p>The worker asks it for a declared window kind, and for any kind the catalog does not declare:
+ * a sweep registered for an undeclared kind runs that kind at window grain. The worker, not this
+ * class, combines the catalog and the registry.
+ *
  * <h2>Two things this deliberately does not do</h2>
  *
  * <p>It never touches the catalog. {@link BuiltInClassifierCatalog#builtIns()} is the full set
@@ -61,8 +65,9 @@ public class ClassifierSweepRegistry {
     }
 
     /**
-     * The sweep that claims this {@link BuiltInDetector.Kind}, or empty when nothing on this classpath
-     * does. Empty is a normal answer, not an error; see the class comment.
+     * The sweep that claims this detector kind, a {@link BuiltInDetector.Kind} or a kind no catalog
+     * module declares, or empty when nothing on this classpath does. Empty is a normal answer, not an
+     * error; see the class comment.
      */
     public Optional<ClassifierSweep> forKind(String detectorKind) {
         return Optional.ofNullable(byKind.get(detectorKind));
