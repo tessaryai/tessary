@@ -17,8 +17,8 @@ import org.springframework.stereotype.Component;
  * classifier the platform ships.
  *
  * <p>The worker asks it for a declared window kind, and for any kind the catalog does not declare:
- * a sweep registered for an undeclared kind runs that kind at window grain. The worker, not this
- * class, combines the catalog and the registry.
+ * a sweep registered for an undeclared kind runs that kind at window grain. {@link SweepRouting},
+ * not this class, combines the catalog and the registry.
  *
  * <h2>Two things this deliberately does not do</h2>
  *

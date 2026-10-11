@@ -16,6 +16,7 @@ import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
+import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
@@ -70,6 +71,7 @@ public class ClassifierService {
     private final ClassifierDetectionRepository detections;
     private final ClassifierJobRepository jobs;
     private final BuiltInClassifierCatalog catalog;
+    private final SweepRouting routing;
     private final SubstrateReadRepository substrate;
     private final ObjectMapper mapper;
     private final ClassifierProperties props;
@@ -90,6 +92,7 @@ public class ClassifierService {
             ClassifierDetectionRepository detections,
             ClassifierJobRepository jobs,
             BuiltInClassifierCatalog catalog,
+            SweepRouting routing,
             SubstrateReadRepository substrate,
             ObjectMapper mapper,
             ClassifierProperties props,
@@ -107,6 +110,7 @@ public class ClassifierService {
         this.detections = detections;
         this.jobs = jobs;
         this.catalog = catalog;
+        this.routing = routing;
         this.substrate = substrate;
         this.mapper = mapper;
         this.props = props;
@@ -527,7 +531,9 @@ public class ClassifierService {
      * added call site's history is checked rather than read as clean: the same reason as {@link
      * #rewindForCallSiteFact}. A classifier that sends each span or turn to a model is not rewound, because the rewind
      * would send the whole history again; it checks the added call site from now on. A window classifier is not
-     * rewound either: its cursor feeds fitted state, and replaying it would count traffic twice.
+     * rewound either: its cursor feeds fitted state, and replaying it would count traffic twice. The grain is the one
+     * {@link SweepRouting} gives the worker, so a kind no catalog module declares and a sweep runs is a window
+     * classifier here too.
      */
     public ClassifierRow setCallSiteIds(String projectId, String id, @Nullable List<String> callSiteIds) {
         ClassifierRow before = get(projectId, id);
@@ -572,7 +578,7 @@ public class ClassifierService {
     }
 
     private boolean rewindsOnWiden(String detector) {
-        return catalog.grainFor(detector) == ClassifierModelModule.Grain.OBSERVATION
+        return routing.grainFor(detector) == ClassifierModelModule.Grain.OBSERVATION
                 && !BuiltInDetector.Kind.ENCODER_BACKED.contains(detector);
     }
 

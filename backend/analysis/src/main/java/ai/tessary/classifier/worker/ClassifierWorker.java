@@ -109,6 +109,9 @@ public class ClassifierWorker {
      */
     private final ClassifierSweepRegistry sweeps;
 
+    /** The grain each detector kind sweeps at; see {@link SweepRouting}. */
+    private final SweepRouting routing;
+
     /** Population work a classifier does once its sweep has caught up; see {@link ClassifierCatchUp}. */
     private final ObjectProvider<ClassifierCatchUp> catchUps;
 
@@ -129,6 +132,7 @@ public class ClassifierWorker {
             BuiltInClassifierCatalog catalog,
             PreDeployCheckService preDeployChecks,
             ClassifierSweepRegistry sweeps,
+            SweepRouting routing,
             ObjectProvider<ClassifierCatchUp> catchUps,
             ClassifierProperties props,
             TraceMdcBridge traceBridge,
@@ -142,6 +146,7 @@ public class ClassifierWorker {
         this.catalog = catalog;
         this.preDeployChecks = preDeployChecks;
         this.sweeps = sweeps;
+        this.routing = routing;
         this.catchUps = catchUps;
         this.props = props;
         this.traceBridge = traceBridge;
@@ -387,11 +392,11 @@ public class ClassifierWorker {
      *
      * <p>The grain of a kind the catalog declares comes from the catalog. A kind no catalog module
      * declares runs at window grain when a sweep claims it, and otherwise takes the catalog's
-     * default; see {@link #routeFor}.
+     * default; see {@link SweepRouting}.
      */
     private void sweepSignal(ClassifierJobRow job, ClassifierRow signal, Instant start) {
-        Routing routing = routeFor(signal.detector());
-        Grain grain = routing.grain();
+        SweepRouting.Routing route = routing.routeFor(signal.detector());
+        Grain grain = route.grain();
         switch (grain) {
             case WINDOW -> {
                 Optional<ClassifierSweep> sweep = sweeps.forKind(signal.detector());
@@ -415,7 +420,7 @@ public class ClassifierWorker {
                             .field("project", job.projectId())
                             .field("detector", signal.detector())
                             .field("grain", grain.name().toLowerCase(Locale.ROOT))
-                            .field("route", routing.route().field())
+                            .field("route", route.route().field())
                             .field("registered", String.join(",", sweeps.registeredKinds()))
                             .log();
                     jobs.markSwept(job.id(), null, null);
@@ -424,38 +429,10 @@ public class ClassifierWorker {
                 }
                 SweepOutcome outcome = sweep.get().sweep(new SweepContext(job, signal));
                 sweepFailures.clear(job.id());
-                logSweepComplete(job, signal, grain, routing.route(), outcome.scanned(), outcome.fired(), 1, start);
+                logSweepComplete(job, signal, grain, route.route(), outcome.scanned(), outcome.fired(), 1, start);
             }
             case TURN, OBSERVATION -> sweepObservationGrain(job, signal, grain, start);
         }
-    }
-
-    /** Where a sweep's grain came from: the catalog's manifest or default, or a sweep in the registry. */
-    private enum Route {
-        CATALOG,
-        REGISTRY;
-
-        String field() {
-            return name().toLowerCase(Locale.ROOT);
-        }
-    }
-
-    private record Routing(Grain grain, Route route) {}
-
-    /**
-     * The grain a detector kind sweeps at, and where it came from. The catalog answers for a kind
-     * it declares, even when a sweep also claims it, so a jar on the classpath never changes a
-     * shipped classifier's grain. A kind no module declares runs at window grain when a sweep
-     * claims it; with no sweep it keeps the catalog's default.
-     */
-    private Routing routeFor(String detectorKind) {
-        if (catalog.declares(detectorKind)) {
-            return new Routing(catalog.grainFor(detectorKind), Route.CATALOG);
-        }
-        if (sweeps.forKind(detectorKind).isPresent()) {
-            return new Routing(Grain.WINDOW, Route.REGISTRY);
-        }
-        return new Routing(catalog.grainFor(detectorKind), Route.CATALOG);
     }
 
     /**
@@ -648,7 +625,7 @@ public class ClassifierWorker {
                     .field("pages", pages)
                     .log();
         }
-        logSweepComplete(job, signal, grain, Route.CATALOG, scanned, fired, pages, start);
+        logSweepComplete(job, signal, grain, SweepRouting.Route.CATALOG, scanned, fired, pages, start);
         // A genuinely-new production signal discovery closes the loop to the edge: register a
         // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
         // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
@@ -874,7 +851,7 @@ public class ClassifierWorker {
             ClassifierJobRow job,
             ClassifierRow signal,
             Grain grain,
-            Route route,
+            SweepRouting.Route route,
             int scanned,
             int fired,
             int pages,

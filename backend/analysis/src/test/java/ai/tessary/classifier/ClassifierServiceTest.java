@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierModelModule;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricDriftConfig;
@@ -23,6 +25,9 @@ import ai.tessary.classifier.metric.MetricHistogram;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
+import ai.tessary.classifier.worker.ClassifierSweep;
+import ai.tessary.classifier.worker.ClassifierSweepRegistry;
+import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
@@ -72,6 +77,7 @@ class ClassifierServiceTest {
     private static final String PID = "proj-1";
     private static final String T0 = "2026-01-01T00:00:00Z";
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String UNDECLARED = "undeclared_kind";
 
     private final ClassifierRepository signals = mock(ClassifierRepository.class);
     private final ClassifierJobRepository jobs = mock(ClassifierJobRepository.class);
@@ -79,11 +85,17 @@ class ClassifierServiceTest {
     private final ProjectRepository projects = mock(ProjectRepository.class);
     private final DecisionProviderResolver decisionProviders = mock(DecisionProviderResolver.class);
     private final ClassifierProperties props = new ClassifierProperties();
+    private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
+
+    /** A sweep from outside the tree, for a kind no catalog module declares. */
+    private final ClassifierSweep undeclaredSweep = mock(ClassifierSweep.class);
+
     private final ClassifierService service = new ClassifierService(
             signals,
             mock(ClassifierDetectionRepository.class),
             jobs,
-            mock(BuiltInClassifierCatalog.class),
+            catalog,
+            new SweepRouting(catalog, sweepsFor(undeclaredSweep, UNDECLARED)),
             mock(SubstrateReadRepository.class),
             MAPPER,
             props,
@@ -320,6 +332,51 @@ class ClassifierServiceTest {
     /** A control ring holding one closed day whose sketch is {@code sketchJson}. */
     private static String control(String sketchJson) {
         return "{\"kind\":\"control\",\"days\":[{\"d\":\"2026-09-01\",\"m\":" + sketchJson + "}]}";
+    }
+
+    /**
+     * Widening the call sites of a classifier a registered sweep runs does not rewind it. Its kind runs at window
+     * grain, so a rewind would send every match in the history to the model again and count it twice in fitted state;
+     * read from the catalog alone, the kind takes the observation default and is rewound.
+     */
+    @Test
+    void wideningAKindASweepRunsDoesNotRewindIt() {
+        when(catalog.grainFor(UNDECLARED)).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
+        ClassifierRow before = ClassifierRowBuilder.of(UNDECLARED)
+                .id("clf-u")
+                .custom()
+                .onCallSites("cs-1")
+                .build();
+        when(signals.findById(PID, "clf-u")).thenReturn(Optional.of(before));
+        when(signals.setCallSiteIds(PID, "clf-u", null)).thenReturn(1);
+        when(jobs.rewindCursor(PID, "clf-u")).thenReturn(1);
+
+        service.setCallSiteIds(PID, "clf-u", null);
+
+        verify(jobs, never()).rewindCursor(any(), any());
+    }
+
+    /** An undeclared kind no sweep claims still scores spans with no model, so widening it rewinds as before. */
+    @Test
+    void wideningAnUndeclaredKindNoSweepRunsRewindsIt() {
+        when(catalog.grainFor("other_undeclared_kind")).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
+        ClassifierRow before = ClassifierRowBuilder.of("other_undeclared_kind")
+                .id("clf-o")
+                .custom()
+                .onCallSites("cs-1")
+                .build();
+        when(signals.findById(PID, "clf-o")).thenReturn(Optional.of(before));
+        when(signals.setCallSiteIds(PID, "clf-o", null)).thenReturn(1);
+        when(jobs.rewindCursor(PID, "clf-o")).thenReturn(1);
+
+        service.setCallSiteIds(PID, "clf-o", null);
+
+        verify(jobs).rewindCursor(PID, "clf-o");
+    }
+
+    private static ClassifierSweepRegistry sweepsFor(ClassifierSweep sweep, String kind) {
+        when(sweep.kinds()).thenReturn(java.util.Set.of(kind));
+        return new ClassifierSweepRegistry(TestObjectProvider.of(sweep));
     }
 
     private static ClassifierRow row(String id, String detector, @Nullable String configJson) {
