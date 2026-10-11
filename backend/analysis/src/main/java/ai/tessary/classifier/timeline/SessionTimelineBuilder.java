@@ -454,7 +454,7 @@ public final class SessionTimelineBuilder {
         JsonNode attributes = parse(span.attributes());
         if (attributes.isObject()) {
             attributes.properties().forEach(e -> {
-                if (e.getKey().startsWith(SETTINGS_PREFIX) && !e.getKey().equals(MODEL_SETTING)) {
+                if (e.getKey().startsWith(SETTINGS_PREFIX) && !MODEL_SETTING.equals(e.getKey())) {
                     settings.set(e.getKey().substring(SETTINGS_PREFIX.length()), e.getValue());
                 }
             });
