@@ -826,6 +826,7 @@ class ClassifierWorkerTest {
                 catalog,
                 preDeployChecks,
                 sweeps,
+                new SweepRouting(catalog, sweeps),
                 TestObjectProvider.of(catchUp),
                 props,
                 new TraceMdcBridge(tracer),
