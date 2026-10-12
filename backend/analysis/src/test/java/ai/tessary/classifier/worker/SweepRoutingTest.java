@@ -3,12 +3,17 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.TestObjectProvider;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
+import ai.tessary.classifier.detector.EncoderScorer;
+import ai.tessary.classifier.substrate.SubstrateReadRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,11 +30,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class SweepRoutingTest {
 
     private static final String UNDECLARED = "undeclared_kind";
-    private static final String OBSERVED = BuiltInDetector.Kind.TOOL_ERROR;
+    private static final String OBSERVED = BuiltInDetector.Kind.SECRET_LEAK;
     private static final String DRIFT = BuiltInDetector.Kind.DURATION_DRIFT;
 
-    @Mock
-    BuiltInClassifierCatalog catalog;
+    private final BuiltInClassifierCatalog catalog = new BuiltInClassifierCatalog(
+            new ObjectMapper(),
+            mock(SubstrateReadRepository.class),
+            mock(EncoderScorer.class),
+            TestObjectProvider.of(List.of()));
 
     @Mock
     ClassifierSweep undeclared;
@@ -64,8 +72,6 @@ class SweepRoutingTest {
     /** Catches a fallback to some other sweep for a kind nothing claims. */
     @Test
     void aKindWithNoSweepHasNone() {
-        when(catalog.grainFor("nobody")).thenReturn(Grain.OBSERVATION);
-
         assertTrue(routing.sweepFor("nobody").isEmpty());
     }
 
@@ -75,8 +81,7 @@ class SweepRoutingTest {
      */
     @Test
     void aDeclaredKindThatIsNotWindowGrainIsNeverHandedToASweep() {
-        when(catalog.declares(OBSERVED)).thenReturn(true);
-        when(catalog.grainFor(OBSERVED)).thenReturn(Grain.OBSERVATION);
+        assertEquals(Grain.OBSERVATION, catalog.grainFor(OBSERVED), "the manifest's grain for the kind");
 
         assertTrue(routing.sweepFor(OBSERVED).isEmpty());
     }
@@ -84,9 +89,6 @@ class SweepRoutingTest {
     /** Catches a declared window kind losing the sweep the worker dispatches it to. */
     @Test
     void aDeclaredWindowKindIsRunByItsRegisteredSweep() {
-        when(catalog.declares(DRIFT)).thenReturn(true);
-        when(catalog.grainFor(DRIFT)).thenReturn(Grain.WINDOW);
-
         assertEquals(Optional.of(drift), routing.sweepFor(DRIFT));
     }
 }
