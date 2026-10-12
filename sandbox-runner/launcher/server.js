@@ -2007,7 +2007,12 @@ function streamSessionEvents(s, rawAfter, res) {
 // `/sessions` paths only: null for any other path (today's routes), 'other' for a session path
 // with another method or segment.
 function matchSessionRoute(method, rawUrl) {
-  const url = new URL(rawUrl, 'http://launcher');
+  let url;
+  try {
+    url = new URL(rawUrl, 'http://launcher');
+  } catch {
+    return null;
+  }
   const parts = url.pathname.split('/');
   if (parts[1] !== 'sessions') return null;
   const id = parts[2];

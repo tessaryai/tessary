@@ -27,7 +27,7 @@ const START = {
   credential: CREDENTIAL,
   mcp_servers: [
     { name: 'tessary', url: 'http://backend:8080/mcp', token: 'tsy_a_tok1' },
-    { name: 'drafts', url: 'http://backend:8080/mcp/x', token: 'tsy_a_tok1' },
+    { name: 'notes', url: 'http://backend:8080/mcp/x', token: 'tsy_a_tok1' },
   ],
   idle_timeout_ms: 60000,
   max_tool_calls_per_message: 40,
