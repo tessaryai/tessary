@@ -281,10 +281,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 new TessaryException(
                         AgentRunError.LAUNCHER_MISCONFIGURED,
                         launcherDiagnosis(resp.statusCode(), launcherUrl, diag, ROUTE));
-            case LAUNCHER_UNAVAILABLE ->
-                new TessaryException(
-                        AgentRunError.LAUNCHER_UNAVAILABLE,
-                        launcherDiagnosis(resp.statusCode(), launcherUrl, diag, ROUTE));
+            case LAUNCHER_UNAVAILABLE, CAPACITY ->
+                new TessaryException(failure, launcherDiagnosis(resp.statusCode(), launcherUrl, diag, ROUTE));
             case TIMED_OUT -> new TessaryException(AgentRunError.TIMED_OUT, req.timeoutMs());
             case BAD_OUTPUT -> new TessaryException(AgentRunError.BAD_OUTPUT, detail);
             case RUN_FAILED -> new TessaryException(AgentRunError.RUN_FAILED, detail);

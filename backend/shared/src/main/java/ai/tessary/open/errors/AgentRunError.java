@@ -4,18 +4,19 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 /**
- * Errors raised by the generic agent-sandbox run ({@code agentrun/}). Five outcomes, split by who has
- * to act: the launcher could not be reached, the launcher is refusing every request until a person
- * changes the deployment, this run failed on its own terms, the agent finished but answered with
- * nothing usable, or the run hit its wall clock. A caller that queues these runs retries the first,
- * parks on the second, and spends an attempt on the other three.
+ * Errors raised by the generic agent-sandbox run and session ({@code agentrun/}). Six outcomes, split
+ * by who has to act: the launcher could not be reached, the launcher is refusing every request until a
+ * person changes the deployment, this run failed on its own terms, the agent finished but answered
+ * with nothing usable, the run hit its wall clock, or the launcher has no room for another session. A
+ * caller retries the first and the last, parks on the second, and spends an attempt on the other three.
  */
 public enum AgentRunError implements ErrorCode {
     LAUNCHER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The agent launcher is not answering: %s"),
     LAUNCHER_MISCONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "The agent launcher refused the run: %s"),
     RUN_FAILED(HttpStatus.BAD_GATEWAY, "The agent run failed: %s"),
     BAD_OUTPUT(HttpStatus.BAD_GATEWAY, "The agent returned nothing usable: %s"),
-    TIMED_OUT(HttpStatus.GATEWAY_TIMEOUT, "The agent run hit its %sms wall clock");
+    TIMED_OUT(HttpStatus.GATEWAY_TIMEOUT, "The agent run hit its %sms wall clock"),
+    CAPACITY(HttpStatus.SERVICE_UNAVAILABLE, "The agent launcher is at its session cap: %s");
 
     private final HttpStatus status;
     private final String template;
