@@ -71,5 +71,7 @@ public interface ClassifierSweep {
      * this sweep could not run. {@code ClassifierService#setEnabled} asks before it writes, and only when turning
      * a row on; turning one off is never refused. The default accepts every row.
      */
-    default void checkEnable(ClassifierRow classifier) {}
+    default void checkEnable(ClassifierRow classifier) {
+        // A sweep that can run every row it is handed has nothing to refuse.
+    }
 }
