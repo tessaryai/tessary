@@ -371,14 +371,14 @@ class BehaviorTriagePromptTest {
      */
     @Test
     void anOwnedFindingShipsItsAdaptersMethod() {
-        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"custom_rate\"}", null);
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
 
         Map<String, String> dossier = engineOwningCustomX().dossier(JOB, row);
 
         assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
         assertEquals("# Method x\n", dossier.get("method.md"));
         assertEquals(
-                List.of("- cause: `custom_rate`. Read the matching section of `dossier/method.md`."),
+                List.of("- cause: `ext_rate`. Read the matching section of `dossier/method.md`."),
                 findingMd(engineOwningCustomX(), row)
                         .lines()
                         .filter(line -> line.startsWith("- cause: "))
@@ -388,7 +388,7 @@ class BehaviorTriagePromptTest {
     /** An owned finding's user message lists {@code method.md}. The bug is the no-card branch taken for it. */
     @Test
     void anOwnedFindingsPromptListsTheMethodFile() {
-        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"custom_rate\"}", null);
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
 
         ObserverProperties props = new ObserverProperties();
         props.getAgentic().setMaxTurns(12);

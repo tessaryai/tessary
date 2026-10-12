@@ -338,7 +338,7 @@ class BehaviorTriageSourceTest {
                 .id(id)
                 .projectId(PROJECT)
                 .callSiteId("cs-1")
-                .payload("{\"cause_kind\":\"custom_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
                 .evidenceCounts("{\"witness\":3,\"member\":40}")
                 .build();
     }
@@ -436,7 +436,7 @@ class BehaviorTriageSourceTest {
     /**
      * A person's absorb on an owned finding calls the adapter's hook once, with the ruling's own clock, and then
      * writes the negative ruling; a real deviation calls no hook and opens the case. The bugs are an owned
-     * {@code custom_rate} finding hitting the "no branch claims it" refusal, the hook running on a real deviation,
+     * {@code ext_rate} finding hitting the "no branch claims it" refusal, the hook running on a real deviation,
      * and the hook running twice.
      */
     @ParameterizedTest
@@ -540,9 +540,9 @@ class BehaviorTriageSourceTest {
     }
 
     /**
-     * The paid edition always registers an adapter, and it owns none of the built-in keys. A built-in case absorb
-     * still folds every spell and calls no hook. The bug is the owner check read as "an adapter exists", which
-     * re-pins the newest finding alone and leaves the earlier spells alarming.
+     * With an adapter registered that owns none of the built-in keys, a built-in case absorb still folds every spell
+     * and calls no hook. The bug is the owner check read as "an adapter exists", which re-pins the newest finding alone
+     * and leaves the earlier spells alarming.
      */
     @Test
     void withAnAdapterRegisteredABuiltInCaseStillFoldsEverySpell() {

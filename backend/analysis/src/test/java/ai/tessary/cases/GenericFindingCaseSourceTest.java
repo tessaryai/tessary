@@ -75,16 +75,16 @@ class GenericFindingCaseSourceTest {
     }
 
     /**
-     * A custom classifier's finding (key {@code custom-<ulid>}) is owned by this source and keyed on its own cause and
-     * classifier key. The bug is a positive ruling on a custom finding that opens no case because a dedicated source,
-     * or no source, claims it.
+     * A finding of a classifier outside the catalog, under a key no dedicated source claims, is owned by this source
+     * and keyed on its own cause and classifier key. The bug is a positive ruling on such a finding that opens no case
+     * because a dedicated source, or no source, claims it.
      */
     @Test
-    void aCustomClassifiersFindingOpensAGenericCase() {
-        String key = "custom-01j9z3k5m2";
+    void aFindingOfAClassifierOutsideTheCatalogOpensAGenericCase() {
+        String key = "ext-x";
         var finding = FindingRowBuilder.of(key)
                 .causeKey("cls-1:cs-1")
-                .payload("{\"cause_kind\":\"custom_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
                 .build();
 
         assertTrue(source.owns(key));
