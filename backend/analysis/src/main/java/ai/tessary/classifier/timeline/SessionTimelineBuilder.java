@@ -103,8 +103,9 @@ public final class SessionTimelineBuilder {
     /**
      * Orders the events of the loaded traces and numbers them: by time; on a tie the event of the trace that ends first,
      * then the deeper event, then trace, span and ordinal; each reply right after the span event of its writer. A user
-     * message is placed at a start, so in its instant it comes after the span events of its trace that end there,
-     * except its carrier's, its carrier's ancestors' and its carrier's descendants', which it comes before.
+     * message is placed at a start ({@code receivedAt}), so in its instant it comes after the span events of its trace
+     * that end there, except its carrier's, its carrier's ancestors' and its carrier's descendants', which it comes
+     * before.
      */
     static SessionTimeline assemble(String projectId, String sessionId, List<Derived> events, boolean truncated) {
         Map<List<String>, List<Derived>> repliesByWriter = new HashMap<>();
@@ -293,15 +294,18 @@ public final class SessionTimelineBuilder {
          *
          * <p>When a top agent span received a user message, the agent input gives the messages that opened the turn,
          * as its output is the authority for the replies, and an {@code llm} call under it gives only what the person
-         * added while the agent ran ({@link #addedWhileRunning}).
+         * added while the agent ran ({@link #addedWhileRunning}), placed at that call's start. Any other carrier's
+         * messages are placed where the turn received them ({@link #receivedAt}).
          */
         private void userMessages(List<TimelineSpan> facing) {
             Map<UserKey, Integer> emitted = new HashMap<>();
-            for (TimelineSpan carrier : facing) {
+            for (int i = 0; i < facing.size(); i++) {
+                TimelineSpan carrier = facing.get(i);
                 String opening = agentsNewestUserText(carrier);
                 List<UserKey> users = opening == null
                         ? newUserMessages(carrier, facing)
                         : addedWhileRunning(carrier, opening, facing);
+                Instant at = opening == null ? receivedAt(carrier, facing.subList(0, i)) : carrier.startedAt();
                 Map<UserKey, Integer> inSpan = new HashMap<>();
                 for (int n = 0; n < users.size(); n++) {
                     UserKey key = users.get(n);
@@ -310,12 +314,7 @@ public final class SessionTimelineBuilder {
                     ObjectNode data =
                             MAPPER.createObjectNode().put("text", key.text()).put("from_person", true);
                     out.add(new Derived(
-                            messageEvent(
-                                    carrier,
-                                    spanEventId(carrier) + "#user:" + n,
-                                    Event.USER_MESSAGE,
-                                    carrier.startedAt(),
-                                    data),
+                            messageEvent(carrier, spanEventId(carrier) + "#user:" + n, Event.USER_MESSAGE, at, data),
                             null,
                             n,
                             last,
@@ -323,6 +322,31 @@ public final class SessionTimelineBuilder {
                 }
                 inSpan.forEach((key, count) -> emitted.merge(key, count, Math::max));
             }
+        }
+
+        /**
+         * Where the messages a carrier received are placed: at the start of the highest loaded span above it that holds
+         * no earlier person-facing span of the trace, since that span received them before any work it holds, else at
+         * the carrier's start. So a retrieval or a guardrail the turn runs before its first model call comes after the
+         * message, while a message of a later turn or call of the same trace stays at its own carrier.
+         */
+        private Instant receivedAt(TimelineSpan carrier, List<TimelineSpan> earlier) {
+            List<String> lineage = facts(carrier).ancestorIds();
+            for (String ancestorId : lineage) {
+                if (holdsAny(ancestorId, earlier, lineage)) continue;
+                Instant start = Objects.requireNonNull(byId.get(ancestorId)).startedAt();
+                return start.isBefore(carrier.startedAt()) ? start : carrier.startedAt();
+            }
+            return carrier.startedAt();
+        }
+
+        /** Whether a span outside {@code lineage} lies below the given span. */
+        private boolean holdsAny(String spanId, List<TimelineSpan> spans, List<String> lineage) {
+            for (TimelineSpan span : spans) {
+                if (!lineage.contains(span.spanId())
+                        && facts(span).ancestorIds().contains(spanId)) return true;
+            }
+            return false;
         }
 
         /** The user messages after the last assistant message of the span's input, keyed as {@link #userMessages} says. */

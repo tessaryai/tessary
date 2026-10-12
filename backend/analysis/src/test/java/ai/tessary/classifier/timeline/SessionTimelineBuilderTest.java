@@ -571,6 +571,82 @@ class SessionTimelineBuilderTest {
                 "a tool-call-only output is not a reply, and an app with no agent span still has replies");
     }
 
+    /**
+     * Catches a question placed after the retrieval it caused: with no agent span, the model call that carries the
+     * question starts after the retrieval, but the root of the turn received the question first.
+     */
+    @Test
+    void aRetrievalTheQuestionCausedComesAfterTheQuestion() {
+        List<TimelineSpan> spans = List.of(
+                span("tr-1", "w", "workflow")
+                        .at(0, 400)
+                        .in("{\"question\":\"what is the refund policy?\"}")
+                        .build(),
+                span("tr-1", "r", "retrieval").parent("w").at(10, 100).build(),
+                span("tr-1", "l", "llm")
+                        .parent("w")
+                        .at(150, 300)
+                        .in("[" + SYS + ",{\"role\":\"user\",\"content\":\"what is the refund policy?\"}]")
+                        .out("Refunds take 5 days.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-1/l#user:0 0", "tr-1/r 100", "tr-1/l 300", "tr-1/l#reply:0 300", "tr-1/w 400"),
+                idsAndMillis(timeline),
+                "the question is placed at the start of the turn that received it, before the work it caused");
+    }
+
+    /** Catches an input guardrail on the root of a turn with no agent span coming before the message it checks. */
+    @Test
+    void aGuardrailBeforeTheFirstModelCallComesAfterTheMessage() {
+        List<TimelineSpan> spans = List.of(
+                span("tr-2", "w", "workflow").at(0, 300).build(),
+                span("tr-2", "g", "guardrail").parent("w").at(5, 40).build(),
+                span("tr-2", "l", "llm")
+                        .parent("w")
+                        .at(50, 250)
+                        .in("[{\"role\":\"user\",\"content\":\"hi\"}]")
+                        .out("Hello.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-2/l#user:0 0", "tr-2/g 40", "tr-2/l 250", "tr-2/l#reply:0 250", "tr-2/w 300"),
+                idsAndMillis(timeline),
+                "a guardrail that checks the message comes after it");
+    }
+
+    /**
+     * Catches the same misplacement under an agent span that holds a framework's call arguments: the agent gives no
+     * message, the model call inside carries it, and the retrieval the agent ran first came after the message.
+     */
+    @Test
+    void aRetrievalUnderAnAgentWithCallArgumentsComesAfterTheMessage() {
+        List<TimelineSpan> spans = List.of(
+                span("tr-3", "a", "agent")
+                        .at(0, 500)
+                        .in("{\"input\":\"what is the refund policy?\"}")
+                        .out("{\"result\":\"done\"}")
+                        .build(),
+                span("tr-3", "r", "retrieval").parent("a").at(10, 60).build(),
+                span("tr-3", "l", "llm")
+                        .parent("a")
+                        .at(70, 400)
+                        .in("[{\"role\":\"user\",\"content\":\"what is the refund policy?\"}]")
+                        .out("Refunds take 5 days.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-3/l#user:0 0", "tr-3/r 60", "tr-3/l 400", "tr-3/l#reply:0 400", "tr-3/a 500"),
+                idsAndMillis(timeline),
+                "the message is placed at the start of the agent span that holds the model call carrying it");
+    }
+
     @Test
     void anOpenSpanGivesItsUserMessageButNoEventOrReply() {
         List<TimelineSpan> spans = List.of(span("tr-o", "o1", "llm")
@@ -1290,6 +1366,13 @@ class SessionTimelineBuilderTest {
         return timeline.events().stream()
                 .filter(e -> e.kind().equals(Event.USER_MESSAGE) || e.kind().equals(Event.ASSISTANT_REPLY))
                 .map(e -> e.id() + " " + e.data().get("text").asText())
+                .toList();
+    }
+
+    /** Each event as {@code "<id> <ms after T0>"}, in timeline order. */
+    private static List<String> idsAndMillis(SessionTimeline timeline) {
+        return timeline.events().stream()
+                .map(e -> e.id() + " " + Duration.between(T0, e.at()).toMillis())
                 .toList();
     }
 

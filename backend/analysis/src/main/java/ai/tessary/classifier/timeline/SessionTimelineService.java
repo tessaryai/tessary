@@ -65,8 +65,8 @@ public class SessionTimelineService {
      * span may still arrive, so it is always read.
      *
      * <p>The one event a trace row does not bound: a user message whose carrying span never ended, in a settled trace,
-     * which the builder places at that span's start; when the start is later than the trace's latest span end, a tail
-     * can miss it.
+     * which the builder places at the start of that span or of a span above it; when that start is later than the
+     * trace's latest span end, a tail can miss it.
      */
     public SessionTimeline loadTail(String projectId, String sessionId, long maxBytes) {
         return read(projectId, sessionId, maxBytes);
