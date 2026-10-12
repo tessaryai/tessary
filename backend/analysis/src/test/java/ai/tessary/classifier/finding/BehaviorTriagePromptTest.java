@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
@@ -376,8 +377,12 @@ class BehaviorTriagePromptTest {
 
         assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
         assertEquals("# Method x\n", dossier.get("method.md"));
-        String findingMd = findingMd(engineOwningCustomX(), row);
-        assertTrue(findingMd.contains("Read the matching section of `dossier/method.md`"), findingMd);
+        assertEquals(
+                List.of("- cause: `custom_rate`. Read the matching section of `dossier/method.md`."),
+                findingMd(engineOwningCustomX(), row)
+                        .lines()
+                        .filter(line -> line.startsWith("- cause: "))
+                        .toList());
     }
 
     /** An owned finding's user message lists {@code method.md}. The bug is the no-card branch taken for it. */
@@ -385,9 +390,35 @@ class BehaviorTriagePromptTest {
     void anOwnedFindingsPromptListsTheMethodFile() {
         FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"custom_rate\"}", null);
 
-        String prompt = engineOwningCustomX().buildPrompt(JOB, row);
+        ObserverProperties props = new ObserverProperties();
+        props.getAgentic().setMaxTurns(12);
+        BehaviorTriageEngine engine =
+                engine(props, FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n"))));
 
-        assertTrue(prompt.contains("- `dossier/method.md`"), prompt);
-        assertFalse(prompt.contains("This detector has no method card"), prompt);
+        assertEquals(
+                "Rule on finding `" + row.id() + "`.\n\n"
+                        + "The dossier is under `./dossier/`:\n"
+                        + "- `dossier/finding.md`\n"
+                        + "- `dossier/method.md`\n\n"
+                        + "You have 10 turns. Every tool call is a turn. Record your ruling before they run out.\n",
+                engine.buildPrompt(JOB, row));
+    }
+
+    /**
+     * An adapter's {@code method.md} comes after the built-in card for the key, as the extension interface says. The
+     * bug is an adapter that owns a built-in key replacing the card the built-in detector's findings are ruled by.
+     */
+    @Test
+    void theBuiltInCardWinsOverAnAdaptersMethod() {
+        FindingRow row =
+                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
+        BehaviorTriageEngine engine = engine(
+                new ObserverProperties(),
+                FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n"))));
+
+        assertEquals(
+                ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.TOOL_ERROR),
+                engine.dossier(JOB, row).get("method.md"));
     }
 }

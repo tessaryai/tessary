@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FakeFindingAdapter;
 import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
@@ -65,24 +66,28 @@ class RcaAnalysisServiceTest {
             "2026-10-02T00:00:00Z",
             null);
 
-    private static final FindingClaim CLAIM = new FindingClaim(
-            "f1",
-            PROJECT,
-            "custom-x",
-            "cls-1:cs-1",
-            FindingRow.SubjectKind.CLASSIFIER,
-            "cls-1",
-            "Custom x",
-            "cs-1",
-            "2026-10-01T00:00:00Z",
-            "2026-10-02T00:00:00Z",
-            null,
-            null,
-            null,
-            40,
-            "{\"version_id\":\"v1\"}",
-            "{\"witness\":1}",
-            "2026-10-01T00:00:00Z");
+    private static final FindingClaim CLAIM = claim("custom-x");
+
+    private static FindingClaim claim(String classifierKey) {
+        return new FindingClaim(
+                "f1",
+                PROJECT,
+                classifierKey,
+                "cls-1:cs-1",
+                FindingRow.SubjectKind.CLASSIFIER,
+                "cls-1",
+                "Custom x",
+                "cs-1",
+                "2026-10-01T00:00:00Z",
+                "2026-10-02T00:00:00Z",
+                null,
+                null,
+                null,
+                40,
+                "{\"version_id\":\"v1\"}",
+                "{\"witness\":1}",
+                "2026-10-01T00:00:00Z");
+    }
 
     @Mock
     FindingRepository findings;
@@ -135,6 +140,20 @@ class RcaAnalysisServiceTest {
         Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of()));
 
         assertEquals(Set.of("findings/1-f1/finding.md", "findings/1-f1/evidence.md", "tools.md"), dossier.keySet());
+    }
+
+    /**
+     * The built-in RCA method for a key comes before an adapter's, as the extension interface says. The bug is an
+     * adapter that owns a built-in key replacing the method its findings are investigated by.
+     */
+    @Test
+    void theBuiltInRcaMethodWinsOverAnAdaptersMethod() {
+        when(findings.findClaim(PROJECT, "f1")).thenReturn(Optional.of(claim(BuiltInDetector.Kind.TOOL_ERROR)));
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(
+                List.of(FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n"))));
+
+        assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.TOOL_ERROR), dossier.get("method.md"));
     }
 
     @SuppressWarnings("unchecked")
