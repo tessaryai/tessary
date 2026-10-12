@@ -52,6 +52,24 @@ class SpanPayloadRepositoryTraceIdsTest {
         assertEquals(2, read.size());
     }
 
+    @Test
+    void anotherProjectsPayloadUnderTheSameTraceIdIsNotRead() {
+        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+        String mine =
+                TenantFixture.bootstrap(tenants, "payloads-mine").project().id();
+        String theirs =
+                TenantFixture.bootstrap(tenants, "payloads-theirs").project().id();
+        Instant at = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        String traceId = SubstrateV2Fixtures.traceId();
+        SpanPayloadRow own = fullPayload(fx.llmSpan(mine, traceId, at), "mine", at);
+        fullPayload(fx.llmSpan(theirs, traceId, at), "theirs", at);
+
+        assertEquals(
+                List.of(own),
+                payloads.listByTraceIds(mine, List.of(traceId)),
+                "a read that drops the project filter returns the other project's payload of the same trace id");
+    }
+
     private SpanPayloadRow fullPayload(SpanRow span, String word, Instant at) {
         SpanPayloadRow row = new SpanPayloadRow(
                 span.projectId(),

@@ -93,6 +93,27 @@ class TraceV2RepositorySessionTracesTest {
                         + " a deleted trace lists t5, an unsettled trace placed by a stale end is not first");
     }
 
+    @Test
+    void anotherProjectsSessionWithTheSameIdIsNotRead() {
+        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        String mine = TenantFixture.bootstrap(tenants, "session-traces-mine")
+                .project()
+                .id();
+        String theirs = TenantFixture.bootstrap(tenants, "session-traces-theirs")
+                .project()
+                .id();
+        Instant t0 = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        String shared = SubstrateV2Fixtures.traceId();
+        fx.trace(mine, shared, "sess-1", t0);
+        fx.trace(theirs, shared, "sess-1", t0.plusMillis(1_000));
+        fx.trace(theirs, SubstrateV2Fixtures.traceId(), "sess-1", t0.plusMillis(2_000));
+
+        assertEquals(
+                List.of(new Seen(shared, null, null, t0, null)),
+                seen(traces.listSessionTraces(mine, "sess-1")),
+                "a read that drops the project filter lists the other project's traces of the same session id");
+    }
+
     private static List<Seen> seen(List<TraceV2Repository.SessionTrace> rows) {
         return rows.stream()
                 .map(r -> new Seen(

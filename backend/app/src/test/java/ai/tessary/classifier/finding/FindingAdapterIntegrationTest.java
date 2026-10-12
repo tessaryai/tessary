@@ -119,6 +119,30 @@ class FindingAdapterIntegrationTest {
         assertEquals(List.of(owned), ids, "only the owned finding escalates, not the un-owned " + unowned);
     }
 
+    /**
+     * The candidate read against Postgres: one claim per key (the lowest id), only findings the escalation predicate
+     * admits, never a key the caller excludes, and only the project's own. The bugs are a read that returns every row
+     * of a key, one that skips the sample or evidence rule, and one that reads another project's findings.
+     */
+    @Test
+    @DisplayName("the candidate read gives one eligible claim per key, of the project's own findings")
+    void theCandidateReadGivesOneEligibleClaimPerKeyOfTheProject() {
+        String pid = project("fa-candidates");
+        String other = project("fa-candidates-other");
+        String a = finding(pid, OWNED_KEY, "clf-a");
+        String b = finding(pid, OWNED_KEY, "clf-b");
+        finding(pid, "custom-few", "clf-few", 10, true);
+        finding(pid, "custom-bare", "clf-bare", 40, false);
+        finding(pid, "tool_error", "clf-tool");
+        finding(other, "custom-other", "clf-other");
+
+        List<String> claims = findings.escalationCandidatesByKey(pid, List.of("tool_error"), 30).stream()
+                .map(c -> c.classifierKey() + " " + c.id())
+                .toList();
+
+        assertEquals(List.of(OWNED_KEY + " " + (a.compareTo(b) < 0 ? a : b)), claims);
+    }
+
     /** Escalation and the triage dossier agree on ownership: the press queues a job, and the brief carries the
      *  adapter's method. */
     @Test
@@ -164,13 +188,18 @@ class FindingAdapterIntegrationTest {
 
     /** A per-span classifier's armed window over 40 samples, citing one witness trace, as a custom sweep files it. */
     private String finding(String projectId, String classifierKey, String classifierId) {
+        return finding(projectId, classifierKey, classifierId, 40, true);
+    }
+
+    private String finding(
+            String projectId, String classifierKey, String classifierId, long samples, boolean citesATrace) {
         String id = Objects.requireNonNull(findings.recordArmedWindow(
                         Ids.ulid(),
                         projectId,
                         classifierKey,
                         classifierId,
                         "Custom " + classifierKey,
-                        40,
+                        samples,
                         "cs-1",
                         "{}",
                         now(),
@@ -178,6 +207,7 @@ class FindingAdapterIntegrationTest {
                         now(),
                         now()))
                 .findingId();
+        if (!citesATrace) return id;
         findingEvidence.record(
                 projectId,
                 id,
