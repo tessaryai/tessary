@@ -24,6 +24,10 @@
  *   <li>An unregistered kind is inert: one WARN, the job completes, no other sweep runs in its place.
  * </ol>
  *
+ * <p>A sweep may refuse to turn on a row it cannot run ({@code ClassifierSweep#checkEnable}, asked by
+ * {@code ClassifierService#setEnabled} through {@link ai.tessary.classifier.worker.SweepRouting#sweepFor});
+ * it must never refuse turning one off.
+ *
  * <p>The contract an out-of-tree author writes against is
  * {@code devdocs/reference/classifier-extension-interface.md}.
  */

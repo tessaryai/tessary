@@ -129,6 +129,7 @@ which is precisely why the open engine could not compile without the paid classi
 public interface ClassifierSweep {
     Set<String> kinds();                 // the detector kinds this sweep claims
     SweepOutcome sweep(SweepContext ctx); // one leased pass
+    default void checkEnable(ClassifierRow classifier) {} // refuse turning this row on; default accepts
 }
 
 public record SweepContext(ClassifierJobRow job, ClassifierRow classifier) {}
@@ -158,6 +159,12 @@ list, null for every call site, and `ClassifierRow.runsOn` is the test. The work
 observation- or turn-grain detector is sent, but it cannot see inside a sweep, so a sweep that ignores
 the list runs on every call site and nothing fails. `MetricDriftSweep` filters its samples; `tool_error`
 does not read the list yet, so `ClassifierService#setCallSiteIds` refuses one for it.
+
+**A sweep can refuse to turn a classifier on.** `ClassifierService#setEnabled` asks the sweep that runs the
+row (`SweepRouting#sweepFor`: the registered sweep of a window-grain kind) before it writes, and only when
+turning the row on. The sweep throws a `TessaryException` whose code says why, for a row it could not run,
+so the person sees the reason at once rather than a pause on the first pass. Turning a row off is never
+refused. The default accepts every row.
 
 `SweepContext` carries the two records every sweep already took as its two arguments and nothing
 else — no repositories, no catalog, no worker, no clock. An implementation injects the collaborators
