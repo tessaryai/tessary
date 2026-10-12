@@ -74,6 +74,83 @@ narrower.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
 
+## Agent sessions (`session.js`)
+
+`agent-sandbox/session.js` keeps one OpenCode session alive for many messages, where the lane
+scripts run one prompt and exit. It is generic: it knows a system prompt, files, a model and named
+MCP servers, and nothing about what the caller builds with them. A launcher runs it once per
+session as `node session.js /home/user/session.json` (E2B) or `node session.js /work/session.json`
+(Docker) and drives it over HTTP.
+
+### Start
+
+| Item | Value |
+|---|---|
+| `session.json` | `{ system_prompt, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
+| `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
+| `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
+| `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`. |
+| `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
+| `SESSION_PORT` | Env var, default `9400`. The launcher does not set it; the tests do. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
+| Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied, `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders. |
+
+### Routes
+
+Every request carries `Authorization: Bearer <SESSION_SECRET>`, `/healthz` included. Without it, or
+with a wrong one: `401 { "kind": "unauthorized" }`. Another path or method: `404 { "kind": "not_found" }`.
+
+| Route | Result |
+|---|---|
+| `GET /healthz` | `200 { "state": "ready" }` once OpenCode is up, its event stream is connected and the OpenCode session exists. `503 { "state": "starting" }` before; `503 { "state": "failed" }` after a start failure or an OpenCode exit. |
+| `POST /message` | Body `{ "text": "<non-empty string>" }`, at most 1 MiB. `202`, and the reply starts. While a reply runs: `409 { "kind": "busy" }`. Not ready: `503 { "kind": "starting" }` or `503 { "kind": "failed" }`. Bad body: `400 { "kind": "bad_request" }`. OpenCode refused the prompt: `502 { "kind": "prompt", "detail" }`, and no reply starts. |
+| `POST /abort` | `204`. A running reply ends with `message_end.reason = "aborted"`; with no reply running it does nothing. The session stays. If OpenCode refuses the abort: `502 { "kind": "abort", "detail" }`. |
+| `GET /events?from=<n>` | `200`, `application/x-ndjson`: one `{ "type", "data" }` object per line, in emit order, with no sequence number (the launcher adds it). The script keeps every event of the session in memory; `from` (default 0) is the index of the first event wanted, which is the count of lines the reader already holds. It writes `from..` and then live events, and holds the response open. `from` equal to the log size gives only live events; a larger `from` is `400 { "kind": "bad_request" }`. Several readers may read at once. |
+
+### Events
+
+| Type | Data | When |
+|---|---|---|
+| `text` | `{ delta }` | Live text of the reply. Reasoning text, user text and synthetic parts are never sent. |
+| `tool_start` | `{ call_id, server, tool, input_summary }` | Once per OpenCode call id, when the call is first seen running or done. `server` is the configured name, or `null` for OpenCode's own tools; `tool` has no server prefix. |
+| `tool_end` | `{ call_id, result_summary, bytes, duration_ms, ok }` | Once per call id, when the call completes (`ok: true`) or fails (`ok: false`). |
+| `message_end` | `{ usage: { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, cost_usd }, reason }` | Once per accepted message. `usage` sums every model step of the reply. |
+| `error` | `{ kind, detail }` | See the kinds below. |
+| `closed` | `{ reason: "failed" }` | Only after a start failure or an OpenCode exit. `idle` and `stopped` are the launcher's. |
+
+`input_summary` is the scrubbed tool input as JSON and `result_summary` the scrubbed output (or the
+error), each cut to 2000 characters; `bytes` is the size of the whole output before the cut.
+
+`reason` is `aborted` when an abort was asked during the reply, else `limit` when the reply used
+`steps` model steps or more, else `done`. OpenCode 1.18.30 does not enforce `steps`: on the step
+that reaches it, it tells the model that tools are disabled and to answer in text, but it still
+offers the tools, and a model that calls one anyway goes on to further steps. So
+`max_tool_calls_per_message` bounds the tool steps of a model that follows OpenCode's instruction,
+and `limit` reports every reply that reached the last step, whether the model stopped there or not.
+
+| `error.kind` | Cause | Then |
+|---|---|---|
+| `start` | A bad `session.json`, a dossier path that escapes, or the relay, OpenCode or the OpenCode session did not start. | `closed { failed }`; open `/events` responses end; exit 1 after 5 s. |
+| `agent` | An OpenCode `session.error` during a reply, other than an abort. `detail` is `<name>: <message>`, scrubbed and cut to 500 characters. | The reply still ends with one `message_end`, so its spend is booked once. |
+| `opencode_exit` | `opencode serve` exited after the session was ready. `detail` is `exit code <n>` or `signal <s>`. | `closed { failed }`; open `/events` responses end; exit 1 after 5 s. |
+
+SIGTERM or SIGINT stops OpenCode (awaited), the relay and the HTTP server, and exits 0 with no event.
+
+### How a reply ends
+
+The script prompts with `prompt_async` and reads OpenCode's own event stream (`GET /event`,
+which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.30 binary shape the rules:
+
+- After a reply ends, OpenCode sends the reply's user message again, and after an abort or a
+  provider error it sends a second idle pair. So a reply counts an idle only after it has seen its
+  own user message, the first user message whose id is new.
+- After an abort or a provider error, OpenCode reports idle before it settles the running tool and
+  completes the assistant message. So an idle ends the reply only when every assistant message of
+  the reply is complete; if one is still open 2 s after an idle, the reply ends anyway.
+- The event stream has no replay. At the end of a reply the script reads the session's messages
+  once and sends any text or tool event the stream did not deliver, so a frame lost in a reconnect
+  loses nothing. After the stream reconnects during a reply, the script asks OpenCode for the
+  session status and ends the reply if the session is idle.
+
 ## Deploy
 
 The launcher ships as its own image, built and pushed by

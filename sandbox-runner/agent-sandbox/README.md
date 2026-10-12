@@ -35,6 +35,11 @@ as the Docker backend's agent image.
   prose when no `json_schema` was sent. The repository is read-only (`edit` denied under `repo/`);
   everywhere else under the work dir is writable, so the agent can draft a builder and run it with
   `node`. (Node builtins only.)
+- `session.js` — one long-lived agent session: reads and deletes `session.json`, starts the relay
+  with the session's named MCP servers and one `opencode serve`, and serves `POST /message`,
+  `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
+  maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
+  `closed` events. The contract is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's

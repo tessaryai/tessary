@@ -124,6 +124,19 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
     return Object.assign(events, { ended });
   }
 
+  async function waitListening() {
+    const deadline = Date.now() + DEADLINE_MS;
+    while (Date.now() < deadline) {
+      try {
+        await request('GET', '/healthz');
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    throw new Error(`session not listening after ${DEADLINE_MS}ms: ${stderr}`);
+  }
+
   async function waitReady() {
     const deadline = Date.now() + DEADLINE_MS;
     while (Date.now() < deadline) {
@@ -181,6 +194,7 @@ async function startSession({ input = {}, script = { replies: [] }, env = {}, se
     request,
     readEvents,
     eventsWithin,
+    waitListening,
     waitReady,
     records,
     stdout: () => stdout,

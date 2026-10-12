@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js, authoring.js). ONE source of truth for:
- *   - starting `opencode serve` and driving it over the SDK,
+ * Shared OpenCode runner for the agent lanes (rca.js, triage.js, authoring.js) and the long-lived
+ * session.js. ONE source of truth for:
+ *   - starting `opencode serve` and driving it over the SDK, and the config it starts with
+ *     (basePermission, customAgent, remoteMcp),
  *   - turning its session messages into the `turns[]` shape the backend's
  *     AgentSpanTelemetry.recordTurns expects,
  *   - synthesising the result envelope the backend parses (`resultRaw`),
@@ -20,9 +22,10 @@
  * the run was over. Ours SIGTERMs, waits, SIGKILLs, and releases the child's pipes, and runAgent
  * awaits all of it. Everything spoken over HTTP still goes through the SDK's client.
  *
- * WHY WE LIST MESSAGES INSTEAD OF STREAMING: nothing here renders live progress. The
+ * WHY runAgent LISTS MESSAGES INSTEAD OF STREAMING: no lane renders live progress. The
  * backend reads one payload at the end, so reading the session's messages once the
- * prompt resolves is the same data with none of the event-ordering exposure.
+ * prompt resolves is the same data with none of the event-ordering exposure. session.js
+ * streams, because a person watches its replies as they are written.
  *
  * Runs identically in-VM (E2B template, /home/user) and in local/host mode
  * (agent-sandbox/), because `require('./agent-stream')` resolves beside the caller in

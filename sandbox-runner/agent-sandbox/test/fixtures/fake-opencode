@@ -111,8 +111,9 @@ function serve() {
  * tells the model to stop), so the fake plays every step as written.
  *
  * Switches: FAKE_OPENCODE_HEARTBEAT_MS (default 10000), FAKE_OPENCODE_EXIT_ON_PROMPT=<n> (exit 3 when
- * the n-th prompt arrives, before answering), FAKE_OPENCODE_STRAY_IDLE=1 (publish a late
- * `session.status idle` right after accepting a prompt), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
+ * the n-th prompt arrives, before answering), FAKE_OPENCODE_STRAY_IDLE=1 (right after accepting
+ * a prompt, publish the previous user message again and a `session.status idle`: the tail of the
+ * previous reply, which the binary sends after its idle), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
  * first reply, end every `/event` response instead of publishing the final idle pair).
  */
 function serveSession(port) {
@@ -312,7 +313,11 @@ function serveSession(port) {
         playing = true;
         res.writeHead(204);
         res.end();
-        if (process.env.FAKE_OPENCODE_STRAY_IDLE === '1') publish('session.status', { sessionID, status: { type: 'idle' } });
+        if (process.env.FAKE_OPENCODE_STRAY_IDLE === '1') {
+          const previousUser = messages.filter((msg) => msg.info.role === 'user').at(-1);
+          if (previousUser) publish('message.updated', { sessionID, info: previousUser.info });
+          publish('session.status', { sessionID, status: { type: 'idle' } });
+        }
         const text = (body.parts || []).map((p) => p.text).join('');
         setTimeout(() => void play(prompts, text), 5);
         return;
