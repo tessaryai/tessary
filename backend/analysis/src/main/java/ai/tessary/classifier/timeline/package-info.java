@@ -48,6 +48,9 @@
  * <p>Events are ordered by end time, because an event can be judged only when it is complete. On a tie the event of
  * the trace that ends first comes first, so a turn's events come before the next turn's that starts in the instant it
  * ends; inside one trace the deeper event comes first, so a parent never comes before its child. A user message is
- * placed at the start of the first span that carries it; a reply comes right after the span that wrote it.
+ * placed at the start of the first span that carries it; a reply comes right after the span that wrote it. In the
+ * instant a user message is placed, it comes after the span events of its trace that end there, since that work, and
+ * the reply it answers, came first; but before its carrier and the spans above and below the carrier that end there, so
+ * a parent still comes after its child.
  */
 package ai.tessary.classifier.timeline;

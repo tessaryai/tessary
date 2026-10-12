@@ -973,6 +973,100 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void aTurnOfTheSameTraceThatStartsWhenThePreviousEndsComesAfterIt() {
+        String hi = "{\"role\":\"user\",\"content\":\"hi\"}";
+        String hello = "{\"role\":\"assistant\",\"content\":\"Hello, how can I help?\"}";
+        String cancel = "{\"role\":\"user\",\"content\":\"cancel my order\"}";
+        List<TimelineSpan> spans = List.of(
+                span("t3", "root", "workflow").at(0, 1000).build(),
+                span("t3", "ag1", "agent")
+                        .parent("root")
+                        .at(10, 400)
+                        .in("[" + hi + "]")
+                        .out("Hello, how can I help?")
+                        .build(),
+                span("t3", "ag2", "agent")
+                        .parent("root")
+                        .at(400, 900)
+                        .in("[" + hi + "," + hello + "," + cancel + "]")
+                        .out("Done, it is cancelled.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of(
+                        "t3/ag1#user:0",
+                        "t3/ag1",
+                        "t3/ag1#reply:0",
+                        "t3/ag2#user:0",
+                        "t3/ag2",
+                        "t3/ag2#reply:0",
+                        "t3/root"),
+                timeline.events().stream().map(Event::id).toList(),
+                "the next turn's message, one level deeper, sorts before the turn of the same trace that ended in"
+                        + " its instant, so it comes before the reply it answers");
+    }
+
+    @Test
+    void aModelCallThatStartsWhenThePreviousEndsComesAfterItsReply() {
+        String book = "{\"role\":\"user\",\"content\":\"book a table\"}";
+        String which = "{\"role\":\"assistant\",\"content\":\"Which day?\"}";
+        String friday = "{\"role\":\"user\",\"content\":\"friday\"}";
+        List<TimelineSpan> spans = List.of(
+                span("t", "w", "workflow").at(0, 300).build(),
+                span("t", "l1", "llm")
+                        .parent("w")
+                        .at(10, 100)
+                        .in("[" + book + "]")
+                        .out("[" + which + "]")
+                        .build(),
+                span("t", "l2", "llm")
+                        .parent("w")
+                        .at(100, 290)
+                        .in("[" + book + "," + which + "," + friday + "]")
+                        .out("Booked for friday.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("t/l1#user:0", "t/l1", "t/l1#reply:0", "t/l2#user:0", "t/l2", "t/l2#reply:0", "t/w"),
+                timeline.events().stream().map(Event::id).toList(),
+                "the person's answer sorts before the question it answers when the next call starts in the instant"
+                        + " the last one ended");
+    }
+
+    @Test
+    void aMessageComesBeforeTheSpansAboveItThatEndInItsInstant() {
+        String a = "{\"role\":\"user\",\"content\":\"a\"}";
+        String b = "{\"role\":\"assistant\",\"content\":\"b\"}";
+        String c = "{\"role\":\"user\",\"content\":\"c\"}";
+        List<TimelineSpan> spans = List.of(
+                span("z", "w", "workflow").at(0, 400).build(),
+                span("z", "l0", "llm")
+                        .parent("w")
+                        .at(100, 400)
+                        .in("[" + a + "]")
+                        .out("[" + b + "]")
+                        .build(),
+                span("z", "l1", "llm")
+                        .parent("w")
+                        .at(400, 400)
+                        .in("[" + a + "," + b + "," + c + "]")
+                        .out("d")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("z/l0#user:0", "z/l0", "z/l0#reply:0", "z/l1#user:0", "z/l1", "z/l1#reply:0", "z/w"),
+                timeline.events().stream().map(Event::id).toList(),
+                "a span that ends in the instant its zero-length child starts comes before the child, or the"
+                        + " message comes before a reply it answers");
+    }
+
+    @Test
     void anEventsBytesIsTheSizeOfItsJsonWithoutPositionAndBytes() {
         SessionTimeline timeline = SessionTimelineBuilder.build("p1", "sess-1", acceptanceSession());
 

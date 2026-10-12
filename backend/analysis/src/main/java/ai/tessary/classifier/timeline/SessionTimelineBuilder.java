@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,9 +66,16 @@ public final class SessionTimelineBuilder {
 
     /**
      * An event of one trace before ordering: {@code ordinal} breaks the last tie, {@code writerSpanId} is a reply's,
-     * {@code traceLast} is the latest instant of the event's trace.
+     * {@code traceLast} is the latest instant of the event's trace, {@code ancestorIds} the loaded spans above the
+     * event, root first; a message's end with its carrier.
      */
-    record Derived(Event event, @Nullable String writerSpanId, int ordinal, Instant traceLast) {}
+    record Derived(
+            Event event, @Nullable String writerSpanId, int ordinal, Instant traceLast, List<String> ancestorIds) {
+
+        Derived {
+            ancestorIds = List.copyOf(ancestorIds);
+        }
+    }
 
     /** The whole timeline of the given spans: any number of whole traces of one session, each one settled. */
     public static SessionTimeline build(String projectId, String sessionId, List<TimelineSpan> spans) {
@@ -93,7 +101,9 @@ public final class SessionTimelineBuilder {
 
     /**
      * Orders the events of the loaded traces and numbers them: by time; on a tie the event of the trace that ends first,
-     * then the deeper event, then trace, span and ordinal; each reply right after the span event of its writer.
+     * then the deeper event, then trace, span and ordinal; each reply right after the span event of its writer. A user
+     * message is placed at a start, so in its instant it comes after the span events of its trace that end there,
+     * except its carrier's, its carrier's ancestors' and its carrier's descendants', which it comes before.
      */
     static SessionTimeline assemble(String projectId, String sessionId, List<Derived> events, boolean truncated) {
         Map<List<String>, List<Derived>> repliesByWriter = new HashMap<>();
@@ -115,7 +125,7 @@ public final class SessionTimelineBuilder {
                 .thenComparing(d -> d.event().spanId())
                 .thenComparingInt(Derived::ordinal));
         List<Event> ordered = new ArrayList<>(events.size());
-        for (Derived d : others) {
+        for (Derived d : startsAfterEnds(others)) {
             Event event = d.event();
             ordered.add(event.withPosition(ordered.size()));
             if (d.ordinal() != SPAN_ORDINAL) continue;
@@ -129,9 +139,62 @@ public final class SessionTimelineBuilder {
         return new SessionTimeline(projectId, sessionId, ordered, truncated);
     }
 
+    /** The sorted events with each instant of a trace reordered by {@link #placeInstant}. */
+    private static List<Derived> startsAfterEnds(List<Derived> sorted) {
+        List<Derived> placed = new ArrayList<>(sorted.size());
+        int from = 0;
+        while (from < sorted.size()) {
+            Event first = sorted.get(from).event();
+            int to = from + 1;
+            while (to < sorted.size()
+                    && sorted.get(to).event().at().equals(first.at())
+                    && sorted.get(to).event().traceId().equals(first.traceId())) {
+                to++;
+            }
+            placeInstant(sorted.subList(from, to), placed);
+            from = to;
+        }
+        return placed;
+    }
+
+    /**
+     * The events of one instant of one trace, in sorted order, except that each user message moves to just before the
+     * first span event in its line, or after them all: work that ended in the instant a message's span starts came
+     * before the message, while the spans in its line come after it, as a parent comes after its child.
+     */
+    private static void placeInstant(List<Derived> instant, List<Derived> placed) {
+        List<Derived> waiting = new ArrayList<>();
+        for (Derived d : instant) {
+            if (Event.USER_MESSAGE.equals(d.event().kind())) waiting.add(d);
+        }
+        if (waiting.isEmpty()) {
+            placed.addAll(instant);
+            return;
+        }
+        for (Derived d : instant) {
+            if (Event.USER_MESSAGE.equals(d.event().kind())) continue;
+            for (Iterator<Derived> it = waiting.iterator(); it.hasNext(); ) {
+                Derived message = it.next();
+                if (inLine(d, message)) {
+                    placed.add(message);
+                    it.remove();
+                }
+            }
+            placed.add(d);
+        }
+        placed.addAll(waiting);
+    }
+
+    /** Whether the span event is the message's carrier, above it or below it in the trace's tree. */
+    private static boolean inLine(Derived span, Derived message) {
+        return message.ancestorIds().contains(span.event().spanId())
+                || span.ancestorIds().contains(message.event().spanId());
+    }
+
     /**
      * The tree facts of a span, from the spans of its trace that are loaded.
      *
+     * @param ancestorIds the loaded spans above the span, root first
      * @param rooted the walk up the parent links reached a span with no parent
      * @param insideWork a span of a kind outside {@link #DIALOGUE_PATH_KINDS} lies between the span and its nearest
      *     agent, or the root when it has no agent
@@ -139,6 +202,7 @@ public final class SessionTimelineBuilder {
     private record Facts(
             @Nullable String parentKind,
             List<String> ancestorKinds,
+            List<String> ancestorIds,
             int depth,
             @Nullable String agentId,
             boolean rooted,
@@ -201,7 +265,8 @@ public final class SessionTimelineBuilder {
                                         : spanData(span)),
                         null,
                         SPAN_ORDINAL,
-                        last));
+                        last,
+                        f.ancestorIds()));
             }
             boolean detached = !spans.isEmpty() && spans.get(0).parentTraceId() != null;
             if (!detached) {
@@ -260,7 +325,8 @@ public final class SessionTimelineBuilder {
                                     data),
                             null,
                             n,
-                            last));
+                            last,
+                            lineage(carrier)));
                 }
                 inSpan.forEach((key, count) -> emitted.merge(key, count, Math::max));
             }
@@ -401,7 +467,15 @@ public final class SessionTimelineBuilder {
                     messageEvent(writer, spanEventId(writer) + "#reply:" + n, Event.ASSISTANT_REPLY, ended, data),
                     writer.spanId(),
                     n,
-                    last);
+                    last,
+                    lineage(writer));
+        }
+
+        /** The ancestors of a message the span carries: the span's, then the span. */
+        private List<String> lineage(TimelineSpan carrier) {
+            List<String> ids = new ArrayList<>(facts(carrier).ancestorIds());
+            ids.add(carrier.spanId());
+            return ids;
         }
 
         private Event messageEvent(TimelineSpan carrier, String id, String kind, Instant at, ObjectNode data) {
@@ -499,6 +573,7 @@ public final class SessionTimelineBuilder {
             return new Facts(
                     kinds.isEmpty() ? null : kinds.get(kinds.size() - 1),
                     kinds,
+                    up.stream().map(TimelineSpan::spanId).toList(),
                     up.size(),
                     agentId,
                     rooted,
