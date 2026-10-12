@@ -49,7 +49,7 @@ decides what an out-of-tree jar can actually contribute — see §8.
 | `BuiltInDetector` | `classifier/catalog/` | observation, turn | in-tree manifest, **or** Spring `ObjectProvider<DetectorSupplier>` (generic, unguarded, see below) | Score one span (or a batch of them). Pure: no database, no clock, no writes. |
 | `ClassifierSweep` | `classifier/worker/` | trace, window | Spring, `ObjectProvider` | Run one leased pass over a larger unit and write findings. Stateful. |
 | `TriageSource` | `classifier/finding/` | — | Spring, `List` | Serve this classifier's findings into the shared read surface and triage queue. `@Order`-ranked. |
-| `FindingAdapter` | `classifier/finding/` | — | Spring, `ObjectProvider`, folded by `FindingAdapters` (two owners of one finding fail at lookup) | Claim the findings a classifier outside the catalog filed: their triage eligibility, the `method.md` text for triage and RCA (read from the `FindingClaim`, so the RCA firewall holds), and the detector-state half of a person's absorb (`absorbed`, in the caller's transaction). |
+| `FindingAdapter` | `classifier/finding/` | — | Spring, `ObjectProvider`, folded by `FindingAdapters` (two owners of one finding fail at lookup, and the failure is not isolated: §6) | Claim the findings a classifier outside the catalog filed: their triage eligibility, the `method.md` text for triage and RCA (read from the `FindingClaim`, so the RCA firewall holds), and the detector-state half of a person's absorb (`absorbed`, in the caller's transaction). |
 | `DetectionTable` | `detection/` (`backend/shared`) | span, trace | Spring, `ObjectProvider`, folded by `DetectionTableRegistry` (`toUnmodifiableMap`, duplicate kind fails boot) | Name the table this classifier's fired detections land in and the grain (`span`/`trace`) its rows carry. Replaces the old `classifier_detection_v` view's hard-coded six-table list; a kind with no registered table takes one `writesDetections`-gated WARN from `ClassifierWorker` and scores nothing rather than throwing. |
 
 `FindingAdapter`'s consumers are `BehaviorTriageSource` (`analyze` and `listAutoEscalatable` for
@@ -268,6 +268,26 @@ depend on classpath order.
 kind through one of them, so the other would stop scoring and nothing would say so.
 `ClassifierWorker#validateRouting` runs at `@PostConstruct` and names every such kind. The rule
 covers a `DetectorSupplier`, an in-tree detector factory and `regex` alike.
+
+**A faulty `FindingAdapter` is not isolated.** No lease, budget or kind boundary sits around an
+adapter: `FindingAdapters.ownerOf` asks every adapter on each lookup, so an `owns()` that throws, or
+two adapters that own one finding (an `IllegalStateException`), fails the call that asked, and that
+call is often on a built-in path:
+
+- `BehaviorTriageSource.resolve`, `repin` and `repinCase` ask for the owner first, for every finding,
+  built-in ones too. An `owns()` that throws makes a person's ruling or absorb on any finding fail
+  with a 500 from the catch-all handler; two owners make it fail on the findings they share. A case
+  absorb that reaches `repinCase` fails the same way.
+- `listAutoEscalatable` asks about every escalation candidate outside the built-in keys, so it throws
+  for the whole project. `TriageAutoEscalator` catches it per project (one WARN,
+  `triage.auto.project-failed`): that tick escalates nothing more for the project, built-in findings
+  included, the other projects go on, and the next tick tries again.
+- `analyze`, `BehaviorTriageEngine.methodCard` and `RcaAnalysisService.dossierFiles` ask only for a
+  key that no built-in rules on, so a fault there fails that request, triage job or RCA job only.
+
+The guarantee that an adapter "degrades" (§7, and `finding/package-info.java`) is about an absent
+adapter, not a faulty one. An adapter's `owns()` must not throw and must not claim another
+classifier's findings: answer from the claim's classifier key alone.
 
 ---
 
