@@ -12,10 +12,13 @@ import ai.tessary.storage.ToolCallRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Repository.SessionTrace;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,8 +64,9 @@ public class SessionTimelineService {
      * trace when the events loaded after its end already weigh more than {@code maxBytes}: every event of that trace
      * and of the traces after it is at or before that end, so it sorts before the first event the tail leaves out. The
      * traces are read a page at a time, the first page one trace and each next page twice the last, so the spans of a
-     * trace the tail leaves out are read only in the last page. A trace that is not settled has no end yet, since a
-     * span may still arrive, so it is always read.
+     * trace the tail leaves out are read only in the last page. The trace rows are read the same way, so a tail of a
+     * session with many traces reads only its newest rows. A trace that is not settled has no end yet, since a span may
+     * still arrive, so it is always read.
      *
      * <p>The one event a trace row does not bound: a user message whose carrying span never ended, in a settled trace,
      * which the builder places at the start of that span or of a span above it; when that start is later than the
@@ -75,16 +79,16 @@ public class SessionTimelineService {
     /** The tail of at most {@code maxBytes}; the load line counts the events it returns, not the events it read. */
     private SessionTimeline read(String projectId, String sessionId, long maxBytes) {
         Instant start = Instant.now();
-        List<SessionTrace> all = traces.listSessionTraces(projectId, sessionId);
+        SessionTraces source = new SessionTraces(traces, projectId, sessionId);
         List<SessionTimelineBuilder.Derived> derived = new ArrayList<>();
         long bytes = 0;
         int traceCount = 0;
         int spanCount = 0;
         boolean tracesRemain = false;
-        int pageSize = 1;
         pages:
-        for (int from = 0; from < all.size(); from += pageSize, pageSize = Math.min(2 * pageSize, TRACES_PER_READ)) {
-            List<SessionTrace> page = all.subList(from, Math.min(from + pageSize, all.size()));
+        for (int pageSize = 1; ; pageSize = Math.min(2 * pageSize, TRACES_PER_READ)) {
+            List<SessionTrace> page = source.next(pageSize);
+            if (page.isEmpty()) break;
             if (enough(derived, bytes, maxBytes, page.get(0))) {
                 tracesRemain = true;
                 break;
@@ -119,6 +123,47 @@ public class SessionTimelineService {
                 .durationMs(start)
                 .log();
         return timeline;
+    }
+
+    /**
+     * A session's traces latest end first, a page at a time: the traces with no settled end in one read, then the ended
+     * ones a page at a time after the last one read, so a tail that stops early never reads the older trace rows. A
+     * trace that settles during the read could come back in an ended page; it is read once.
+     */
+    private static final class SessionTraces {
+        private final TraceV2Repository traces;
+        private final String projectId;
+        private final String sessionId;
+        private final ArrayDeque<SessionTrace> unended;
+        private final Set<String> read = new HashSet<>();
+        private @Nullable SessionTrace lastEnded;
+        private boolean endedRemain = true;
+
+        SessionTraces(TraceV2Repository traces, String projectId, String sessionId) {
+            this.traces = traces;
+            this.projectId = projectId;
+            this.sessionId = sessionId;
+            this.unended = new ArrayDeque<>(traces.listUnendedSessionTraces(projectId, sessionId));
+        }
+
+        /** Up to {@code n} traces not returned before; fewer only when none remain. */
+        List<SessionTrace> next(int n) {
+            List<SessionTrace> page = new ArrayList<>(n);
+            while (page.size() < n && !unended.isEmpty()) {
+                SessionTrace trace = unended.poll();
+                if (read.add(trace.id())) page.add(trace);
+            }
+            while (page.size() < n && endedRemain) {
+                int wanted = n - page.size();
+                List<SessionTrace> ended = traces.listEndedSessionTraces(projectId, sessionId, lastEnded, wanted);
+                endedRemain = ended.size() == wanted;
+                for (SessionTrace trace : ended) {
+                    lastEnded = trace;
+                    if (read.add(trace.id())) page.add(trace);
+                }
+            }
+            return page;
+        }
     }
 
     /** Whether the events loaded after the trace's end already fill the tail, so the trace and the ones after it are not read. */

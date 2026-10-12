@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DataAccessException;
@@ -751,27 +752,71 @@ public class TraceV2Repository {
             boolean settled,
             @Nullable String settledEnd) {}
 
+    private static final String SESSION_TRACE_COLUMNS = "SELECT t.id, t.parent_trace_id, t.call_site_id, t.started_at,"
+            + " t.is_settled, CASE WHEN t.is_settled THEN t.ended_at END AS settled_end FROM trace t"
+            + " WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted";
+
+    static final String UNENDED_SESSION_TRACES = SESSION_TRACE_COLUMNS
+            + " AND (NOT t.is_settled OR t.ended_at IS NULL)"
+            + " ORDER BY t.started_at DESC, t.id DESC";
+
+    static final String ENDED_SESSION_TRACES = SESSION_TRACE_COLUMNS
+            + " AND t.is_settled AND t.ended_at IS NOT NULL"
+            + " ORDER BY t.ended_at DESC, t.started_at DESC, t.id DESC LIMIT :limit";
+
+    static final String ENDED_SESSION_TRACES_AFTER = SESSION_TRACE_COLUMNS
+            + " AND t.is_settled AND t.ended_at IS NOT NULL"
+            + " AND (t.ended_at, t.started_at, t.id) < (:end::timestamptz, :start::timestamptz, :id)"
+            + " ORDER BY t.ended_at DESC, t.started_at DESC, t.id DESC LIMIT :limit";
+
     /**
-     * Every trace of a session that is not deleted, including a detached sub-agent trace ({@code parent_trace_id}
-     * set), latest end first: the traces with no settled end first, then by {@code ended_at} descending, then start
-     * and id descending. Reads trace rows only, so a long session costs one small row per trace. Found through {@code
-     * ix_trace_session}, then sorted.
+     * The traces of a session with no settled end, latest start first: those not settled, since a span may still
+     * arrive, and the settled ones none of whose spans ended. Detached sub-agent traces too. Served by {@code
+     * ix_trace_session_unended}, which holds only such traces, so a long session's ended traces are not read.
      */
-    public List<SessionTrace> listSessionTraces(String projectId, String sessionId) {
-        return jdbc.sql("SELECT t.id, t.parent_trace_id, t.call_site_id, t.started_at, t.is_settled,"
-                        + " CASE WHEN t.is_settled THEN t.ended_at END AS settled_end FROM trace t"
-                        + " WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted"
-                        + " ORDER BY settled_end DESC NULLS FIRST, t.started_at DESC, t.id DESC")
+    public List<SessionTrace> listUnendedSessionTraces(String projectId, String sessionId) {
+        return jdbc.sql(UNENDED_SESSION_TRACES)
                 .param("pid", projectId)
                 .param("sid", sessionId)
-                .query((rs, n) -> new SessionTrace(
-                        rs.getString("id"),
-                        rs.getString("parent_trace_id"),
-                        rs.getString("call_site_id"),
-                        requireIso(rs, "started_at"),
-                        rs.getBoolean("is_settled"),
-                        Timestamps.iso(rs, "settled_end")))
+                .query((rs, n) -> sessionTrace(rs))
                 .list();
+    }
+
+    /**
+     * Up to {@code limit} settled traces of a session that have an end, latest end first, then start and id
+     * descending, after {@code after} in that order, or from the latest when it is null. Detached sub-agent traces
+     * too. Served by {@code ix_trace_session_ended} in this order, so a page reads only its own rows. With {@link
+     * #listUnendedSessionTraces} before it, it lists every trace of the session latest end first.
+     */
+    public List<SessionTrace> listEndedSessionTraces(
+            String projectId, String sessionId, @Nullable SessionTrace after, int limit) {
+        if (after == null) {
+            return jdbc.sql(ENDED_SESSION_TRACES)
+                    .param("pid", projectId)
+                    .param("sid", sessionId)
+                    .param("limit", limit)
+                    .query((rs, n) -> sessionTrace(rs))
+                    .list();
+        }
+        return jdbc.sql(ENDED_SESSION_TRACES_AFTER)
+                .param("pid", projectId)
+                .param("sid", sessionId)
+                .param("end", Objects.requireNonNull(after.settledEnd(), "an ended trace"))
+                .param("start", after.startedAt())
+                .param("id", after.id())
+                .param("limit", limit)
+                .query((rs, n) -> sessionTrace(rs))
+                .list();
+    }
+
+    private static SessionTrace sessionTrace(ResultSet rs) throws SQLException {
+        return new SessionTrace(
+                rs.getString("id"),
+                rs.getString("parent_trace_id"),
+                rs.getString("call_site_id"),
+                requireIso(rs, "started_at"),
+                rs.getBoolean("is_settled"),
+                Timestamps.iso(rs, "settled_end"));
     }
 
     /**

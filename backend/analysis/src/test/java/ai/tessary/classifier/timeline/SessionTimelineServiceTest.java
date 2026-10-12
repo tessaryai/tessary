@@ -2,9 +2,12 @@
 package ai.tessary.classifier.timeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.open.obs.Markers;
@@ -53,8 +56,7 @@ class SessionTimelineServiceTest {
 
     @Test
     void loadTailReadsNoTraceItThenLeavesOut() {
-        when(traces.listSessionTraces(PID, SID))
-                .thenReturn(List.of(settled("t3", 3000), settled("t2", 2000), settled("t1", 1000)));
+        stubTraces(List.of(), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
         when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
                 .thenAnswer(call -> {
                     Collection<String> ids = call.getArgument(1);
@@ -79,9 +81,36 @@ class SessionTimelineServiceTest {
         assertEquals(true, tail.truncated());
     }
 
+    /**
+     * Catches a tail that reads every trace row of the session: one that the newest trace fills reads the trace rows
+     * of its first two pages, and never the older ones.
+     */
+    @Test
+    void loadTailReadsOnlyTheTraceRowsOfThePagesItReads() {
+        SessionTrace t5 = settled("t5", 5000);
+        stubTraces(List.of(), t5, settled("t4", 4000), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenAnswer(call -> {
+                    Collection<String> ids = call.getArgument(1);
+                    return ids.stream()
+                            .map(SessionTimelineServiceTest::toolSpan)
+                            .toList();
+                });
+        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+
+        service.loadTail(PID, SID, 1);
+
+        verify(traces).listUnendedSessionTraces(PID, SID);
+        verify(traces).listEndedSessionTraces(PID, SID, null, 1);
+        verify(traces).listEndedSessionTraces(PID, SID, t5, 2);
+        verifyNoMoreInteractions(traces);
+    }
+
     @Test
     void theLoadLineOfATailCountsTheEventsTheTailReturns() {
-        when(traces.listSessionTraces(PID, SID)).thenReturn(List.of(settled("t2", 2000), settled("t1", 1000)));
+        stubTraces(List.of(), settled("t2", 2000), settled("t1", 1000));
         when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
                 .thenAnswer(call -> {
                     Collection<String> ids = call.getArgument(1);
@@ -135,8 +164,7 @@ class SessionTimelineServiceTest {
 
     @Test
     void aSettledTraceWithNoEndedSpanStillPlacesAnOrphanSpansMessage() {
-        when(traces.listSessionTraces(PID, SID))
-                .thenReturn(List.of(new SessionTrace("t1", null, null, T0.toString(), true, null)));
+        stubTraces(List.of(new SessionTrace("t1", null, null, T0.toString(), true, null)));
         when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(spanRow("t1", "l1", "missing-parent", "llm", T0.toString(), null)));
         when(payloads.listByTraceIds(eq(PID), anyCollection()))
@@ -160,6 +188,21 @@ class SessionTimelineServiceTest {
                 timeline.events().stream().map(Event::id).toList(),
                 "a settled trace none of whose spans ended is read as a trace still receiving spans, so the span whose"
                         + " parent never arrived carries no message");
+    }
+
+    /**
+     * The repository's reads over the given traces: the unended ones in one read, and the ended ones, latest end first,
+     * a page after the given trace.
+     */
+    private void stubTraces(List<SessionTrace> unended, SessionTrace... ended) {
+        when(traces.listUnendedSessionTraces(PID, SID)).thenReturn(unended);
+        when(traces.listEndedSessionTraces(eq(PID), eq(SID), any(), anyInt())).thenAnswer(call -> {
+            SessionTrace after = call.getArgument(2);
+            int limit = call.getArgument(3);
+            List<SessionTrace> all = List.of(ended);
+            int from = after == null ? 0 : all.indexOf(after) + 1;
+            return all.subList(from, Math.min(all.size(), from + limit));
+        });
     }
 
     private static SessionTrace settled(String id, long endMs) {

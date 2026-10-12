@@ -8,17 +8,20 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * {@link TraceV2Repository#listSessionTraces}: every trace of one session, the detached sub-agent traces too, latest
- * end first. A trace that is not settled has no end yet and comes first. The session is the conversation; {@code
- * thread_id} is only a column.
+ * {@link TraceV2Repository#listUnendedSessionTraces} and {@link TraceV2Repository#listEndedSessionTraces}: every trace
+ * of one session, the detached sub-agent traces too, latest end first. A trace with no settled end comes first; the
+ * ended ones are read a page at a time, each page from its index without a sort. The session is the conversation;
+ * {@code thread_id} is only a column.
  */
 @SpringBootTest
 class TraceV2RepositorySessionTracesTest {
@@ -40,6 +43,9 @@ class TraceV2RepositorySessionTracesTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    TransactionTemplate transactions;
 
     private record Seen(
             String id,
@@ -89,6 +95,9 @@ class TraceV2RepositorySessionTracesTest {
                 .param("id", t7)
                 .update();
 
+        List<TraceV2Repository.SessionTrace> all = new ArrayList<>(traces.listUnendedSessionTraces(pid, "sess-1"));
+        all.addAll(traces.listEndedSessionTraces(pid, "sess-1", null, 10));
+
         assertEquals(
                 List.of(
                         new Seen(t7, null, null, t0.plusMillis(6_000), true, null),
@@ -96,7 +105,7 @@ class TraceV2RepositorySessionTracesTest {
                         new Seen(t1, null, "cs-1", t0, true, t0.plusMillis(9_000)),
                         new Seen(t6, null, null, t0.plusMillis(3_000), true, t0.plusMillis(5_000)),
                         new Seen(t2, t1, null, t0.plusMillis(1_000), true, t0.plusMillis(5_000))),
-                seen(traces.listSessionTraces(pid, "sess-1")),
+                seen(all),
                 "a start order puts t1 last, a thread-keyed read lists t4, a read that drops detached traces skips t2,"
                         + " a deleted trace lists t5, an unsettled trace placed by a stale end is not first, a settled"
                         + " trace with no ended span reads as not settled");
@@ -119,8 +128,84 @@ class TraceV2RepositorySessionTracesTest {
 
         assertEquals(
                 List.of(new Seen(shared, null, null, t0, false, null)),
-                seen(traces.listSessionTraces(mine, "sess-1")),
+                seen(traces.listUnendedSessionTraces(mine, "sess-1")),
                 "a read that drops the project filter lists the other project's traces of the same session id");
+    }
+
+    /**
+     * Catches a page that skips or repeats a trace: each page starts after the last trace of the one before, also
+     * when two traces end in the same instant.
+     */
+    @Test
+    void readsTheEndedTracesAPageAtATime() {
+        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+        String pid = TenantFixture.bootstrap(tenants, "session-traces-pages")
+                .project()
+                .id();
+        Instant t0 = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        String a = SubstrateV2Fixtures.traceId();
+        String b = SubstrateV2Fixtures.traceId();
+        String c = SubstrateV2Fixtures.traceId();
+        fx.trace(pid, a, "sess-1", t0);
+        fx.settle(pid, a, t0.plusMillis(9_000));
+        fx.trace(pid, b, "sess-1", t0.plusMillis(3_000));
+        fx.settle(pid, b, t0.plusMillis(5_000));
+        fx.trace(pid, c, "sess-1", t0.plusMillis(1_000));
+        fx.settle(pid, c, t0.plusMillis(5_000));
+
+        List<String> pages = new ArrayList<>();
+        TraceV2Repository.SessionTrace after = null;
+        for (List<TraceV2Repository.SessionTrace> page = traces.listEndedSessionTraces(pid, "sess-1", null, 1);
+                !page.isEmpty();
+                page = traces.listEndedSessionTraces(pid, "sess-1", after, 1)) {
+            after = page.get(page.size() - 1);
+            pages.add(after.id());
+        }
+
+        assertEquals(List.of(a, b, c), pages, "b and c end in one instant, so the later start comes first");
+    }
+
+    /**
+     * Catches a read that sorts the whole session: each read walks its index in the read's order, and a page after a
+     * trace starts in the index at that trace, so its cost is its own rows and not the session's.
+     */
+    @Test
+    void eachReadWalksItsIndexWithoutASort() {
+        List<String> ended = plan("EXPLAIN "
+                + TraceV2Repository.ENDED_SESSION_TRACES_AFTER
+                        .replace(":pid", "'p'")
+                        .replace(":sid", "'s'")
+                        .replace(":end", "'2026-01-05T10:00:00Z'")
+                        .replace(":start", "'2026-01-05T09:00:00Z'")
+                        .replace(":id", "'t'")
+                        .replace(":limit", "20"));
+        List<String> unended = plan("EXPLAIN "
+                + TraceV2Repository.UNENDED_SESSION_TRACES
+                        .replace(":pid", "'p'")
+                        .replace(":sid", "'s'"));
+
+        assertEquals(
+                List.of(true, false, true),
+                List.of(
+                        ended.stream().anyMatch(l -> l.contains("Index Scan using ix_trace_session_ended")),
+                        ended.stream().anyMatch(l -> l.contains("Sort")),
+                        ended.stream().anyMatch(l -> l.contains("Index Cond") && l.contains("ROW(ended_at"))),
+                String.join("\n", ended));
+        assertEquals(
+                List.of(true, false),
+                List.of(
+                        unended.stream().anyMatch(l -> l.contains("Index Scan using ix_trace_session_unended")),
+                        unended.stream().anyMatch(l -> l.contains("Sort"))),
+                String.join("\n", unended));
+    }
+
+    /** The plan of a statement, with sequential and bitmap scans off so the planner shows the index it can use. */
+    private List<String> plan(String explain) {
+        return transactions.execute(status -> {
+            jdbc.sql("SET LOCAL enable_seqscan = off").update();
+            jdbc.sql("SET LOCAL enable_bitmapscan = off").update();
+            return jdbc.sql(explain).query(String.class).list();
+        });
     }
 
     private static List<Seen> seen(List<TraceV2Repository.SessionTrace> rows) {
