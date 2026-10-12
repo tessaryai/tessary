@@ -52,8 +52,9 @@ async function startFakeSession({ port, secret, shape = {} }) {
 
   function endLog() {
     logEnded = true;
-    for (const reader of readers) reader.res.end();
+    const flushed = [...readers].map((reader) => new Promise((resolve) => reader.res.end(resolve)));
     readers.clear();
+    return Promise.all(flushed);
   }
 
   function endReply(reason) {
@@ -146,11 +147,10 @@ async function startFakeSession({ port, secret, shape = {} }) {
 
   function stop(code) {
     if (!stopping) {
-      endLog();
-      stopping = new Promise((resolve) => {
+      stopping = endLog().then(() => new Promise((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();
-      }).then(() => {
+      })).then(() => {
         resolveExited(code);
         return code;
       });

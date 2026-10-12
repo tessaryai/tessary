@@ -30,6 +30,7 @@
  *                                                    -> 201 { session_id }  a long-lived agent
  *                                                    session (session.js) in its own sandbox
  *   POST   /sessions/{id}/messages { text }          -> 202; 409 while a reply runs
+ *   POST   /sessions/{id}/abort                      -> 204; the reply ends, the session stays
  *   GET    /sessions/{id}/events?after=<seq>         -> text/event-stream, numbered, replayed
  *                                                    from the session's buffer
  *   DELETE /sessions/{id}                            -> 204 once the sandbox is gone
@@ -1639,6 +1640,7 @@ function emitSessionEvent(s, type, data, fromScript) {
   if (type === 'message_end') {
     s.replyOpen = false;
     s.messageEnds++;
+    armIdle(s);
   }
   if (type === 'closed') {
     s.closedSent = true;
@@ -1711,7 +1713,36 @@ function readSessionEventsOnce(s) {
 }
 
 async function readSessionEvents(s) {
-  await readSessionEventsOnce(s);
+  for (;;) {
+    await readSessionEventsOnce(s);
+    if (s.ended || s.exited) return;
+    await new Promise((r) => setTimeout(r, SESSION_RECONNECT_MS));
+    if (s.ended || s.exited) return;
+  }
+}
+
+// The idle clock runs only while no reply is open and no message is in flight, so a reply longer
+// than the idle time is never cut.
+function armIdle(s) {
+  clearIdle(s);
+  if (s.state !== 'live' || s.replyOpen || s.sending) return;
+  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), s.idleTimeoutMs);
+}
+
+function clearIdle(s) {
+  if (s.idleTimer) clearTimeout(s.idleTimer);
+  s.idleTimer = null;
+}
+
+function waitUntil(condition, ms) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + ms;
+    const tick = () => {
+      if (condition() || Date.now() >= deadline) resolve();
+      else setTimeout(tick, 20);
+    };
+    tick();
+  });
 }
 
 // Start step 6: the script answers /healthz once OpenCode and its session are up.
@@ -1738,6 +1769,14 @@ function closeSession(s, reason) {
   if (!s.closing) {
     s.closing = (async () => {
       s.state = 'closing';
+      clearIdle(s);
+      if (s.lifeTimer) clearTimeout(s.lifeTimer);
+      // Abort a running reply first and let it end, so its message_end, and the spend it carries,
+      // reaches the caller before the session closes.
+      if (s.replyOpen && !s.exited) {
+        try { await sessionCall(s, 'POST', '/abort'); } catch { /* the script is gone; nothing to wait for */ }
+        await waitUntil(() => !s.replyOpen || s.exited || s.closedSent, SESSION_CLOSE_GRACE_MS);
+      }
       emitSessionEvent(s, 'closed', { reason });
       s.ended = true;
       for (const res of s.subscribers) res.end();
@@ -1746,9 +1785,34 @@ function closeSession(s, reason) {
       await SESSION_DRIVERS[BACKEND].stop(s);
       s.state = 'closed';
       console.log(`session ${s.id}: closed reason=${reason} events=${s.seq} age_ms=${Date.now() - s.createdAt}`);
+      setTimeout(() => sessions.delete(s.id), SESSION_TOMBSTONE_MS).unref();
     })().catch((e) => console.error(`session ${s.id}: close failed: ${(e && e.name) || 'Error'}`));
   }
   return s.closing;
+}
+
+// After a failed start the script ends its event log, which holds its start error: read it once and
+// keep it on this console, scrubbed and cut. Never in a response.
+function logStartFailure(s) {
+  if (!s.address) return Promise.resolve();
+  return new Promise((resolve) => {
+    const req = http.request(`${s.address}/events?from=0`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
+      let text = '';
+      res.on('data', (c) => { text += c.toString('utf8'); });
+      res.on('end', done);
+      res.on('error', done);
+      res.on('aborted', done);
+      function done() {
+        for (const line of text.split('\n').filter(Boolean)) {
+          console.error(`session ${s.id}: start event ${scrubToken(line).slice(0, 500)}`);
+        }
+        resolve();
+      }
+    });
+    req.setTimeout(2000, () => req.destroy());
+    req.on('error', () => resolve());
+    req.end();
+  });
 }
 
 // A failed start: the same teardown without events or tombstone, because no caller holds the id.
@@ -1805,6 +1869,15 @@ const dockerSessionDriver = {
 
 const SESSION_DRIVERS = { docker: dockerSessionDriver };
 
+// The sandbox's own process ended. Let the reader take the script's last lines (its error and
+// closed) first, so they come before the launcher's own closed.
+async function onSandboxExit(s) {
+  s.exited = true;
+  if (s.state !== 'live') return;
+  await Promise.race([s.readerDone, new Promise((r) => setTimeout(r, 1000))]);
+  closeSession(s, 'failed');
+}
+
 async function startSession(body) {
   const arrivedAt = Date.now();
   const p = parseSessionStart(body);
@@ -1819,14 +1892,19 @@ async function startSession(body) {
     });
     s.handle = started.handle;
     s.address = started.address;
-    started.exited.then(() => { s.exited = true; });
+    started.exited.then(() => onSandboxExit(s));
     await waitSessionReady(s, arrivedAt);
   } catch (e) {
+    await logStartFailure(s);
     await abandonStart(s);
     throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: SESSION_START_MS } });
   }
   s.state = 'live';
   s.readerDone = readSessionEvents(s);
+  armIdle(s);
+  const lifeLeft = SANDBOX_SESSION_MAX_MS - (Date.now() - s.createdAt);
+  if (lifeLeft > 0) s.lifeTimer = setTimeout(() => closeSession(s, 'idle'), lifeLeft);
+  else setImmediate(() => closeSession(s, 'idle'));
   const container = s.handle && s.handle.containerId ? ` container=${s.handle.containerId.slice(0, 12)}` : '';
   console.log(`session ${s.id}: live${container} ready_ms=${Date.now() - arrivedAt}`);
   return { status: 201, body: { session_id: s.id } };
@@ -1840,9 +1918,10 @@ async function sendSessionMessage(s, req) {
   }
   if (s.replyOpen || s.sending) return { status: 409, body: { error: 'session busy', kind: 'busy' } };
   s.sending = true;
+  clearIdle(s);
   const endsBefore = s.messageEnds;
+  let answer;
   try {
-    let answer;
     try {
       answer = await sessionCall(s, 'POST', '/message', { text });
     } catch {
@@ -1862,7 +1941,20 @@ async function sendSessionMessage(s, req) {
     throw sessionFailure(`${SESSION_SCRIPT} refused the message (HTTP ${answer.status})`, 'orchestration');
   } finally {
     s.sending = false;
+    if (!answer || answer.status !== 503) armIdle(s);
   }
+}
+
+async function abortSessionReply(s) {
+  let answer;
+  try {
+    answer = await sessionCall(s, 'POST', '/abort');
+  } catch {
+    closeSession(s, 'failed');
+    return { status: 404, body: SESSION_UNKNOWN };
+  }
+  if (answer.status === 204) return { status: 204 };
+  throw sessionFailure(`${SESSION_SCRIPT} refused the abort (HTTP ${answer.status})`, 'orchestration');
 }
 
 function streamSessionEvents(s, rawAfter, res) {
@@ -1917,7 +2009,7 @@ async function handleSessionRoute(req, res, route) {
   }
   if (s.state !== 'live') return answer(res, { status: 404, body: SESSION_UNKNOWN });
   if (route.op === 'message') return answer(res, await sendSessionMessage(s, req));
-  return answer(res, { status: 404, body: SESSION_UNKNOWN });
+  return answer(res, await abortSessionReply(s));
 }
 
 // The whole route table: a POST anywhere else is 404 before the body is read.

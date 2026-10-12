@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnLauncher, request, readSse, freePort, tempDir } = require('./fixtures/launcher-harness');
+const { spawnLauncher, request, readSse, freePort, tempDir, withoutElapsed } = require('./fixtures/launcher-harness');
 const { startFakeSession } = require('./fixtures/fake-session');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -73,6 +73,7 @@ function startSessionDaemon(socketPath, { workDir, shape = {}, shapes = [], self
   const sessionFiles = {};
   const fakes = {};
   const connects = [];
+  const abortedBeforeStop = {};
   let nextId = 1;
   let sessionCount = 0;
 
@@ -144,6 +145,7 @@ function startSessionDaemon(socketPath, { workDir, shape = {}, shapes = [], self
       }
       if (req.method === 'POST' && /^\/containers\/[^/]+\/(stop|kill)/.test(url)) {
         const id = idOf();
+        if (fakes[id] && !(id in abortedBeforeStop)) abortedBeforeStop[id] = fakes[id].requests.some((r) => r.path === '/abort');
         if (fakes[id]) await fakes[id].close();
         return send(204);
       }
@@ -152,7 +154,7 @@ function startSessionDaemon(socketPath, { workDir, shape = {}, shapes = [], self
     });
   });
   return new Promise((resolve) => {
-    server.listen(socketPath, () => resolve({ server, calls, createBodies, sessionFiles, fakes, connects }));
+    server.listen(socketPath, () => resolve({ server, calls, createBodies, sessionFiles, fakes, connects, abortedBeforeStop }));
   });
 }
 
@@ -280,6 +282,141 @@ test('DELETE stops the session: closed stopped, container gone, later calls 404'
     assert.equal(read.ended, true);
     assert.deepEqual(await send(id, 'late'), { status: 404, body: NOT_FOUND });
     assert.deepEqual(await abort(id), { status: 404, body: NOT_FOUND });
+  });
+});
+
+test('abort ends the reply and keeps the session', T, async () => {
+  await withSessionLauncher({ shape: { hold: true } }, async ({ start, send, abort, events, daemon }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+    await events(id, { after: 0, until: 1 });
+    assert.deepEqual(await abort(id), { status: 204, body: undefined });
+
+    const read = await events(id, { after: 0, until: 2 });
+    assert.equal(read.events[1].type, 'message_end');
+    assert.equal(read.events[1].data.reason, 'aborted');
+    assert.equal((await send(id, 'next')).status, 202);
+    await events(id, { after: 2, until: 6 });
+    assert.deepEqual(daemon.calls.filter((c) => /c1\/stop|DELETE \/containers\/c1/.test(c)), [], 'the sandbox keeps running');
+    assert.deepEqual(await abort(id), { status: 204, body: undefined }, 'an abort with no reply running is still 204');
+  });
+});
+
+test('idle closes the session with closed: idle, and removes its container and work dir', T, async () => {
+  await withSessionLauncher({}, async ({ start, send, stop, events, daemon, workDir }) => {
+    const id = (await start({ ...START, idle_timeout_ms: 200 })).body.session_id;
+
+    const read = await events(id);
+    assert.deepEqual(read.events, [{ id: 1, type: 'closed', data: { reason: 'idle' } }]);
+    assert.equal(read.ended, true);
+    await until(() => fs.readdirSync(workDir).length === 0, 'the work dir to go');
+    const teardown = daemon.calls.filter((c) => /c1\/stop|DELETE \/containers\/c1/.test(c));
+    assert.deepEqual(teardown, ['POST /containers/c1/stop?t=5', 'DELETE /containers/c1?force=true']);
+    assert.deepEqual(await send(id, 'late'), { status: 404, body: NOT_FOUND });
+
+    const replay = await events(id, { after: 0 });
+    assert.deepEqual(replay.events, [{ id: 1, type: 'closed', data: { reason: 'idle' } }]);
+    assert.equal(replay.ended, true);
+    assert.deepEqual(await stop(id), { status: 204, body: undefined });
+  });
+});
+
+test('idle never closes a session while a reply runs', T, async () => {
+  await withSessionLauncher({ shape: { hold: true } }, async ({ start, send, events, daemon }) => {
+    const id = (await start({ ...START, idle_timeout_ms: 200 })).body.session_id;
+    assert.equal((await send(id, 'long')).status, 202);
+    const reader = events(id, { after: 0, until: 3 });
+
+    await sleep(500);
+    assert.ok(!daemon.calls.some((c) => /c1\/stop/.test(c)), 'no stop while the reply runs');
+    assert.equal((await send(id, 'again')).status, 409, 'the session is still live and busy');
+
+    daemon.fakes.c1.release();
+    const read = await reader;
+    assert.deepEqual(read.events.map((e) => [e.id, e.type]), [[1, 'text'], [2, 'message_end'], [3, 'closed']]);
+    assert.deepEqual(read.events[2].data, { reason: 'idle' });
+    assert.ok(read.times[2] - read.times[1] >= 200, `idle counts from the reply's end (${read.times[2] - read.times[1]}ms)`);
+  });
+});
+
+test('max lifetime aborts the running reply, lets it end, then closes the session', T, async () => {
+  await withSessionLauncher({ shape: { hold: true, startingPolls: 0 }, env: { SANDBOX_SESSION_MAX_MS: '1500' } }, async ({ start, send, events, daemon }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'long')).status, 202);
+
+    const read = await events(id, { after: 0 });
+    assert.deepEqual(read.events.map((e) => [e.id, e.type]), [[1, 'text'], [2, 'message_end'], [3, 'closed']]);
+    assert.equal(read.events[1].data.reason, 'aborted');
+    assert.deepEqual(read.events[2].data, { reason: 'idle' });
+    await until(() => 'c1' in daemon.abortedBeforeStop, 'the container stop');
+    assert.equal(daemon.abortedBeforeStop.c1, true, 'the reply is aborted before the sandbox stops');
+    assert.equal(daemon.createBodies.c1.Labels['tessary.sandbox.timeout-ms'], '1500');
+  });
+});
+
+test('a session that never becomes ready is 502, leaves nothing behind, and frees its slot', T, async () => {
+  await withSessionLauncher({ shapes: [{ startFails: true }], env: { SANDBOX_SESSION_CAP: '1' } }, async ({ start, daemon, workDir, stderr }) => {
+    const failed = await start();
+    assert.equal(failed.status, 502);
+    assert.deepEqual(withoutElapsed(failed.body), {
+      error: 'sandbox orchestration failed',
+      kind: 'orchestration',
+      timeout: false,
+      error_class: 'Error',
+      detail: 'session.js did not become ready (failed)',
+      script: 'session.js',
+      timeout_ms: 90000,
+    });
+    assert.doesNotMatch(JSON.stringify(failed.body), /boom|tsy_/);
+    assert.ok(daemon.calls.includes('POST /containers/c1/stop?t=5'));
+    assert.ok(daemon.calls.includes('DELETE /containers/c1?force=true'));
+    assert.deepEqual(fs.readdirSync(workDir), []);
+    assert.match(stderr(), /boom tsy_\*\*\*/, 'the script\'s start error is on the console, scrubbed');
+    assert.doesNotMatch(stderr(), /tsy_a_leaked/);
+
+    assert.equal((await start()).status, 201, 'the failed start frees its cap slot');
+  });
+});
+
+test('a sandbox that reports its own death closes the session as failed, once', T, async () => {
+  await withSessionLauncher({}, async ({ start, send, events, daemon }) => {
+    const id = (await start()).body.session_id;
+    const reader = events(id, { after: 0 });
+    await until(() => daemon.fakes.c1.eventFroms.length > 0, 'the launcher to read the script events');
+    await daemon.fakes.c1.die({ withClosed: true });
+
+    const read = await reader;
+    assert.deepEqual(read.events, [
+      { id: 1, type: 'error', data: { kind: 'opencode_exit', detail: 'exit code 1' } },
+      { id: 2, type: 'closed', data: { reason: 'failed' } },
+    ]);
+    assert.equal(read.ended, true);
+    await until(() => daemon.calls.includes('DELETE /containers/c1?force=true'), 'the container removal');
+    assert.deepEqual(await send(id, 'late'), { status: 404, body: NOT_FOUND });
+  });
+});
+
+test('a sandbox that exits without a word still closes the session as failed', T, async () => {
+  await withSessionLauncher({}, async ({ start, events, daemon }) => {
+    const id = (await start()).body.session_id;
+    const reader = events(id, { after: 0 });
+    await until(() => daemon.fakes.c1.eventFroms.length > 0, 'the launcher to read the script events');
+    await daemon.fakes.c1.die({ withClosed: false });
+
+    const read = await reader;
+    assert.deepEqual(read.events, [{ id: 1, type: 'closed', data: { reason: 'failed' } }]);
+    await until(() => daemon.calls.includes('DELETE /containers/c1?force=true'), 'the container removal');
+  });
+});
+
+test('a cut event stream from the sandbox is resumed with from and loses nothing', T, async () => {
+  await withSessionLauncher({ shape: { cutEventsAfter: 2 } }, async ({ start, send, events, daemon }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'one')).status, 202);
+
+    const read = await events(id, { after: 0, until: 4 });
+    assert.deepEqual(read.events, numbered(reply(1, 'one'), 1));
+    assert.deepEqual(daemon.fakes.c1.eventFroms, [0, 2]);
   });
 });
 

@@ -174,6 +174,7 @@ never script output, a token or a prompt.
 |---|---|---|
 | `POST /sessions` | `201 { session_id }` once the script reports ready | `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
 | `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message |
+| `POST /sessions/{id}/abort` | `204`, also with no reply running; the reply ends with `message_end.reason = "aborted"` and the session stays | `404`; `502 orchestration` when the script refused the abort |
 | `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
 | `DELETE /sessions/{id}` | `204` after the sandbox is stopped and removed; `204` again on a closed session | `404` |
 
@@ -213,6 +214,36 @@ logged by type name only. `seq` starts at 1 and grows by one per event the launc
 `after` (default 0) is the last sequence the caller holds: the response replays every held event
 after it, then follows live events. Exactly one `closed { reason }` ends every session and is
 always the last event; the stream ends after it.
+
+### Lifecycle
+
+A session is `starting`, then `live`, then `closing`, then `closed`. Every way out of `live` closes
+it the same way, with one `closed { reason }` event:
+
+| Cause | `reason` |
+|---|---|
+| No message for the caller's `idle_timeout_ms`. The clock starts when the session is live and again at each `message_end`, and stops while a reply runs, so a reply longer than the idle time is never cut. | `idle` |
+| `SANDBOX_SESSION_MAX_MS` after the `POST /sessions` arrived | `idle` (both clocks end a healthy session) |
+| `DELETE /sessions/{id}` | `stopped` |
+| The sandbox exits, the script sends `closed`, or the script refuses connections on a message or an abort | `failed` |
+
+To close, the launcher stops both clocks; if a reply runs and the sandbox is still up, it aborts the
+reply and waits up to 5 s for its `message_end`, so the reply's spend reaches the caller; then it
+sends `closed`, ends every open event stream, stops and removes the container and removes the work
+dir. When the sandbox exits by itself, the launcher first waits up to 1 s for the script's own last
+lines (its `error` and `closed`), so they come before the launcher's. A reply that is open when the
+sandbox dies has no `message_end`, and its spend is lost.
+
+A closed session stays known for 5 minutes: `GET /events` replays its buffer and ends, `DELETE` is
+`204`, a message or an abort is `404`. After that it is unknown.
+
+A start that fails (the script reports `failed`, the container exits, or 90 s pass) is a `502`; the
+launcher logs the script's start events on its console, scrubbed and cut to 500 characters, then
+stops and removes the container and the work dir. No `closed` event is sent, because no caller
+holds the id.
+
+If the launcher's read of the script's events breaks, it reads again from the count of lines it
+already holds (`GET /events?from=<n>`), so no event is lost or doubled.
 
 ### Env
 
