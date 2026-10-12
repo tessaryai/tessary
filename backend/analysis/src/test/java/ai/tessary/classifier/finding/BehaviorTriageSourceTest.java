@@ -30,10 +30,16 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.tracing.Tracer;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -43,6 +49,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
@@ -387,6 +394,35 @@ class BehaviorTriageSourceTest {
         verify(findings).listAutoEscalatable(PROJECT, expected, 30, 50);
     }
 
+    /**
+     * The adapter step of escalation says what it read and what the adapters own. The bug is an adapter whose findings
+     * never escalate with no line that shows which step dropped them.
+     */
+    @Test
+    void theAdapterEscalationStepLogsWhatItReadAndOwned() {
+        when(findings.escalationCandidatesByKey(PROJECT, BUILT_IN_KEYS, 30))
+                .thenReturn(List.of(
+                        custom("f1").claim(),
+                        FindingRowBuilder.of("user-regex-1")
+                                .id("f2")
+                                .projectId(PROJECT)
+                                .build()
+                                .claim()));
+
+        List<Map<String, Object>> events = logged(
+                BehaviorTriageSource.class,
+                "finding.adapter.escalation",
+                () -> source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+                        .listAutoEscalatable(PROJECT, 30, 50));
+
+        assertEquals(1, events.size(), "one line per escalation pass");
+        Map<String, Object> fields = new HashMap<>(events.get(0));
+        assertEquals(
+                Long.class, Objects.requireNonNull(fields.remove("durationMs")).getClass());
+        assertEquals(
+                Map.of("event", "finding.adapter.escalation", "project", PROJECT, "candidates", 2, "owned", 1), fields);
+    }
+
     /** With no adapter the escalation query is the six built-in keys and no candidate read runs. The bug is the open
      *  edition paying an extra query or widening the list. */
     @Test
@@ -596,5 +632,26 @@ class BehaviorTriageSourceTest {
                 groundednessRates,
                 null,
                 adapters);
+    }
+
+    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
+    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(source);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (ILoggingEvent e : appender.list) {
+            if (e.getKeyValuePairs() == null) continue;
+            Map<String, Object> fields = new HashMap<>();
+            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
+            if (name.equals(fields.get("event"))) events.add(fields);
+        }
+        return events;
     }
 }

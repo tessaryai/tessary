@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,10 +47,16 @@ import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +65,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 /**
  * The metric-drift dial behind {@code GET/PUT .../tuning} and its false-alarm rate, {@link
@@ -338,9 +346,26 @@ class ClassifierServiceTest {
         TessaryException refusal = new TessaryException(ClassifierError.NOT_FOUND, "x");
         doThrow(refusal).when(undeclaredSweep).checkEnable(row);
 
-        TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true));
+        List<Map<String, Object>> events = logged(
+                ClassifierService.class,
+                "classifier.enable.refused",
+                () -> assertSame(
+                        refusal, assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true))));
 
-        assertSame(refusal, e);
+        assertEquals(
+                List.of(Map.of(
+                        "event",
+                        "classifier.enable.refused",
+                        "project",
+                        PID,
+                        "classifier",
+                        "cls-u",
+                        "detector",
+                        UNDECLARED,
+                        "error_code",
+                        ClassifierError.NOT_FOUND.code())),
+                events,
+                "a sweep's refusal reaches only the caller, with no line that names the classifier and the code");
         verify(signals, never()).setEnabled(anyString(), anyString(), anyBoolean());
         verify(signals, never()).unpause(anyString(), anyString());
     }
@@ -403,7 +428,7 @@ class ClassifierServiceTest {
      */
     @Test
     void wideningAKindASweepRunsDoesNotRewindIt() {
-        when(catalog.grainFor(UNDECLARED)).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
+        lenient().when(catalog.grainFor(UNDECLARED)).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
         ClassifierRow before = ClassifierRowBuilder.of(UNDECLARED)
                 .id("clf-u")
                 .custom()
@@ -411,7 +436,6 @@ class ClassifierServiceTest {
                 .build();
         when(signals.findById(PID, "clf-u")).thenReturn(Optional.of(before));
         when(signals.setCallSiteIds(PID, "clf-u", null)).thenReturn(1);
-        when(jobs.rewindCursor(PID, "clf-u")).thenReturn(1);
 
         service.setCallSiteIds(PID, "clf-u", null);
 
@@ -513,5 +537,26 @@ class ClassifierServiceTest {
         NoCredit() {
             super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
         }
+    }
+
+    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
+    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(source);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (ILoggingEvent e : appender.list) {
+            if (e.getKeyValuePairs() == null) continue;
+            Map<String, Object> fields = new HashMap<>();
+            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
+            if (name.equals(fields.get("event"))) events.add(fields);
+        }
+        return events;
     }
 }

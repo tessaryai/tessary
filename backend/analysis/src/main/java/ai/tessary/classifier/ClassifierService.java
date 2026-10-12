@@ -15,6 +15,7 @@ import ai.tessary.classifier.metric.MetricSketch;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
+import ai.tessary.classifier.worker.ClassifierSweep;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
@@ -471,7 +472,7 @@ public class ClassifierService {
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
         ClassifierRow row = get(projectId, id); // tenant + existence + capability guard
-        if (enabled) routing.sweepFor(row.detector()).ifPresent(sweep -> sweep.checkEnable(row));
+        if (enabled) routing.sweepFor(row.detector()).ifPresent(sweep -> checkEnable(sweep, projectId, row));
         if (enabled
                 && BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
                 && !decisionProviders.hasProvider(projectId, ModelLane.FRUSTRATION)) {
@@ -482,6 +483,20 @@ public class ClassifierService {
         }
         if (enabled) signals.unpause(projectId, id);
         return get(projectId, id);
+    }
+
+    private static void checkEnable(ClassifierSweep sweep, String projectId, ClassifierRow row) {
+        try {
+            sweep.checkEnable(row);
+        } catch (TessaryException e) {
+            StructuredLog.info(log, Markers.OPS, "classifier.enable.refused")
+                    .field("project", projectId)
+                    .field("classifier", row.id())
+                    .field("detector", row.detector())
+                    .field("error_code", e.error().code())
+                    .log();
+            throw e;
+        }
     }
 
     /**

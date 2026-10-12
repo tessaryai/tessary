@@ -246,11 +246,19 @@ public class BehaviorTriageSource implements TriageSource {
      */
     private List<String> escalatableKeys(String projectId, long minObservations) {
         if (adapters.isEmpty()) return BEHAVIOR_CLASSIFIERS;
+        long start = System.nanoTime();
         List<String> keys = new ArrayList<>(BEHAVIOR_CLASSIFIERS);
-        for (FindingClaim candidate :
-                findings.escalationCandidatesByKey(projectId, BEHAVIOR_CLASSIFIERS, minObservations)) {
+        List<FindingClaim> candidates =
+                findings.escalationCandidatesByKey(projectId, BEHAVIOR_CLASSIFIERS, minObservations);
+        for (FindingClaim candidate : candidates) {
             if (adapters.ownerOf(candidate).isPresent()) keys.add(candidate.classifierKey());
         }
+        StructuredLog.info(log, Markers.OPS, "finding.adapter.escalation")
+                .field("project", projectId)
+                .field("candidates", candidates.size())
+                .field("owned", keys.size() - BEHAVIOR_CLASSIFIERS.size())
+                .field("durationMs", (System.nanoTime() - start) / 1_000_000)
+                .log();
         return List.copyOf(keys);
     }
 
