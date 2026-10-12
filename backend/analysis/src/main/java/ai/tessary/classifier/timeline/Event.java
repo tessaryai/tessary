@@ -49,6 +49,25 @@ public record Event(
         ancestorKinds = List.copyOf(ancestorKinds);
     }
 
+    Event withBytes(long bytes) {
+        return new Event(
+                id,
+                kind,
+                position,
+                turn,
+                at,
+                callSiteId,
+                traceId,
+                spanId,
+                parentId,
+                parentKind,
+                ancestorKinds,
+                depth,
+                agentId,
+                data,
+                bytes);
+    }
+
     Event withPosition(int position) {
         return new Event(
                 id,

@@ -14,11 +14,20 @@
  *       detached sub-agent trace. A message an orchestrator sends to a sub-agent stays in the sub-agent's {@code llm}
  *       event. A message that a later span sends again is not a new event.
  *   <li>An {@code assistant_reply} is text the person sees, from the top agent of the turn. A message with only tool
- *       calls is not a reply, and neither is the text a sub-agent returns to its orchestrator.
+ *       calls is not a reply, and neither is the text a sub-agent returns to its orchestrator. When an output holds the
+ *       whole chat, only the assistant messages after its last user message are new. Two messages with the same text
+ *       are two replies when the loop received the first before it wrote the second.
  * </ul>
  *
  * <p>The new messages of an input are those after its last assistant message that has text or a tool call ({@link
- * ai.tessary.classifier.timeline.DialogueMessages}), the rule the frustration thread uses too.
+ * ai.tessary.classifier.timeline.DialogueMessages}), the rule the frustration thread uses too. An {@code agent} span's
+ * input and output give messages only when they are a message list or text; a framework's call arguments or return
+ * object give none, and the {@code llm} spans inside give the messages.
+ *
+ * <p>A message needs the span's place in the tree. In a trace that is not settled, a span whose parent links do not
+ * reach a root is not placed yet (the root span of a turn ends, and arrives, last), so it carries no message until its
+ * ancestors arrive. In a settled trace, a span whose parent is not stored is a root of its own. A root that arrives
+ * after its trace settled can still change the trace's messages.
  *
  * <h2>Ids</h2>
  *
@@ -30,8 +39,9 @@
  *
  * <h2>Order</h2>
  *
- * <p>Events are ordered by end time, because an event can be judged only when it is complete. On a tie the deeper event
- * comes first, so a parent never comes before its child. A user message is placed at the start of the first span that
- * carries it; a reply comes right after the span that wrote it.
+ * <p>Events are ordered by end time, because an event can be judged only when it is complete. On a tie the event of
+ * the trace that ends first comes first, so a turn's events come before the next turn's that starts in the instant it
+ * ends; inside one trace the deeper event comes first, so a parent never comes before its child. A user message is
+ * placed at the start of the first span that carries it; a reply comes right after the span that wrote it.
  */
 package ai.tessary.classifier.timeline;
