@@ -494,6 +494,67 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void aMessageThePersonAddsWhileTheAgentRunsIsAUserMessage() {
+        String book = "{\"role\":\"user\",\"content\":\"book a table\"}";
+        String find = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"find\",\"arguments\":\"{}\"}}]}";
+        String found = "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"free at 8\"}";
+        String four = "{\"role\":\"user\",\"content\":\"actually make it for 4 people\"}";
+        String reserve = "{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c2\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"reserve\",\"arguments\":\"{}\"}}]}";
+        String reserved = "{\"role\":\"tool\",\"tool_call_id\":\"c2\",\"content\":\"ok\"}";
+        List<TimelineSpan> spans = List.of(
+                span("t1", "a", "agent")
+                        .at(0, 500)
+                        .in("[" + book + "]")
+                        .out("Booked for 4.")
+                        .build(),
+                span("t1", "l1", "llm")
+                        .parent("a")
+                        .at(10, 100)
+                        .in("[" + book + "]")
+                        .out("[" + find + "]")
+                        .build(),
+                span("t1", "x", "tool").parent("a").at(110, 200).build(),
+                span("t1", "l2", "llm")
+                        .parent("a")
+                        .at(210, 300)
+                        .in("[" + book + "," + find + "," + found + "," + four + "]")
+                        .out("[" + reserve + "]")
+                        .build(),
+                span("t1", "y", "tool").parent("a").at(310, 390).build(),
+                span("t1", "l3", "llm")
+                        .parent("a")
+                        .at(400, 490)
+                        .in("[" + book + "," + find + "," + found + "," + four + "," + reserve + "," + reserved + "]")
+                        .out("Booked for 4.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of(
+                        "t1/a#user:0 book a table",
+                        "t1/l2#user:0 actually make it for 4 people",
+                        "t1/l3#reply:0 Booked for 4."),
+                messages(timeline),
+                "the agent input is taken as the only source of the turn's user messages, so the person's message"
+                        + " that only a later call holds is dropped");
+        assertEquals(
+                List.of(
+                        "t1/a#user:0",
+                        "t1/l1",
+                        "t1/x",
+                        "t1/l2#user:0",
+                        "t1/l2",
+                        "t1/y",
+                        "t1/l3",
+                        "t1/l3#reply:0",
+                        "t1/a"),
+                timeline.events().stream().map(Event::id).toList());
+    }
+
+    @Test
     void anAppWithoutAgentSpansRepliesFromEachTextCall() {
         String toolCallOnly = "[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
                 + "\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}]";

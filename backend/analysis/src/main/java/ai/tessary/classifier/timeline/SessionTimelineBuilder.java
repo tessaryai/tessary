@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
 import org.jspecify.annotations.Nullable;
@@ -225,7 +226,7 @@ public final class SessionTimelineBuilder {
         private final Map<String, List<DialogueMessage>> inputs = new HashMap<>();
         private final Map<String, List<DialogueMessage>> outputs = new HashMap<>();
         private final Map<String, Map<String, Integer>> received = new HashMap<>();
-        private final Map<String, Boolean> speaking = new HashMap<>();
+        private final Map<String, Optional<String>> newestUserText = new HashMap<>();
         private final List<Derived> out = new ArrayList<>();
 
         TraceDerivation(List<TimelineSpan> spans, boolean settled) {
@@ -290,32 +291,23 @@ public final class SessionTimelineBuilder {
          * So the person can say the same words again after a reply of the same turn, and a span that carries an
          * earlier turn's history does not count the message again.
          *
-         * <p>When a top agent span received a user message, the agent input is the authority, as its output is for
-         * the replies: the {@code llm} calls under it carry no user message, because the agent loop's calls also
-         * send prompts that code wrote under the user role, such as a memory summary's instruction. So a message the
-         * person adds while the agent runs, which only a later call's input holds, is not an event.
+         * <p>When a top agent span received a user message, the agent input gives the messages that opened the turn,
+         * as its output is the authority for the replies, and an {@code llm} call under it gives only what the person
+         * added while the agent ran ({@link #addedWhileRunning}).
          */
         private void userMessages(List<TimelineSpan> facing) {
             Map<UserKey, Integer> emitted = new HashMap<>();
             for (TimelineSpan carrier : facing) {
-                if (underSpeakingAgent(carrier)) continue;
-                List<DialogueMessage> input = personInput(carrier);
-                List<DialogueMessage> fresh = DialogueMessages.afterLastAssistant(input);
-                List<DialogueMessage> users = fresh.stream()
-                        .filter(m -> USER.equals(m.role()) && m.dialogue())
-                        .toList();
-                if (users.isEmpty()) continue;
-                String answers = input.size() == fresh.size()
-                        ? null
-                        : answeredInTrace(input.get(input.size() - fresh.size() - 1), carrier, facing);
+                String opening = agentsNewestUserText(carrier);
+                List<UserKey> users =
+                        opening == null ? newUserMessages(carrier, facing) : addedWhileRunning(carrier, opening);
                 Map<UserKey, Integer> inSpan = new HashMap<>();
                 for (int n = 0; n < users.size(); n++) {
-                    String text = users.get(n).text();
-                    UserKey key = new UserKey(answers, text);
+                    UserKey key = users.get(n);
                     int occurrence = inSpan.merge(key, 1, Integer::sum);
                     if (occurrence <= emitted.getOrDefault(key, 0)) continue;
                     ObjectNode data =
-                            MAPPER.createObjectNode().put("text", text).put("from_person", true);
+                            MAPPER.createObjectNode().put("text", key.text()).put("from_person", true);
                     out.add(new Derived(
                             messageEvent(
                                     carrier,
@@ -332,15 +324,62 @@ public final class SessionTimelineBuilder {
             }
         }
 
-        /** Whether the span is an {@code llm} call under a top agent that received a user message. */
-        private boolean underSpeakingAgent(TimelineSpan span) {
+        /** The user messages after the last assistant message of the span's input, keyed as {@link #userMessages} says. */
+        private List<UserKey> newUserMessages(TimelineSpan carrier, List<TimelineSpan> facing) {
+            List<DialogueMessage> input = personInput(carrier);
+            List<DialogueMessage> fresh = DialogueMessages.afterLastAssistant(input);
+            String answers = input.size() == fresh.size()
+                    ? null
+                    : answeredInTrace(input.get(input.size() - fresh.size() - 1), carrier, facing);
+            return fresh.stream()
+                    .filter(this::fromUser)
+                    .map(m -> new UserKey(answers, m.text()))
+                    .toList();
+        }
+
+        /**
+         * The user messages an {@code llm} call under a top agent holds after the agent's newest user message, each
+         * keyed by the assistant message before it: what the person added while the agent ran. A call whose input does
+         * not hold that message is not on the person's thread, such as a memory summary, whose instruction code wrote
+         * under the user role, so it gives none; an instruction code adds after the person's thread reads as the
+         * person's.
+         */
+        private List<UserKey> addedWhileRunning(TimelineSpan carrier, String opening) {
+            List<DialogueMessage> input = input(carrier);
+            int lastCopy = -1;
+            for (int i = 0; i < input.size(); i++) {
+                if (fromUser(input.get(i)) && opening.equals(input.get(i).text())) lastCopy = i;
+            }
+            List<UserKey> added = new ArrayList<>();
+            String answers = null;
+            for (int i = 0; i < input.size(); i++) {
+                DialogueMessage m = input.get(i);
+                if (ASSISTANT.equals(m.role()) && m.dialogue()) {
+                    answers = messageKey(m);
+                } else if (lastCopy >= 0 && i > lastCopy && fromUser(m)) {
+                    added.add(new UserKey(answers, m.text()));
+                }
+            }
+            return added;
+        }
+
+        private boolean fromUser(DialogueMessage m) {
+            return USER.equals(m.role()) && m.dialogue();
+        }
+
+        /** The text of the newest user message of the top agent above an {@code llm} span, when that agent received one. */
+        private @Nullable String agentsNewestUserText(TimelineSpan span) {
             String agentId = facts(span).agentId();
             TimelineSpan agent = agentId == null ? null : byId.get(agentId);
-            return LLM.equals(eventKind(span))
-                    && agent != null
-                    && speaking.computeIfAbsent(
+            if (!LLM.equals(eventKind(span)) || agent == null) return null;
+            return newestUserText
+                    .computeIfAbsent(
                             agent.spanId(),
-                            k -> personInput(agent).stream().anyMatch(m -> USER.equals(m.role()) && m.dialogue()));
+                            k -> personInput(agent).stream()
+                                    .filter(this::fromUser)
+                                    .reduce((first, second) -> second)
+                                    .map(DialogueMessage::text))
+                    .orElse(null);
         }
 
         /** The key of an assistant message when a person-facing {@code llm} call that ended by then wrote it. */
