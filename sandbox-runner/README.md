@@ -3,6 +3,8 @@
 Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`), Layer-2 triage
 (`/triage`) and the generic agent run behind the authoring lane (`/authoring`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
 HTTP and the sidecar owns the sandbox lifecycle — one request, one fresh sandbox, torn down after.
+The one exception is a [launcher session](#launcher-sessions): one sandbox serves one session's
+messages until the session closes, and is never shared with another session.
 
 ## What this was, and why the name changed
 
@@ -37,7 +39,8 @@ E2B; nothing in this tree can delete it.
 
 ## Layout
 
-- `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below.
+- `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below and the
+  [launcher sessions](#launcher-sessions).
 - `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the long-lived agent
   session `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), the shared
   `agent-stream.js` OpenCode runner and `mcp-relay.js`, and TWO INDEPENDENTLY MAINTAINED RECIPES for
@@ -74,6 +77,11 @@ narrower.
   output, model output, or repo content.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
+- **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte
+  `SESSION_SECRET`, and the launcher alone holds that secret. With `SANDBOX_NETWORK_ISOLATION` on,
+  the launcher joins the isolated bridge to reach the sessions, so on that bridge the sandboxes can
+  reach the launcher's port (which needs `SANDBOX_API_KEY`) and each other's session port (which
+  needs that session's secret); they still cannot reach the service network.
 
 ## Agent sessions (`session.js`)
 
@@ -329,7 +337,11 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   (`DOCKER_SANDBOX_NETWORK`, never the `tessary` service network), and such an install must set
   `SITE_DOMAIN` and point `TESSARY_RCA_AGENTIC_MCP_BASE_URL` at that public origin, because there is
   no longer an internal route. The trade is explicit both ways: isolation off means a sibling can
-  address `postgres` and the other internal services directly, not only the MCP port.
+  address `postgres` and the other internal services directly, not only the MCP port. A session
+  container is placed the same way, and the launcher dials it there: on its own network when
+  isolation is off; with isolation on, the launcher connects itself to `DOCKER_SANDBOX_NETWORK` at
+  boot (`POST /networks/{name}/connect` with its own container id from `HOSTNAME`, skipped when it
+  is already on it). A failed join is a warning, and session starts then fail one at a time.
 - **Concurrency:** `SANDBOX_DOCKER_CONCURRENCY` (default `1`) — an in-process semaphore
   around the one container-spawn call site of the one-shot routes. A session container never takes
   a slot of it, because one open session would then freeze every one-shot run;
@@ -337,7 +349,10 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
 - **Teardown:** every container is removed explicitly when its run ends (not just `--rm`), and a
   startup reconciliation pass reaps any `tessary.sandbox=1`-labeled container older than a few
   request timeouts — the case a normal `finally` can't cover: the launcher itself crashing or
-  being redeployed mid-run.
+  being redeployed mid-run. A session container is removed when its session closes, or when its
+  start fails; the startup pass reaps every container labeled `tessary.sandbox.session` whatever
+  its age, because the session registry lives in memory and no caller can reach the session after
+  a restart.
 - **The Docker-outside-of-Docker work volume:** the launcher runs AS a container itself
   (`docker-compose.yml`'s `sandbox-runner` service), so a sibling container's mount source has to
   be something the HOST daemon can resolve — the launcher's own in-container temp dir means
@@ -387,7 +402,12 @@ pins `SANDBOX_BACKEND=docker` explicitly — that the docker path is what actual
 `SANDBOX_BACKEND` is **left unset**, matching a genuinely fresh self-host's `.env`. A fake daemon
 proves the launcher asked Docker for the right thing; it cannot prove a spawned container
 actually runs, or exercise real bind-mount permissions/image-registry behavior — that's what the
-manual proof below is for. `check-open-boot.sh` (the open-edition boot gate's dev leg) does not
+manual proof below is for. `docker-sessions.test.js` drives the launcher sessions the same way: its
+fake daemon starts a fake `session.js` (`test/fixtures/fake-session`) for each session container,
+and the tests cover the routes, the numbered events and their replay, busy, abort, idle, the max
+lifetime, the cap, the buffer, a dead or unreachable sandbox, the network join and the session
+container's create body. `docker-failures.test.js` covers the boot reaper's session rule.
+`check-open-boot.sh` (the open-edition boot gate's dev leg) does not
 probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
 `sandbox-runner` service is profile-gated off there. The gate's second leg,
 `check-open-boot-selfhost.sh`, boots `docker-compose.yml` with `sandbox-runner` started

@@ -420,6 +420,23 @@ test('a cut event stream from the sandbox is resumed with from and loses nothing
   });
 });
 
+test('with isolation on, the launcher joins the sandbox network at boot and runs sessions on it', T, async () => {
+  await withSessionLauncher({ env: { SANDBOX_NETWORK_ISOLATION: '1' }, selfNetworks: ['tessary_tessary'] }, async ({ start, daemon }) => {
+    await until(() => daemon.calls.some((c) => c.startsWith('GET /containers/json')), 'the boot chain to reach the reaper');
+    assert.deepEqual(daemon.connects, [{ name: 'tessary-sandbox', body: { Container: 'launcher-self' } }]);
+    assert.equal((await start()).status, 201);
+    assert.equal(daemon.createBodies.c1.HostConfig.NetworkMode, 'tessary-sandbox');
+  });
+});
+
+test('a launcher already on the sandbox network does not join it again', T, async () => {
+  await withSessionLauncher({ env: { SANDBOX_NETWORK_ISOLATION: '1' }, selfNetworks: ['tessary_tessary', 'tessary-sandbox'] }, async ({ start, daemon }) => {
+    await until(() => daemon.calls.some((c) => c.startsWith('GET /containers/json')), 'the boot chain to reach the reaper');
+    assert.deepEqual(daemon.connects, []);
+    assert.equal((await start()).status, 201);
+  });
+});
+
 test('an unknown session id is 404 on every route', T, async () => {
   await withSessionLauncher({}, async ({ send, abort, stop, port }) => {
     for (const id of ['00000000-0000-4000-8000-000000000000', 'nope']) {

@@ -1160,6 +1160,24 @@ async function ensureSandboxNetwork() {
   }
 }
 
+// With isolation on, sessions run on DOCKER_SANDBOX_NETWORK and the launcher dials them there, so it
+// joins that bridge itself (once, at boot). It then shares the bridge with the sandboxes: they can
+// reach its port (which needs SANDBOX_API_KEY) and each other's session port (which needs that
+// session's secret), and still not the service network. Best effort: a failure costs session
+// starts, one at a time, never the boot.
+async function joinSandboxNetwork() {
+  if (!SANDBOX_NETWORK_ISOLATION) return;
+  try {
+    const self = await dockerJson('GET', `/containers/${process.env.HOSTNAME}/json`);
+    const networks = (self && self.NetworkSettings && self.NetworkSettings.Networks) || {};
+    if (Object.prototype.hasOwnProperty.call(networks, DOCKER_SANDBOX_NETWORK)) return;
+    await dockerJson('POST', `/networks/${DOCKER_SANDBOX_NETWORK}/connect`, { Container: process.env.HOSTNAME });
+    console.log(`docker backend: joined sandbox network '${DOCKER_SANDBOX_NETWORK}'`);
+  } catch (e) {
+    console.error(`warning: could not join sandbox network '${DOCKER_SANDBOX_NETWORK}': ${e && e.message}`);
+  }
+}
+
 // Best-effort startup reconciliation: stop + remove any tessary.sandbox=1 container older than
 // SANDBOX_ORPHAN_MAX_AGE_MS. Every normal run already removes its own container in
 // runScriptInDocker's `finally` — this exists solely for the crash/redeploy case, where `finally`
@@ -1184,7 +1202,10 @@ async function reapOrphanSandboxContainers() {
     const maxAgeMs = Number.isFinite(labeledTimeoutMs) && labeledTimeoutMs > 0
       ? labeledTimeoutMs * SANDBOX_ORPHAN_GRACE_MULTIPLIER
       : SANDBOX_ORPHAN_MAX_AGE_MS;
-    if (now - createdMs < maxAgeMs) continue; // still plausibly a live run
+    // A session container is reaped whatever its age: the session registry lives in memory, so after
+    // this boot no caller can reach it any more.
+    const isSession = Boolean(labels[SANDBOX_LABEL_SESSION]);
+    if (!isSession && now - createdMs < maxAgeMs) continue; // still plausibly a live run
     console.error(`docker backend: reaping orphaned sandbox container ${c.Id} (created ${new Date(createdMs).toISOString()}, maxAgeMs=${maxAgeMs})`);
     try { await dockerJson('POST', `/containers/${c.Id}/stop?t=1`); } catch { /* best effort */ }
     try { await dockerJson('DELETE', `/containers/${c.Id}?force=true`); } catch { /* best effort */ }
@@ -2138,6 +2159,7 @@ if (BACKEND === 'docker' && !SANDBOX_WORK_VOLUME) {
 // comment for why a failure here degrades to a per-request error rather than a boot crash.
 if (require.main === module && BACKEND === 'docker') {
   ensureSandboxNetwork()
+    .then(joinSandboxNetwork)
     .then(reapOrphanSandboxContainers)
     .catch((e) => console.error(`docker backend startup reconciliation failed: ${e && e.message}`));
 }

@@ -295,3 +295,21 @@ test('an isolated bridge that already exists is not created again', async () => 
     assert.ok(!calls.includes('POST /networks/create'));
   });
 });
+
+test('startup reaps every session container whatever its age, and only stale one-shot ones', async () => {
+  const nowS = Math.floor(Date.now() / 1000);
+  const containers = [
+    { Id: 'session-young', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '7200000', 'tessary.sandbox.session': 'abc' } },
+    { Id: 'oneshot-young', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '600000' } },
+  ];
+  await withLauncher({ containers }, {}, async ({ calls, post }) => {
+    await until(() => calls.some((c) => c.startsWith('GET /containers/json')), 'the reaper to list');
+    assert.equal((await post({})).status, 200);
+
+    assert.deepEqual(
+      calls.filter((c) => /stop|DELETE/.test(c) && !/\/c1/.test(c)),
+      ['POST /containers/session-young/stop?t=1', 'DELETE /containers/session-young?force=true'],
+      'no caller can reach a session after a restart, so its container goes at once',
+    );
+  });
+});
