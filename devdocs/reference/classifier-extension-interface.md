@@ -137,6 +137,7 @@ public interface ClassifierSweep {
     Set<String> kinds();                 // the detector kinds this sweep claims
     SweepOutcome sweep(SweepContext ctx); // one leased pass
     default void checkEnable(ClassifierRow classifier) {} // refuse turning this row on; default accepts
+    default int reset(ClassifierRow classifier) { return 0; } // forget its own rows on a person's reset
 }
 
 public record SweepContext(ClassifierJobRow job, ClassifierRow classifier) {}
@@ -172,6 +173,13 @@ row (`SweepRouting#sweepFor`: the registered sweep of a window-grain kind) befor
 turning the row on. The sweep throws a `TessaryException` whose code says why, for a row it could not run,
 so the person sees the reason at once rather than a pause on the first pass. Turning a row off is never
 refused. The default accepts every row.
+
+**A sweep forgets its own rows on a reset.** `ClassifierReset` clears the detections of every registered
+`DetectionTable`, the built-ins' assessments and learned state, and the unruled findings, then rewinds the
+cursor. It does not know a sweep's own tables, so it calls `ClassifierSweep#reset` on the sweep that runs the
+row (`SweepRouting#sweepFor`), inside the same transaction and after the job restart has locked the job. A
+sweep that keeps assessments to stop a unit being judged twice must delete them there, or the rewound cursor
+finds every unit already judged and the reset judges nothing again. The default deletes nothing.
 
 `SweepContext` carries the two records every sweep already took as its two arguments and nothing
 else — no repositories, no catalog, no worker, no clock. An implementation injects the collaborators

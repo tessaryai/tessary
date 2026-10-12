@@ -13,6 +13,7 @@ import ai.tessary.classifier.toolerror.ToolErrorReferenceRepository;
 import ai.tessary.classifier.toolerror.ToolErrorStateRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository.Restart;
+import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
@@ -29,7 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
  * again from the start.
  *
  * <p>What goes: its detections, its assessments, the rate state and baselines it learned, and its open
- * findings with no ruling. What stays: ruled findings and the cases they back, alert rules, and the cost
+ * findings with no ruling. A kind a registered sweep runs keeps its assessments and state in tables only that
+ * sweep knows, so the reset asks it to forget them ({@code ClassifierSweep#reset}). What stays: ruled findings and the cases they back, alert rules, and the cost
  * ledger. A provider-backed classifier pays again for every trace it re-checks, which is why the UI asks
  * twice.
  *
@@ -54,6 +56,7 @@ public class ClassifierReset {
     private final ToolErrorStateRepository toolErrorStates;
     private final ToolErrorReferenceRepository toolErrorReferences;
     private final MetricBaselineRepository metricBaselines;
+    private final SweepRouting routing;
 
     public ClassifierReset(
             ClassifierService classifiers,
@@ -68,7 +71,8 @@ public class ClassifierReset {
             MalformedOutputRateRepository malformedOutputRates,
             ToolErrorStateRepository toolErrorStates,
             ToolErrorReferenceRepository toolErrorReferences,
-            MetricBaselineRepository metricBaselines) {
+            MetricBaselineRepository metricBaselines,
+            SweepRouting routing) {
         this.classifiers = classifiers;
         this.rows = rows;
         this.jobs = jobs;
@@ -82,6 +86,7 @@ public class ClassifierReset {
         this.toolErrorStates = toolErrorStates;
         this.toolErrorReferences = toolErrorReferences;
         this.metricBaselines = metricBaselines;
+        this.routing = routing;
     }
 
     /**
@@ -123,6 +128,8 @@ public class ClassifierReset {
                         metricBaselines.deleteByClassifier(projectId, row.id());
                     default -> 0;
                 };
+        int sweepRowsDeleted =
+                routing.sweepFor(row.detector()).map(s -> s.reset(row)).orElse(0);
         int findingsClosed = findings.closeUnruled(
                 projectId, row.classifierKey(), Instant.now().toString());
         rows.unpause(projectId, row.id());
@@ -136,6 +143,7 @@ public class ClassifierReset {
                 .field("detections_deleted", detectionsDeleted)
                 .field("assessments_deleted", assessmentsDeleted)
                 .field("learned_state_deleted", learnedStateDeleted)
+                .field("sweep_rows_deleted", sweepRowsDeleted)
                 .field("findings_closed", findingsClosed)
                 .field("enabled", row.enabled())
                 .log();

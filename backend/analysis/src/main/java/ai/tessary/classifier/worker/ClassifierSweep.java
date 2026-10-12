@@ -74,4 +74,16 @@ public interface ClassifierSweep {
     default void checkEnable(ClassifierRow classifier) {
         // A sweep that can run every row it is handed has nothing to refuse.
     }
+
+    /**
+     * Forget what this sweep judged and learned for {@code classifier}, for a person's reset: the rows of its own
+     * tables that the reset does not know, such as assessments that stop a judged unit being judged again, and the
+     * state it fitted. {@code ClassifierReset} calls it inside the reset's transaction, after the job restart has
+     * locked the sweep job and before the cursor goes back to the start, so the next pass judges every kept trace
+     * again. Detections in a registered {@code DetectionTable} and unruled findings are cleared by the reset itself.
+     * Returns the rows deleted; the default keeps nothing of its own and deletes nothing.
+     */
+    default int reset(ClassifierRow classifier) {
+        return 0;
+    }
 }
