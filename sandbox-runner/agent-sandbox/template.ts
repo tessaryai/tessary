@@ -7,7 +7,8 @@ import { Template } from 'e2b';
  *
  * It needs network egress — github.com (clone) + Bedrock. It carries no credentials: the launcher
  * injects a short-lived clone token (in the URL) and the agent's auth env at run time. The sandbox
- * sits idle until the launcher runs `node /home/user/rca.js <input.json>` (no start command).
+ * sits idle until the launcher runs `node /home/user/rca.js <input.json>` (no start command), or
+ * starts a long-lived agent session with `node /home/user/session.js /home/user/session.json`.
  *
  * Build/publish with the sibling build.ts (see README): `pnpm exec tsx build.ts`.
  *
@@ -106,11 +107,12 @@ export const template = Template()
   .setEnvs({ HOME: '/home/user', PIP_BREAK_SYSTEM_PACKAGES: '1' })
   .runCmd('mkdir -p /home/user')
   .setWorkdir('/home/user')
-  // Shared OpenCode runner required by rca.js/triage.js/authoring.js — must be baked beside them or
-  // their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
-  // agent-stream.js itself, on the system-prompt (triage, authoring) path only.
+  // Shared OpenCode runner required by rca.js/triage.js/authoring.js/session.js — must be baked beside
+  // them or their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same
+  // way, by agent-stream.js on the system-prompt (triage, authoring) path and by session.js.
   .copy('agent-stream.js', '/home/user/agent-stream.js')
   .copy('mcp-relay.js', '/home/user/mcp-relay.js')
   .copy('rca.js', '/home/user/rca.js')
   .copy('triage.js', '/home/user/triage.js')
-  .copy('authoring.js', '/home/user/authoring.js');
+  .copy('authoring.js', '/home/user/authoring.js')
+  .copy('session.js', '/home/user/session.js');

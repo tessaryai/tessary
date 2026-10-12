@@ -38,10 +38,11 @@ E2B; nothing in this tree can delete it.
 ## Layout
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below.
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the shared `agent-stream.js`
-  OpenCode runner, and TWO INDEPENDENTLY MAINTAINED RECIPES for one runtime — `template.ts` (the E2B
-  template, published by `build.ts`) and `Dockerfile` (the published agent image the Docker backend
-  spawns). Change one, change the other.
+- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the long-lived agent
+  session `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), the shared
+  `agent-stream.js` OpenCode runner and `mcp-relay.js`, and TWO INDEPENDENTLY MAINTAINED RECIPES for
+  one runtime — `template.ts` (the E2B template, published by `build.ts`) and `Dockerfile` (the
+  published agent image the Docker backend spawns). Change one, change the other.
 
 ## Security model
 
@@ -167,8 +168,8 @@ secret, in two jobs either side of the commit point:
 | `verify-agent-template` | nothing; boots `tessary/tessary-agent-sandbox:<version>` and runs four checks through it | n/a |
 | `finalize` | moves `latest` and `default` onto that build | nothing (this is the commit point) |
 
-`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the four agent scripts, and
-the cpu/memory pair. A build already carrying
+`recipe-<hash>` is a digest of the real build inputs — `template.ts`, the agent scripts
+(`RECIPE_INPUTS` in `build.ts`), and the cpu/memory pair. A build already carrying
 this release's hash gets the version tag assigned to it and no rebuild happens. Asking E2B which
 recipes it already holds is self-correcting where a `git diff` against the previous tag is not: after
 a release whose template build failed, the source is unchanged at the next attempt, so a diff would

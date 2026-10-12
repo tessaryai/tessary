@@ -56,6 +56,7 @@ const RECIPE_INPUTS = [
   'rca.js',
   'triage.js',
   'authoring.js',
+  'session.js',
 ];
 
 /**
@@ -194,7 +195,8 @@ async function verify(version: string) {
       [
         'agent scripts are baked',
         'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/authoring.js'
-          + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js',
+          + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
+          + ' && test -f /home/user/session.js',
       ],
     ];
     const failed: string[] = [];
