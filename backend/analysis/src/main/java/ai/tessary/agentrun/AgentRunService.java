@@ -2,17 +2,12 @@
 package ai.tessary.agentrun;
 
 import ai.tessary.config.AgentRunProperties;
-import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.git.GitCloneUrls;
 import ai.tessary.git.GitIntegrationRepository;
 import ai.tessary.git.GitIntegrationRow;
 import ai.tessary.git.GitProviderFactory;
 import ai.tessary.llm.AgenticCredentialResolver;
-import ai.tessary.llm.ModelCatalog;
-import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.ModelsDevRates;
-import ai.tessary.llm.ProjectModelSettings;
 import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.TessaryException;
@@ -57,10 +52,8 @@ public class AgentRunService {
     private final Map<String, AgentRunSandbox> sandboxes;
     private final AgentRunProperties props;
     private final RcaProperties rcaProps;
-    private final ObserverProperties observerProps;
-    private final ProjectModelSettings modelSettings;
+    private final AgentModels models;
     private final AgenticCredentialResolver credentials;
-    private final ModelsDevRates rates;
     private final ApiKeyService apiKeys;
     private final ProjectRepository projects;
     private final OrgMembershipRepository memberships;
@@ -71,10 +64,8 @@ public class AgentRunService {
             List<AgentRunSandbox> sandboxList,
             AgentRunProperties props,
             RcaProperties rcaProps,
-            ObserverProperties observerProps,
-            ProjectModelSettings modelSettings,
+            AgentModels models,
             AgenticCredentialResolver credentials,
-            ModelsDevRates rates,
             ApiKeyService apiKeys,
             ProjectRepository projects,
             OrgMembershipRepository memberships,
@@ -85,10 +76,8 @@ public class AgentRunService {
         this.sandboxes = Map.copyOf(byKey);
         this.props = props;
         this.rcaProps = rcaProps;
-        this.observerProps = observerProps;
-        this.modelSettings = modelSettings;
+        this.models = models;
         this.credentials = credentials;
-        this.rates = rates;
         this.apiKeys = apiKeys;
         this.projects = projects;
         this.memberships = memberships;
@@ -125,40 +114,13 @@ public class AgentRunService {
             Map<String, String> files,
             @Nullable String jsonSchema,
             LlmUsageAccountant.Subject subject) {
-        String mcpBase = mcpBaseUrl();
-        if (mcpBase.isBlank()) {
-            throw new TessaryException(
-                    AgentRunError.LAUNCHER_MISCONFIGURED,
-                    "tessary.agentrun.mcp-base-url and tessary.rca.agentic.mcp-base-url are both unset, so the"
-                            + " agent has no way to read the traces");
-        }
-        Optional<ProjectModelSettings.ResolvedAgenticModel> resolved =
-                modelSettings.resolveAgenticModel(projectId, lane);
-        String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
-                .orElseGet(() -> observerProps.getAgentic().getModel());
-        // The deployment default is a Bedrock inference-profile id, so its rates are looked up on Bedrock.
-        String modelsDevId = resolved.isPresent()
-                ? resolved.get().modelsDevId()
-                : ModelCatalog.modelsDevId(ModelProvider.BEDROCK, model).orElse(null);
-        ModelsDevRates.ModelCost modelCost = rates.cost(modelsDevId).orElse(null);
-        ModelProvider provider = resolved.map(ProjectModelSettings.ResolvedAgenticModel::provider)
-                .orElse(ModelProvider.BEDROCK);
+        String mcpUrl = platformMcpUrl();
+        AgentModels.Choice choice = models.resolve(projectId, lane);
         // Resolved before the key is minted: an org with no credential fails closed with nothing to revoke.
-        AgenticCredentialResolver.Credential credential = credentials.resolve(projectId, provider);
+        AgenticCredentialResolver.Credential credential = credentials.resolve(projectId, choice.provider());
         try {
             return runWithCredential(
-                    projectId,
-                    lane,
-                    systemPrompt,
-                    prompt,
-                    files,
-                    jsonSchema,
-                    subject,
-                    mcpBase,
-                    model,
-                    modelCost,
-                    provider,
-                    credential);
+                    projectId, lane, systemPrompt, prompt, files, jsonSchema, subject, mcpUrl, choice, credential);
         } finally {
             credentials.release(credential);
         }
@@ -172,10 +134,8 @@ public class AgentRunService {
             Map<String, String> files,
             @Nullable String jsonSchema,
             LlmUsageAccountant.Subject subject,
-            String mcpBase,
-            String model,
-            ModelsDevRates.@Nullable ModelCost modelCost,
-            ModelProvider provider,
+            String mcpUrl,
+            AgentModels.Choice choice,
             AgenticCredentialResolver.Credential credential) {
         String principal = orgOwnerPrincipal(projectId);
         if (principal == null) {
@@ -195,11 +155,11 @@ public class AgentRunService {
                     jsonSchema,
                     clone.map(Clone::url).orElse(null),
                     clone.map(Clone::headSha).orElse(null),
-                    model,
-                    modelCost,
-                    provider.name(),
+                    choice.model(),
+                    choice.modelCost(),
+                    choice.provider().name(),
                     credential,
-                    mcpBase.replaceAll("/+$", "") + "/mcp",
+                    mcpUrl,
                     issued.plaintext(),
                     props.getTimeoutMs(),
                     props.getMaxTurns(),
@@ -209,12 +169,23 @@ public class AgentRunService {
         }
     }
 
-    /** This lane's own MCP origin, else RCA's, the same public origin every agent lane calls back on. */
-    private String mcpBaseUrl() {
+    /**
+     * The platform's MCP endpoint an agent reads the traces through: this lane's own origin, else
+     * RCA's, the same public origin every agent lane calls back on, with {@code /mcp} appended.
+     *
+     * @throws TessaryException {@code AgentRunError.LAUNCHER_MISCONFIGURED} when both origins are unset
+     */
+    public String platformMcpUrl() {
         String own = props.getMcpBaseUrl();
-        if (own != null && !own.isBlank()) return own;
         String rca = rcaProps.getAgentic().getMcpBaseUrl();
-        return rca == null ? "" : rca;
+        String origin = own != null && !own.isBlank() ? own : rca == null ? "" : rca;
+        if (origin.isBlank()) {
+            throw new TessaryException(
+                    AgentRunError.LAUNCHER_MISCONFIGURED,
+                    "tessary.agentrun.mcp-base-url and tessary.rca.agentic.mcp-base-url are both unset, so the"
+                            + " agent has no way to read the traces");
+        }
+        return origin.replaceAll("/+$", "") + "/mcp";
     }
 
     /** The repo to hand the sandbox: an authenticated clone URL and the commit to check out. */

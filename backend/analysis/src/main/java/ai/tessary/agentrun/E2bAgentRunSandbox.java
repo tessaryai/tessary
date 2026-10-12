@@ -62,6 +62,10 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final String ROUTE = "/authoring";
 
+    /** Why nothing is sent when neither this lane nor the observer names a launcher. */
+    static final String NO_LAUNCHER = "tessary.agentrun.launcher-url and tessary.observer.agentic.launcher-url are both"
+            + " unset; set TESSARY_AGENTRUN_LAUNCHER_URL";
+
     private final AgentRunProperties props;
     private final ObserverProperties observerProps;
     private final LlmUsageAccountant usage;
@@ -107,12 +111,9 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     @Override
     public Result run(Request req) {
-        String launcherUrl = launcherUrl();
+        String launcherUrl = launcherUrl(props, observerProps);
         if (launcherUrl.isBlank()) {
-            throw new TessaryException(
-                    AgentRunError.LAUNCHER_MISCONFIGURED,
-                    "tessary.agentrun.launcher-url and tessary.observer.agentic.launcher-url are both unset;"
-                            + " set TESSARY_AGENTRUN_LAUNCHER_URL");
+            throw new TessaryException(AgentRunError.LAUNCHER_MISCONFIGURED, NO_LAUNCHER);
         }
         Span span = tracer.spanBuilder(OPERATION)
                 .setNoParent()
@@ -181,15 +182,16 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         }
     }
 
-    /** The launcher this sandbox posts to: this lane's own, else the observer's, which every agent lane rides. */
-    private String launcherUrl() {
+    /** The launcher an agent lane posts to: this lane's own, else the observer's, which every agent lane rides. */
+    static String launcherUrl(AgentRunProperties props, ObserverProperties observerProps) {
         String own = props.getLauncherUrl();
         return own == null || own.isBlank()
                 ? blankToEmpty(observerProps.getAgentic().getLauncherUrl())
                 : own;
     }
 
-    private String launcherApiKey() {
+    /** The bearer key for {@link #launcherUrl}: this lane's own, else the observer's. */
+    static String launcherApiKey(AgentRunProperties props, ObserverProperties observerProps) {
         String own = props.getLauncherApiKey();
         return own == null || own.isBlank()
                 ? blankToEmpty(observerProps.getAgentic().getLauncherApiKey())
@@ -232,7 +234,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     private String postLauncher(String bodyJson, String launcherUrl, Request req) {
         HttpRequest httpReq = HttpRequest.newBuilder(URI.create(launcherUrl + ROUTE))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .header("Authorization", "Bearer " + launcherApiKey())
+                .header("Authorization", "Bearer " + launcherApiKey(props, observerProps))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 .timeout(Duration.ofMillis(req.timeoutMs() + 30_000))
@@ -277,10 +279,12 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
         throw switch (failure) {
             case LAUNCHER_MISCONFIGURED ->
                 new TessaryException(
-                        AgentRunError.LAUNCHER_MISCONFIGURED, launcherDiagnosis(resp.statusCode(), launcherUrl, diag));
+                        AgentRunError.LAUNCHER_MISCONFIGURED,
+                        launcherDiagnosis(resp.statusCode(), launcherUrl, diag, ROUTE));
             case LAUNCHER_UNAVAILABLE ->
                 new TessaryException(
-                        AgentRunError.LAUNCHER_UNAVAILABLE, launcherDiagnosis(resp.statusCode(), launcherUrl, diag));
+                        AgentRunError.LAUNCHER_UNAVAILABLE,
+                        launcherDiagnosis(resp.statusCode(), launcherUrl, diag, ROUTE));
             case TIMED_OUT -> new TessaryException(AgentRunError.TIMED_OUT, req.timeoutMs());
             case BAD_OUTPUT -> new TessaryException(AgentRunError.BAD_OUTPUT, detail);
             case RUN_FAILED -> new TessaryException(AgentRunError.RUN_FAILED, detail);
@@ -311,7 +315,8 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
-    private static String kindOf(String body) {
+    /** The {@code kind} of a launcher error body, empty when it has none or is not JSON. */
+    static String kindOf(String body) {
         try {
             return KIND_MAPPER.readTree(body).path("kind").asText("");
         } catch (JsonProcessingException | RuntimeException e) {
@@ -335,21 +340,23 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
                 req.subject());
     }
 
-    private static String launcherDiagnosis(int status, String launcherUrl, String diag) {
+    /** What a refused or failed launcher answer means for the operator, naming the route a 404 is missing. */
+    static String launcherDiagnosis(int status, String launcherUrl, String diag, String route) {
         String remedy =
                 switch (status) {
                     case 401, 403 ->
                         ", the shared secret does not match; TESSARY_AGENTRUN_LAUNCHER_API_KEY (or the observer's)"
                                 + " must equal the launcher's SANDBOX_API_KEY";
-                    case 404 -> ", no /authoring route; the launcher image is older than this backend";
+                    case 404 -> ", no " + route + " route; the launcher image is older than this backend";
                     default -> diag.isBlank() ? "" : ", " + diag;
                 };
         return "status " + status + " from " + launcherUrl + remedy;
     }
 
-    private String describeLauncherError(String body) {
+    /** The launcher's own {@code kind}, {@code detail} and sandbox id from an error body; never the rest of it. */
+    static String describeLauncherError(String body) {
         try {
-            JsonNode n = mapper.readTree(body);
+            JsonNode n = KIND_MAPPER.readTree(body);
             StringBuilder sb = new StringBuilder();
             if (n.hasNonNull("kind")) sb.append("kind=").append(n.get("kind").asText());
             if (n.hasNonNull("detail")) {

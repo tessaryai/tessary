@@ -42,6 +42,8 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -165,14 +167,17 @@ class AgentRunServiceTest {
     }
 
     private AgentRunService service(AgentRunProperties props, CapturingSandbox sandbox, GitProviderFactory providers) {
+        return service(props, new RcaProperties(), sandbox, providers);
+    }
+
+    private AgentRunService service(
+            AgentRunProperties props, RcaProperties rcaProps, CapturingSandbox sandbox, GitProviderFactory providers) {
         return new AgentRunService(
                 List.of(sandbox),
                 props,
-                new RcaProperties(),
-                observer(),
-                modelSettings,
+                rcaProps,
+                new AgentModels(modelSettings, observer(), RATES),
                 credentials,
-                RATES,
                 apiKeys,
                 projects,
                 memberships,
@@ -367,6 +372,29 @@ class AgentRunServiceTest {
 
         assertEquals(AgentRunError.LAUNCHER_MISCONFIGURED, ex.error());
         verifyNoInteractions(credentials, apiKeys, modelSettings);
+    }
+
+    /**
+     * The session client builds its MCP servers from this URL: a trailing slash must not become
+     * {@code //mcp}, and a deployment that set only RCA's origin must not point the agent at nothing.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "https://own.example/ | ''                  | https://own.example/mcp",
+                "''                   | https://rca.example | https://rca.example/mcp"
+            })
+    void platformMcpUrlIsTheOwnOriginElseRcasWithOneSlash(String own, String rca, String expected) {
+        AgentRunProperties props = props();
+        props.setMcpBaseUrl(own);
+        RcaProperties rcaProps = new RcaProperties();
+        rcaProps.getAgentic().setMcpBaseUrl(rca);
+
+        String url = service(props, rcaProps, new CapturingSandbox(null), new GitProviderFactory(List.of(), List.of()))
+                .platformMcpUrl();
+
+        assertEquals(expected, url);
     }
 
     /** A sandbox key nothing registered refuses to boot, rather than failing every run later. */
