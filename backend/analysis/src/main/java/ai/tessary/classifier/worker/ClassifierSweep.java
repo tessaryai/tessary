@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import java.util.Set;
 
@@ -40,6 +41,8 @@ import java.util.Set;
  *       classifier row and nothing else, no repositories, no catalog, no worker. Widening it later
  *       is cheap; narrowing it once out-of-tree classifiers depend on it is not.
  * </ol>
+ *
+ * <p>A sweep may refuse to turn on a row it cannot run; it must never refuse turning one off.
  */
 public interface ClassifierSweep {
 
@@ -62,4 +65,11 @@ public interface ClassifierSweep {
      * that returns is treated as a clean pass.
      */
     SweepOutcome sweep(SweepContext ctx);
+
+    /**
+     * Refuse to turn {@code classifier} on by throwing a {@code TessaryException} whose code says why, for a row
+     * this sweep could not run. {@code ClassifierService#setEnabled} asks before it writes, and only when turning
+     * a row on; turning one off is never refused. The default accepts every row.
+     */
+    default void checkEnable(ClassifierRow classifier) {}
 }

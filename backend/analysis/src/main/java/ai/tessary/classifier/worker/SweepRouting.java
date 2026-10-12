@@ -4,6 +4,7 @@ package ai.tessary.classifier.worker;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import java.util.Locale;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -52,5 +53,13 @@ public class SweepRouting {
 
     public Grain grainFor(String detectorKind) {
         return routeFor(detectorKind).grain();
+    }
+
+    /**
+     * The sweep that runs {@code detectorKind}'s jobs: the registered one when the kind sweeps at window grain,
+     * the only grain {@link ClassifierWorker} hands to a sweep; empty otherwise.
+     */
+    public Optional<ClassifierSweep> sweepFor(String detectorKind) {
+        return grainFor(detectorKind) == Grain.WINDOW ? sweeps.forKind(detectorKind) : Optional.empty();
     }
 }

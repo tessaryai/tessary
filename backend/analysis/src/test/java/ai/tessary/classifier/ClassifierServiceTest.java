@@ -3,10 +3,14 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -321,6 +325,64 @@ class ClassifierServiceTest {
 
         assertEquals(ClassifierError.INVALID_MODE, e.error());
         verifyNoInteractions(signals);
+    }
+
+    /**
+     * Catches an enable written before the sweep that runs the row is asked: the sweep's refusal reaches the caller
+     * as it was thrown, and the row stays off and paused as it was.
+     */
+    @Test
+    void aSweepThatRefusesTheRowKeepsItOff() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        TessaryException refusal = new TessaryException(ClassifierError.NOT_FOUND, "x");
+        doThrow(refusal).when(undeclaredSweep).checkEnable(row);
+
+        TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true));
+
+        assertSame(refusal, e);
+        verify(signals, never()).setEnabled(anyString(), anyString(), anyBoolean());
+        verify(signals, never()).unpause(anyString(), anyString());
+    }
+
+    /** Catches a disable that a refusing sweep blocks: turning a row off never asks the sweep. */
+    @Test
+    void turningARowOffNeverAsksTheSweep() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        doThrow(new TessaryException(ClassifierError.NOT_FOUND, "x"))
+                .when(undeclaredSweep)
+                .checkEnable(any());
+        when(signals.setEnabled(PID, "cls-u", false)).thenReturn(1);
+
+        assertSame(row, service.setEnabled(PID, "cls-u", false));
+
+        verify(undeclaredSweep, never()).checkEnable(any());
+        verify(signals).setEnabled(PID, "cls-u", false);
+    }
+
+    /** Catches the check replacing the write: a sweep that accepts the row lets the enable and the unpause land. */
+    @Test
+    void aSweepThatAcceptsTheRowLetsItOn() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        when(signals.setEnabled(PID, "cls-u", true)).thenReturn(1);
+
+        service.setEnabled(PID, "cls-u", true);
+
+        verify(undeclaredSweep).checkEnable(row);
+        verify(signals).setEnabled(PID, "cls-u", true);
+        verify(signals).unpause(PID, "cls-u");
+    }
+
+    private static ClassifierRow undeclaredRow() {
+        return ClassifierRowBuilder.of(UNDECLARED)
+                .id("cls-u")
+                .custom()
+                .disabled()
+                .discovery()
+                .at(T0)
+                .build();
     }
 
     private static MetricHistogram sketch(double... logValues) {

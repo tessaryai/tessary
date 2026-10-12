@@ -465,9 +465,13 @@ public class ClassifierService {
      * not asked about: on and able to run are separate, and a provider with no credit left pauses the sweep
      * as {@code no_credit}. Any enable clears a pause: it is how a person says "try again", and the next
      * sweep pauses again if the provider still refuses.
+     *
+     * <p>The sweep that runs the row may refuse it first ({@code ClassifierSweep#checkEnable}); its exception
+     * reaches the caller and nothing is written.
      */
     public ClassifierRow setEnabled(String projectId, String id, boolean enabled) {
         ClassifierRow row = get(projectId, id); // tenant + existence + capability guard
+        if (enabled) routing.sweepFor(row.detector()).ifPresent(sweep -> sweep.checkEnable(row));
         if (enabled
                 && BuiltInDetector.Kind.FRUSTRATION.equals(row.detector())
                 && !decisionProviders.hasProvider(projectId, ModelLane.FRUSTRATION)) {
