@@ -15,34 +15,16 @@
  */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { startMcpRelay } = require('../mcp-relay');
+const { startStubUpstream, jsonRpcToolResult } = require('./fixtures/mcp-upstream');
 
-function startStubUpstream(handler) {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const chunks = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        handler(JSON.parse(Buffer.concat(chunks).toString('utf8')), req, res);
-      });
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      resolve({ url: `http://127.0.0.1:${port}/mcp`, close: () => server.close() });
-    });
-  });
-}
-
-function jsonRpcToolResult(id, payload) {
-  return {
-    jsonrpc: '2.0',
-    id,
-    result: { content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload },
-  };
+/** A relay with one upstream, addressed by its single URL. */
+async function relayFor(url, token, workDir) {
+  const relay = await startMcpRelay({ servers: [{ name: 'only', url, token }], workDir });
+  return { ...relay, url: relay.urls.only };
 }
 
 function tempWorkDir() {
@@ -67,7 +49,7 @@ test('a small tools/call result comes back inline in full, with its saved path a
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const { status, body } = await callTool(relay.url, 1, 'get_finding_evidence');
@@ -97,7 +79,7 @@ test('a large tools/call result is saved to a file and replaced with a summary (
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const { status, body } = await callTool(relay.url, 2, 'get_finding_evidence');
@@ -123,7 +105,7 @@ test('a large tools/call result reads next_cursor as well as nextCursor', async 
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const { body } = await callTool(relay.url, 3, 'get_finding_evidence');
@@ -140,7 +122,7 @@ test('sequential large calls number their files 001, 002, ... by tool', async (t
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const first = await callTool(relay.url, 10, 'get_finding_evidence');
@@ -157,7 +139,7 @@ test('the file sequence keeps incrementing across a mix of small and large calls
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const small = await callTool(relay.url, 20, 'get_finding');
@@ -179,7 +161,7 @@ test('initialize (and anything not tools/call) passes through untouched, instruc
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const res = await fetch(relay.url, {
@@ -199,7 +181,7 @@ test('a notification is forwarded upstream and answered with a bare 204', async 
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 'test-token', workDir });
+  const relay = await relayFor(upstream.url, 'test-token', workDir);
   t.after(() => relay.close());
 
   const res = await fetch(relay.url, {
@@ -214,7 +196,7 @@ test('a notification is forwarded upstream and answered with a bare 204', async 
 
 test('a GET is rejected with 405 and never reaches upstream', async (t) => {
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: 'http://127.0.0.1:1/mcp', token: 't', workDir });
+  const relay = await relayFor('http://127.0.0.1:1/mcp', 't', workDir);
   t.after(() => relay.close());
   const res = await fetch(relay.url, { method: 'GET' });
   assert.equal(res.status, 405);
@@ -227,7 +209,7 @@ async function relayOver(t, respond, status = 200) {
   });
   t.after(() => upstream.close());
   const workDir = tempWorkDir();
-  const relay = await startMcpRelay({ url: upstream.url, token: 't', workDir });
+  const relay = await relayFor(upstream.url, 't', workDir);
   t.after(() => relay.close());
   return { relay, workDir };
 }
@@ -287,7 +269,7 @@ test('a request body that is not JSON is refused with 400 and never reaches upst
 });
 
 test('an unreachable upstream is a 502 the agent can read, not a dropped connection', async (t) => {
-  const relay = await startMcpRelay({ url: 'http://127.0.0.1:1/mcp', token: 't', workDir: tempWorkDir() });
+  const relay = await relayFor('http://127.0.0.1:1/mcp', 't', tempWorkDir());
   t.after(() => relay.close());
 
   const { status, body } = await callTool(relay.url, 1, 'get_trace');
@@ -304,4 +286,76 @@ test('a large single-object result is replaced by its field names and where it w
   const file = path.join('checks', 'mcp', '001-get_finding.json');
   assert.deepEqual(summary, { file, note: 'result saved to file; too large to inline', fields: ['id', 'narrative', 'evidence_counts'] });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(workDir, file), 'utf8')), finding);
+});
+
+/** Two upstreams, `alpha` and `beta`, each answering every tools/call with its own payload. */
+async function twoServers(t) {
+  const alpha = await startStubUpstream((reqBody, req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(jsonRpcToolResult(reqBody.id, { count: 3 })));
+  });
+  const beta = await startStubUpstream((reqBody, req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(jsonRpcToolResult(reqBody.id, { name: 'widget' })));
+  });
+  t.after(() => { alpha.close(); beta.close(); });
+  const workDir = tempWorkDir();
+  const relay = await startMcpRelay({
+    servers: [
+      { name: 'alpha', url: alpha.url, token: 'tsy_a_alphatoken' },
+      { name: 'beta', url: beta.url, token: 'tsy_a_betatoken' },
+    ],
+    workDir,
+  });
+  t.after(() => relay.close());
+  return { alpha, beta, relay, workDir };
+}
+
+test('a call to each named server reaches its own upstream with its own token', async (t) => {
+  const { alpha, beta, relay } = await twoServers(t);
+
+  await callTool(relay.urls.alpha, 1, 'list_traces');
+  await callTool(relay.urls.beta, 2, 'get_thing');
+
+  assert.deepEqual(
+    alpha.requests.map((r) => [r.authorization, r.body.params.name]),
+    [['Bearer tsy_a_alphatoken', 'list_traces']],
+  );
+  assert.deepEqual(
+    beta.requests.map((r) => [r.authorization, r.body.params.name]),
+    [['Bearer tsy_a_betatoken', 'get_thing']],
+  );
+});
+
+test('the saved-file counter is shared across servers', async (t) => {
+  const { relay, workDir } = await twoServers(t);
+
+  await callTool(relay.urls.alpha, 1, 'list_traces');
+  await callTool(relay.urls.beta, 2, 'get_thing');
+
+  assert.deepEqual(fs.readdirSync(path.join(workDir, 'checks', 'mcp')).sort(), ['001-list_traces.json', '002-get_thing.json']);
+});
+
+test('an unknown server name is 404 and never reaches an upstream', async (t) => {
+  const { alpha, beta, relay } = await twoServers(t);
+  const gamma = relay.urls.alpha.replace(/\/mcp\/alpha$/, '/mcp/gamma');
+
+  const { status, body } = await callTool(gamma, 1, 'list_traces');
+
+  assert.deepEqual({ status, body }, { status: 404, body: { error: 'unknown server' } });
+  assert.equal(alpha.requests.length + beta.requests.length, 0);
+});
+
+test('a repeated or malformed server name refuses to start', async () => {
+  const workDir = tempWorkDir();
+  const server = (name) => ({ name, url: 'http://127.0.0.1:1/mcp', token: 't' });
+
+  await assert.rejects(startMcpRelay({ servers: [server('alpha'), server('alpha')], workDir }), /alpha/);
+  await assert.rejects(startMcpRelay({ servers: [server('Alpha_1')], workDir }), /Alpha_1/);
+});
+
+test('urls name each server under /mcp/<name> on loopback', async (t) => {
+  const { relay } = await twoServers(t);
+
+  assert.match(relay.urls.alpha, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/alpha$/);
+  assert.equal(new URL(relay.urls.beta).port, new URL(relay.urls.alpha).port);
+  assert.equal(new URL(relay.urls.beta).pathname, '/mcp/beta');
 });

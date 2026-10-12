@@ -10,6 +10,11 @@ as the Docker backend's agent image.
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
   through the SDK. Required by `rca.js`, `triage.js` and `authoring.js`.
+- `mcp-relay.js` — a loopback MCP proxy with named upstreams: each name is served at
+  `/mcp/<name>` and forwards to its own URL with its own bearer token, so no token reaches
+  OpenCode's config. Every `tools/call` result is saved whole to `checks/mcp/NNN-<tool>.json` (one
+  counter across all upstreams), and a large one comes back to the agent as a summary. Used by
+  `agent-stream.js` on the system-prompt path.
 - `rca.js` — the finding-anchored root-cause lane: materialize the finding's dossier (`finding.md`,
   `evidence.md`, `method.md` when the classifier has one, `tools.md`) → read-only agent run wired to
   the platform's MCP surface → emit verdict + summary + causes + the markdown investigation. It reads

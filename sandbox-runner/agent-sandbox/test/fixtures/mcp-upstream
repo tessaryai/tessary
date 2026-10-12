@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * A stand-in for an MCP upstream behind mcp-relay.js. No extension, so node --test skips it. Each
+ * request is recorded as { authorization, body } in `requests`, then handed to `handler`.
+ */
+const http = require('node:http');
+
+function startStubUpstream(handler) {
+  const requests = [];
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        requests.push({ authorization: req.headers.authorization, body });
+        handler(body, req, res);
+      });
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({
+        url: `http://127.0.0.1:${port}/mcp`,
+        requests,
+        close: () => {
+          server.closeAllConnections();
+          server.close();
+        },
+      });
+    });
+  });
+}
+
+function jsonRpcToolResult(id, payload) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    result: { content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload },
+  };
+}
+
+module.exports = { startStubUpstream, jsonRpcToolResult };

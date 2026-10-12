@@ -734,6 +734,14 @@ function toEnvelope(turns, structured, text) {
 
 // --- the run -----------------------------------------------------------------
 
+/** One remote OpenCode MCP entry per relay URL. No headers: the relay holds every token. */
+function remoteMcp(urls) {
+  const mcp = {};
+  for (const [name, url] of Object.entries(urls)) mcp[name] = { type: 'remote', url, enabled: true, oauth: false };
+  return mcp;
+}
+
+
 /**
  * Run one agent invocation against `spec.prompt`; collect per-turn telemetry + a result envelope.
  *
@@ -808,10 +816,11 @@ async function runAgent(spec) {
   if (spec.systemPrompt) {
     // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
     // it (see mcp-relay.js's header for why that split matters).
-    relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
-    config.mcp = {
-      'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
-    };
+    relay = await startMcpRelay({
+      servers: [{ name: 'tessary-evals', url: spec.mcp.url, token: spec.mcp.token }],
+      workDir: WORK,
+    });
+    config.mcp = remoteMcp(relay.urls);
     // The custom agent's `prompt` REPLACES the provider's default system prompt (verified against
     // opencode source, see the research notes this change was built from). `task`/`skill` are
     // denied because this lane runs no sub-agents and ships no skills of its own; `todowrite`
