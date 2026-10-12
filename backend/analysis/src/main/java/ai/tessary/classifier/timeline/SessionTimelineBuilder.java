@@ -332,12 +332,13 @@ public final class SessionTimelineBuilder {
          */
         private Instant receivedAt(TimelineSpan carrier, List<TimelineSpan> earlier) {
             List<String> lineage = facts(carrier).ancestorIds();
-            for (String ancestorId : lineage) {
-                if (holdsAny(ancestorId, earlier, lineage)) continue;
-                Instant start = Objects.requireNonNull(byId.get(ancestorId)).startedAt();
-                return start.isBefore(carrier.startedAt()) ? start : carrier.startedAt();
-            }
-            return carrier.startedAt();
+            return lineage.stream()
+                    .filter(ancestorId -> !holdsAny(ancestorId, earlier, lineage))
+                    .findFirst()
+                    .map(ancestorId ->
+                            Objects.requireNonNull(byId.get(ancestorId)).startedAt())
+                    .filter(start -> start.isBefore(carrier.startedAt()))
+                    .orElse(carrier.startedAt());
         }
 
         /** Whether a span outside {@code lineage} lies below the given span. */

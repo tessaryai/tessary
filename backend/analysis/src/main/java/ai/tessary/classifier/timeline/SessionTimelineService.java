@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -134,7 +135,7 @@ public class SessionTimelineService {
         private final TraceV2Repository traces;
         private final String projectId;
         private final String sessionId;
-        private final ArrayDeque<SessionTrace> unended;
+        private final Queue<SessionTrace> unended;
         private final Set<String> read = new HashSet<>();
         private @Nullable SessionTrace lastEnded;
         private boolean endedRemain = true;
