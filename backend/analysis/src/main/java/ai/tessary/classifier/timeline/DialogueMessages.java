@@ -79,6 +79,28 @@ public final class DialogueMessages {
             return textMessage(
                     fallbackRole, ContentExtractor.flattenContentText(node).strip());
         }
+        return envelope(node);
+    }
+
+    /**
+     * The messages of a column that holds what a person and an agent said: a message envelope, or a plain string, which
+     * is one text message under {@code fallbackRole}. Any other JSON value, such as a framework's call arguments or
+     * return object, holds no message.
+     */
+    public static List<DialogueMessage> readDialogue(@Nullable String raw, String fallbackRole) {
+        if (raw == null || raw.isBlank()) return List.of();
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(raw);
+        } catch (JsonProcessingException e) {
+            return textMessage(fallbackRole, raw.strip());
+        }
+        if (node != null && node.isTextual())
+            return textMessage(fallbackRole, node.asText().strip());
+        return ContentExtractor.isMessageEnvelope(node) ? envelope(node) : List.of();
+    }
+
+    private static List<DialogueMessage> envelope(JsonNode node) {
         List<DialogueMessage> out = new ArrayList<>();
         for (JsonNode msg : node) {
             if (!msg.isObject() || !msg.has("role")) continue;
@@ -106,6 +128,16 @@ public final class DialogueMessages {
                     msg));
         }
         return List.copyOf(out);
+    }
+
+    /** The messages after the last user message that has text or a tool call: what an output adds to a chat it holds. */
+    public static List<DialogueMessage> afterLastUser(List<DialogueMessage> messages) {
+        int afterLastUser = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            DialogueMessage m = messages.get(i);
+            if ("user".equals(m.role()) && m.dialogue()) afterLastUser = i + 1;
+        }
+        return messages.subList(afterLastUser, messages.size());
     }
 
     /** The messages after the last assistant message that has text or a tool call: what is new in this call. */
