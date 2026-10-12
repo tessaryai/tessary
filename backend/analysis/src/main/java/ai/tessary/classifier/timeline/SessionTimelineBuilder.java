@@ -257,7 +257,7 @@ public final class SessionTimelineBuilder {
             String key = messageKey(answered);
             for (TimelineSpan writer : facing) {
                 Instant ended = writer.endedAt();
-                if (writer == carrier
+                if (writer.spanId().equals(carrier.spanId())
                         || ended == null
                         || ended.isAfter(carrier.startedAt())
                         || !LLM.equals(eventKind(writer))) {
