@@ -92,7 +92,7 @@ session as `node session.js /home/user/session.json` (E2B) or `node session.js /
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
 | `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`. |
 | `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
-| `SESSION_PORT` | Env var, default `9400`. The launcher does not set it; the tests do. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
+| `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
 | Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied, `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders. |
 
 ### Routes
@@ -151,6 +151,88 @@ which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.30 bin
   once and sends any text or tool event the stream did not deliver, so a frame lost in a reconnect
   loses nothing. After the stream reconnects during a reply, the script asks OpenCode for the
   session status and ends the reply if the session is idle.
+
+## Launcher sessions
+
+The launcher owns long-lived agent sessions: `POST /sessions` starts one sandbox that runs
+`session.js` (see [Agent sessions](#agent-sessions-sessionjs)), and the routes below forward
+messages to it and stream its events. A session is generic: the launcher knows a lane name, files,
+a system prompt, a model and named MCP servers, and nothing about what the caller builds with them.
+The registry lives in the launcher's memory, so after a launcher restart every session is unknown.
+
+### Routes
+
+Every route checks `Authorization: Bearer <SANDBOX_API_KEY>` before it reads a body; without it:
+`401 { "error": "unauthorized" }`. Another method on a session path, or another path under
+`/sessions`: `404 { "error": "not found" }`. An unknown session is
+`404 { "error": "not found", "kind": "unknown_session" }` on every route; a caller reads it as
+`closed`. A `502` is the launcher's failure envelope (`error`, `kind`, `timeout`, `error_class`,
+`detail`, `script: "session.js"`, `elapsed_ms`, `timeout_ms`); its `detail` is launcher-authored,
+never script output, a token or a prompt.
+
+| Route | Success | Other answers |
+|---|---|---|
+| `POST /sessions` | `201 { session_id }` once the script reports ready | `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
+| `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message |
+| `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
+| `DELETE /sessions/{id}` | `204` after the sandbox is stopped and removed; `204` again on a closed session | `404` |
+
+`POST /sessions` takes `{ lane, system_prompt, files, model, model_cost?, provider, credential,
+mcp_servers: [ { name, url, token } ], idle_timeout_ms, max_tool_calls_per_message }`. The launcher
+checks the body in this order, each a `bad_request` with this `detail`:
+
+| Check | `detail` |
+|---|---|
+| JSON, at most 8 MiB | `invalid json body` / `body too large` |
+| `lane` non-empty string | `session.js: lane must be a non-empty string` |
+| `credential`, as on the one-shot routes | `session.js: missing or invalid credential (<why>)` |
+| `model` non-empty string | `session.js: model must be a non-empty string` |
+| `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
+| an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
+| a backend with no session driver (e2b, for now) | `session.js: agent sessions need SANDBOX_BACKEND=docker (got e2b)` |
+
+The script checks `system_prompt`, `files`, `mcp_servers` and `max_tool_calls_per_message`; a bad
+one is a start failure. `provider` is ignored, as on the one-shot routes: `credential.provider`
+decides. `session.json` holds exactly `{ system_prompt, files, model, mcp_servers,
+max_tool_calls_per_message }`, with the model qualified as on the one-shot routes; the credential
+reaches the sandbox only through its env, with `model_cost` declared in `OPENCODE_CONFIG_CONTENT`.
+Each session has its own `SESSION_SECRET` (32 random bytes as hex), sent with every call the
+launcher makes to the script.
+
+`POST /sessions/{id}/messages`: the body the launcher forwards to the script, `{ "text": ... }`,
+must be at most 1 MiB, the script's own limit; else `session.js: text must be a non-empty string of
+at most 1 MiB`.
+
+### Events
+
+Each event is one frame: `id: <seq>`, `event: <type>`, `data: <JSON>`, with no heartbeat and no
+`retry:`. The types and their data are the script's (see [Events](#events) under Agent sessions),
+passed through unchanged; a script line that is not JSON or names another type is dropped and
+logged by type name only. `seq` starts at 1 and grows by one per event the launcher emits.
+
+`after` (default 0) is the last sequence the caller holds: the response replays every held event
+after it, then follows live events. Exactly one `closed { reason }` ends every session and is
+always the last event; the stream ends after it.
+
+### Env
+
+| Env | Default | Meaning |
+|---|---|---|
+| `SANDBOX_SESSION_CAP` | `4` | Live sessions at once. |
+| `SANDBOX_SESSION_BUFFER` | `5000` | Events kept per session for replay. |
+| `SANDBOX_SESSION_MAX_MS` | `7200000` | A session's whole life; also the container's `tessary.sandbox.timeout-ms` label. |
+| `SANDBOX_SESSION_PORT` | `9400` | The port `session.js` listens on in the sandbox, passed to it as `SESSION_PORT`. |
+
+Each must be a positive integer; anything else is `<NAME> must be a positive integer` on stderr
+and exit 1 at boot. The idle timeout has no launcher default: the caller sends `idle_timeout_ms`.
+
+### Docker
+
+A session container is built like a one-shot one (the same hardening, the one work-volume mount)
+and runs `node session.js /work/session.json` with the labels `tessary.sandbox=1`,
+`tessary.sandbox.script=session.js`, `tessary.sandbox.timeout-ms=<SANDBOX_SESSION_MAX_MS>` and
+`tessary.sandbox.session=<id>`. The launcher dials the script at the container's address on the
+network it shares with the container, chosen by that network's name, never the first one listed.
 
 ## Deploy
 

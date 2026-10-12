@@ -9,7 +9,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { spawnLauncher, startLauncher, request } = require('./fixtures/launcher-harness');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnLauncher, startLauncher, request, tempDir } = require('./fixtures/launcher-harness');
 
 const E2B_ENV = { SANDBOX_BACKEND: 'e2b', E2B_API_KEY: 'fake-e2b-key', SANDBOX_API_KEY: 'testkey' };
 
@@ -142,4 +144,128 @@ test('a docker backend with no SANDBOX_WORK_VOLUME refuses to boot', async () =>
   const code = await new Promise((resolve) => child.on('exit', resolve));
   assert.equal(code, 1, 'it must exit rather than serve requests that will each fail at mount time');
   assert.match(stderr, /requires SANDBOX_WORK_VOLUME/);
+});
+
+// ---- Launcher sessions: the front door ------------------------------------------------------
+
+const SESSION_START = {
+  lane: 'authoring',
+  system_prompt: 'You help.',
+  files: {},
+  model: 'global.anthropic.claude-sonnet-4-6',
+  provider: 'BEDROCK',
+  credential: { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'a', aws_secret_key: 's' },
+  mcp_servers: [{ name: 'tessary', url: 'https://tessary.example.com/mcp', token: 'tsy_a_tok1' }],
+  idle_timeout_ms: 60000,
+  max_tool_calls_per_message: 40,
+};
+
+const SESSION_ROUTES = [
+  ['POST', '/sessions'],
+  ['POST', '/sessions/x/messages'],
+  ['POST', '/sessions/x/abort'],
+  ['GET', '/sessions/x/events'],
+  ['DELETE', '/sessions/x'],
+];
+
+test('every session route needs the launcher key before its body is read', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    for (const [method, urlPath] of SESSION_ROUTES) {
+      for (const auth of [undefined, 'Bearer wrong']) {
+        assert.deepEqual(
+          await request(port, method, urlPath, { auth, body: method === 'POST' ? SESSION_START : undefined }),
+          { status: 401, body: { error: 'unauthorized' } },
+          `${method} ${urlPath} with ${auth}`,
+        );
+      }
+    }
+  } finally {
+    child.kill();
+  }
+});
+
+test('a session path with another method or segment is 404', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    for (const [method, urlPath] of [
+      ['GET', '/sessions'], ['DELETE', '/sessions'], ['PUT', '/sessions/x'], ['POST', '/sessions/x'],
+      ['GET', '/sessions/x/messages'], ['POST', '/sessions/x/events'], ['POST', '/sessions/x/other'], ['POST', '/sessions/x/abort/y'],
+    ]) {
+      assert.deepEqual(
+        await request(port, method, urlPath, { auth: 'Bearer testkey' }),
+        { status: 404, body: { error: 'not found' } },
+        `${method} ${urlPath}`,
+      );
+    }
+  } finally {
+    child.kill();
+  }
+});
+
+test('POST /sessions refuses a bad body before any sandbox is spent', async () => {
+  // A docker backend whose socket does not exist: a start that got past validation would fail as
+  // an orchestration error at its first daemon call, never as bad_request.
+  const scratch = tempDir('http-edges-sessions-');
+  const { child, port } = await startLauncher({
+    SANDBOX_BACKEND: 'docker',
+    DOCKER_SOCKET_PATH: path.join(scratch, 'missing.sock'),
+    SANDBOX_WORK_VOLUME: 'vol',
+    LAUNCHER_WORK_DIR: path.join(scratch, 'work'),
+    SANDBOX_API_KEY: 'testkey',
+  });
+  try {
+    const garbled = await rawPost(port, '/sessions', '{"lane": tsy_secret');
+    assert.equal(garbled.status, 502);
+    assert.equal(garbled.body.kind, 'bad_request');
+    assert.equal(garbled.body.detail, 'invalid json body');
+
+    const rows = [
+      [{ lane: undefined }, 'session.js: lane must be a non-empty string'],
+      [{ lane: '' }, 'session.js: lane must be a non-empty string'],
+      [{ credential: undefined }, 'session.js: missing or invalid credential (no credential object on the request'],
+      [{ credential: { provider: 'GEMINI' } }, 'session.js: missing or invalid credential (GEMINI credential is missing api_key'],
+      [{ model: '' }, 'session.js: model must be a non-empty string'],
+      [{ model: 7 }, 'session.js: model must be a non-empty string'],
+      [{ idle_timeout_ms: undefined }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: 0 }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: 1.5 }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: '60000' }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' } }, 'session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)'],
+    ];
+    for (const [change, detail] of rows) {
+      const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body: { ...SESSION_START, ...change } });
+      assert.equal(res.status, 502, JSON.stringify(change));
+      assert.equal(res.body.kind, 'bad_request', JSON.stringify(change));
+      assert.ok(res.body.detail.startsWith(detail), `${JSON.stringify(change)}: ${res.body.detail}`);
+    }
+  } finally {
+    child.kill();
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('on the e2b backend a session start is the caller\'s bad_request until it has a driver', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body: SESSION_START });
+    assert.equal(res.status, 502);
+    assert.equal(res.body.kind, 'bad_request');
+    assert.equal(res.body.detail, 'session.js: agent sessions need SANDBOX_BACKEND=docker (got e2b)');
+  } finally {
+    child.kill();
+  }
+});
+
+test('a session env value that is not a positive integer refuses to boot', async () => {
+  for (const [name, value] of [['SANDBOX_SESSION_CAP', 'abc'], ['SANDBOX_SESSION_BUFFER', '0'], ['SANDBOX_SESSION_MAX_MS', '-5'], ['SANDBOX_SESSION_PORT', '1.5']]) {
+    const child = spawnLauncher({ ...E2B_ENV, [name]: value });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    const killer = setTimeout(() => child.kill(), 3000);
+    const code = await new Promise((resolve) => child.on('exit', resolve));
+    clearTimeout(killer);
+    assert.equal(code, 1, `${name}=${value} must stop the boot, not make every timer fire at once`);
+    assert.match(stderr, new RegExp(`${name} must be a positive integer`));
+  }
 });
