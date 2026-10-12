@@ -30,6 +30,8 @@ public class SessionTimelineService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionTimelineService.class);
 
+    // A read's first page is one trace and each next page twice the last, up to this many, so a tail that stops early
+    // has read at most about twice the traces it keeps.
     private static final int TRACES_PER_READ = 20;
 
     private final TraceV2Repository traces;
@@ -57,8 +59,10 @@ public class SessionTimelineService {
      * {@code load(projectId, sessionId).tail(maxBytes)}, without reading the traces that cannot reach it: the same
      * events, with the same ids, sizes and data, numbered from 0. Reads whole traces latest end first and stops before a
      * trace when the events loaded after its end already weigh more than {@code maxBytes}: every event of that trace
-     * and of the traces after it is at or before that end, so it sorts before the first event the tail leaves out. A
-     * trace that is not settled has no end yet, so it is always read.
+     * and of the traces after it is at or before that end, so it sorts before the first event the tail leaves out. The
+     * traces are read a page at a time, the first page one trace and each next page twice the last, so the spans of a
+     * trace the tail leaves out are read only in the last page. A trace that is not settled has no end yet, since a
+     * span may still arrive, so it is always read.
      *
      * <p>The one event a trace row does not bound: a user message whose carrying span never ended, in a settled trace,
      * which the builder places at that span's start; when the start is later than the trace's latest span end, a tail
@@ -76,12 +80,17 @@ public class SessionTimelineService {
         int traceCount = 0;
         int spanCount = 0;
         boolean tracesRemain = false;
+        int pageSize = 1;
         pages:
-        for (int from = 0; from < all.size(); from += TRACES_PER_READ) {
-            List<SessionTrace> page = all.subList(from, Math.min(from + TRACES_PER_READ, all.size()));
+        for (int from = 0; from < all.size(); from += pageSize, pageSize = Math.min(2 * pageSize, TRACES_PER_READ)) {
+            List<SessionTrace> page = all.subList(from, Math.min(from + pageSize, all.size()));
+            if (enough(derived, bytes, maxBytes, page.get(0))) {
+                tracesRemain = true;
+                break;
+            }
             Map<String, List<TimelineSpan>> byTrace = timelineSpans(projectId, page);
             for (SessionTrace trace : page) {
-                if (bytes > maxBytes && bytesAfter(derived, trace.settledEnd()) > maxBytes) {
+                if (enough(derived, bytes, maxBytes, trace)) {
                     tracesRemain = true;
                     break pages;
                 }
@@ -108,6 +117,12 @@ public class SessionTimelineService {
                 .durationMs(start)
                 .log();
         return timeline;
+    }
+
+    /** Whether the events loaded after the trace's end already fill the tail, so the trace and the ones after it are not read. */
+    private static boolean enough(
+            List<SessionTimelineBuilder.Derived> derived, long bytes, long maxBytes, SessionTrace trace) {
+        return bytes > maxBytes && bytesAfter(derived, trace.settledEnd()) > maxBytes;
     }
 
     /** The summed size of the events later than {@code end}; 0 for a trace with no end, so that trace is read. */
