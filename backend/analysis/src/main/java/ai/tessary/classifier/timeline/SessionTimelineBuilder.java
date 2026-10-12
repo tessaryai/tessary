@@ -587,8 +587,9 @@ public final class SessionTimelineBuilder {
         for (DialogueMessage m : DialogueMessages.afterLastAssistant(input)) {
             if (!SYSTEM_ROLES.contains(m.role())) fresh.add(m.source());
         }
-        List<DialogueMessage> replies =
-                output.stream().filter(m -> ASSISTANT.equals(m.role())).toList();
+        List<DialogueMessage> replies = DialogueMessages.afterLastUser(output).stream()
+                .filter(m -> ASSISTANT.equals(m.role()))
+                .toList();
         ObjectNode result = data.putObject("output");
         result.put("text", joined(replies.stream().map(DialogueMessage::text).toList()));
         ArrayNode toolCalls = result.putArray("tool_calls");

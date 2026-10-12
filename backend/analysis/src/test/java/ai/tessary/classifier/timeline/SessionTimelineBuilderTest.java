@@ -680,6 +680,30 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void anLlmOutputThatHoldsTheWholeChatKeepsOnlyThisCallsOutput() {
+        String toolResult = "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"ships tomorrow\"}";
+        String done = "{\"role\":\"assistant\",\"content\":\"Done.\"}";
+        String history = Q1 + "," + TC1 + "," + toolResult + "," + R1 + "," + EXPEDITE;
+        List<TimelineSpan> spans = List.of(span("t2", "l1", "llm")
+                .at(0, 100)
+                .in("[" + history + "]")
+                .out("[" + history + "," + done + "]")
+                .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        Event llm = timeline.events().stream()
+                .filter(e -> e.kind().equals("llm"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(
+                json("{\"text\":\"Done.\",\"tool_calls\":[],\"reasoning\":null}"),
+                json(llm.data().get("output").toString()),
+                "an output that holds the whole chat gives the llm event the replies and tool calls of earlier turns");
+        assertEquals(List.of("t2/l1#user:0 can you expedite it?", "t2/l1#reply:0 Done."), messages(timeline));
+    }
+
+    @Test
     void theAgentLoopsRepeatedTextIsTwoReplies() {
         String u = "{\"role\":\"user\",\"content\":\"expedite 42\"}";
         String first = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c1\","
