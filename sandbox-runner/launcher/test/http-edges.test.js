@@ -9,21 +9,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { spawnLauncher, startLauncher } = require('./fixtures/launcher-harness');
-
-function request(port, method, urlPath, { body, auth } = {}) {
-  return new Promise((resolve, reject) => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (auth) headers.Authorization = auth;
-    const req = http.request({ host: '127.0.0.1', port, path: urlPath, method, headers }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
-    });
-    req.on('error', reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
-  });
-}
+const { spawnLauncher, startLauncher, request } = require('./fixtures/launcher-harness');
 
 const E2B_ENV = { SANDBOX_BACKEND: 'e2b', E2B_API_KEY: 'fake-e2b-key', SANDBOX_API_KEY: 'testkey' };
 

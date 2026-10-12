@@ -9,6 +9,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
 const { spawn } = require('node:child_process');
 
 const SERVER_JS = path.join(__dirname, '..', '..', 'server.js');
@@ -54,6 +55,99 @@ function postJson(port, urlPath, body, apiKey) {
   });
 }
 
+/** One request to the launcher; `body` is the parsed JSON answer, or undefined when it has none. */
+function request(port, method, urlPath, { body, auth } = {}) {
+  return new Promise((resolve, reject) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth) headers.Authorization = auth;
+    const req = http.request({ host: '127.0.0.1', port, path: urlPath, method, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: res.statusCode, body: text ? JSON.parse(text) : undefined });
+      });
+    });
+    req.on('error', reject);
+    req.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+}
+
+/**
+ * Reads GET /sessions/{id}/events as server-sent events. Resolves when the stream ends, or once an
+ * event with id `until` or later arrives (the reader then hangs up). `events` is
+ * `[{ id, type, data }]`; `times[i]` is when `events[i]` arrived. A non-200 answer resolves to
+ * `{ status, body }`.
+ */
+function readSse(port, id, { after, until, timeoutMs = 5000, auth = 'Bearer testkey' } = {}) {
+  return new Promise((resolve, reject) => {
+    const events = [];
+    const times = [];
+    const query = after === undefined ? '' : `?after=${encodeURIComponent(after)}`;
+    let settled = false;
+    let req;
+    const timer = setTimeout(() => {
+      settled = true;
+      req.destroy();
+      reject(new Error(`timed out reading the events of ${id}: got ${JSON.stringify(events)}`));
+    }, timeoutMs);
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    req = http.request({ host: '127.0.0.1', port, path: `/sessions/${id}/events${query}`, method: 'GET', headers: { Authorization: auth } }, (res) => {
+      if (res.statusCode !== 200) {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          finish({ status: res.statusCode, body: text ? JSON.parse(text) : undefined });
+        });
+        return;
+      }
+      let buffered = '';
+      res.on('data', (chunk) => {
+        buffered += chunk.toString('utf8');
+        let cut;
+        while ((cut = buffered.indexOf('\n\n')) !== -1) {
+          const frame = buffered.slice(0, cut);
+          buffered = buffered.slice(cut + 2);
+          const fields = {};
+          for (const line of frame.split('\n')) {
+            const colon = line.indexOf(': ');
+            fields[line.slice(0, colon)] = line.slice(colon + 2);
+          }
+          events.push({ id: Number(fields.id), type: fields.event, data: JSON.parse(fields.data) });
+          times.push(Date.now());
+          if (until !== undefined && Number(fields.id) >= until) {
+            finish({ status: 200, events, times, ended: false });
+            req.destroy();
+            return;
+          }
+        }
+      });
+      res.on('end', () => finish({ status: 200, events, times, ended: true }));
+      res.on('error', () => finish({ status: 200, events, times, ended: false }));
+    });
+    req.on('error', (e) => { if (!settled) { settled = true; clearTimeout(timer); reject(e); } });
+    req.end();
+  });
+}
+
+/** A TCP port free on 127.0.0.1 at the time of the call. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 function tempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
@@ -65,4 +159,4 @@ function withoutElapsed(body) {
   return rest;
 }
 
-module.exports = { spawnLauncher, startLauncher, postJson, tempDir, withoutElapsed };
+module.exports = { spawnLauncher, startLauncher, postJson, request, readSse, freePort, tempDir, withoutElapsed };
