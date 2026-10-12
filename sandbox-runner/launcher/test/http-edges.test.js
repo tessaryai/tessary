@@ -245,13 +245,18 @@ test('POST /sessions refuses a bad body before any sandbox is spent', async () =
   }
 });
 
-test('on the e2b backend a session start is the caller\'s bad_request until it has a driver', async () => {
+test('on the e2b backend a session whose MCP server has no url or points at localhost is refused before any sandbox (a session sandbox spent on a callback the microVM can never reach)', async () => {
+  // No fake SDK: the refusal comes before the launcher requires `e2b`, which is not installed here.
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body: SESSION_START });
-    assert.equal(res.status, 502);
-    assert.equal(res.body.kind, 'bad_request');
-    assert.equal(res.body.detail, 'session.js: agent sessions need SANDBOX_BACKEND=docker (got e2b)');
+    const publicServer = SESSION_START.mcp_servers[0];
+    for (const url of ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://[::1]:8000', 'http://0.0.0.0:8000', 'http://[::ffff:127.0.0.1]:8000', undefined, 7]) {
+      const body = { ...SESSION_START, mcp_servers: [publicServer, { name: 'notes', url, token: 'tsy_a_tok1' }] };
+      const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body });
+      assert.equal(res.status, 502, String(url));
+      assert.equal(res.body.kind, 'bad_request', String(url));
+      assert.equal(res.body.detail, 'session.js: mcp_servers[1].url is missing or unreachable from an E2B microVM', String(url));
+    }
   } finally {
     child.kill();
   }

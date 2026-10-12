@@ -180,12 +180,16 @@
  * Launcher sessions (each a positive integer, else the launcher refuses to boot):
  *   SANDBOX_SESSION_CAP     live sessions at once, on every backend (default 4)
  *   SANDBOX_SESSION_BUFFER  events kept per session for replay (default 5000)
- *   SANDBOX_SESSION_MAX_MS  a session's whole life (default 7200000)
+ *   SANDBOX_SESSION_MAX_MS  a session's whole life (default 7200000); an E2B session sandbox gets
+ *                           this plus SESSION_E2B_GRACE_MS as its E2B timeoutMs
  *   SANDBOX_SESSION_PORT    the port session.js listens on inside the sandbox, passed to it as
  *                           SESSION_PORT (default 9400; the tests use free ports)
+ *   E2B_DEBUG               the e2b SDK's own switch for a local E2B; a session's port is then
+ *                           dialed over http instead of https
  */
 const crypto = require('node:crypto');
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -333,6 +337,14 @@ const SESSION_RECONNECT_MS = 250;
 const SESSION_SCRIPT = 'session.js';
 const SANDBOX_LABEL_SESSION = 'tessary.sandbox.session';
 const SESSION_TEXT_MAX_BYTES = 1 << 20;
+// The launcher's life timer starts when POST /sessions arrives and its close can take the abort
+// grace plus the kill, so the E2B sandbox outlives SANDBOX_SESSION_MAX_MS by this much and the
+// launcher always closes first.
+const SESSION_E2B_GRACE_MS = 60_000;
+const SESSION_E2B_HOME = '/home/user';
+// The SDK reads the same variable: true means a local E2B served over plain http. Production never
+// sets it.
+const E2B_DEBUG = (process.env.E2B_DEBUG || 'false').toLowerCase() === 'true';
 const SESSION_EVENT_TYPES = new Set(['text', 'tool_start', 'tool_end', 'message_end', 'error', 'closed']);
 
 // Which OpenCode provider serves a given backend model id, and on what wire.
@@ -1570,13 +1582,14 @@ function runAuthoring(payload) {
 // ---------------------------------------------------------------------------
 // Launcher sessions: POST /sessions starts one long-lived sandbox running session.js, and the
 // routes below forward messages to it, number its events and replay them. The registry, routes,
-// buffer and timers are backend-neutral; a backend is one driver in SESSION_DRIVERS:
+// buffer and timers are backend-neutral; a backend is one driver (sessionDriver):
 //   driver.start(s, { sessionFile, credential, model, modelCost }) -> { handle, address, exited: Promise<{ code }> }
 //     Each driver builds the sandbox env itself, and sets s.handle as soon as it owns a resource, so
 //     a failed start can be torn down.
 //   driver.stop(s) -> Promise<void>, best effort, never throws
-// The registry lives in memory only: after a restart every session is unknown (404), and the boot
-// reaper removes the containers no caller can reach any more.
+// The registry lives in memory only: after a restart every session is unknown (404). On Docker the
+// boot reaper removes the containers no caller can reach any more; on E2B such a sandbox lives
+// until its own E2B timeout.
 
 const SESSION_UNKNOWN = { error: 'not found', kind: 'unknown_session' };
 const sessions = new Map();
@@ -1630,7 +1643,13 @@ function parseSessionStart(rawBody) {
   if (typeof body.model !== 'string' || !body.model) bad('model must be a non-empty string');
   if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
   if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
-  if (!SESSION_DRIVERS[BACKEND]) bad(`agent sessions need SANDBOX_BACKEND=docker (got ${BACKEND})`);
+  if (BACKEND !== 'docker') {
+    const servers = Array.isArray(body.mcp_servers) ? body.mcp_servers : [];
+    servers.forEach((server, i) => {
+      const url = server && server.url;
+      if (typeof url !== 'string' || pointsAtLocalhost(url)) bad(`mcp_servers[${i}].url is missing or unreachable from an E2B microVM`);
+    });
+  }
   const model = toProviderModel(body.model, body.credential);
   return {
     lane: body.lane,
@@ -1673,6 +1692,14 @@ function emitSessionEvent(s, type, data, fromScript) {
   }
 }
 
+function e2bSessionAddress(host, debug) {
+  return `${debug ? 'http' : 'https'}://${host}`;
+}
+
+function sessionTransport(address) {
+  return new URL(address).protocol === 'https:' ? https : http;
+}
+
 // One call from the launcher to the session script, with the session's bearer secret. Resolves
 // { status, body } for any HTTP answer; rejects when the script cannot be reached.
 function sessionCall(s, method, urlPath, body) {
@@ -1683,7 +1710,7 @@ function sessionCall(s, method, urlPath, body) {
       headers['Content-Type'] = 'application/json';
       headers['Content-Length'] = data.length;
     }
-    const req = http.request(`${s.address}${urlPath}`, { method, headers, timeout: SESSION_REQUEST_MS }, (res) => {
+    const req = sessionTransport(s.address).request(`${s.address}${urlPath}`, { method, headers, timeout: SESSION_REQUEST_MS }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
@@ -1703,7 +1730,7 @@ function sessionCall(s, method, urlPath, body) {
 // `from` of the next read, whether it is kept or dropped.
 function readSessionEventsOnce(s) {
   return new Promise((resolve) => {
-    const req = http.request(`${s.address}/events?from=${s.scriptLines}`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
+    const req = sessionTransport(s.address).request(`${s.address}/events?from=${s.scriptLines}`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
         resolve();
@@ -1807,7 +1834,7 @@ function closeSession(s, reason) {
       for (const res of s.subscribers) res.end();
       s.subscribers.clear();
       if (s.eventsReq) s.eventsReq.destroy();
-      await SESSION_DRIVERS[BACKEND].stop(s);
+      await sessionDriver.stop(s);
       s.state = 'closed';
       console.log(`session ${s.id}: closed reason=${reason} events=${s.seq} age_ms=${Date.now() - s.createdAt}`);
       setTimeout(() => sessions.delete(s.id), SESSION_TOMBSTONE_MS).unref();
@@ -1821,7 +1848,7 @@ function closeSession(s, reason) {
 function logStartFailure(s) {
   if (!s.address) return Promise.resolve();
   return new Promise((resolve) => {
-    const req = http.request(`${s.address}/events?from=0`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
+    const req = sessionTransport(s.address).request(`${s.address}/events?from=0`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
       let text = '';
       res.on('data', (c) => { text += c.toString('utf8'); });
       res.on('end', done);
@@ -1845,7 +1872,7 @@ async function abandonStart(s) {
   s.state = 'closed';
   sessions.delete(s.id);
   if (s.eventsReq) s.eventsReq.destroy();
-  await SESSION_DRIVERS[BACKEND].stop(s);
+  await sessionDriver.stop(s);
 }
 
 // A session never takes a dockerSemaphore slot: at SANDBOX_DOCKER_CONCURRENCY=1 one open session
@@ -1894,7 +1921,38 @@ const dockerSessionDriver = {
   },
 };
 
-const SESSION_DRIVERS = { docker: dockerSessionDriver };
+const e2bSessionDriver = {
+  async start(s, { sessionFile, credential, model, modelCost }) {
+    const sbx = await Sandbox().create(ANALYZER_TEMPLATE, {
+      apiKey: E2B_API_KEY,
+      timeoutMs: SANDBOX_SESSION_MAX_MS + SESSION_E2B_GRACE_MS,
+      metadata: { [SANDBOX_LABEL_SESSION]: s.id },
+    });
+    s.handle = { sbx, sandboxId: sbx.sandboxId };
+    const file = `${SESSION_E2B_HOME}/session.json`;
+    await sbx.files.write(file, JSON.stringify(sessionFile));
+    const command = await sbx.commands.run(`node ${SESSION_E2B_HOME}/${SESSION_SCRIPT} ${file}`, {
+      background: true,
+      timeoutMs: 0,
+      envs: { ...agentEnvs(credential, model, modelCost), SESSION_SECRET: s.secret, SESSION_PORT: String(SANDBOX_SESSION_PORT) },
+    });
+    const exited = command.wait()
+      .then((r) => ({ code: r.exitCode, stderr: r.stderr }), (e) => ({ code: exitCodeOf(e) ?? null, stderr: (e && e.stderr) || '' }))
+      .then(({ code, stderr }) => {
+        const tail = stderr ? ` stderr: ${scrubToken(stderr).slice(-500)}` : '';
+        console.error(`session ${s.id}: ${SESSION_SCRIPT} ended code=${code}${tail}`);
+        return { code };
+      });
+    return { handle: s.handle, address: e2bSessionAddress(sbx.getHost(SANDBOX_SESSION_PORT), E2B_DEBUG), exited };
+  },
+  async stop(s) {
+    if (s.handle && s.handle.sbx) {
+      try { await s.handle.sbx.kill(); } catch { /* best effort */ }
+    }
+  },
+};
+
+const sessionDriver = BACKEND === 'docker' ? dockerSessionDriver : e2bSessionDriver;
 
 // The sandbox's own process ended. Let the reader take the script's last lines (its error and
 // closed) first, so they come before the launcher's own closed.
@@ -1917,7 +1975,7 @@ async function startSession(body) {
   sessions.set(s.id, s);
   console.log(`session ${s.id}: model ${p.rawModel} -> ${p.model} (provider ${p.credential.provider}) lane ${p.lane}`);
   try {
-    const started = await SESSION_DRIVERS[BACKEND].start(s, {
+    const started = await sessionDriver.start(s, {
       sessionFile: p.sessionFile,
       credential: p.credential,
       model: p.model,
@@ -2194,4 +2252,6 @@ module.exports = {
   toProviderModel,
   providerConfig,
   agentEnvs,
+  // test/e2b-sessions.test.js: the tests dial sessions over http, so the https choice is checked here.
+  e2bSessionAddress,
 };

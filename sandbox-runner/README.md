@@ -78,7 +78,8 @@ narrower.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
 - **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte
-  `SESSION_SECRET`, and the launcher alone holds that secret. With `SANDBOX_NETWORK_ISOLATION` on,
+  `SESSION_SECRET`, and the launcher alone holds that secret. On E2B that port is public through
+  the sandbox host, and the secret is its only gate. With `SANDBOX_NETWORK_ISOLATION` on,
   the launcher joins the isolated bridge to reach the sessions, so on that bridge the sandboxes can
   reach the launcher's port (which needs `SANDBOX_API_KEY`) and each other's session port (which
   needs that session's secret); they still cannot reach the service network.
@@ -175,8 +176,8 @@ Every route checks `Authorization: Bearer <SANDBOX_API_KEY>` before it reads a b
 `/sessions`: `404 { "error": "not found" }`. An unknown session is
 `404 { "error": "not found", "kind": "unknown_session" }` on every route; a caller reads it as
 `closed`. A `502` is the launcher's failure envelope (`error`, `kind`, `timeout`, `error_class`,
-`detail`, `script: "session.js"`, `elapsed_ms`, `timeout_ms`); its `detail` is launcher-authored,
-never script output, a token or a prompt.
+`detail`, `script: "session.js"`, `elapsed_ms`, `timeout_ms`, and on E2B `sandbox_id` once the
+sandbox exists); its `detail` is launcher-authored, never script output, a token or a prompt.
 
 | Route | Success | Other answers |
 |---|---|---|
@@ -198,7 +199,7 @@ checks the body in this order, each a `bad_request` with this `detail`:
 | `model` non-empty string | `session.js: model must be a non-empty string` |
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
-| a backend with no session driver (e2b, for now) | `session.js: agent sessions need SANDBOX_BACKEND=docker (got e2b)` |
+| on E2B, an `mcp_servers` entry whose `url` is missing or points at localhost (the one-shot routes' check) | `session.js: mcp_servers[<i>].url is missing or unreachable from an E2B microVM` |
 
 The script checks `system_prompt`, `files`, `mcp_servers` and `max_tool_calls_per_message`; a bad
 one is a start failure. `provider` is ignored, as on the one-shot routes: `credential.provider`
@@ -239,18 +240,18 @@ it the same way, with one `closed { reason }` event:
 
 To close, the launcher stops both clocks; if a reply runs and the sandbox is still up, it aborts the
 reply and waits up to 5 s for its `message_end`, so the reply's spend reaches the caller; then it
-sends `closed`, ends every open event stream, stops and removes the container and removes the work
-dir. When the sandbox exits by itself, the launcher first waits up to 1 s for the script's own last
+sends `closed`, ends every open event stream, and stops the sandbox (Docker: stops and removes the
+container and removes the work dir; E2B: kills the sandbox). When the sandbox exits by itself, the launcher first waits up to 1 s for the script's own last
 lines (its `error` and `closed`), so they come before the launcher's. A reply that is open when the
 sandbox dies has no `message_end`, and its spend is lost.
 
 A closed session stays known for 5 minutes: `GET /events` replays its buffer and ends, `DELETE` is
 `204`, a message or an abort is `404`. After that it is unknown.
 
-A start that fails (the script reports `failed`, the container exits, or 90 s pass) is a `502`; the
+A start that fails (the script reports `failed`, the sandbox exits, or 90 s pass) is a `502`; the
 launcher logs the script's start events on its console, scrubbed and cut to 500 characters, then
-stops and removes the container and the work dir. No `closed` event is sent, because no caller
-holds the id.
+stops the sandbox the same way. A failed E2B `create` leaves nothing to stop. No `closed` event is
+sent, because no caller holds the id.
 
 If the launcher's read of the script's events breaks, it reads again from the count of lines it
 already holds (`GET /events?from=<n>`), so no event is lost or doubled.
@@ -261,11 +262,13 @@ already holds (`GET /events?from=<n>`), so no event is lost or doubled.
 |---|---|---|
 | `SANDBOX_SESSION_CAP` | `4` | Sessions at once (starting, live or closing), on every backend. Over it: `429`. |
 | `SANDBOX_SESSION_BUFFER` | `5000` | Events kept per session for replay: enough for a whole reply's `text` deltas, about 1 MB per session. |
-| `SANDBOX_SESSION_MAX_MS` | `7200000` | A session's whole life; also the container's `tessary.sandbox.timeout-ms` label. |
+| `SANDBOX_SESSION_MAX_MS` | `7200000` | A session's whole life; also the Docker container's `tessary.sandbox.timeout-ms` label, and on E2B the sandbox's `timeoutMs` less 60 s. |
 | `SANDBOX_SESSION_PORT` | `9400` | The port `session.js` listens on in the sandbox, passed to it as `SESSION_PORT`. |
 
 Each must be a positive integer; anything else is `<NAME> must be a positive integer` on stderr
 and exit 1 at boot. The idle timeout has no launcher default: the caller sends `idle_timeout_ms`.
+E2B caps a sandbox's `timeoutMs` by plan (1 h on Hobby), so with a Hobby key every session start
+fails at `create` until `SANDBOX_SESSION_MAX_MS` is at most `3540000`.
 
 ### Docker
 
@@ -274,6 +277,21 @@ and runs `node session.js /work/session.json` with the labels `tessary.sandbox=1
 `tessary.sandbox.script=session.js`, `tessary.sandbox.timeout-ms=<SANDBOX_SESSION_MAX_MS>` and
 `tessary.sandbox.session=<id>`. The launcher dials the script at the container's address on the
 network it shares with the container, chosen by that network's name, never the first one listed.
+
+### E2B
+
+A session sandbox is created from `E2B_ANALYZER_TEMPLATE` with `timeoutMs` set to
+`SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`. The launcher
+writes `session.json` to `/home/user/session.json` through the files API, then runs
+`node /home/user/session.js /home/user/session.json` in the background with no command timeout,
+the credential env, `SESSION_SECRET` and `SESSION_PORT`. It dials the script at
+`https://<port>-<sandbox id>.<domain>` (the SDK's `getHost`), or over `http://` under the SDK's own
+`E2B_DEBUG=true`. When the command ends, the session closes as `failed`, and the launcher logs one
+console line with the exit code and the scrubbed tail of its stderr. Every close, and every failed
+start after the `create`, kills the sandbox. There is no boot reaper: after a launcher restart a
+session sandbox has no owner and lives until its E2B `timeoutMs`. Listing sandboxes at boot would
+also kill the sessions of any other launcher on the same E2B key; the metadata is there for a human
+to find them.
 
 ## Deploy
 
@@ -407,6 +425,10 @@ fake daemon starts a fake `session.js` (`test/fixtures/fake-session`) for each s
 and the tests cover the routes, the numbered events and their replay, busy, abort, idle, the max
 lifetime, the cap, the buffer, a dead or unreachable sandbox, the network join and the session
 container's create body. `docker-failures.test.js` covers the boot reaper's session rule.
+`e2b-sessions.test.js` runs the same session tests on the e2b backend: the fake E2B
+(`test/fixtures/fake-e2b`) relays each SDK call to the test, which runs a fake `session.js` per
+sandbox, and the tests also cover the create, the file, the command and the kill on every way
+out.
 `check-open-boot.sh` (the open-edition boot gate's dev leg) does not
 probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
 `sandbox-runner` service is profile-gated off there. The gate's second leg,
