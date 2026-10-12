@@ -835,6 +835,28 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void anLlmEventsOutputCarriesItsReasoningAndPartFormToolCalls() {
+        String toolUse = "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"lookup_order\",\"input\":{\"id\":42}}";
+        List<TimelineSpan> spans = List.of(span("T", "l1", "llm")
+                .at(0, 100)
+                .in("[" + Q1 + "]")
+                .out("[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"text\":\"look it up\"},"
+                        + "{\"type\":\"text\",\"text\":\"Let me check.\"}," + toolUse + "]}]")
+                .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        Event llm = timeline.events().stream()
+                .filter(e -> e.kind().equals("llm"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(
+                json("{\"text\":\"Let me check.\",\"tool_calls\":[" + toolUse + "],\"reasoning\":\"look it up\"}"),
+                json(llm.data().get("output").toString()),
+                "an Anthropic call's reasoning or tool_use part is missing from the llm event's output");
+    }
+
+    @Test
     void theAgentLoopsRepeatedTextIsTwoReplies() {
         String u = "{\"role\":\"user\",\"content\":\"expedite 42\"}";
         String first = "{\"role\":\"assistant\",\"content\":\"Let me check.\",\"tool_calls\":[{\"id\":\"c1\","
