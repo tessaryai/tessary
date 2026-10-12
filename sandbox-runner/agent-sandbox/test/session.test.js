@@ -158,7 +158,75 @@ test('OpenCode is configured for the session and the prompt selects its agent', 
   }
 });
 
+test('an abort ends the reply as aborted and the session takes the next message', async (t) => {
+  // Bug caught: the abort kills the session, or the aborted reply reports done.
+  const script = {
+    replies: [
+      { steps: [{ tools: [{ name: 'alpha_slow', input: {}, duration_ms: 0, hang: true }], usage: usage(5, 1, 0, 0, 0.5) }] },
+      { steps: [{ text: ['Still here.'], usage: usage(7, 2, 0, 0, 0.25) }] },
+    ],
+  };
+  const { session } = await readySession(t, { script });
 
+  await send(session, 'take your time');
+  const [toolStart] = await session.readEvents(0, 'tool_start', 1);
+  assert.deepEqual(toolStart, ev('tool_start', { call_id: 'call_1_1_1', server: 'alpha', tool: 'slow', input_summary: '{}' }));
+  assert.deepEqual(await session.request('POST', '/message', { text: 'again' }), { status: 409, body: { kind: 'busy' }, contentType: 'application/json' });
+  assert.equal((await session.request('POST', '/abort')).status, 204);
+
+  const reply1 = await session.readEvents(0, 'message_end', 1);
+  assert.equal(reply1.length, 3);
+  assert.equal(reply1[1].type, 'tool_end');
+  assert.equal(reply1[1].data.call_id, 'call_1_1_1');
+  assert.equal(reply1[1].data.ok, false);
+  assert.equal(reply1[1].data.result_summary, 'Tool execution aborted');
+  assert.equal(reply1[1].data.bytes, 22);
+  assert.deepEqual(reply1[2], ev('message_end', {
+    usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.5 },
+    reason: 'aborted',
+  }));
+
+  await send(session, 'are you there?');
+  const all = await session.readEvents(0, 'message_end', 2);
+  assert.deepEqual(all.slice(3), [
+    ev('text', { delta: 'Still here.' }),
+    ev('message_end', {
+      usage: { input_tokens: 7, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.25 },
+      reason: 'done',
+    }),
+  ]);
+});
+
+const toolStep = (j) => ({ text: [`s${j}`], tools: [{ name: 'alpha_list_traces', input: { q: `q${j}` }, duration_ms: 1 }], usage: usage(1, 1, 0, 0, 0.125) });
+
+test('the tool cap ends a reply with reason limit', async (t) => {
+  // Bug caught: a capped reply reads as done, or the cap is not set. The model follows OpenCode's
+  // last-step instruction: two steps with a tool, then text only on step 3.
+  const script = { replies: [{ steps: [toolStep(1), toolStep(2), { text: ['s3'], usage: usage(1, 1, 0, 0, 0.125) }] }] };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'keep going');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events.map((e) => (e.type === 'text' ? `text:${e.data.delta}` : e.type)), [
+    'text:s1', 'tool_start', 'tool_end', 'text:s2', 'tool_start', 'tool_end', 'text:s3', 'message_end',
+  ]);
+  assert.equal(events.at(-1).data.reason, 'limit');
+  assert.equal(events.at(-1).data.usage.cost_usd, 0.375);
+});
+
+test('a model that keeps calling tools past the last step still ends with reason limit', async (t) => {
+  // Bug caught: OpenCode only tells the model to stop at `steps` (it keeps offering tools), so a
+  // reply that ran past it must not read as done.
+  const script = { replies: [{ steps: [toolStep(1), toolStep(2), toolStep(3), { text: ['s4'], usage: usage(1, 1, 0, 0, 0.125) }] }] };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'keep going');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.equal(events.filter((e) => e.type === 'tool_end').length, 3);
+  assert.equal(events.at(-1).data.reason, 'limit');
+});
 
 test('a request without the secret is 401 on every route', async (t) => {
   // Bug caught: the launcher's port is open to anyone who reaches the sandbox host.
@@ -233,6 +301,40 @@ test('a dossier path that escapes fails the start, and the session closes as fai
   ]);
   assert.deepEqual((await session.request('GET', '/healthz')).body, { state: 'failed' });
   assert.deepEqual((await session.request('POST', '/message', { text: 'hi' })).body, { kind: 'failed' });
+  assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
+});
+
+test('a provider error is reported and the reply still ends once', async (t) => {
+  // Bug caught: an error leaves the reply open forever, or its spend is not booked.
+  const script = { replies: [{ steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error: { name: 'APIError', data: { message: 'overloaded' } } }] };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'hello');
+  const events = await session.readEvents(0, 'message_end', 1);
+  const later = await session.eventsWithin(events.length, 300);
+
+  assert.deepEqual(events, [
+    ev('error', { kind: 'agent', detail: 'APIError: overloaded' }),
+    ev('message_end', {
+      usage: { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.5 },
+      reason: 'done',
+    }),
+  ]);
+  assert.deepEqual([...later], [], 'the second idle pair ends nothing');
+});
+
+test('an OpenCode that dies mid-session closes the session as failed', async (t) => {
+  // Bug caught: the launcher keeps a dead session as live.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_EXIT_ON_PROMPT: '1' } });
+
+  const res = await session.request('POST', '/message', { text: 'hello' });
+  assert.equal(res.status, 502);
+  assert.equal(res.body.kind, 'prompt');
+  assert.equal(typeof res.body.detail, 'string');
+
+  const events = await session.eventsWithin(0, 6_000);
+  assert.deepEqual([...events], [ev('error', { kind: 'opencode_exit', detail: 'exit code 3' }), ev('closed', { reason: 'failed' })]);
+  assert.equal(events.ended, true, 'the /events response ends');
   assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
 });
 

@@ -35,6 +35,7 @@ const SUMMARY_CHARS = 2000;
 const DETAIL_CHARS = 500;
 const REQUEST_MS = 60_000;
 const CLOSE_GRACE_MS = 5_000;
+const SETTLE_MS = 2_000;
 const MAX_BODY_BYTES = 1 << 20;
 const MIN_SECRET_CHARS = 32;
 const MAX_TOOL_CALLS = 1000;
@@ -237,13 +238,16 @@ function createReplyTracker({ log, serverNames, steps }) {
         }
         case 'session.error': {
           const error = p.error || {};
+          if (!reply || error.name === 'MessageAbortedError') return null;
+          const message = error.data && error.data.message;
+          log.emit('error', { kind: 'agent', detail: scrubToken(`${error.name}: ${message}`).slice(0, DETAIL_CHARS) });
           return null;
         }
         case 'session.status':
         case 'session.idle': {
           if (event.type === 'session.status' && !(p.status && p.status.type === 'idle')) return null;
           if (!reply || !reply.armed) return null;
-          return 'end';
+          return [...reply.assistants.values()].every(Boolean) ? 'end' : 'settle';
         }
         default:
           return null;
@@ -253,7 +257,7 @@ function createReplyTracker({ log, serverNames, steps }) {
     finish(messages) {
       const own = messages.filter((m) => m && m.info && m.info.role === 'assistant' && m.info.parentID === reply.userId);
       const usage = sumUsage(own.map((m) => ({ usage: usageOf(m.info) })));
-      const reason = 'done';
+      const reason = reply.abortRequested ? 'aborted' : own.length >= steps ? 'limit' : 'done';
       log.emit('message_end', { usage, reason });
       reply = null;
     },
@@ -427,6 +431,7 @@ async function main() {
     if (!sessionId || sessionOf(event) !== sessionId) return;
     const signal = tracker.onEvent(event);
     if (signal === 'end') await finishReply();
+    else if (signal === 'settle' && !settleTimer) settleTimer = setTimeout(() => void finishReply(), SETTLE_MS);
   }
 
   async function runEventLoop() {
@@ -511,6 +516,7 @@ async function main() {
     sessionId = created.data.id;
     model = splitModel(input.model);
     state.phase = 'ready';
+    server.exited.then(({ code, signal }) => failSession('opencode_exit', signal ? `signal ${signal}` : `exit code ${code}`));
   } catch (e) {
     failSession('start', describeError(e));
   }
