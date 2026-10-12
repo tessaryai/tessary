@@ -93,9 +93,10 @@ CREATE TABLE span (
                                                  -- Deliberately no FK: parents arrive after
                                                  -- children (§6.4).
 
-    -- derived structure (platform-owned; never set from an arrival)
+    -- derived structure (platform-owned; an arrival never sets its own, §6.2 — it may put
+    -- its retired children back to pending, §6.4)
     path                 ltree,                  -- materialized ancestry; NULL = unresolved (§6.4)
-    path_state           text        NOT NULL DEFAULT 'pending',  -- resolver terminal marker, §6.4
+    path_state           text        NOT NULL DEFAULT 'pending',  -- resolver retirement marker, §6.4
     depth                integer GENERATED ALWAYS AS
                              (CASE WHEN path IS NULL THEN NULL ELSE nlevel(path) - 1 END) STORED,
 
@@ -424,6 +425,8 @@ ON CONFLICT (project_id, trace_id, id) DO UPDATE
 - **SET list:** every producer-sourced column, including `parent_span_id`. **Excluded:** the
   platform-derived `path`, `correlation_state`, `path_state`, `depth` (generated), and
   `created_at`. A newer version replaces what the producer said, never what the platform derived.
+  The one derived write the upsert makes is on other rows: the arrivals' retired children go back
+  to `pending` (§6.4), in the same transaction.
 - **Ties (`>=`):** second-granularity SDK clocks make equal timestamps common; the latest
   arrival wins, and a replay rewriting identical content is a no-op in effect.
 - **Backward clock steps** on the producer can still discard a final version. Accepted as a
@@ -488,6 +491,18 @@ What resolves late is the **derived ancestry**:
   terminal-state device as `correlation_state = 'none'` (§6.3) — otherwise orphans would sit
   permanently in the unresolved-path index and eventually starve the fixpoint of genuinely
   resolvable rows.
+- **A late parent takes its orphans back.** "Never arrives" is decided at settle time, and a
+  parent that outlives its children by more than the settle window — a 30-second agent turn, a
+  queue consumer — arrives after they were retired. Its write puts its retired descendants, to any
+  depth, back to `pending` in the same transaction (`SpanRepository.upsertAll`), the parent gets
+  its own path on the next pass, and the subtree resolves level by level as if it had arrived in
+  order. Only the arrival's own descendants, and only under an arrival that is not itself retired: a
+  sibling orphan whose parent is still missing stays retired, and a redelivered orphan does not send
+  its children round the retire loop again, so the index stays drainable. The probe is a lookup in
+  `ix_span_orphan_parent` (§8), so a batch with nothing to reclaim costs one near-empty index read per
+  arrival. The orphan pass shares each trace row it retires from and skips a locked one, so it never
+  retires off a snapshot older than an in-flight batch's write of that trace (`markOrphanPaths`).
+  Rows retired before this rule existed were repaired once by migration `0037`.
 - The resolver **iterates to a fixpoint**: each pass resolves one level, and chains arrive
   deepest-first, so a chain of depth *n* resolves over at most *n* passes. The partial index
   `ix_span_unresolved_path` (§8) makes each pass a small indexed scan.
@@ -813,6 +828,8 @@ CREATE INDEX ix_span_call_site         ON span (call_site_id, started_at DESC)
                                           WHERE call_site_id IS NOT NULL;
 CREATE INDEX ix_span_unresolved_path   ON span (project_id, trace_id)
                                           WHERE path IS NULL AND path_state = 'pending';
+CREATE INDEX ix_span_orphan_parent     ON span (project_id, trace_id, parent_span_id)
+                                          WHERE path_state = 'orphan';           -- §6.4 reclaim probe
 CREATE INDEX ix_span_uncorrelated      ON span (project_id, trace_id)
                                           WHERE session_id IS NULL
                                             AND correlation_state = 'pending';
@@ -836,8 +853,9 @@ CREATE INDEX ix_session_project_active ON session (project_id, last_activity_at 
 ```
 
 The partial indexes stay near-empty by construction: `ix_trace_rollup_due` holds only traces
-awaiting rollup, `ix_span_unresolved_path` only spans whose ancestry is pending, and
-`ix_span_uncorrelated` only spans awaiting the correlation backfill.
+awaiting rollup, `ix_span_unresolved_path` only spans whose ancestry is pending,
+`ix_span_uncorrelated` only spans awaiting the correlation backfill, and `ix_span_orphan_parent`
+only retired spans, for the §6.4 reclaim to find by parent.
 
 ## 9. Sub-agents
 
