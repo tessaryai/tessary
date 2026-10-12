@@ -110,7 +110,9 @@ class StructuredLogFieldsTest {
 
         assertEquals(Level.DEBUG, captured.event().getLevel());
         assertEquals(List.of(Markers.OPS), captured.event().getMarkerList());
-        assertTrue(captured.json().contains("\"events\":7"), "got: " + captured.json());
+        assertEquals(
+                Map.of("event", "timeline.load", "events", 7),
+                captured.event().getKeyValuePairs().stream().collect(Collectors.toMap(kv -> kv.key, kv -> kv.value)));
     }
 
     /**
