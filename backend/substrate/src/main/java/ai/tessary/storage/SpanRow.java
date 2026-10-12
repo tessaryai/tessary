@@ -21,10 +21,12 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@code path} — materialized ancestry, resolved by the path fixpoint. Null means UNRESOLVED, never
  *       "root": root is {@code parentSpanId == null}, the producer's own statement. The upsert never
  *       overwrites it, because a newer version replaces what the producer said, not what we derived.
- *   <li>{@code correlationState} / {@code pathState} — the resolvers' terminal markers. They are what keep
- *       the two partial indexes near-empty: without them, anonymous traffic (session-less forever) and a
- *       child of a parent the producer never shipped would sit in those indexes permanently and eventually
- *       crowd genuine work out of every LIMITed micro-batch.
+ *   <li>{@code correlationState} / {@code pathState} — the resolvers' retirement markers. They are what
+ *       keep the two partial indexes near-empty: without them, anonymous traffic (session-less forever) and
+ *       a child of a parent the producer never shipped would sit in those indexes permanently and
+ *       eventually crowd genuine work out of every LIMITed micro-batch. Neither is final: a later batch
+ *       that brings the session, or the parent, puts the span back to {@code pending}
+ *       ({@code SpanRepository.adoptTraceSession}, {@code SpanRepository.upsertAll}).
  * </ul>
  *
  * <p>{@code depth}, {@code totalTokens} and {@code totalCost} are generated columns: read-only, and

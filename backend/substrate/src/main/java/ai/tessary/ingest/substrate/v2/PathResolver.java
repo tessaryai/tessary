@@ -28,13 +28,16 @@ import org.springframework.stereotype.Component;
  * and roots are given their one-label path by the same tick. Subtree reads (§9) are complete once the
  * trace has settled.
  *
- * <h2>The orphan terminal state</h2>
+ * <h2>The orphan state</h2>
  *
- * <p>Some parents are never shipped at all. Without a terminal state their children sit in the partial
+ * <p>Some parents are never shipped at all. Without a retired state their children sit in the partial
  * index forever, and once those permanent residents outnumber the batch limit the fixpoint stops selecting
  * anything that could still make progress — a starvation bug that looks like a resolver quietly doing
  * nothing. Marking them {@code path_state = 'orphan'} once their trace has settled takes them out of the
- * index and keeps the spec's "near-empty by construction" claim true.
+ * index and keeps the spec's "near-empty by construction" claim true. "Never" is decided at settle time,
+ * and a parent that outlives its children by more than the settle window arrives after they were retired:
+ * its write puts them back to {@code pending} ({@code SpanRepository#upsertAll}), and this fixpoint then
+ * resolves them as if they had arrived in order.
  *
  * <h2>The kill switch</h2>
  *
