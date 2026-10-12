@@ -603,8 +603,11 @@ class ClassifierWorkerTest {
 
         IllegalStateException failure = assertThrows(
                 IllegalStateException.class, worker::validateRouting, "the kind has a detector and a sweep");
-        String message = String.valueOf(failure.getMessage());
-        assertTrue(message.contains(UNDECLARED), "the boot failure names the kind: " + message);
+        assertEquals(
+                "detector kind(s) [" + UNDECLARED + "] have both a BuiltInDetector and a ClassifierSweep; a kind is"
+                        + " dispatched through one of them, so remove the other",
+                failure.getMessage(),
+                "the boot failure names the kind");
         assertDoesNotThrow(worker::validateRouting, "the kind has only a sweep");
     }
 

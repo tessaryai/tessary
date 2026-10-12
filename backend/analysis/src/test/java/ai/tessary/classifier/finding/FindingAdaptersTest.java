@@ -51,9 +51,10 @@ class FindingAdaptersTest {
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> adapters.ownerOf(claim("custom-x")));
 
-        String message = String.valueOf(e.getMessage());
-        assertTrue(message.contains(FakeFindingAdapter.class.getName()), message);
-        assertTrue(message.contains(SecondOwner.class.getName()), message);
+        assertEquals(
+                "finding f1 is owned by both " + FakeFindingAdapter.class.getName() + " and "
+                        + SecondOwner.class.getName(),
+                e.getMessage());
     }
 
     /** A second adapter class, so the failure message can be checked for both names. */

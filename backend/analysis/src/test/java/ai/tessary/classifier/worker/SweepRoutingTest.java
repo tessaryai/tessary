@@ -3,7 +3,7 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.TestObjectProvider;
@@ -12,29 +12,54 @@ import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule.Grain;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link SweepRouting#sweepFor}: the sweep {@code ClassifierService#setEnabled} asks before turning a row on. It is the
  * sweep {@link ClassifierWorker} would hand the row's jobs to, so a sweep never vetoes a row it would never run.
  */
+@ExtendWith(MockitoExtension.class)
 class SweepRoutingTest {
 
     private static final String UNDECLARED = "undeclared_kind";
     private static final String OBSERVED = BuiltInDetector.Kind.TOOL_ERROR;
     private static final String DRIFT = BuiltInDetector.Kind.DURATION_DRIFT;
 
-    private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
-    private final ClassifierSweep undeclared = sweep(UNDECLARED);
-    private final ClassifierSweep observed = sweep(OBSERVED);
-    private final ClassifierSweep drift = sweep(DRIFT);
-    private final SweepRouting routing =
-            new SweepRouting(catalog, new ClassifierSweepRegistry(TestObjectProvider.of(undeclared, observed, drift)));
+    @Mock
+    BuiltInClassifierCatalog catalog;
 
-    /** Catches a registered kind no module declares being left without the sweep the worker runs it with. */
+    @Mock
+    ClassifierSweep undeclared;
+
+    @Mock
+    ClassifierSweep observed;
+
+    @Mock
+    ClassifierSweep drift;
+
+    private SweepRouting routing;
+
+    @BeforeEach
+    void setUp() {
+        when(undeclared.kinds()).thenReturn(Set.of(UNDECLARED));
+        when(observed.kinds()).thenReturn(Set.of(OBSERVED));
+        when(drift.kinds()).thenReturn(Set.of(DRIFT));
+        routing = new SweepRouting(
+                catalog, new ClassifierSweepRegistry(TestObjectProvider.of(undeclared, observed, drift)));
+    }
+
+    /**
+     * Catches a registered kind no module declares being left without the sweep the worker runs it with. The catalog's
+     * default grain for the kind is observation, so routing that reads the catalog for it finds no sweep; the right
+     * routing never asks.
+     */
     @Test
     void aKindNoModuleDeclaresIsRunByItsRegisteredSweep() {
-        when(catalog.grainFor(UNDECLARED)).thenReturn(Grain.OBSERVATION);
+        lenient().when(catalog.grainFor(UNDECLARED)).thenReturn(Grain.OBSERVATION);
 
         assertEquals(Optional.of(undeclared), routing.sweepFor(UNDECLARED));
     }
@@ -66,11 +91,5 @@ class SweepRoutingTest {
         when(catalog.grainFor(DRIFT)).thenReturn(Grain.WINDOW);
 
         assertEquals(Optional.of(drift), routing.sweepFor(DRIFT));
-    }
-
-    private static ClassifierSweep sweep(String kind) {
-        ClassifierSweep sweep = mock(ClassifierSweep.class);
-        when(sweep.kinds()).thenReturn(Set.of(kind));
-        return sweep;
     }
 }
