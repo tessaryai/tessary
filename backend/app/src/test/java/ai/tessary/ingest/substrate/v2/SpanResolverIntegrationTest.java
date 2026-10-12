@@ -186,6 +186,55 @@ class SpanResolverIntegrationTest {
                 "orphan", spans.findById(pid, traceId, "stray").orElseThrow().pathState());
     }
 
+    /**
+     * Catches: a reclaim that reopens the starvation the orphan state exists to prevent. A late middle span
+     * whose own parent never ships takes its children back to pending; once the trace is settled the pass
+     * must retire the middle span and then its children again, and the index must drain to empty.
+     */
+    @Test
+    @DisplayName(
+            "a late span whose own parent never ships is retired with its reclaimed children, and the queue drains")
+    void pathFixpoint_aReclaimedSubtreeBehindAMissingParentIsRetiredAgain() {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.span(pid, traceId, "leaf", "middle", "llm", t0, t0);
+        PathResolver resolver = resolver(500);
+        settle(traceId);
+        resolver.runOnce();
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "leaf").orElseThrow().pathState());
+
+        fx.span(pid, traceId, "middle", "aparentthatnevership", "step", t0, t0.plusSeconds(20));
+
+        assertEquals(2, pendingPaths(), "the middle span and its reclaimed leaf");
+        resolver.runOnce();
+        resolver.runOnce();
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "middle").orElseThrow().pathState());
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "leaf").orElseThrow().pathState(), "one level per pass");
+        assertEquals(0, pendingPaths(), "nothing is left in the index");
+    }
+
+    /** Catches: a redelivered orphan sending its retired children round the retire loop on every replay. */
+    @Test
+    @DisplayName("a redelivered span that is itself an orphan does not reclaim its children")
+    void pathFixpoint_aRedeliveredOrphanReclaimsNothing() {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.span(pid, traceId, "middle", "aparentthatnevership", "step", t0, t0.plusSeconds(1));
+        fx.span(pid, traceId, "leaf", "middle", "llm", t0, t0);
+        PathResolver resolver = resolver(500);
+        settle(traceId);
+        resolver.runOnce();
+        resolver.runOnce();
+        assertEquals(0, pendingPaths());
+
+        fx.span(pid, traceId, "middle", "aparentthatnevership", "step", t0, t0.plusSeconds(1));
+
+        assertEquals(0, pendingPaths(), "the replay reclaimed nothing");
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "leaf").orElseThrow().pathState());
+    }
+
     @Test
     @DisplayName("a third-party span that arrived before its trace was known inherits the trace's handles")
     void correlation_copiesTheTraceHandlesDown() {

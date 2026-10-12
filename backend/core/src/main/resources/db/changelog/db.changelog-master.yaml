@@ -136,3 +136,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0036-case-close-without-mute.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0037-span-orphan-reclaim.sql
+      relativeToChangelogFile: false

@@ -167,7 +167,8 @@ public class SpanRepository {
      * platform derived rather than received, and {@code created_at}, and it cannot touch {@code depth},
      * {@code total_tokens} or {@code total_cost}, which are generated. A newer version replaces what the
      * producer said; it never discards what we resolved, which would send an already-resolved span back
-     * into the fixpoint's work queue on every replay.
+     * into the fixpoint's work queue on every replay. The one derived write this method makes is on OTHER
+     * rows, the arrivals' retired children, below.
      *
      * <p><b>The guard is {@code >=}, not {@code >}.</b> Second-granularity SDK clocks make equal timestamps
      * common, so ties go to the latest arrival; a replay rewriting identical content is then a no-op in
@@ -185,24 +186,36 @@ public class SpanRepository {
      * <p><b>An arrival takes back the orphans it is the parent of.</b> A batch exporter ships a span when
      * it ends, so a parent that outlives its children by more than the settle window, a 30-second agent
      * turn or a queue consumer, arrives after the trace settled and {@link #markOrphanPaths} retired them.
-     * Orphan is terminal for the resolver, which only ever claims {@code pending} rows, so without this
-     * step the parent would stand in the trace with no children under it, forever. The arrived span's
-     * retired descendants, to any depth, go back to {@code pending} here, in the same transaction as the
-     * write; the parent gets its path on the next pass and the fixpoint resolves the subtree level by
-     * level. Only descendants of this batch's spans: a sibling orphan whose own parent is still missing
-     * stays retired, so the queue remains drainable (§6.4).
+     * The resolver only ever claims {@code pending} rows, so without this step the parent would stand in
+     * the trace with no children under it, forever. The arrived span's retired descendants, to any depth,
+     * go back to {@code pending} here, in the same transaction as the write; the parent gets its path on
+     * the next pass and the fixpoint resolves the subtree level by level. Only descendants of this batch's
+     * spans, and only under an arrival that is not itself retired: a sibling orphan whose own parent is
+     * still missing stays retired, and a redelivered orphan does not send its children round the retire
+     * loop again, so the queue remains drainable (§6.4).
      */
     public void upsertAll(List<SpanRow> rows) {
         int[] applied = named.batchUpdate(
                 UPSERT_SQL, rows.stream().map(SpanRepository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
-        reclaimOrphansUnder(rows);
+        for (int from = 0; from < rows.size(); from += RECLAIM_CHUNK) {
+            reclaimOrphansUnder(rows.subList(from, Math.min(rows.size(), from + RECLAIM_CHUNK)));
+        }
     }
+
+    /**
+     * Arrivals per reclaim statement: three bind parameters each, well inside the driver's ceiling, and a
+     * bounded number of distinct statement texts for the parse caches. The OTLP receiver caps a push at
+     * 2,000 spans, so the common batch is one statement.
+     */
+    private static final int RECLAIM_CHUNK = 1000;
 
     /**
      * Put the retired ({@code orphan}) descendants of the given spans back into the resolver's queue. The
      * walk is per trace and follows {@code parent_span_id} downward through orphans only, so a resolved
-     * subtree is never touched and a cycle cannot recurse ({@code UNION} de-duplicates).
+     * subtree is never touched and a cycle cannot recurse ({@code UNION} de-duplicates). Each probe is a
+     * lookup in {@code ix_span_orphan_parent}, the partial index over orphan rows, so a batch with nothing
+     * to reclaim, the common case, costs one near-empty index read per arrival.
      */
     private void reclaimOrphansUnder(List<SpanRow> rows) {
         StringBuilder values = new StringBuilder();
@@ -227,6 +240,8 @@ public class SpanRepository {
                         + "   SELECT c.project_id, c.trace_id, c.id FROM span c"
                         + "     JOIN arrived a ON a.project_id = c.project_id AND a.trace_id = c.trace_id"
                         + "                   AND a.id = c.parent_span_id"
+                        + "     JOIN span p ON p.project_id = a.project_id AND p.trace_id = a.trace_id"
+                        + "                AND p.id = a.id AND p.path_state <> 'orphan'"
                         + "    WHERE c.path_state = 'orphan'"
                         + "   UNION"
                         + "   SELECT c.project_id, c.trace_id, c.id FROM span c"
@@ -322,6 +337,16 @@ public class SpanRepository {
      * has not finished with it yet, and orphaning its children early would strand a subtree that was about
      * to resolve.
      *
+     * <p><b>A trace an ingest batch is writing is skipped this pass.</b> The batch holds the trace row
+     * {@code FOR UPDATE} from before its span write until it commits, and its write takes back the
+     * orphans under the spans it carries ({@link #upsertAll}). Retiring a span off a snapshot taken before
+     * that commit, and committing after the batch's reclaim had already looked and found nothing to
+     * reclaim, would strand the span as an orphan beside a parent that is now present. Sharing the trace
+     * row, and skipping one that is locked, closes that window: either this pass goes first and the batch's
+     * reclaim then sees the orphan, or the batch goes first and the next pass sees the parent. {@code SKIP
+     * LOCKED} never waits, so the resolver cannot deadlock with ingest, whose own lock order it does not
+     * follow.
+     *
      * @return the number of spans marked orphan.
      */
     public int markOrphanPaths(int limit) {
@@ -337,6 +362,7 @@ public class SpanRepository {
                                     WHERE p.project_id = s.project_id AND p.trace_id = s.trace_id
                                       AND p.id = s.parent_span_id AND p.path_state <> 'orphan')
                              LIMIT :limit
+                               FOR SHARE OF t SKIP LOCKED
                         )
                         UPDATE span s SET path_state = 'orphan'
                           FROM due
