@@ -5,6 +5,7 @@ import ai.tessary.llmspi.ModelLane;
 import ai.tessary.usage.LlmUsageAccountant;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Long-lived agent sessions on the launcher ({@code sandbox-runner/README.md}, "Launcher sessions"):
@@ -23,6 +24,18 @@ public interface AgentSessionClient {
      *     {@code ModelConfigError} when the org holds no credential for the lane's provider
      */
     Session start(Start start);
+
+    /**
+     * The session's events after {@code afterSeq}, in order, as they come; blocking, so read it on a
+     * virtual thread and close it. The stream ends after {@link SessionEvent.Closed}, or with no
+     * {@code Closed} when the connection ends: then resume from the last sequence read. A session the
+     * launcher no longer knows yields one {@code Closed(afterSeq, UNKNOWN)}.
+     *
+     * @throws ai.tessary.open.errors.TessaryException {@code AgentRunError.*} when the launcher refuses
+     *     the stream ({@code RUN_FAILED} for an {@code afterSeq} it no longer holds), and
+     *     {@code BAD_OUTPUT} from the stream for a frame that does not parse
+     */
+    Stream<SessionEvent> events(String sessionId, long afterSeq);
 
     /**
      * @param lane the lane the session runs and books on

@@ -19,6 +19,7 @@ import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -26,14 +27,19 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -282,5 +288,176 @@ class LauncherAgentSessionClientTest {
                 assertFalse(line.contains(secret), secret + " leaked into: " + line);
             }
         }
+    }
+
+    // ---- events -------------------------------------------------------------------------------------
+
+    private static final String USAGE_JSON = "{\"input_tokens\":1200,\"output_tokens\":80,"
+            + "\"cache_read_input_tokens\":1000,\"cache_creation_input_tokens\":200,\"cost_usd\":0.0123}";
+    private static final AgentSpanTelemetry.AgentUsage USAGE =
+            new AgentSpanTelemetry.AgentUsage(1200, 80, 1000, 200, new BigDecimal("0.0123"));
+
+    private LauncherAgentSessionClient aStartedSession() {
+        aGrokLaneWithItsCredential();
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        LauncherAgentSessionClient client = client();
+        client.start(START);
+        return client;
+    }
+
+    private static List<SessionEvent> read(LauncherAgentSessionClient client, long afterSeq) {
+        try (Stream<SessionEvent> events = client.events("s-1", afterSeq)) {
+            return events.toList();
+        }
+    }
+
+    /** Catches a dropped or mis-mapped field, and a JSON {@code null} server read as the string "null". */
+    @Test
+    void eventsYieldEveryTypeInOrder() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"Hel\"}"),
+                FakeLauncher.frame(
+                        2,
+                        "tool_start",
+                        "{\"call_id\":\"c1\",\"server\":\"platform\",\"tool\":\"search_traces\","
+                                + "\"input_summary\":\"{\\\"q\\\":\\\"x\\\"}\"}"),
+                FakeLauncher.frame(
+                        3,
+                        "tool_start",
+                        "{\"call_id\":\"c2\",\"server\":null,\"tool\":\"read\",\"input_summary\":\"{}\"}"),
+                FakeLauncher.frame(
+                        4,
+                        "tool_end",
+                        "{\"call_id\":\"c1\",\"result_summary\":\"3 traces\",\"bytes\":812,\"duration_ms\":40,"
+                                + "\"ok\":true}"),
+                FakeLauncher.frame(5, "error", "{\"kind\":\"agent\",\"detail\":\"ProviderError: overloaded\"}"),
+                FakeLauncher.frame(6, "message_end", "{\"usage\":" + USAGE_JSON + ",\"reason\":\"done\"}"),
+                FakeLauncher.frame(7, "closed", "{\"reason\":\"idle\"}"));
+
+        List<SessionEvent> events = read(client, 0);
+
+        assertEquals(
+                List.of(
+                        new SessionEvent.Text(1, "Hel"),
+                        new SessionEvent.ToolStart(2, "c1", "platform", "search_traces", "{\"q\":\"x\"}"),
+                        new SessionEvent.ToolStart(3, "c2", null, "read", "{}"),
+                        new SessionEvent.ToolEnd(4, "c1", "3 traces", 812, 40, true),
+                        new SessionEvent.Failure(5, "agent", "ProviderError: overloaded"),
+                        new SessionEvent.MessageEnd(6, USAGE, SessionEvent.EndReason.DONE),
+                        new SessionEvent.Closed(7, SessionEvent.CloseReason.IDLE)),
+                events);
+    }
+
+    /** Catches a reconnect that replays from the start or ignores {@code after}. */
+    @Test
+    void eventsResumeAfterTheGivenSequence() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=4",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(5, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(6, "text", "{\"delta\":\"b\"}"));
+
+        List<SessionEvent> events = read(client, 4);
+
+        assertEquals(List.of(new SessionEvent.Text(5, "a"), new SessionEvent.Text(6, "b")), events);
+        FakeLauncher.Seen seen = fake.seen().getLast();
+        assertEquals("GET", seen.method());
+        assertEquals("/sessions/s-1/events?after=4", seen.path());
+        assertEquals("Bearer " + LAUNCHER_KEY, seen.headers().get("authorization"));
+        assertEquals("text/event-stream", seen.headers().get("accept"));
+    }
+
+    /** Catches a reader that buffers the whole body, so the page would see nothing until the session ends. */
+    @Test
+    void eventsArriveWhileTheStreamIsOpen() throws Exception {
+        LauncherAgentSessionClient client = aStartedSession();
+        FakeLauncher.LiveEvents live = fake.liveEvents("/sessions/s-1/events?after=0");
+        live.push(FakeLauncher.frame(1, "text", "{\"delta\":\"Hel\"}"));
+
+        try (Stream<SessionEvent> events = client.events("s-1", 0)) {
+            Iterator<SessionEvent> it = events.iterator();
+            CompletableFuture<SessionEvent> first = new CompletableFuture<>();
+            Thread.ofVirtual().start(() -> first.complete(it.next()));
+
+            assertEquals(new SessionEvent.Text(1, "Hel"), first.get(5, TimeUnit.SECONDS));
+
+            live.push(FakeLauncher.frame(2, "text", "{\"delta\":\"lo\"}"));
+            live.end();
+            assertEquals(new SessionEvent.Text(2, "lo"), it.next());
+            assertFalse(it.hasNext());
+        }
+    }
+
+    /** Catches a broken connection reported as a closed session, or thrown at the relay thread. */
+    @Test
+    void aCutStreamEndsWithoutClosedSoTheCallerResumes() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.CUT,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(2, "text", "{\"delta\":\"b\"}"));
+
+        List<SessionEvent> events = read(client, 0);
+
+        assertEquals(List.of(new SessionEvent.Text(1, "a"), new SessionEvent.Text(2, "b")), events);
+    }
+
+    /** Catches a launcher restart that leaves the caller waiting on a session that is gone. */
+    @Test
+    void aSessionTheLauncherNoLongerKnowsEndsWithClosed() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.answer(
+                "GET", "/sessions/s-1/events?after=4", 404, "{\"error\":\"not found\",\"kind\":\"unknown_session\"}");
+
+        List<SessionEvent> events = read(client, 4);
+
+        assertEquals(List.of(new SessionEvent.Closed(4, SessionEvent.CloseReason.UNKNOWN)), events);
+    }
+
+    /** Catches a stale reader that silently skips the events the launcher no longer holds. */
+    @Test
+    void aStreamPastTheBufferIsRunFailed() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.answer(
+                "GET", "/sessions/s-1/events?after=0", 410, "{\"error\":\"events no longer held\",\"kind\":\"gone\"}");
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
+
+        assertEquals(AgentRunError.RUN_FAILED, ex.error());
+    }
+
+    /** Catches a newer launcher's event type that kills the relay thread. */
+    @Test
+    void anUnknownEventTypeIsSkipped() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(2, "thinking", "{\"x\":1}"),
+                FakeLauncher.frame(3, "closed", "{\"reason\":\"stopped\"}"));
+
+        List<SessionEvent> events = read(client, 0);
+
+        assertEquals(
+                List.of(new SessionEvent.Text(1, "a"), new SessionEvent.Closed(3, SessionEvent.CloseReason.STOPPED)),
+                events);
+    }
+
+    /** Catches a truncated frame yielded as an empty delta. */
+    @Test
+    void aFrameThatDoesNotParseIsBadOutput() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0", FakeLauncher.Ending.END, FakeLauncher.frame(1, "text", "{\"delta\":"));
+
+        TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
+
+        assertEquals(AgentRunError.BAD_OUTPUT, ex.error());
     }
 }
