@@ -36,8 +36,8 @@ enforce this would be a different decision, tracked separately.
 A classifier is not one interface. It is a set of small ports it may implement as many or as few of
 as it needs, each keyed on a detector kind: an open `BuiltInDetector.Kind` constant, or, for a
 `ClassifierSweep` only, a kind of its own that no catalog module declares. `FindingAdapter` is the
-exception: it keys on a predicate over the finding's claim because a paid classifier's key is per row
-(`custom-<ulid>`). **Four of the five are discovered by Spring collection injection outright.
+exception: it keys on a predicate over the finding's claim because an extension's classifier key can
+be one per row, which no constant names. **Four of the five are discovered by Spring collection injection outright.
 `BuiltInDetector` is hybrid**: its CATALOG
 ENTRY — name, description, capability, grain, config — is still in-tree-manifest-only, but the
 detector object itself can now ALSO be supplied from off the classpath, through a

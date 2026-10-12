@@ -20,8 +20,8 @@
  *       availability: {@code ClassifierService.retireDroppedBuiltIns} keys on catalog membership,
  *       and retirement is irreversible, so a classifier dropping out of the catalog would silently
  *       retire a customer's. <b>{@code FindingAdapter} keys on a predicate over the finding's
- *       claim</b> instead, because a paid classifier's key is per row ({@code custom-<ulid>}) and no
- *       constant names it. The predicate answers the same for every finding of one project and
+ *       claim</b> instead, because an extension's classifier key can be one per row, which no
+ *       constant names. The predicate answers the same for every finding of one project and
  *       classifier key.
  *   <li><b>An absent adapter degrades to what the surface already shows for a classifier with no
  *       data</b>: an empty list, a null block, a 404, never a wiring failure and never a 500. With
