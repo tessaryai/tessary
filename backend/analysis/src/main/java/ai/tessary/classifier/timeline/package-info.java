@@ -9,10 +9,13 @@
  * {@code data.mcp = true}. The messages inside the spans are events too:
  *
  * <ul>
- *   <li>A {@code user_message} is a message from the person: a new user message of a person-facing span (a top
- *       {@code agent} span, or an {@code llm} span that is not inside a nested agent) of a trace that is not a
- *       detached sub-agent trace. A message an orchestrator sends to a sub-agent stays in the sub-agent's {@code llm}
- *       event. A message that a later span sends again is not a new event.
+ *   <li>A {@code user_message} is a message from the person: a new user message of a person-facing span of a trace
+ *       that is not a detached sub-agent trace. A person-facing span is a top {@code agent} span, or an {@code llm}
+ *       span that is not inside a nested agent, with only {@code llm}, {@code step}, {@code workflow} or {@code
+ *       handoff} spans between it and its agent, or the root. A message an orchestrator sends to a sub-agent stays in
+ *       the sub-agent's {@code llm} event, and so does the prompt of a model call that a tool, a guardrail, a
+ *       retrieval or any other work span makes; an agent a tool runs is not the agent the person talks to. A message
+ *       that a later span sends again is not a new event.
  *   <li>An {@code assistant_reply} is text the person sees, from the top agent of the turn. A message with only tool
  *       calls is not a reply, and neither is the text a sub-agent returns to its orchestrator. When an output holds the
  *       whole chat, only the assistant messages after its last user message are new. Two messages with the same text

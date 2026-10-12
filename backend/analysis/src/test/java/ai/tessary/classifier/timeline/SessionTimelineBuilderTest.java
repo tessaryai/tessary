@@ -363,6 +363,106 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void aModelCallInsideAToolOfTheAgentIsNotThePersonsDialogue() {
+        String question = "{\"role\":\"user\",\"content\":\"what does my contract say about refunds?\"}";
+        String answer = "Refunds within 30 days.";
+        List<TimelineSpan> spans = List.of(
+                span("T", "ag", "agent")
+                        .at(0, 100)
+                        .in("{\"kwargs\":{\"question\":\"what does my contract say about refunds?\"}}")
+                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
+                        .build(),
+                span("T", "l1", "llm")
+                        .parent("ag")
+                        .at(1, 20)
+                        .in("[" + SYS + "," + question + "]")
+                        .out("[" + TC1 + "]")
+                        .build(),
+                span("T", "tool", "tool").parent("ag").at(21, 60).build(),
+                span("T", "l2", "llm")
+                        .parent("tool")
+                        .at(22, 59)
+                        .in("[{\"role\":\"user\",\"content\":\"Summarize the refund clause of this contract: ...\"}]")
+                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
+                        .build(),
+                span("T", "l3", "llm")
+                        .parent("ag")
+                        .at(61, 99)
+                        .in("[" + SYS + "," + question + "," + TC1
+                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"" + answer + "\"}]")
+                        .out("[{\"role\":\"assistant\",\"content\":\"" + answer + "\"}]")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("T/l1#user:0 what does my contract say about refunds?", "T/l3#reply:0 " + answer),
+                messages(timeline),
+                "a model call a tool makes reads as the person's dialogue: its prompt becomes the person's message"
+                        + " and its text takes the place of the reply the agent loop wrote");
+    }
+
+    @Test
+    void aModelCallUnderAStepOfTheAgentIsThePersonsDialogue() {
+        List<TimelineSpan> spans = List.of(
+                span("T", "ag", "agent").at(0, 100).out("Hello!").build(),
+                span("T", "st", "step").parent("ag").at(1, 99).build(),
+                span("T", "l1", "llm")
+                        .parent("st")
+                        .at(2, 98)
+                        .in("[" + SYS + ",{\"role\":\"user\",\"content\":\"hi\"}]")
+                        .out("Hello!")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("T/l1#user:0 hi", "T/l1#reply:0 Hello!"),
+                messages(timeline),
+                "a span of unknown kind (stored as step) that wraps the agent's model call hides the person's dialogue");
+    }
+
+    @Test
+    void anAgentCalledAsAToolIsNotTheAgentThePersonTalksTo() {
+        List<TimelineSpan> spans = List.of(
+                span("T", "w", "workflow").at(0, 100).build(),
+                span("T", "l1", "llm")
+                        .parent("w")
+                        .at(1, 10)
+                        .in("[{\"role\":\"user\",\"content\":\"book a table\"}]")
+                        .out("[" + TC1 + "]")
+                        .build(),
+                span("T", "tool", "tool").parent("w").at(11, 80).build(),
+                span("T", "sub", "agent")
+                        .parent("tool")
+                        .at(12, 79)
+                        .in("[{\"role\":\"user\",\"content\":\"find a free table for 2 at 8pm\"}]")
+                        .out("Table 7 is free.")
+                        .build(),
+                span("T", "l2", "llm")
+                        .parent("sub")
+                        .at(13, 78)
+                        .in("[{\"role\":\"user\",\"content\":\"find a free table for 2 at 8pm\"}]")
+                        .out("Table 7 is free.")
+                        .build(),
+                span("T", "l3", "llm")
+                        .parent("w")
+                        .at(81, 99)
+                        .in("[{\"role\":\"user\",\"content\":\"book a table\"}," + TC1
+                                + ",{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"Table 7 is free.\"}]")
+                        .out("Booked table 7 for you.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("T/l1#user:0 book a table", "T/l3#reply:0 Booked table 7 for you."),
+                messages(timeline),
+                "an agent a tool runs reads as the agent the person talks to: the model's request becomes the"
+                        + " person's message and the tool's answer a reply");
+    }
+
+    @Test
     void anAppWithoutAgentSpansRepliesFromEachTextCall() {
         String toolCallOnly = "[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
                 + "\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}]";

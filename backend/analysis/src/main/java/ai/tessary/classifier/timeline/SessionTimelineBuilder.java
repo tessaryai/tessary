@@ -45,6 +45,11 @@ public final class SessionTimelineBuilder {
     private static final String TOOL = "tool";
     private static final String MCP = "mcp";
     private static final String STEP = "step";
+    private static final String WORKFLOW = "workflow";
+    private static final String HANDOFF = "handoff";
+    // The kinds that only group a turn's steps. Any other span, such as a tool, a guardrail or a retrieval, does work
+    // for the agent, so a model call inside it is not a call the person talks to.
+    private static final Set<String> DIALOGUE_PATH_KINDS = Set.of(LLM, STEP, WORKFLOW, HANDOFF);
     private static final String USER = "user";
     private static final String ASSISTANT = "assistant";
     private static final Set<String> SYSTEM_ROLES = Set.of("system", "developer");
@@ -128,13 +133,16 @@ public final class SessionTimelineBuilder {
      * The tree facts of a span, from the spans of its trace that are loaded.
      *
      * @param rooted the walk up the parent links reached a span with no parent
+     * @param insideWork a span of a kind outside {@link #DIALOGUE_PATH_KINDS} lies between the span and its nearest
+     *     agent, or the root when it has no agent
      */
     private record Facts(
             @Nullable String parentKind,
             List<String> ancestorKinds,
             int depth,
             @Nullable String agentId,
-            boolean rooted) {}
+            boolean rooted,
+            boolean insideWork) {}
 
     /** A new user message's key: its text, and the assistant message it answers when this trace wrote that one. */
     private record UserKey(@Nullable String answers, String text) {}
@@ -415,15 +423,23 @@ public final class SessionTimelineBuilder {
             return settled || facts(span).rooted();
         }
 
-        /** An {@code agent} span with no {@code agent} ancestor: the agent the person talks to. */
+        /**
+         * An {@code agent} span with no {@code agent} ancestor and no work span above it: the agent the person talks
+         * to. An agent a tool runs answers the model that called the tool, not the person.
+         */
         private boolean isTopAgent(TimelineSpan span) {
-            return AGENT.equals(eventKind(span)) && facts(span).agentId() == null && placed(span);
+            Facts f = facts(span);
+            return AGENT.equals(eventKind(span)) && f.agentId() == null && !f.insideWork() && placed(span);
         }
 
-        /** A top agent span, or an {@code llm} span whose nearest agent is a top agent or that has no agent. */
+        /**
+         * A top agent span, or an {@code llm} span whose nearest agent is a top agent or that has no agent, with no
+         * work span, such as a tool or a guardrail, between them: a model call a tool makes is code talking to a
+         * model.
+         */
         private boolean isPersonFacing(TimelineSpan span) {
             if (isTopAgent(span)) return true;
-            if (!LLM.equals(eventKind(span)) || !placed(span)) return false;
+            if (!LLM.equals(eventKind(span)) || !placed(span) || facts(span).insideWork()) return false;
             String agentId = facts(span).agentId();
             if (agentId == null) return true;
             TimelineSpan agent = byId.get(agentId);
@@ -452,10 +468,23 @@ public final class SessionTimelineBuilder {
             List<String> kinds =
                     up.stream().map(SessionTimelineBuilder::eventKind).toList();
             String agentId = null;
+            boolean insideWork = false;
             for (TimelineSpan ancestor : up) {
-                if (AGENT.equals(eventKind(ancestor))) agentId = ancestor.spanId();
+                String kind = eventKind(ancestor);
+                if (AGENT.equals(kind)) {
+                    agentId = ancestor.spanId();
+                    insideWork = false;
+                } else if (!DIALOGUE_PATH_KINDS.contains(kind)) {
+                    insideWork = true;
+                }
             }
-            return new Facts(kinds.isEmpty() ? null : kinds.get(kinds.size() - 1), kinds, up.size(), agentId, rooted);
+            return new Facts(
+                    kinds.isEmpty() ? null : kinds.get(kinds.size() - 1),
+                    kinds,
+                    up.size(),
+                    agentId,
+                    rooted,
+                    insideWork);
         }
     }
 
