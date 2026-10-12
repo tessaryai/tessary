@@ -665,14 +665,14 @@ function hostOf(url) {
 
 /**
  * The `network` option for Sandbox.create, set only for an egress credential: E2B's proxy injects the
- * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the MCP
- * door, the clone host and EGRESS_EXTRA_ALLOW. A rule's host must also be allowed, or the provider is
+ * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the hosts
+ * of `urls` (the run's MCP door and clone host, or a session's MCP servers) and EGRESS_EXTRA_ALLOW. A rule's host must also be allowed, or the provider is
  * unreachable, which is why it leads `allowOut`.
  */
-function egressNetwork(credential, payload) {
+function egressNetwork(credential, urls) {
   if (!credential.egress_secret) return {};
   const modelHost = hostOf((credential.base_url || '').trim() || defaultBaseUrlFor(ANTHROPIC_MODE));
-  const hosts = [modelHost, hostOf(payload.mcp && payload.mcp.url), hostOf(payload.clone_url), ...EGRESS_EXTRA_ALLOW];
+  const hosts = [modelHost, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
   return {
     network: {
       allowOut: [...new Set(hosts.filter(Boolean))],
@@ -1486,7 +1486,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   const fail = (e) => stampFailure(e, { launcherMeta: { ...meta, elapsed_ms: Date.now() - startedAt } });
   let sbx;
   try {
-    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs, ...egressNetwork(credential, payload) });
+    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs, ...egressNetwork(credential, [payload.mcp && payload.mcp.url, payload.clone_url]) });
   } catch (e) {
     // No microVM ever existed (quota, missing template, E2B outage). Previously indistinguishable
     // from an agent that ran and crashed, since both ended as the same bare 502.
@@ -1571,7 +1571,9 @@ function runAuthoring(payload) {
 // Launcher sessions: POST /sessions starts one long-lived sandbox running session.js, and the
 // routes below forward messages to it, number its events and replay them. The registry, routes,
 // buffer and timers are backend-neutral; a backend is one driver in SESSION_DRIVERS:
-//   driver.start(s, { sessionFile, env, credential }) -> { handle, address, exited: Promise<{ code }> }
+//   driver.start(s, { sessionFile, credential, model, modelCost }) -> { handle, address, exited: Promise<{ code }> }
+//     Each driver builds the sandbox env itself, and sets s.handle as soon as it owns a resource, so
+//     a failed start can be torn down.
 //   driver.stop(s) -> Promise<void>, best effort, never throws
 // The registry lives in memory only: after a restart every session is unknown (404), and the boot
 // reaper removes the containers no caller can reach any more.
@@ -1771,7 +1773,7 @@ function waitUntil(condition, ms) {
 // Start step 6: the script answers /healthz once OpenCode and its session are up.
 async function waitSessionReady(s, startedAt) {
   for (;;) {
-    if (s.exited) throw sessionFailure(`${SESSION_SCRIPT} did not become ready (container exited)`, 'orchestration');
+    if (s.exited) throw sessionFailure(`${SESSION_SCRIPT} did not become ready (sandbox exited)`, 'orchestration');
     if (Date.now() - startedAt >= SESSION_START_MS) {
       throw sessionFailure(`${SESSION_SCRIPT} did not become ready in ${SESSION_START_MS}ms`, 'timeout');
     }
@@ -1849,7 +1851,7 @@ async function abandonStart(s) {
 // A session never takes a dockerSemaphore slot: at SANDBOX_DOCKER_CONCURRENCY=1 one open session
 // would freeze every one-shot run. SANDBOX_SESSION_CAP bounds sessions instead.
 const dockerSessionDriver = {
-  async start(s, { sessionFile, env }) {
+  async start(s, { sessionFile, credential, model, modelCost }) {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
     const workDir = fs.mkdtempSync(path.join(LAUNCHER_WORK_DIR, 'session-'));
     s.handle = { containerId: null, workDir };
@@ -1858,7 +1860,7 @@ const dockerSessionDriver = {
     const networkMode = await sandboxNetwork();
     const created = await dockerJson('POST', '/containers/create', agentContainerBody({
       cmd: ['node', SESSION_SCRIPT, '/work/session.json'],
-      env: [...env, `SESSION_SECRET=${s.secret}`, `SESSION_PORT=${SANDBOX_SESSION_PORT}`],
+      env: [...containerEnvFor(AGENT_POSTURE, credential, model, modelCost), `SESSION_SECRET=${s.secret}`, `SESSION_PORT=${SANDBOX_SESSION_PORT}`],
       labels: {
         'tessary.sandbox.script': SESSION_SCRIPT,
         [SANDBOX_LABEL_TIMEOUT_MS]: String(SANDBOX_SESSION_MAX_MS),
@@ -1917,8 +1919,9 @@ async function startSession(body) {
   try {
     const started = await SESSION_DRIVERS[BACKEND].start(s, {
       sessionFile: p.sessionFile,
-      env: containerEnvFor(AGENT_POSTURE, p.credential, p.model, p.modelCost),
       credential: p.credential,
+      model: p.model,
+      modelCost: p.modelCost,
     });
     s.handle = started.handle;
     s.address = started.address;
@@ -1927,7 +1930,8 @@ async function startSession(body) {
   } catch (e) {
     await logStartFailure(s);
     await abandonStart(s);
-    throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: SESSION_START_MS } });
+    const sandbox = s.handle && s.handle.sandboxId ? { sandbox_id: s.handle.sandboxId } : {};
+    throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: SESSION_START_MS, ...sandbox } });
   }
   s.state = 'live';
   s.readerDone = readSessionEvents(s);
@@ -1935,8 +1939,9 @@ async function startSession(body) {
   const lifeLeft = SANDBOX_SESSION_MAX_MS - (Date.now() - s.createdAt);
   if (lifeLeft > 0) s.lifeTimer = setTimeout(() => closeSession(s, 'idle'), lifeLeft);
   else setImmediate(() => closeSession(s, 'idle'));
-  const container = s.handle && s.handle.containerId ? ` container=${s.handle.containerId.slice(0, 12)}` : '';
-  console.log(`session ${s.id}: live${container} ready_ms=${Date.now() - arrivedAt}`);
+  const h = s.handle || {};
+  const where = h.containerId ? ` container=${h.containerId.slice(0, 12)}` : h.sandboxId ? ` sandbox=${h.sandboxId}` : '';
+  console.log(`session ${s.id}: live${where} ready_ms=${Date.now() - arrivedAt}`);
   return { status: 201, body: { session_id: s.id } };
 }
 
