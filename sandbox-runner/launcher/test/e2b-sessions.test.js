@@ -479,6 +479,31 @@ test('the E2B sandbox is created from the template with the session lifetime plu
   });
 });
 
+test('an E2B session with an egress credential reaches only the model, every MCP server host and the extra hosts, with the key injected at egress (an egress session that can reach anything, or holds the key)', T, async () => {
+  await withE2bLauncher({ env: { EGRESS_EXTRA_ALLOW: 'extra.example.com' } }, async ({ start, control }) => {
+    const started = await start({
+      ...START,
+      credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic', platform_funded: true },
+      model: 'claude-sonnet-5',
+      mcp_servers: [
+        { name: 'tessary', url: 'https://tessary.example.com/mcp', token: 'tsy_a_tok1' },
+        { name: 'notes', url: 'https://tessary.example.com/mcp/x', token: 'tsy_a_tok1' },
+        { name: 'other', url: 'https://notes.example.com/mcp', token: 'tsy_a_tok1' },
+      ],
+    });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+
+    assert.deepEqual(control.calls.find((c) => c.op === 'create').network, {
+      allowOut: ['api.anthropic.com', 'tessary.example.com', 'notes.example.com', 'extra.example.com'],
+      denyOut: ['0.0.0.0/0'],
+      rules: { 'api.anthropic.com': [{ transform: { headers: { 'x-api-key': '${e2b.secrets.tessary-ai-anthropic}' } } }] },
+    });
+    assert.equal(control.calls.find((c) => c.op === 'run').envs.ANTHROPIC_API_KEY, 'injected-at-egress');
+    const file = control.calls.find((c) => c.op === 'write').content;
+    for (const leak of ['egress_secret', 'tessary-ai-anthropic']) assert.ok(!file.includes(leak), `session.json holds ${leak}`);
+  });
+});
+
 test('an E2B session whose session.json cannot be written kills its sandbox (a half-started sandbox left running)', T, async () => {
   await withE2bLauncher({ writeFails: true }, async ({ start, control }) => {
     const failed = await start();

@@ -1923,10 +1923,12 @@ const dockerSessionDriver = {
 
 const e2bSessionDriver = {
   async start(s, { sessionFile, credential, model, modelCost }) {
+    const mcpUrls = Array.isArray(sessionFile.mcp_servers) ? sessionFile.mcp_servers.map((m) => m && m.url) : [];
     const sbx = await Sandbox().create(ANALYZER_TEMPLATE, {
       apiKey: E2B_API_KEY,
       timeoutMs: SANDBOX_SESSION_MAX_MS + SESSION_E2B_GRACE_MS,
       metadata: { [SANDBOX_LABEL_SESSION]: s.id },
+      ...egressNetwork(credential, mcpUrls),
     });
     s.handle = { sbx, sandboxId: sbx.sandboxId };
     const file = `${SESSION_E2B_HOME}/session.json`;

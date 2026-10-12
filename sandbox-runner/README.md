@@ -65,8 +65,9 @@ narrower.
   into a sandbox.
   - An **egress credential** (`credential.egress_secret`, Anthropic only, E2B backend only) carries
     no key: it names a secret in E2B's own store, which E2B's egress proxy injects as the provider's
-    `x-api-key` outside the microVM. The agent gets a placeholder, and that run's egress is limited
-    to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`.
+    `x-api-key` outside the microVM. The agent gets a placeholder, and that run's or session's
+    egress is limited to the model provider, the MCP door, the clone host and `EGRESS_EXTRA_ALLOW`;
+    for a session the MCP door is every `mcp_servers` host.
   - The other posture, UNTRUSTED_POSTURE (empty env, `NetworkMode: 'none'`), has **no route today**:
     its callers were `/grade` and `/lint`. It is kept deliberately — the pair exists so that a
     future untrusted-content route cannot default into the full credential set, and one legal value
@@ -427,8 +428,8 @@ lifetime, the cap, the buffer, a dead or unreachable sandbox, the network join a
 container's create body. `docker-failures.test.js` covers the boot reaper's session rule.
 `e2b-sessions.test.js` runs the same session tests on the e2b backend: the fake E2B
 (`test/fixtures/fake-e2b`) relays each SDK call to the test, which runs a fake `session.js` per
-sandbox, and the tests also cover the create, the file, the command and the kill on every way
-out.
+sandbox, and the tests also cover the create, the file, the command, the kill on every way out and
+the egress rule.
 `check-open-boot.sh` (the open-edition boot gate's dev leg) does not
 probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
 `sandbox-runner` service is profile-gated off there. The gate's second leg,
