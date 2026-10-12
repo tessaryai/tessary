@@ -480,6 +480,29 @@ class BehaviorTriageSourceTest {
                         .toList());
     }
 
+    @Test
+    void absorbingAnOwnedCaseWithABuiltInCauseKindCallsTheHook() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FindingRow newest = FindingRowBuilder.of(CUSTOM_KEY)
+                .id("f2")
+                .projectId(PROJECT)
+                .callSiteId("cs-1")
+                .payload("{\"cause_kind\":\"rate_shift\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(newest));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repinCase(PROJECT, List.of(newest, custom("f1")), "u1");
+
+        assertEquals(
+                List.of("f2"),
+                adapter.absorbedCalls().stream()
+                        .map(FakeFindingAdapter.Absorbed::findingId)
+                        .toList(),
+                "an owned case whose newest finding says rate_shift is folded as a tool-error case and never reaches"
+                        + " its adapter");
+    }
+
     private static FindingRow toolError(String id, long nCur, long failures) {
         return FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
                 .id(id)

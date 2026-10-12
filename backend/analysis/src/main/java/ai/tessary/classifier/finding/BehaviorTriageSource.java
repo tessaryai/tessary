@@ -497,7 +497,8 @@ public class BehaviorTriageSource implements TriageSource {
     public void repinCase(String projectId, List<FindingRow> caseFindings, @Nullable String userId) {
         if (caseFindings.isEmpty()) return;
         FindingRow newest = caseFindings.get(0);
-        if (!FindingRow.Cause.RATE_SHIFT.equals(newest.causeKind())) {
+        // Owner first, as resolve and repin ask: an adapter's finding may carry any cause kind, rate_shift included.
+        if (adapters.ownerOf(newest.claim()).isPresent() || !FindingRow.Cause.RATE_SHIFT.equals(newest.causeKind())) {
             repin(projectId, newest.id(), userId);
             return;
         }
