@@ -539,6 +539,95 @@ class BehaviorTriageSourceTest {
                         + " its adapter");
     }
 
+    /**
+     * The paid edition always registers an adapter, and it owns none of the built-in keys. A built-in case absorb
+     * still folds every spell and calls no hook. The bug is the owner check read as "an adapter exists", which
+     * re-pins the newest finding alone and leaves the earlier spells alarming.
+     */
+    @Test
+    void withAnAdapterRegisteredABuiltInCaseStillFoldsEverySpell() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+
+        source(FindingAdapters.of(List.of(adapter)))
+                .repinCase(PROJECT, List.of(toolError("f2", 300, 30), toolError("f1", 300, 20)), "u1");
+
+        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(50L), eq("u1"), anyString());
+        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
+        assertEquals(List.of(), adapter.absorbedCalls());
+    }
+
+    /**
+     * With an adapter registered that owns none of them, a built-in finding's absorb moves its own detector state:
+     * the tool-error reference, the drift baseline, the groundedness state. The bug is a built-in finding handed to
+     * the adapter, or refused, once the owner check runs first.
+     */
+    @Test
+    void withAnAdapterRegisteredABuiltInFindingIsAbsorbedByItsOwnBranch() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        BehaviorTriageSource source = source(FindingAdapters.of(List.of(adapter)));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(toolError("f1", 600, 60)));
+        FindingRow shift = FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .id("f2")
+                .projectId(PROJECT)
+                .subject(FindingRow.SubjectKind.METRIC_BASELINE, "mbl-1")
+                .payload("{\"cause_kind\":\"distribution_shift\"}")
+                .build();
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(shift));
+        when(baselines.findById(PROJECT, "mbl-1")).thenReturn(Optional.of(baselineWithNoClosedDay()));
+        FindingRow grounded = FindingRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+                .id("f3")
+                .projectId(PROJECT)
+                .callSiteId("rag-answer")
+                .payload("{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}")
+                .build();
+        when(findings.findById(PROJECT, "f3")).thenReturn(Optional.of(grounded));
+        when(groundednessRates.states()).thenReturn(groundednessStates);
+
+        source.repin(PROJECT, "f1", "u1");
+        source.repin(PROJECT, "f2", "u1");
+        source.resolve(PROJECT, "f3", "expected", "u1");
+
+        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(60L), eq("u1"), anyString());
+        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
+        verify(baselines)
+                .repin(
+                        eq("mbl-1"),
+                        eq("{\"sketch\":1}"),
+                        isNull(),
+                        isNull(),
+                        isNull(),
+                        anyString(),
+                        isNull(),
+                        anyString());
+        verify(groundednessStates)
+                .resetAndRelearn(eq(PROJECT), eq("rag-answer"), eq("u1"), eq("Absorbed."), anyString());
+        verify(findings)
+                .recordHumanRuling(
+                        eq(PROJECT), eq("f3"), eq("negative"), eq("A person ruled this legitimate."), anyString());
+        assertEquals(List.of(), adapter.absorbedCalls());
+    }
+
+    /** With an adapter registered that does not own it, a built-in finding is still escalated. */
+    @Test
+    void withAnAdapterRegisteredABuiltInFindingIsAnalyzed() {
+        FindingRow finding = FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
+                .id("f1")
+                .projectId(PROJECT)
+                .evidenceCounts("{\"witness\":3}")
+                .build();
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(finding));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
+                .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
+
+        var view = source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+                .analyze(PROJECT, "f1")
+                .orElseThrow();
+
+        assertEquals("job-1", view.jobId());
+    }
+
     private static FindingRow toolError(String id, long nCur, long failures) {
         return FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
                 .id(id)
