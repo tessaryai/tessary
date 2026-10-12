@@ -172,10 +172,10 @@ never script output, a token or a prompt.
 
 | Route | Success | Other answers |
 |---|---|---|
-| `POST /sessions` | `201 { session_id }` once the script reports ready | `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
+| `POST /sessions` | `201 { session_id }` once the script reports ready | `429 { "error": "sandbox session capacity reached", "kind": "capacity" }` at `SANDBOX_SESSION_CAP`, before any sandbox is spent; `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
 | `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message |
 | `POST /sessions/{id}/abort` | `204`, also with no reply running; the reply ends with `message_end.reason = "aborted"` and the session stays | `404`; `502 orchestration` when the script refused the abort |
-| `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
+| `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `410 { "error": "events no longer held", "kind": "gone" }`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
 | `DELETE /sessions/{id}` | `204` after the sandbox is stopped and removed; `204` again on a closed session | `404` |
 
 `POST /sessions` takes `{ lane, system_prompt, files, model, model_cost?, provider, credential,
@@ -212,7 +212,9 @@ passed through unchanged; a script line that is not JSON or names another type i
 logged by type name only. `seq` starts at 1 and grows by one per event the launcher emits.
 
 `after` (default 0) is the last sequence the caller holds: the response replays every held event
-after it, then follows live events. Exactly one `closed { reason }` ends every session and is
+after it, then follows live events. The launcher holds the last `SANDBOX_SESSION_BUFFER` events of
+each session; an `after` older than the oldest held event (`after + 1` below it) is `410`, so a
+stale reader gets an error, never a silent gap. Exactly one `closed { reason }` ends every session and is
 always the last event; the stream ends after it.
 
 ### Lifecycle
@@ -249,8 +251,8 @@ already holds (`GET /events?from=<n>`), so no event is lost or doubled.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `SANDBOX_SESSION_CAP` | `4` | Live sessions at once. |
-| `SANDBOX_SESSION_BUFFER` | `5000` | Events kept per session for replay. |
+| `SANDBOX_SESSION_CAP` | `4` | Sessions at once (starting, live or closing), on every backend. Over it: `429`. |
+| `SANDBOX_SESSION_BUFFER` | `5000` | Events kept per session for replay: enough for a whole reply's `text` deltas, about 1 MB per session. |
 | `SANDBOX_SESSION_MAX_MS` | `7200000` | A session's whole life; also the container's `tessary.sandbox.timeout-ms` label. |
 | `SANDBOX_SESSION_PORT` | `9400` | The port `session.js` listens on in the sandbox, passed to it as `SESSION_PORT`. |
 
@@ -329,7 +331,9 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   no longer an internal route. The trade is explicit both ways: isolation off means a sibling can
   address `postgres` and the other internal services directly, not only the MCP port.
 - **Concurrency:** `SANDBOX_DOCKER_CONCURRENCY` (default `1`) — an in-process semaphore
-  around the one container-spawn call site.
+  around the one container-spawn call site of the one-shot routes. A session container never takes
+  a slot of it, because one open session would then freeze every one-shot run;
+  `SANDBOX_SESSION_CAP` bounds sessions instead.
 - **Teardown:** every container is removed explicitly when its run ends (not just `--rm`), and a
   startup reconciliation pass reaps any `tessary.sandbox=1`-labeled container older than a few
   request timeouts — the case a normal `finally` can't cover: the launcher itself crashing or

@@ -28,11 +28,12 @@
  *   POST   /sessions  { lane, system_prompt, files, model, model_cost?, provider, credential,
  *                       mcp_servers, idle_timeout_ms, max_tool_calls_per_message }
  *                                                    -> 201 { session_id }  a long-lived agent
- *                                                    session (session.js) in its own sandbox
+ *                                                    session (session.js) in its own sandbox; 429
+ *                                                    at SANDBOX_SESSION_CAP
  *   POST   /sessions/{id}/messages { text }          -> 202; 409 while a reply runs
  *   POST   /sessions/{id}/abort                      -> 204; the reply ends, the session stays
  *   GET    /sessions/{id}/events?after=<seq>         -> text/event-stream, numbered, replayed
- *                                                    from the session's buffer
+ *                                                    from the session's buffer; 410 past it
  *   DELETE /sessions/{id}                            -> 204 once the sandbox is gone
  *                                                    An unknown session is 404 on every route.
  *                                                    See sandbox-runner/README.md "Launcher sessions".
@@ -1635,6 +1636,7 @@ function emitSessionEvent(s, type, data, fromScript) {
   if (s.closedSent) return;
   const event = { seq: ++s.seq, type, data };
   s.buffer.push(event);
+  if (s.buffer.length > SANDBOX_SESSION_BUFFER) s.buffer.shift();
   const frame = sseFrame(event);
   for (const res of s.subscribers) res.write(frame);
   if (type === 'message_end') {
@@ -1823,6 +1825,8 @@ async function abandonStart(s) {
   await SESSION_DRIVERS[BACKEND].stop(s);
 }
 
+// A session never takes a dockerSemaphore slot: at SANDBOX_DOCKER_CONCURRENCY=1 one open session
+// would freeze every one-shot run. SANDBOX_SESSION_CAP bounds sessions instead.
 const dockerSessionDriver = {
   async start(s, { sessionFile, env }) {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
@@ -1881,6 +1885,11 @@ async function onSandboxExit(s) {
 async function startSession(body) {
   const arrivedAt = Date.now();
   const p = parseSessionStart(body);
+  // The count and the insert stay in one synchronous block, so two starts cannot both take the
+  // last slot.
+  if (liveSessionCount() >= SANDBOX_SESSION_CAP) {
+    return { status: 429, body: { error: 'sandbox session capacity reached', kind: 'capacity' } };
+  }
   const s = newSessionRecord({ lane: p.lane, idleTimeoutMs: p.idleTimeoutMs, createdAt: arrivedAt });
   sessions.set(s.id, s);
   console.log(`session ${s.id}: model ${p.rawModel} -> ${p.model} (provider ${p.credential.provider}) lane ${p.lane}`);
@@ -1960,6 +1969,8 @@ async function abortSessionReply(s) {
 function streamSessionEvents(s, rawAfter, res) {
   const after = rawAfter === null ? 0 : /^\d+$/.test(rawAfter) ? Number(rawAfter) : NaN;
   if (!Number.isSafeInteger(after)) throw sessionFailure(`${SESSION_SCRIPT}: after must be a non-negative integer`, 'bad_request');
+  const oldest = s.buffer.length > 0 ? s.buffer[0].seq : s.seq + 1;
+  if (after + 1 < oldest) return send(res, 410, { error: 'events no longer held', kind: 'gone' });
   if (after > s.seq) throw sessionFailure(`${SESSION_SCRIPT}: after is past the last event`, 'bad_request');
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
   res.flushHeaders();

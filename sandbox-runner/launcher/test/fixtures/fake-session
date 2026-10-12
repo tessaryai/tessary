@@ -9,6 +9,7 @@
  * No extension on purpose: node --test runs every .js/.cjs under test/ as a test file.
  */
 const http = require('node:http');
+const { finished } = require('node:stream');
 
 /**
  * shape (all optional):
@@ -52,7 +53,10 @@ async function startFakeSession({ port, secret, shape = {} }) {
 
   function endLog() {
     logEnded = true;
-    const flushed = [...readers].map((reader) => new Promise((resolve) => reader.res.end(resolve)));
+    const flushed = [...readers].map((reader) => new Promise((resolve) => {
+      finished(reader.res, () => resolve());
+      reader.res.end();
+    }));
     readers.clear();
     return Promise.all(flushed);
   }

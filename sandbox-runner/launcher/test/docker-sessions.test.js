@@ -500,6 +500,38 @@ test('the launcher reaches the session on its network by name, not on the first 
   });
 });
 
+test('the cap refuses the next start with 429, spends no sandbox on it, and frees on DELETE', T, async () => {
+  await withSessionLauncher({ env: { SANDBOX_SESSION_CAP: '1' } }, async ({ start, stop, daemon }) => {
+    const a = await start();
+    assert.equal(a.status, 201);
+    assert.deepEqual(await start(), { status: 429, body: { error: 'sandbox session capacity reached', kind: 'capacity' } });
+    assert.equal(daemon.calls.filter((c) => c === 'POST /containers/create').length, 1);
+
+    assert.equal((await stop(a.body.session_id)).status, 204);
+    assert.equal((await start()).status, 201);
+    const secretOf = (id) => daemon.createBodies[id].Env.find((e) => e.startsWith('SESSION_SECRET='));
+    assert.notEqual(secretOf('c1'), secretOf('c2'), 'each session has its own secret');
+  });
+});
+
+test('the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is 410', T, async () => {
+  await withSessionLauncher({ env: { SANDBOX_SESSION_BUFFER: '3' } }, async ({ start, send, events, port }) => {
+    const id = (await start()).body.session_id;
+    const live = events(id, { after: 0, until: 4 });
+    await send(id, 'one');
+    assert.deepEqual((await live).events, numbered(reply(1, 'one'), 1), 'a live reader gets every event, whatever the buffer holds');
+
+    assert.deepEqual(await events(id, { after: 0 }), { status: 410, body: { error: 'events no longer held', kind: 'gone' } });
+    assert.deepEqual((await events(id, { after: 1, until: 4 })).events, numbered(reply(1, 'one'), 1).slice(1));
+    for (const [after, detail] of [['5', 'session.js: after is past the last event'], ['x', 'session.js: after must be a non-negative integer']]) {
+      const res = await request(port, 'GET', `/sessions/${id}/events?after=${after}`, { auth: 'Bearer testkey' });
+      assert.equal(res.status, 502, after);
+      assert.equal(res.body.kind, 'bad_request', after);
+      assert.equal(res.body.detail, detail);
+    }
+  });
+});
+
 test('a live session does not hold the docker run slot', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_DOCKER_CONCURRENCY: '1' } }, async ({ start, port }) => {
     assert.equal((await start()).status, 201);
