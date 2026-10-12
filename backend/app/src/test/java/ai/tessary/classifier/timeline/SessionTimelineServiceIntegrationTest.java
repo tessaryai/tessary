@@ -4,6 +4,9 @@ package ai.tessary.classifier.timeline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.tessary.ingest.GenAiAttributes;
+import ai.tessary.ingest.RawEntry;
+import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
 import ai.tessary.storage.SessionRepository;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
@@ -22,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +72,9 @@ class SessionTimelineServiceIntegrationTest {
 
     @Autowired
     SessionTimelineService timelines;
+
+    @Autowired
+    SpanBatchWriter writer;
 
     private SubstrateV2Fixtures fx;
     private String pid;
@@ -426,6 +433,38 @@ class SessionTimelineServiceIntegrationTest {
         assertEquals(
                 IntStream.range(0, 21).boxed().toList(),
                 timeline.events().stream().map(Event::position).toList());
+    }
+
+    @Test
+    void anIngestedSpanWithNoOperationKindIsAStepWithItsName() {
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String traceId = "tr-" + UUID.randomUUID();
+        writer.write(
+                pid,
+                List.of(new RawEntry(
+                        "s1",
+                        "load_profile",
+                        "{\"user\":7}",
+                        "{\"plan\":\"pro\"}",
+                        null,
+                        Map.of(GenAiAttributes.SESSION_ID, sessionId),
+                        null,
+                        traceId,
+                        at(0).toString(),
+                        null,
+                        at(40).toString(),
+                        null,
+                        null)));
+
+        SessionTimeline timeline = timelines.load(pid, sessionId);
+
+        assertEquals(
+                List.of("step"),
+                timeline.events().stream().map(Event::kind).toList(),
+                "a span whose producer named no operation is not a step, so a pattern for unknown work cannot name it");
+        assertEquals(
+                json("{\"name\":\"load_profile\",\"input\":{\"user\":7},\"output\":{\"plan\":\"pro\"}}"),
+                data(timeline).get(0));
     }
 
     /** Section 5.1 of the CC-01 plan, plus a trace of another session that shares tr-a's thread id. */
