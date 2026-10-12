@@ -678,8 +678,9 @@ function hostOf(url) {
 /**
  * The `network` option for Sandbox.create, set only for an egress credential: E2B's proxy injects the
  * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the hosts
- * of `urls` (the run's MCP door and clone host, or a session's MCP servers) and EGRESS_EXTRA_ALLOW. A rule's host must also be allowed, or the provider is
- * unreachable, which is why it leads `allowOut`.
+ * of `urls` (the run's MCP door and clone host, or a session's MCP servers) and EGRESS_EXTRA_ALLOW.
+ * A rule's host must also be allowed, or the provider is unreachable, which is why it leads
+ * `allowOut`.
  */
 function egressNetwork(credential, urls) {
   if (!credential.egress_secret) return {};
