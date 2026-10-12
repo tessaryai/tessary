@@ -984,6 +984,42 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void aPersonWhoRepeatsTheOpeningWordsWhileTheAgentRunsGivesTwoMessages() {
+        String yes = "{\"role\":\"user\",\"content\":\"yes\"}";
+        String ask = "{\"role\":\"assistant\",\"content\":\"Delete all 3 files, ok?\"}";
+        List<TimelineSpan> spans = List.of(
+                span("T3", "a", "agent")
+                        .at(0, 500)
+                        .in("[" + yes + "]")
+                        .out("Deleted.")
+                        .build(),
+                span("T3", "l1", "llm")
+                        .parent("a")
+                        .at(10, 100)
+                        .in("[" + yes + "]")
+                        .out("[" + ask + "]")
+                        .build(),
+                span("T3", "l2", "llm")
+                        .parent("a")
+                        .at(200, 490)
+                        .in("[" + yes + "," + ask + "," + yes + "]")
+                        .out("Deleted.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of(
+                        "T3/a#user:0 yes",
+                        "T3/l1#reply:0 Delete all 3 files, ok?",
+                        "T3/l2#user:0 yes",
+                        "T3/l2#reply:0 Deleted."),
+                messages(timeline),
+                "the person's second yes is taken for the agent's opening message, so the answer to the question is"
+                        + " dropped");
+    }
+
+    @Test
     void anAgentThatCarriesOnlyTheNewMessageDoesNotCountItTwice() {
         String yes = "{\"role\":\"user\",\"content\":\"yes\"}";
         String sure = "{\"role\":\"assistant\",\"content\":\"Sure?\"}";

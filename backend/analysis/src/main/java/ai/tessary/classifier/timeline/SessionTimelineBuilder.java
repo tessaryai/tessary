@@ -299,8 +299,9 @@ public final class SessionTimelineBuilder {
             Map<UserKey, Integer> emitted = new HashMap<>();
             for (TimelineSpan carrier : facing) {
                 String opening = agentsNewestUserText(carrier);
-                List<UserKey> users =
-                        opening == null ? newUserMessages(carrier, facing) : addedWhileRunning(carrier, opening);
+                List<UserKey> users = opening == null
+                        ? newUserMessages(carrier, facing)
+                        : addedWhileRunning(carrier, opening, facing);
                 Map<UserKey, Integer> inSpan = new HashMap<>();
                 for (int n = 0; n < users.size(); n++) {
                     UserKey key = users.get(n);
@@ -344,23 +345,48 @@ public final class SessionTimelineBuilder {
          * under the user role, so it gives none; an instruction code adds after the person's thread reads as the
          * person's.
          */
-        private List<UserKey> addedWhileRunning(TimelineSpan carrier, String opening) {
+        private List<UserKey> addedWhileRunning(TimelineSpan carrier, String opening, List<TimelineSpan> facing) {
             List<DialogueMessage> input = input(carrier);
-            int lastCopy = -1;
-            for (int i = 0; i < input.size(); i++) {
-                if (fromUser(input.get(i)) && opening.equals(input.get(i).text())) lastCopy = i;
-            }
+            int from = openingCopy(input, carrier, opening, facing);
             List<UserKey> added = new ArrayList<>();
             String answers = null;
             for (int i = 0; i < input.size(); i++) {
                 DialogueMessage m = input.get(i);
                 if (ASSISTANT.equals(m.role()) && m.dialogue()) {
                     answers = messageKey(m);
-                } else if (lastCopy >= 0 && i > lastCopy && fromUser(m)) {
+                } else if (from >= 0 && i > from && fromUser(m)) {
                     added.add(new UserKey(answers, m.text()));
                 }
             }
             return added;
+        }
+
+        /**
+         * Where the agent's newest user message is in the call's input, or -1: its last copy, or an earlier copy when
+         * only assistant messages this trace wrote before the call lie between them, since the person then said the
+         * same words again while the agent ran. A copy after history the trace did not write is the opening itself.
+         */
+        private int openingCopy(
+                List<DialogueMessage> input, TimelineSpan carrier, String opening, List<TimelineSpan> facing) {
+            int first = -1;
+            int copy = -1;
+            for (int i = 0; i < input.size(); i++) {
+                if (!fromUser(input.get(i)) || !opening.equals(input.get(i).text())) continue;
+                if (first < 0) first = i;
+                copy = i;
+            }
+            boolean writtenBetween = false;
+            for (int i = copy - 1; i >= first; i--) {
+                DialogueMessage m = input.get(i);
+                if (ASSISTANT.equals(m.role()) && m.dialogue()) {
+                    if (answeredInTrace(m, carrier, facing) == null) break;
+                    writtenBetween = true;
+                } else if (writtenBetween && fromUser(m) && opening.equals(m.text())) {
+                    copy = i;
+                    writtenBetween = false;
+                }
+            }
+            return copy;
         }
 
         private boolean fromUser(DialogueMessage m) {

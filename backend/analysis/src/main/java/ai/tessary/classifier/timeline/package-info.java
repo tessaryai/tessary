@@ -17,10 +17,10 @@
  *       retrieval or any other work span makes; an agent a tool runs is not the agent the person talks to. When a top
  *       agent span received a user message, its input gives the messages that opened the turn, as its output is the
  *       authority for the replies, and an {@code llm} call under it gives only the user messages after the agent's
- *       newest one, which the person added while the agent ran. A call whose input does not hold the agent's newest
- *       user message, such as a memory summary whose instruction code wrote under the user role, gives none; an
- *       instruction that code adds after the person's thread reads as the person's. A message that a later span
- *       sends again is not a new event.
+ *       newest one, which the person added while the agent ran, a later copy of the same words after a reply of
+ *       the turn among them. A call whose input does not hold the agent's newest user message, such as a memory
+ *       summary whose instruction code wrote under the user role, gives none; an instruction that code adds after the
+ *       person's thread reads as the person's. A message that a later span sends again is not a new event.
  *   <li>An {@code assistant_reply} is text the person sees, from the top agent of the turn. A message with only tool
  *       calls is not a reply, and neither is the text a sub-agent returns to its orchestrator. When an output holds the
  *       whole chat, only the assistant messages after its last user message are new. Two messages with the same text
