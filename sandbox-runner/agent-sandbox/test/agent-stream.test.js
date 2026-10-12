@@ -600,3 +600,16 @@ test('a session that never produced a turn fails as no result', async (t) => {
     },
   );
 });
+
+test('an OpenCode that exits after it announced itself settles exited', async (t) => {
+  // Bug caught: a session never learns its OpenCode died and keeps answering 202.
+  const { startServer } = require('../agent-stream');
+  clearRecords();
+  const server = await startServer({});
+  t.after(() => server.close());
+
+  process.kill(serverRecords()[0].pid, 'SIGKILL');
+
+  const exit = await Promise.race([server.exited, new Promise((r) => setTimeout(() => r('not settled in 2s'), 2000))]);
+  assert.deepEqual(exit, { code: null, signal: 'SIGKILL' });
+});

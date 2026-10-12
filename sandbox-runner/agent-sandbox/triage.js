@@ -45,23 +45,10 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { runAgent, describeError, sumUsage, WORK } = require('./agent-stream');
+const { runAgent, describeError, sumUsage, writeDossier, WORK } = require('./agent-stream');
 
 /** Where the agent's own scripts go, relative to its start directory (WORK) — see the header. */
 const CHECKS_DIR = 'checks';
-
-// Materialize the dossier under root, refusing anything that would escape it — the paths come from
-// the backend's own store, but a traversal must be impossible by construction rather than by trust.
-function writeDossier(root, files) {
-  for (const [rel, content] of Object.entries(files || {})) {
-    const full = path.resolve(root, rel);
-    if (full !== root && !full.startsWith(root + path.sep)) {
-      throw new Error('dossier path escapes root: ' + rel);
-    }
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, content);
-  }
-}
 
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

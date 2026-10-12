@@ -33,19 +33,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { git, runAgent, describeError, sumUsage, quarantineRepo, WORK, REPO } = require('./agent-stream');
-
-// Materialize the dossier under root, refusing anything that would escape it.
-function writeDossier(root, files) {
-  for (const [rel, content] of Object.entries(files || {})) {
-    const full = path.resolve(root, rel);
-    if (full !== root && !full.startsWith(root + path.sep)) {
-      throw new Error('dossier path escapes root: ' + rel);
-    }
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, content);
-  }
-}
+const { git, runAgent, describeError, sumUsage, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
 
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
