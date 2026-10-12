@@ -3,7 +3,6 @@ package ai.tessary.classifier.worker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.TestObjectProvider;
@@ -53,14 +52,12 @@ class SweepRoutingTest {
     }
 
     /**
-     * Catches a registered kind no module declares being left without the sweep the worker runs it with. The catalog's
-     * default grain for the kind is observation, so routing that reads the catalog for it finds no sweep; the right
-     * routing never asks.
+     * Catches a registered kind no module declares being left without the sweep the worker runs it with. The catalog
+     * gives the kind no window grain, so routing that reads the catalog for it finds no sweep; the right routing never
+     * asks.
      */
     @Test
     void aKindNoModuleDeclaresIsRunByItsRegisteredSweep() {
-        lenient().when(catalog.grainFor(UNDECLARED)).thenReturn(Grain.OBSERVATION);
-
         assertEquals(Optional.of(undeclared), routing.sweepFor(UNDECLARED));
     }
 
