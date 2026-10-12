@@ -45,6 +45,8 @@ public class AgentModels {
     }
 
     /**
+     * The lane's model for one project.
+     *
      * @param model the id the agent runs and the ledger stores
      * @param modelCost null when models.dev does not price it
      * @param provider the provider whose credential runs the model

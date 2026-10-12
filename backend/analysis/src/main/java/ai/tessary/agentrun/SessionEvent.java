@@ -22,17 +22,26 @@ public sealed interface SessionEvent {
     /** A piece of the reply's text. */
     record Text(long seq, String delta) implements SessionEvent {}
 
-    /** @param server the MCP server's configured name, null for the agent's own tools */
+    /**
+     * A tool call began.
+     *
+     * @param server the MCP server's configured name, null for the agent's own tools
+     */
     record ToolStart(long seq, String callId, @Nullable String server, String tool, String inputSummary)
             implements SessionEvent {}
 
+    /** A tool call ended. */
     record ToolEnd(long seq, String callId, String resultSummary, long bytes, long durationMs, boolean ok)
             implements SessionEvent {}
 
     /** The reply ended; its usage is what it spent. */
     record MessageEnd(long seq, AgentSpanTelemetry.AgentUsage usage, EndReason reason) implements SessionEvent {}
 
-    /** @param kind {@code start}, {@code agent} or {@code opencode_exit} */
+    /**
+     * A failure the script reported.
+     *
+     * @param kind {@code start}, {@code agent} or {@code opencode_exit}
+     */
     record Failure(long seq, String kind, String detail) implements SessionEvent {}
 
     /**

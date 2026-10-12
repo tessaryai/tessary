@@ -26,6 +26,20 @@ public interface AgentSessionClient {
     Session start(Start start);
 
     /**
+     * One message. The reply's credential is claimed here and held until the reply's
+     * {@code message_end}, an abort or the session's close.
+     *
+     * @return {@code ACCEPTED}, {@code BUSY} while a reply runs, {@code CLOSED} when the session is gone
+     */
+    SendOutcome send(String sessionId, String text);
+
+    /** Ends the running reply and keeps the session; its {@code message_end} has reason {@code ABORTED}. Quiet on a closed session. */
+    void abort(String sessionId);
+
+    /** Stops the session and its sandbox. Quiet on a closed session. */
+    void stop(String sessionId);
+
+    /**
      * The session's events after {@code afterSeq}, in order, as they come; blocking, so read it on a
      * virtual thread and close it. The stream ends after {@link SessionEvent.Closed}, or with no
      * {@code Closed} when the connection ends: then resume from the last sequence read. A session the
@@ -38,6 +52,8 @@ public interface AgentSessionClient {
     Stream<SessionEvent> events(String sessionId, long afterSeq);
 
     /**
+     * What a session starts with.
+     *
      * @param lane the lane the session runs and books on
      * @param systemPrompt the agent's system prompt
      * @param files relative path to content, written under the sandbox's {@code dossier/}
@@ -56,7 +72,11 @@ public interface AgentSessionClient {
             int maxToolCallsPerMessage,
             LlmUsageAccountant.Subject subject) {}
 
-    /** @param token a project key the caller owns and revokes; never logged, never in {@code toString} */
+    /**
+     * One named MCP server the agent reaches through the sandbox's relay.
+     *
+     * @param token a project key the caller owns and revokes; never logged, never in {@code toString}
+     */
     record McpServer(String name, String url, String token) {
         @Override
         public String toString() {
@@ -64,6 +84,16 @@ public interface AgentSessionClient {
         }
     }
 
-    /** @param id the launcher's session id */
+    /**
+     * A started session.
+     *
+     * @param id the launcher's session id
+     */
     record Session(String id) {}
+
+    enum SendOutcome {
+        ACCEPTED,
+        BUSY,
+        CLOSED
+    }
 }

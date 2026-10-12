@@ -4,8 +4,11 @@ package ai.tessary.agentrun;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.AgentRunProperties;
@@ -417,6 +420,9 @@ class LauncherAgentSessionClientTest {
         List<SessionEvent> events = read(client, 4);
 
         assertEquals(List.of(new SessionEvent.Closed(4, SessionEvent.CloseReason.UNKNOWN)), events);
+        int requests = fake.seen().size();
+        assertEquals(AgentSessionClient.SendOutcome.CLOSED, client.send("s-1", "hi"));
+        assertEquals(requests, fake.seen().size(), "a closed session sends nothing");
     }
 
     /** Catches a stale reader that silently skips the events the launcher no longer holds. */
@@ -459,5 +465,255 @@ class LauncherAgentSessionClientTest {
         TessaryException ex = assertThrows(TessaryException.class, () -> read(client, 0));
 
         assertEquals(AgentRunError.BAD_OUTPUT, ex.error());
+    }
+
+    // ---- replies, credentials and booking -----------------------------------------------------------
+
+    private static final AgenticCredentialResolver.Credential REPLY_CRED = new AgenticCredentialResolver.Credential(
+            ModelProvider.GROK, "xai-key", null, null, null, null, null, false, null, "reply");
+    private static final AgenticCredentialResolver.Credential REPLY2_CRED = new AgenticCredentialResolver.Credential(
+            ModelProvider.GROK, "xai-key", null, null, null, null, null, false, null, "reply2");
+
+    private LauncherAgentSessionClient aStartedSessionWith(
+            AgenticCredentialResolver.Credential startCred, AgenticCredentialResolver.Credential... replies) {
+        aGrokLane();
+        when(credentials.resolve(PROJECT, ModelProvider.GROK)).thenReturn(startCred, replies);
+        fake.answer("POST", "/sessions", 201, "{\"session_id\":\"s-1\"}");
+        LauncherAgentSessionClient client = client();
+        client.start(START);
+        return client;
+    }
+
+    private static String messageEnd(String reason) {
+        return "{\"usage\":" + USAGE_JSON + ",\"reason\":\"" + reason + "\"}";
+    }
+
+    private void verifyBookedOnce(boolean platformFunded) {
+        verify(usage)
+                .recordSandboxRun(
+                        "proj",
+                        "authoring",
+                        "grok-4.6",
+                        platformFunded,
+                        1200L,
+                        80L,
+                        1000L,
+                        200L,
+                        new BigDecimal("0.0123"),
+                        SUBJECT);
+    }
+
+    /** Catches a run slot freed when the message is accepted (Tessary AI over-commits) or never freed. */
+    @Test
+    void aReplyHoldsItsCredentialUntilItsMessageEnd() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(2, "message_end", messageEnd("done")),
+                FakeLauncher.frame(3, "closed", "{\"reason\":\"idle\"}"));
+
+        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "hello"));
+
+        FakeLauncher.Seen message = fake.seen().getLast();
+        assertEquals("POST /sessions/s-1/messages", message.method() + " " + message.path());
+        assertEquals("Bearer " + LAUNCHER_KEY, message.headers().get("authorization"));
+        assertEquals("{\"text\":\"hello\"}", message.body());
+        verify(credentials, times(2)).resolve(PROJECT, ModelProvider.GROK);
+        verify(credentials, never()).release(REPLY_CRED);
+        try (Stream<SessionEvent> events = client.events("s-1", 0)) {
+            Iterator<SessionEvent> it = events.iterator();
+            assertEquals(1, it.next().seq());
+            verify(credentials, never()).release(REPLY_CRED);
+            assertEquals(2, it.next().seq());
+            verify(credentials).release(REPLY_CRED);
+            assertEquals(3, it.next().seq());
+            verify(credentials).release(REPLY_CRED);
+        }
+    }
+
+    /**
+     * Catches a double release (the paid lease finished twice), and a second reply started while the
+     * aborted one still runs.
+     */
+    @Test
+    void anAbortFreesTheReplyAndItsMessageEndFreesNothingMore() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED, REPLY2_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.answer("POST", "/sessions/s-1/abort", 204, null);
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "message_end", messageEnd("aborted")));
+        client.send("s-1", "hello");
+
+        client.abort("s-1");
+
+        FakeLauncher.Seen abort = fake.seen().getLast();
+        assertEquals("POST /sessions/s-1/abort", abort.method() + " " + abort.path());
+        verify(credentials).release(REPLY_CRED);
+        int requests = fake.seen().size();
+        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "again"));
+        assertEquals(requests, fake.seen().size(), "a busy session is not asked");
+        verify(credentials, times(2)).resolve(PROJECT, ModelProvider.GROK);
+
+        read(client, 0);
+
+        verify(credentials).release(REPLY_CRED);
+        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "again"));
+        verify(credentials, times(3)).resolve(PROJECT, ModelProvider.GROK);
+    }
+
+    /** Catches a sandbox death that keeps the run slot until the lease runs out. */
+    @Test
+    void aClosedSessionFreesAnOpenReply() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "closed", "{\"reason\":\"failed\"}"));
+        client.send("s-1", "hello");
+
+        read(client, 0);
+
+        verify(credentials).release(REPLY_CRED);
+        assertEquals(AgentSessionClient.SendOutcome.CLOSED, client.send("s-1", "again"));
+        verify(credentials, times(2)).resolve(PROJECT, ModelProvider.GROK);
+    }
+
+    /** Catches a claim leaked on a message the launcher never ran. */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "409 | {\"error\":\"session busy\",\"kind\":\"busy\"}               | BUSY",
+                "404 | {\"error\":\"not found\",\"kind\":\"unknown_session\"}   | CLOSED",
+                "502 | {\"kind\":\"orchestration\"}                               | LAUNCHER_UNAVAILABLE"
+            })
+    void aRefusedMessageFreesItsClaimAtOnce(int status, String body, String expected) {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", status, body);
+
+        if (expected.equals("LAUNCHER_UNAVAILABLE")) {
+            TessaryException ex = assertThrows(TessaryException.class, () -> client.send("s-1", "hello"));
+            assertEquals(AgentRunError.LAUNCHER_UNAVAILABLE, ex.error());
+        } else {
+            assertEquals(AgentSessionClient.SendOutcome.valueOf(expected), client.send("s-1", "hello"));
+        }
+
+        verify(credentials).release(REPLY_CRED);
+    }
+
+    /** Catches spend booked on the wrong lane, model or subject, or a reply's spend lost. */
+    @Test
+    void eachNewMessageEndBooksOneRowOnTheCallersLaneAndSubject() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "message_end", messageEnd("done")),
+                FakeLauncher.frame(2, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(
+                        3,
+                        "message_end",
+                        "{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"cache_read_input_tokens\":0,"
+                                + "\"cache_creation_input_tokens\":0,\"cost_usd\":0.0021},\"reason\":\"limit\"}"));
+
+        read(client, 0);
+
+        verifyBookedOnce(false);
+        verify(usage)
+                .recordSandboxRun(
+                        "proj", "authoring", "grok-4.6", false, 10L, 2L, 0L, 0L, new BigDecimal("0.0021"), SUBJECT);
+        verifyNoMoreInteractions(usage);
+    }
+
+    /** Catches the same reply billed twice after a reconnect. */
+    @Test
+    void aMessageEndReplayedAfterAReconnectBooksNothing() {
+        LauncherAgentSessionClient client = aStartedSession();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(2, "message_end", messageEnd("done")));
+        fake.events(
+                "/sessions/s-1/events?after=1",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(2, "message_end", messageEnd("done")),
+                FakeLauncher.frame(3, "closed", "{\"reason\":\"idle\"}"));
+
+        read(client, 0);
+        read(client, 1);
+
+        verifyBookedOnce(false);
+        verifyNoMoreInteractions(usage);
+    }
+
+    /** Catches Tessary AI spend booked on the org's own key. */
+    @Test
+    void aPlatformFundedSessionBooksAsPlatformFunded() {
+        LauncherAgentSessionClient client = aStartedSessionWith(new AgenticCredentialResolver.Credential(
+                ModelProvider.GROK, null, null, null, null, null, null, true, "e2b-secret", "start"));
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "message_end", messageEnd("done")));
+
+        read(client, 0);
+
+        verifyBookedOnce(true);
+    }
+
+    /** Catches a stop that loses the reply's spend, or frees the run slot twice. */
+    @Test
+    void stopFreesTheReplyAndStillBooksItsLastMessageEnd() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.answer("DELETE", "/sessions/s-1", 204, null);
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "message_end", messageEnd("aborted")),
+                FakeLauncher.frame(2, "closed", "{\"reason\":\"stopped\"}"));
+        client.send("s-1", "hello");
+
+        client.stop("s-1");
+
+        FakeLauncher.Seen stop = fake.seen().getLast();
+        assertEquals("DELETE /sessions/s-1", stop.method() + " " + stop.path());
+        assertEquals("Bearer " + LAUNCHER_KEY, stop.headers().get("authorization"));
+        verify(credentials).release(REPLY_CRED);
+
+        read(client, 0);
+
+        verifyBookedOnce(false);
+        verify(credentials).release(REPLY_CRED);
+    }
+
+    /** Catches a cleanup path that throws on a session the launcher already dropped. */
+    @Test
+    void stopAndAbortOnAGoneSessionAreQuiet() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        String gone = "{\"error\":\"not found\",\"kind\":\"unknown_session\"}";
+        fake.answer("POST", "/sessions/s-1/abort", 404, gone);
+        fake.answer("DELETE", "/sessions/s-1", 404, gone);
+        client.send("s-1", "hello");
+
+        client.abort("s-1");
+        client.stop("s-1");
+
+        verify(credentials).release(REPLY_CRED);
+        assertEquals(
+                List.of(
+                        "POST /sessions",
+                        "POST /sessions/s-1/messages",
+                        "POST /sessions/s-1/abort",
+                        "DELETE /sessions/s-1"),
+                fake.seen().stream().map(r -> r.method() + " " + r.path()).toList());
     }
 }

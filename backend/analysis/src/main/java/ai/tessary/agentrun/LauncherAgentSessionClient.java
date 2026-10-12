@@ -12,6 +12,7 @@ import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.StructuredLog;
+import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,6 +42,8 @@ import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.jspecify.annotations.Nullable;
@@ -67,12 +70,19 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
     private static final String ROUTE = "/sessions";
 
     /** The launcher's own limits plus 30 s: 90 s for a sandbox to become ready. */
-    private static final Duration START_TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration START_TIMEOUT = Duration.ofMinutes(2);
+
+    /** 10 s for the script to take a message or an abort, plus 30 s. */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(40);
+
+    /** A 5 s abort grace, a 5 s container stop and the kill, plus 30 s. */
+    private static final Duration STOP_TIMEOUT = Duration.ofSeconds(60);
 
     private final AgentRunProperties props;
     private final ObserverProperties observerProps;
     private final AgentModels models;
     private final AgenticCredentialResolver credentials;
+    private final LlmUsageAccountant usage;
     private final ObjectMapper mapper;
     private final HttpClient client;
     private final Clock clock;
@@ -101,6 +111,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         this.observerProps = observerProps;
         this.models = models;
         this.credentials = credentials;
+        this.usage = usage;
         this.mapper = mapper;
         this.clock = clock;
         // HTTP/1.1 so a GET carries no h2c upgrade and an event stream is the launcher's chunked body.
@@ -110,14 +121,60 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .build();
     }
 
-    /** What the client keeps per session: what its spend is booked on. */
-    private record SessionState(
-            String projectId,
-            ModelLane lane,
-            String model,
-            ModelProvider provider,
-            boolean platformFunded,
-            LlmUsageAccountant.Subject subject) {}
+    /**
+     * What the client keeps per session: what its spend is booked on, the reply that holds a
+     * credential, and the last sequence booked. A session leaves the map when its stream yields
+     * {@code closed}, so the caller keeps a reader on every session it started.
+     */
+    private static final class SessionState {
+        final String projectId;
+        final ModelLane lane;
+        final String model;
+        final ModelProvider provider;
+        /** From the start credential: the provider, and so whose bill it is, is fixed per session. */
+        final boolean platformFunded;
+
+        final LlmUsageAccountant.Subject subject;
+        final AtomicReference<@Nullable Reply> open = new AtomicReference<>();
+
+        /** Read and written only inside {@code synchronized (this)}. */
+        long lastBookedSeq;
+
+        SessionState(
+                String projectId,
+                ModelLane lane,
+                String model,
+                ModelProvider provider,
+                boolean platformFunded,
+                LlmUsageAccountant.Subject subject) {
+            this.projectId = projectId;
+            this.lane = lane;
+            this.model = model;
+            this.provider = provider;
+            this.platformFunded = platformFunded;
+            this.subject = subject;
+        }
+
+        /** Frees the open reply's credential, if one is open, and forgets the reply. */
+        void releaseOpen() {
+            Reply reply = open.getAndSet(null);
+            if (reply != null) reply.release();
+        }
+    }
+
+    /** One reply's credential claim; released exactly once whichever of its endings comes first. */
+    private final class Reply {
+        final AgenticCredentialResolver.Credential credential;
+        final AtomicBoolean released = new AtomicBoolean();
+
+        Reply(AgenticCredentialResolver.Credential credential) {
+            this.credential = credential;
+        }
+
+        void release() {
+            if (released.compareAndSet(false, true)) credentials.release(credential);
+        }
+    }
 
     @Override
     public Session start(Start start) {
@@ -183,10 +240,98 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
     }
 
     @Override
+    public SendOutcome send(String sessionId, String text) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) return SendOutcome.CLOSED;
+        if (state.open.get() != null) return SendOutcome.BUSY;
+        String launcherUrl = launcherUrl();
+        Reply reply = new Reply(credentials.resolve(state.projectId, state.provider));
+        // Open before the POST: the reply's events can reach a reader before the 202 reaches us.
+        if (!state.open.compareAndSet(null, reply)) {
+            reply.release();
+            return SendOutcome.BUSY;
+        }
+        boolean accepted = false;
+        try {
+            String body = mapper.writeValueAsString(mapper.createObjectNode().put("text", text));
+            HttpRequest request = request(launcherUrl, sessionPath(sessionId) + "/messages")
+                    .timeout(REQUEST_TIMEOUT)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = exchange("message", request, launcherUrl, state.lane.wire(), REQUEST_TIMEOUT);
+            int status = resp.statusCode();
+            if (status / 100 == 2) {
+                accepted = true;
+                return SendOutcome.ACCEPTED;
+            }
+            if (status == 409 && "busy".equals(E2bAgentRunSandbox.kindOf(resp.body()))) return SendOutcome.BUSY;
+            if (unknownSession(status, resp.body())) {
+                closed(sessionId, state);
+                return SendOutcome.CLOSED;
+            }
+            throw refusal("message", status, resp.body(), launcherUrl, state.lane.wire(), REQUEST_TIMEOUT);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("a message body always serializes", e);
+        } finally {
+            if (!accepted) {
+                state.open.compareAndSet(reply, null);
+                reply.release();
+            }
+        }
+    }
+
+    @Override
+    public void abort(String sessionId) {
+        String launcherUrl = launcherUrl();
+        SessionState state = sessions.get(sessionId);
+        String lane = state == null ? null : state.lane.wire();
+        HttpRequest request = request(launcherUrl, sessionPath(sessionId) + "/abort")
+                .timeout(REQUEST_TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> resp = exchange("abort", request, launcherUrl, lane, REQUEST_TIMEOUT);
+        if (resp.statusCode() / 100 == 2) {
+            // The reply stays open until its message_end, so no second reply starts while it winds down.
+            Reply reply = state == null ? null : state.open.get();
+            if (reply != null) reply.release();
+            return;
+        }
+        if (unknownSession(resp.statusCode(), resp.body())) {
+            closed(sessionId, state);
+            return;
+        }
+        throw refusal("abort", resp.statusCode(), resp.body(), launcherUrl, lane, REQUEST_TIMEOUT);
+    }
+
+    @Override
+    public void stop(String sessionId) {
+        String launcherUrl = launcherUrl();
+        SessionState state = sessions.get(sessionId);
+        String lane = state == null ? null : state.lane.wire();
+        HttpRequest request = request(launcherUrl, sessionPath(sessionId))
+                .timeout(STOP_TIMEOUT)
+                .DELETE()
+                .build();
+        HttpResponse<String> resp = exchange("stop", request, launcherUrl, lane, STOP_TIMEOUT);
+        if (resp.statusCode() / 100 == 2) {
+            // The state stays until the stream yields closed, so the reply's last message_end is still booked.
+            if (state != null) state.releaseOpen();
+            return;
+        }
+        if (unknownSession(resp.statusCode(), resp.body())) {
+            closed(sessionId, state);
+            return;
+        }
+        throw refusal("stop", resp.statusCode(), resp.body(), launcherUrl, lane, STOP_TIMEOUT);
+    }
+
+    @Override
     public Stream<SessionEvent> events(String sessionId, long afterSeq) {
         String launcherUrl = launcherUrl();
         SessionState state = sessions.get(sessionId);
-        String lane = state == null ? null : state.lane().wire();
+        String lane = state == null ? null : state.lane.wire();
         HttpRequest request = request(launcherUrl, sessionPath(sessionId) + "/events?after=" + afterSeq)
                 .header("Accept", "text/event-stream")
                 .GET()
@@ -215,9 +360,55 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         throw refusal("events", resp.statusCode(), body, launcherUrl, lane, Duration.ZERO);
     }
 
-    /** A session that ended: the client forgets it. */
+    /** A session that ended: its open reply is freed and the client forgets it. */
     private void closed(String sessionId, @Nullable SessionState state) {
-        if (state != null) sessions.remove(sessionId, state);
+        if (state == null) return;
+        state.releaseOpen();
+        sessions.remove(sessionId, state);
+    }
+
+    /**
+     * Books a {@code message_end} the session has not booked yet, then frees its reply. Booking comes
+     * first, so a ledger write that throws ends the stream and the reconnect books it again. A replay
+     * at or below the last booked sequence books and frees nothing: the open reply may be a newer one.
+     */
+    private void ended(String sessionId, @Nullable SessionState state, SessionEvent.MessageEnd end) {
+        AgentSpanTelemetry.AgentUsage u = end.usage();
+        boolean booked = false;
+        if (state != null) {
+            synchronized (state) {
+                if (end.seq() > state.lastBookedSeq) {
+                    usage.recordSandboxRun(
+                            state.projectId,
+                            state.lane.wire(),
+                            state.model,
+                            state.platformFunded,
+                            u.inputTokens(),
+                            u.outputTokens(),
+                            u.cacheReadTokens(),
+                            u.cacheWriteTokens(),
+                            u.costUsd(),
+                            state.subject);
+                    state.lastBookedSeq = end.seq();
+                    booked = true;
+                }
+            }
+            if (booked) state.releaseOpen();
+        }
+        StructuredLog.info(log, Markers.OPS, "agentsession.reply-ended")
+                .message(
+                        "session %s reply ended (%s) at seq %d, %s",
+                        sessionId, end.reason().name(), end.seq(), booked ? "booked" : "already booked or not ours")
+                .field("session", sessionId)
+                .field("seq", end.seq())
+                .field("reason", end.reason().name())
+                .field("inputTokens", u.inputTokens())
+                .field("outputTokens", u.outputTokens())
+                .field("cacheReadTokens", u.cacheReadTokens())
+                .field("cacheWriteTokens", u.cacheWriteTokens())
+                .field("costUsd", u.costUsd())
+                .field("booked", booked)
+                .log();
     }
 
     /**
@@ -233,7 +424,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         private final Instant began = clock.instant();
         private final AtomicBoolean finished = new AtomicBoolean();
         private volatile boolean closedByCaller;
-        private long count;
+        private final AtomicLong count = new AtomicLong();
         private @Nullable SessionEvent next;
 
         EventReader(String sessionId, @Nullable SessionState state, InputStream body) {
@@ -264,21 +455,22 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
         private @Nullable SessionEvent read() {
             try {
-                while (true) {
+                SessionEvent event = null;
+                while (event == null) {
                     Frame frame = frame();
                     if (frame == null) {
                         finish(closedByCaller ? "caller" : "eof");
                         return null;
                     }
-                    SessionEvent event = event(frame);
-                    if (event == null) continue;
-                    count++;
-                    if (event instanceof SessionEvent.Closed) {
-                        closed(sessionId, state);
-                        finish("closed");
-                    }
-                    return event;
+                    event = event(frame);
                 }
+                count.incrementAndGet();
+                if (event instanceof SessionEvent.MessageEnd end) ended(sessionId, state, end);
+                if (event instanceof SessionEvent.Closed) {
+                    closed(sessionId, state);
+                    finish("closed");
+                }
+                return event;
             } catch (IOException e) {
                 finish(closedByCaller ? "caller" : "broken");
                 return null;
@@ -298,7 +490,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 seq = Long.parseLong(frame.id());
                 data = mapper.readTree(frame.data());
             } catch (NumberFormatException | JsonProcessingException e) {
-                throw new TessaryException(AgentRunError.BAD_OUTPUT, "a session event frame that does not parse");
+                throw new TessaryException(AgentRunError.BAD_OUTPUT, e, "a session event frame that does not parse");
             }
             if (data == null || !data.isObject()) {
                 throw new TessaryException(AgentRunError.BAD_OUTPUT, "a session event frame that does not parse");
@@ -319,8 +511,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             String id = null;
             String type = "message";
             StringBuilder data = null;
-            String line;
-            while ((line = lines.readLine()) != null) {
+            for (String line = lines.readLine(); line != null; line = lines.readLine()) {
                 if (line.isEmpty()) {
                     if (id == null && data == null) continue;
                     return new Frame(id, type, data == null ? "" : data.toString());
@@ -348,12 +539,15 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             try {
                 body.close();
             } catch (IOException e) {
-                // the connection is gone either way; nothing more is read from it
+                StructuredLog.debug(log, "agentsession.body-close-failed")
+                        .field("session", sessionId)
+                        .field("error", e.getClass().getSimpleName())
+                        .log();
             }
             StructuredLog.info(log, Markers.OPS, "agentsession.events-ended")
-                    .message("session %s event stream ended (%s) after %d events", sessionId, ending, count)
+                    .message("session %s event stream ended (%s) after %d events", sessionId, ending, count.get())
                     .field("session", sessionId)
-                    .field("events", count)
+                    .field("events", count.get())
                     .field(
                             "durationMs",
                             Duration.between(began, clock.instant()).toMillis())
