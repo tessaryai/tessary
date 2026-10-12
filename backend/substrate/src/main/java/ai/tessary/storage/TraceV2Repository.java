@@ -739,6 +739,7 @@ public class TraceV2Repository {
     /**
      * One trace of a session, with the facts the session timeline reads from the trace row.
      *
+     * @param settled no span of the trace is on its way ({@code is_settled})
      * @param settledEnd the latest span end of a settled trace; null while the trace is not settled, since a span may
      *     still arrive, or when none of its spans has ended
      */
@@ -747,6 +748,7 @@ public class TraceV2Repository {
             @Nullable String parentTraceId,
             @Nullable String callSiteId,
             String startedAt,
+            boolean settled,
             @Nullable String settledEnd) {}
 
     /**
@@ -756,7 +758,7 @@ public class TraceV2Repository {
      * ix_trace_session}, then sorted.
      */
     public List<SessionTrace> listSessionTraces(String projectId, String sessionId) {
-        return jdbc.sql("SELECT t.id, t.parent_trace_id, t.call_site_id, t.started_at,"
+        return jdbc.sql("SELECT t.id, t.parent_trace_id, t.call_site_id, t.started_at, t.is_settled,"
                         + " CASE WHEN t.is_settled THEN t.ended_at END AS settled_end FROM trace t"
                         + " WHERE t.project_id = :pid AND t.session_id = :sid AND NOT t.is_deleted"
                         + " ORDER BY settled_end DESC NULLS FIRST, t.started_at DESC, t.id DESC")
@@ -767,6 +769,7 @@ public class TraceV2Repository {
                         rs.getString("parent_trace_id"),
                         rs.getString("call_site_id"),
                         requireIso(rs, "started_at"),
+                        rs.getBoolean("is_settled"),
                         Timestamps.iso(rs, "settled_end")))
                 .list();
     }

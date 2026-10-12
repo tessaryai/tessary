@@ -96,8 +96,7 @@ public class SessionTimelineService {
                     break pages;
                 }
                 List<TimelineSpan> spansOfTrace = byTrace.getOrDefault(trace.id(), List.of());
-                for (SessionTimelineBuilder.Derived d :
-                        SessionTimelineBuilder.derive(spansOfTrace, trace.settledEnd() != null)) {
+                for (SessionTimelineBuilder.Derived d : SessionTimelineBuilder.derive(spansOfTrace, trace.settled())) {
                     derived.add(d);
                     bytes += d.event().bytes();
                 }

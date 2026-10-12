@@ -46,6 +46,7 @@ class TraceV2RepositorySessionTracesTest {
             @Nullable String parentTraceId,
             @Nullable String callSiteId,
             Instant startedAt,
+            boolean settled,
             @Nullable Instant settledEnd) {}
 
     @Test
@@ -60,6 +61,7 @@ class TraceV2RepositorySessionTracesTest {
         String t4 = SubstrateV2Fixtures.traceId();
         String t5 = SubstrateV2Fixtures.traceId();
         String t6 = SubstrateV2Fixtures.traceId();
+        String t7 = SubstrateV2Fixtures.traceId();
         fx.trace(pid, t1, "sess-1", "thr-1", null, t0);
         fx.traceCallSite(pid, t1, "cs-1");
         fx.settle(pid, t1, t0.plusMillis(9_000));
@@ -81,16 +83,23 @@ class TraceV2RepositorySessionTracesTest {
                 .update();
         fx.trace(pid, t6, "sess-1", t0.plusMillis(3_000));
         fx.settle(pid, t6, t0.plusMillis(5_000));
+        fx.trace(pid, t7, "sess-1", t0.plusMillis(6_000));
+        jdbc.sql("UPDATE trace SET is_settled = true WHERE project_id = :pid AND id = :id")
+                .param("pid", pid)
+                .param("id", t7)
+                .update();
 
         assertEquals(
                 List.of(
-                        new Seen(t3, null, null, t0.plusMillis(2_000), null),
-                        new Seen(t1, null, "cs-1", t0, t0.plusMillis(9_000)),
-                        new Seen(t6, null, null, t0.plusMillis(3_000), t0.plusMillis(5_000)),
-                        new Seen(t2, t1, null, t0.plusMillis(1_000), t0.plusMillis(5_000))),
+                        new Seen(t7, null, null, t0.plusMillis(6_000), true, null),
+                        new Seen(t3, null, null, t0.plusMillis(2_000), false, null),
+                        new Seen(t1, null, "cs-1", t0, true, t0.plusMillis(9_000)),
+                        new Seen(t6, null, null, t0.plusMillis(3_000), true, t0.plusMillis(5_000)),
+                        new Seen(t2, t1, null, t0.plusMillis(1_000), true, t0.plusMillis(5_000))),
                 seen(traces.listSessionTraces(pid, "sess-1")),
                 "a start order puts t1 last, a thread-keyed read lists t4, a read that drops detached traces skips t2,"
-                        + " a deleted trace lists t5, an unsettled trace placed by a stale end is not first");
+                        + " a deleted trace lists t5, an unsettled trace placed by a stale end is not first, a settled"
+                        + " trace with no ended span reads as not settled");
     }
 
     @Test
@@ -109,7 +118,7 @@ class TraceV2RepositorySessionTracesTest {
         fx.trace(theirs, SubstrateV2Fixtures.traceId(), "sess-1", t0.plusMillis(2_000));
 
         assertEquals(
-                List.of(new Seen(shared, null, null, t0, null)),
+                List.of(new Seen(shared, null, null, t0, false, null)),
                 seen(traces.listSessionTraces(mine, "sess-1")),
                 "a read that drops the project filter lists the other project's traces of the same session id");
     }
@@ -121,6 +130,7 @@ class TraceV2RepositorySessionTracesTest {
                         r.parentTraceId(),
                         r.callSiteId(),
                         Instant.parse(r.startedAt()),
+                        r.settled(),
                         r.settledEnd() == null ? null : Instant.parse(r.settledEnd())))
                 .toList();
     }

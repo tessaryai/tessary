@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.open.obs.Markers;
 import ai.tessary.storage.SpanPayloadRepository;
+import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
@@ -23,6 +24,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -131,34 +133,79 @@ class SessionTimelineServiceTest {
                         + " truncated");
     }
 
+    @Test
+    void aSettledTraceWithNoEndedSpanStillPlacesAnOrphanSpansMessage() {
+        when(traces.listSessionTraces(PID, SID))
+                .thenReturn(List.of(new SessionTrace("t1", null, null, T0.toString(), true, null)));
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenReturn(List.of(spanRow("t1", "l1", "missing-parent", "llm", T0.toString(), null)));
+        when(payloads.listByTraceIds(eq(PID), anyCollection()))
+                .thenReturn(List.of(new SpanPayloadRow(
+                        PID,
+                        "t1",
+                        "l1",
+                        "[{\"role\":\"user\",\"content\":\"hello\"}]",
+                        null,
+                        null,
+                        null,
+                        T0.toString(),
+                        null)));
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+
+        SessionTimeline timeline = service.load(PID, SID);
+
+        assertEquals(
+                List.of("t1/l1#user:0"),
+                timeline.events().stream().map(Event::id).toList(),
+                "a settled trace none of whose spans ended is read as a trace still receiving spans, so the span whose"
+                        + " parent never arrived carries no message");
+    }
+
     private static SessionTrace settled(String id, long endMs) {
         return new SessionTrace(
-                id, null, null, T0.toString(), T0.plusMillis(endMs).toString());
+                id, null, null, T0.toString(), true, T0.plusMillis(endMs).toString());
     }
 
     /** One complete tool span per trace, ending at the trace's end. */
     private static SpanRow toolSpan(String traceId) {
         long endMs = Long.parseLong(traceId.substring(1)) * 1000;
-        return new SpanRow(
-                PID,
+        return spanRow(
                 traceId,
                 "s-" + traceId,
                 null,
+                "tool",
+                T0.plusMillis(endMs - 10).toString(),
+                T0.plusMillis(endMs).toString());
+    }
+
+    private static SpanRow spanRow(
+            String traceId,
+            String spanId,
+            @Nullable String parentSpanId,
+            String kind,
+            String startedAt,
+            @Nullable String endedAt) {
+        return new SpanRow(
+                PID,
+                traceId,
+                spanId,
+                parentSpanId,
                 null,
                 SID,
                 null,
                 null,
                 null,
                 null,
-                "tool",
+                kind,
                 "lookup",
                 true,
                 null,
                 null,
                 null,
                 null,
-                T0.plusMillis(endMs - 10).toString(),
-                T0.plusMillis(endMs).toString(),
+                startedAt,
+                endedAt,
                 10L,
                 null,
                 null,
