@@ -114,7 +114,9 @@ function serve() {
  * the n-th prompt arrives, before answering), FAKE_OPENCODE_STRAY_IDLE=1 (right after accepting
  * a prompt, publish the previous user message again and a `session.status idle`: the tail of the
  * previous reply, which the binary sends after its idle), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
- * first reply, end every `/event` response instead of publishing the final idle pair).
+ * first reply, end every `/event` response instead of publishing the final idle pair),
+ * FAKE_OPENCODE_NEVER_SETTLE=1 (after an abort or an error, stop at the first idle pair: the tool
+ * and the message are never settled).
  */
 function serveSession(port) {
   const script = JSON.parse(fs.readFileSync(process.env.FAKE_OPENCODE_SESSION_SCRIPT, 'utf8'));
@@ -185,6 +187,7 @@ function serveSession(port) {
     publish('session.error', { sessionID, error });
     playing = false;
     idlePair();
+    if (process.env.FAKE_OPENCODE_NEVER_SETTLE === '1') return;
     await sleep(30);
     if (runningPart) {
       runningPart.state = { status: 'error', input: runningPart.state.input, error: 'Tool execution aborted', time: { start: runningPart.state.time.start, end: Date.now() } };

@@ -304,6 +304,38 @@ test('a dossier path that escapes fails the start, and the session closes as fai
   assert.deepEqual(await withDeadline(session.exited, 7_000), { code: 1, signal: null });
 });
 
+test('a lost SSE frame still yields tool_end and text before message_end', async (t) => {
+  // Bug caught: an event lost in a reconnect gap leaves a step the backend never stores.
+  const script = {
+    replies: [{ steps: [{ silent: true, text: ['Quiet.'], tools: [{ name: 'alpha_list_traces', input: { q: 'x' }, duration_ms: 3 }], usage: usage(1, 1, 0, 0, 0.125) }] }],
+  };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'quietly');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events, [
+    ev('text', { delta: 'Quiet.' }),
+    ev('tool_start', { call_id: 'call_1_1_1', server: 'alpha', tool: 'list_traces', input_summary: '{"q":"x"}' }),
+    ev('tool_end', { call_id: 'call_1_1_1', result_summary: '{"count":3,"file":"checks/mcp/001-list_traces.json"}', bytes: 52, duration_ms: 3, ok: true }),
+    ev('message_end', {
+      usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.125 },
+      reason: 'done',
+    }),
+  ]);
+});
+
+test('reasoning text is not the reply', async (t) => {
+  // Bug caught: the model's private reasoning shows as the agent's words.
+  const script = { replies: [{ steps: [{ reasoning: ['think'], text: ['Answer.'], usage: usage(1, 1, 0, 0, 0.125) }] }] };
+  const { session } = await readySession(t, { script });
+
+  await send(session, 'why?');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events.filter((e) => e.type === 'text'), [ev('text', { delta: 'Answer.' })]);
+});
+
 test('a provider error is reported and the reply still ends once', async (t) => {
   // Bug caught: an error leaves the reply open forever, or its spend is not booked.
   const script = { replies: [{ steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error: { name: 'APIError', data: { message: 'overloaded' } } }] };
@@ -321,6 +353,26 @@ test('a provider error is reported and the reply still ends once', async (t) => 
     }),
   ]);
   assert.deepEqual([...later], [], 'the second idle pair ends nothing');
+});
+
+test('a reply whose message never completes after an error still ends', async (t) => {
+  // Bug caught: OpenCode reports idle and never completes the message, and the reply stays open,
+  // so every later message is 409.
+  const script = {
+    replies: [
+      { steps: [{ usage: usage(5, 0, 0, 0, 0.5) }], error: { name: 'APIError', data: { message: 'overloaded' } } },
+      { steps: [{ text: ['Back.'], usage: usage(1, 1, 0, 0, 0.125) }] },
+    ],
+  };
+  const { session } = await readySession(t, { script, env: { FAKE_OPENCODE_NEVER_SETTLE: '1' } });
+
+  await send(session, 'hello');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events.map((e) => e.type), ['error', 'message_end']);
+  assert.equal(events[1].data.reason, 'done');
+  await send(session, 'again');
+  assert.deepEqual((await session.readEvents(2, 'message_end', 1))[0], ev('text', { delta: 'Back.' }));
 });
 
 test('an OpenCode that dies mid-session closes the session as failed', async (t) => {
@@ -364,6 +416,19 @@ test('no secret, no server', async (t) => {
   }
 });
 
+test('a late idle from the previous reply does not end the new one', async (t) => {
+  // Bug caught: a phantom message_end with zero usage while the agent still works, then a stuck reply.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_STRAY_IDLE: '1' } });
+
+  assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS]);
+});
+
+test('a reply whose idle was lost in a stream reconnect still ends', async (t) => {
+  // Bug caught: the reply stays open and every later message is 409.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_IDLE: '1' } });
+
+  assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS]);
+});
 
 function withDeadline(promise, ms) {
   return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`not settled in ${ms}ms`)), ms))]);

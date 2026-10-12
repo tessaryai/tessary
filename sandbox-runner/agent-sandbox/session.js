@@ -36,6 +36,7 @@ const DETAIL_CHARS = 500;
 const REQUEST_MS = 60_000;
 const CLOSE_GRACE_MS = 5_000;
 const SETTLE_MS = 2_000;
+const RESUBSCRIBE_MS = 250;
 const MAX_BODY_BYTES = 1 << 20;
 const MIN_SECRET_CHARS = 32;
 const MAX_TOOL_CALLS = 1000;
@@ -206,7 +207,7 @@ function createReplyTracker({ log, serverNames, steps }) {
         case 'message.updated': {
           const info = p.info || {};
           if (info.role === 'user') {
-            if (reply && !reply.armed) {
+            if (reply && !reply.armed && !userIds.has(info.id)) {
               reply.armed = true;
               reply.userId = info.id;
             }
@@ -229,7 +230,7 @@ function createReplyTracker({ log, serverNames, steps }) {
         }
         case 'message.part.delta': {
           if (p.field !== 'text' || !ofReply(p.messageID)) return null;
-          if (reply.finalParts.has(p.partID)) return null;
+          if (reply.partTypes.get(p.partID) !== 'text' || reply.finalParts.has(p.partID)) return null;
           const delta = String(p.delta || '');
           if (!delta) return null;
           log.emit('text', { delta });
@@ -256,6 +257,18 @@ function createReplyTracker({ log, serverNames, steps }) {
     /** Reconcile against the stored messages, then end the reply with its summed usage. */
     finish(messages) {
       const own = messages.filter((m) => m && m.info && m.info.role === 'assistant' && m.info.parentID === reply.userId);
+      for (const m of own) {
+        const parts = m.parts || [];
+        for (const part of parts) if (part.type === 'text' && !part.synthetic) emitText(part.id, String(part.text || ''));
+        for (const part of parts) {
+          if (part.type !== 'tool') continue;
+          emitTool(part);
+          if (reply.started.has(part.callID) && !reply.ended.has(part.callID)) {
+            reply.ended.add(part.callID);
+            log.emit('tool_end', toolEndOf(part));
+          }
+        }
+      }
       const usage = sumUsage(own.map((m) => ({ usage: usageOf(m.info) })));
       const reason = reply.abortRequested ? 'aborted' : own.length >= steps ? 'limit' : 'done';
       log.emit('message_end', { usage, reason });
@@ -376,6 +389,7 @@ async function main() {
   let sessionId = null;
   let model = null;
   let stopping = false;
+  let lost = false;
   let settleTimer = null;
   let finishing = null;
   let onConnected = () => {};
@@ -422,10 +436,24 @@ async function main() {
     return finishing;
   }
 
+  async function finishIfIdle() {
+    try {
+      const { data } = await client.session.status();
+      const status = data && data[sessionId];
+      if (!status || status.type === 'idle') await finishReply();
+    } catch (e) {
+      console.error(`session status unread after a reconnect: ${describeError(e)}`);
+    }
+  }
+
   async function onOpencodeEvent(event) {
     if (!event || typeof event !== 'object') return;
     if (event.type === 'server.connected') {
       onConnected();
+      if (lost) {
+        lost = false;
+        if (tracker.armed) await finishIfIdle();
+      }
       return;
     }
     if (!sessionId || sessionOf(event) !== sessionId) return;
@@ -435,11 +463,21 @@ async function main() {
   }
 
   async function runEventLoop() {
-    try {
-      const { stream } = await client.event.subscribe({ signal: subscription.signal });
-      for await (const event of stream) await onOpencodeEvent(event);
-    } catch (e) {
-      if (!subscription.signal.aborted) console.error(`event stream failed: ${describeError(e)}`);
+    while (!subscription.signal.aborted) {
+      try {
+        const { stream } = await client.event.subscribe({
+          signal: subscription.signal,
+          sseDefaultRetryDelay: RESUBSCRIBE_MS,
+          onSseError: () => {
+            lost = true;
+          },
+        });
+        for await (const event of stream) await onOpencodeEvent(event);
+      } catch (e) {
+        if (!subscription.signal.aborted) console.error(`event stream failed: ${describeError(e)}`);
+      }
+      lost = true;
+      if (!subscription.signal.aborted) await sleep(RESUBSCRIBE_MS);
     }
   }
 
