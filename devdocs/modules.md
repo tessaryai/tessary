@@ -108,7 +108,8 @@ share a lifecycle — but a package split, so the module boundary stops it regre
 | `substrate/` | 8 | call-site reads, the trace/action reader all three drift classifiers share |
 | `detector/` | 10 | encoder + deterministic detectors |
 | `catalog/` | 8 | `BuiltInClassifierCatalog`, `ClassifierModelModule`, `BuiltInDetector`, `DetectorSupplier`, `ClassifierMethodCard`, `OpenDetectionTables`, and provisioning's two triggers — `ClassifierSeedListener` (once, on project creation) + `ClassifierCatalogWorker` (the periodic reconcile over every active project). Provisioning lives here rather than in `worker/` because it answers to the capability flag layer, not to the sweep: which classifiers a project HAS is a licensing question, and which of them sweep is a traffic question |
-| `worker/` | 9 | `ClassifierWorker`, job claim, and the fitting tier's extension seam — the `ClassifierSweep` port with its `SweepContext`/`SweepOutcome` records, and `ClassifierSweepRegistry`, which indexes every sweep on the classpath by the detector kinds it claims. See its `package-info.java` and `devdocs/reference/classifier-extension-interface.md` |
+| `worker/` | 13 | `ClassifierWorker`, job claim, and the fitting tier's extension seam — the `ClassifierSweep` port with its `SweepContext`/`SweepOutcome` records, `ClassifierSweepRegistry`, which indexes every sweep on the classpath by the detector kinds it claims, and `SweepRouting`, the one home of the decision whether a kind runs at window grain through a registered sweep or at the catalog's grain. See its `package-info.java` and `devdocs/reference/classifier-extension-interface.md` |
+| `timeline/` | 7 | the session timeline: `SessionTimelineBuilder` derives one ordered list of `Event`s per session (`session_id`, never `thread_id`) from its spans, with the user messages and assistant replies inside them; `SessionTimelineService` reads it whole or as a byte-bounded tail; `DialogueMessages` is the new-message rule the frustration thread reads through too |
 | `debug/` | 3 | the debug rail's read surface |
 
 9 files stay at the root — `Classifier{Controller,Service,Repository,Row,Field,Dtos,DetectionRepository,DetectionWriteRepository}`
@@ -160,7 +161,8 @@ detectors references both sides in one file, where the prefix is what makes the 
 ```
 classifier/
   catalog/      BuiltInClassifierCatalog, ClassifierModelModule, seeding + catalog reconcile
-  worker/       ClassifierWorker, job claim, the ClassifierSweep port + its registry
+  worker/       ClassifierWorker, job claim, the ClassifierSweep port + its registry, SweepRouting
+  timeline/     the session timeline of events, and the shared new-message rule
   detector/     encoder + deterministic detectors
   metric/       duration + cost drift
   finding/      the shared findings + triage feature every classifier serves through
