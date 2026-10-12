@@ -161,6 +161,7 @@ public final class SessionTimelineBuilder {
         private final Map<String, List<DialogueMessage>> inputs = new HashMap<>();
         private final Map<String, List<DialogueMessage>> outputs = new HashMap<>();
         private final Map<String, Map<String, Integer>> received = new HashMap<>();
+        private final Map<String, Boolean> speaking = new HashMap<>();
         private final List<Derived> out = new ArrayList<>();
 
         TraceDerivation(List<TimelineSpan> spans, boolean settled) {
@@ -223,10 +224,16 @@ public final class SessionTimelineBuilder {
          * earlier spans of the trace did is a resend, so it is not a new event; {@code n} counts before that check.
          * So the person can say the same words again after a reply of the same turn, and a span that carries an
          * earlier turn's history does not count the message again.
+         *
+         * <p>When a top agent span received a user message, the agent input is the authority, as its output is for
+         * the replies: the {@code llm} calls under it carry no user message, because the agent loop's calls also
+         * send prompts that code wrote under the user role, such as a memory summary's instruction. So a message the
+         * person adds while the agent runs, which only a later call's input holds, is not an event.
          */
         private void userMessages(List<TimelineSpan> facing) {
             Map<UserKey, Integer> emitted = new HashMap<>();
             for (TimelineSpan carrier : facing) {
+                if (underSpeakingAgent(carrier)) continue;
                 List<DialogueMessage> input = personInput(carrier);
                 List<DialogueMessage> fresh = DialogueMessages.afterLastAssistant(input);
                 List<DialogueMessage> users = fresh.stream()
@@ -257,6 +264,17 @@ public final class SessionTimelineBuilder {
                 }
                 inSpan.forEach((key, count) -> emitted.merge(key, count, Math::max));
             }
+        }
+
+        /** Whether the span is an {@code llm} call under a top agent that received a user message. */
+        private boolean underSpeakingAgent(TimelineSpan span) {
+            String agentId = facts(span).agentId();
+            TimelineSpan agent = agentId == null ? null : byId.get(agentId);
+            return LLM.equals(eventKind(span))
+                    && agent != null
+                    && speaking.computeIfAbsent(
+                            agent.spanId(),
+                            k -> personInput(agent).stream().anyMatch(m -> USER.equals(m.role()) && m.dialogue()));
         }
 
         /** The key of an assistant message when a person-facing {@code llm} call that ended by then wrote it. */

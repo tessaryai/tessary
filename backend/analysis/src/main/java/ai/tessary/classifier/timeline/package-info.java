@@ -14,8 +14,11 @@
  *       span that is not inside a nested agent, with only {@code llm}, {@code step}, {@code workflow} or {@code
  *       handoff} spans between it and its agent, or the root. A message an orchestrator sends to a sub-agent stays in
  *       the sub-agent's {@code llm} event, and so does the prompt of a model call that a tool, a guardrail, a
- *       retrieval or any other work span makes; an agent a tool runs is not the agent the person talks to. A message
- *       that a later span sends again is not a new event.
+ *       retrieval or any other work span makes; an agent a tool runs is not the agent the person talks to. When a top
+ *       agent span received a user message, its input is the authority, as its output is for the replies: the {@code
+ *       llm} calls under it carry no user message, since code also writes prompts under the user role, such as a
+ *       memory summary's instruction; a message the person adds while the agent runs, which only a later call's
+ *       input holds, is then not an event. A message that a later span sends again is not a new event.
  *   <li>An {@code assistant_reply} is text the person sees, from the top agent of the turn. A message with only tool
  *       calls is not a reply, and neither is the text a sub-agent returns to its orchestrator. When an output holds the
  *       whole chat, only the assistant messages after its last user message are new. Two messages with the same text

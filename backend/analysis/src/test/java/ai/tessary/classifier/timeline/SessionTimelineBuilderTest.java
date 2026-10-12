@@ -463,6 +463,37 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
+    void aPromptCodeWritesToAModelCallOfTheAgentIsNotAUserMessage() {
+        String history = Q1 + "," + R1;
+        List<TimelineSpan> spans = List.of(
+                span("tr-m", "m1", "agent")
+                        .at(0, 500)
+                        .in("[" + history + "," + EXPEDITE + "]")
+                        .out("Yes, expedited.")
+                        .build(),
+                span("tr-m", "m2", "llm")
+                        .parent("m1")
+                        .at(10, 100)
+                        .in("[" + history + ",{\"role\":\"user\",\"content\":\"summarise the chat\"}]")
+                        .out("Order 42 ships tomorrow.")
+                        .build(),
+                span("tr-m", "m3", "llm")
+                        .parent("m1")
+                        .at(110, 490)
+                        .in("[" + history + "," + EXPEDITE + "]")
+                        .out("Yes, expedited.")
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of("tr-m/m1#user:0 can you expedite it?", "tr-m/m3#reply:0 Yes, expedited."),
+                messages(timeline),
+                "a memory summary's instruction under the user role reads as the person's message, though the agent"
+                        + " input says what the person sent");
+    }
+
+    @Test
     void anAppWithoutAgentSpansRepliesFromEachTextCall() {
         String toolCallOnly = "[{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"c1\","
                 + "\"type\":\"function\",\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}]";
