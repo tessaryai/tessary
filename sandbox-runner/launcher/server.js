@@ -1152,6 +1152,51 @@ function runScriptInDocker(scriptName, payload, timeoutMs, posture, credential) 
   return dockerSemaphore.run(() => runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential));
 }
 
+// The create body of every sibling agent container, one-shot or session, so the hardening is one
+// copy. The caller names the command, env, extra labels, work subdirectory and network.
+function agentContainerBody({ cmd, env, labels, workSubpath, networkMode }) {
+  return {
+    Image: AGENT_IMAGE,
+    Cmd: cmd,
+    WorkingDir: '/home/user',
+    Env: env,
+    // Findable/reapable by reconciliation (reapOrphanSandboxContainers) and by a human running
+    // `docker ps --filter label=tessary.sandbox=1` — see the constant's own comment above.
+    Labels: { [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE, ...labels },
+    HostConfig: {
+      // The ONLY mount: the per-request work dir, read-write, nothing else from the host. The
+      // shared volume by NAME plus the subdirectory this request wrote, never a host path — see
+      // LAUNCHER_WORK_DIR's comment for why a path cannot work here.
+      Mounts: [
+        {
+          Type: 'volume',
+          Source: SANDBOX_WORK_VOLUME,
+          Target: '/work',
+          ReadOnly: false,
+          VolumeOptions: { Subpath: workSubpath },
+        },
+      ],
+      // Explicit remove by the owner (runScriptInDockerInner's `finally`, a session's close), not
+      // AutoRemove — the orphan-leak note above is exactly why: AutoRemove only fires on a normal
+      // container exit, never on a launcher crash, so an explicit, always-attempted remove plus the
+      // startup reconciliation pass is the actual guarantee, not a single `--rm`-equivalent flag.
+      AutoRemove: false,
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges'],
+      Memory: SANDBOX_DOCKER_MEMORY_MB * 1024 * 1024,
+      NanoCpus: Math.round(SANDBOX_DOCKER_CPUS * 1e9),
+      PidsLimit: SANDBOX_DOCKER_PIDS_LIMIT,
+      // Never host networking. Which network an agent-posture sibling lands on is
+      // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the tessary service network
+      // by default so the agent can reach the backend's MCP door by service name, the dedicated
+      // bridge when an operator has opted into cutting it off. Either way the network stays ON
+      // (not `--network none`): the agent needs egress for the repo clone and the model-provider
+      // call.
+      NetworkMode: networkMode,
+    },
+  };
+}
+
 async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential) {
   const startedAt = Date.now();
   const withMeta = (e) => stampFailure(e, { launcherMeta: { script: scriptName, elapsed_ms: Date.now() - startedAt, timeout_ms: timeoutMs } });
@@ -1177,50 +1222,14 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   let containerId;
   try {
     await ensureAgentImage();
-    const created = await dockerJson('POST', '/containers/create', {
-      Image: AGENT_IMAGE,
-      Cmd: ['node', scriptName, '/work/input.json'],
-      WorkingDir: '/home/user',
-      Env: envList,
-      // Findable/reapable by reconciliation (reapOrphanSandboxContainers) and by a human running
-      // `docker ps --filter label=tessary.sandbox=1` — see the constant's own comment above.
-      Labels: {
-        [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE,
-        'tessary.sandbox.script': scriptName,
-        [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs),
-      },
-      HostConfig: {
-        // The ONLY mount: the per-request work dir, read-write, nothing else from the host. The
-        // shared volume by NAME plus the subdirectory this request wrote, never a host path — see
-        // LAUNCHER_WORK_DIR's comment for why a path cannot work here.
-        Mounts: [
-          {
-            Type: 'volume',
-            Source: SANDBOX_WORK_VOLUME,
-            Target: '/work',
-            ReadOnly: false,
-            VolumeOptions: { Subpath: workSubpath },
-          },
-        ],
-        // Explicit remove in `finally` below, not AutoRemove — the orphan-leak note above is
-        // exactly why: AutoRemove only fires on a normal container exit, never on a launcher
-        // crash, so an explicit, always-attempted remove plus the startup reconciliation pass is
-        // the actual guarantee, not a single `--rm`-equivalent flag.
-        AutoRemove: false,
-        CapDrop: ['ALL'],
-        SecurityOpt: ['no-new-privileges'],
-        Memory: SANDBOX_DOCKER_MEMORY_MB * 1024 * 1024,
-        NanoCpus: Math.round(SANDBOX_DOCKER_CPUS * 1e9),
-        PidsLimit: SANDBOX_DOCKER_PIDS_LIMIT,
-        // Never host networking. Which network an agent-posture sibling lands on is
-        // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the tessary service network
-        // by default so the agent can reach the backend's MCP door by service name, the dedicated
-        // bridge when an operator has opted into cutting it off. Either way the network stays ON
-        // (not `--network none`): the agent needs egress for the repo clone and the model-provider
-        // call. A non-agent posture still gets no network at all.
-        NetworkMode: posture === AGENT_POSTURE ? await sandboxNetwork() : 'none',
-      },
-    });
+    const created = await dockerJson('POST', '/containers/create', agentContainerBody({
+      cmd: ['node', scriptName, '/work/input.json'],
+      env: envList,
+      labels: { 'tessary.sandbox.script': scriptName, [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs) },
+      workSubpath,
+      // A non-agent posture gets no network at all; see agentContainerBody for the agent's.
+      networkMode: posture === AGENT_POSTURE ? await sandboxNetwork() : 'none',
+    }));
     containerId = created.Id;
   } catch (e) {
     cleanupDir();
