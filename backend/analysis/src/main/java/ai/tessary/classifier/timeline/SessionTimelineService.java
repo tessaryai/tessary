@@ -69,9 +69,10 @@ public class SessionTimelineService {
      * can miss it.
      */
     public SessionTimeline loadTail(String projectId, String sessionId, long maxBytes) {
-        return read(projectId, sessionId, maxBytes).tail(maxBytes);
+        return read(projectId, sessionId, maxBytes);
     }
 
+    /** The tail of at most {@code maxBytes}; the load line counts the events it returns, not the events it read. */
     private SessionTimeline read(String projectId, String sessionId, long maxBytes) {
         Instant start = Instant.now();
         List<SessionTrace> all = traces.listSessionTraces(projectId, sessionId);
@@ -104,16 +105,18 @@ public class SessionTimelineService {
                 spanCount += spansOfTrace.size();
             }
         }
-        SessionTimeline timeline = SessionTimelineBuilder.assemble(projectId, sessionId, derived, tracesRemain);
+        SessionTimeline timeline = SessionTimelineBuilder.assemble(projectId, sessionId, derived, tracesRemain)
+                .tail(maxBytes);
+        long kept = timeline.bytes();
         StructuredLog.debug(log, Markers.OPS, "timeline.load")
                 .message(
                         "built a timeline of %d events (%d bytes) from %d traces",
-                        timeline.events().size(), bytes, traceCount)
+                        timeline.events().size(), kept, traceCount)
                 .field("traces", traceCount)
                 .field("spans", spanCount)
                 .field("events", timeline.events().size())
-                .field("bytes", bytes)
-                .field("truncated", tracesRemain)
+                .field("bytes", kept)
+                .field("truncated", timeline.truncated())
                 .durationMs(start)
                 .log();
         return timeline;

@@ -7,20 +7,28 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ai.tessary.open.obs.Markers;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.ToolCallRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Repository.SessionTrace;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 @ExtendWith(MockitoExtension.class)
 class SessionTimelineServiceTest {
@@ -67,6 +75,60 @@ class SessionTimelineServiceTest {
                 "a tail that one trace fills reads the spans and payloads of a whole page of traces");
         assertEquals(List.of(), tail.events(), "no event of 1 byte or less exists");
         assertEquals(true, tail.truncated());
+    }
+
+    @Test
+    void theLoadLineOfATailCountsTheEventsTheTailReturns() {
+        when(traces.listSessionTraces(PID, SID)).thenReturn(List.of(settled("t2", 2000), settled("t1", 1000)));
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenAnswer(call -> {
+                    Collection<String> ids = call.getArgument(1);
+                    return ids.stream()
+                            .map(SessionTimelineServiceTest::toolSpan)
+                            .toList();
+                });
+        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+        long newestEvent = service.load(PID, SID).events().get(1).bytes();
+        Logger logger = (Logger) LoggerFactory.getLogger(SessionTimelineService.class);
+        Level before = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.DEBUG);
+        SessionTimeline tail;
+        try {
+            tail = service.loadTail(PID, SID, newestEvent);
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(before);
+        }
+
+        assertEquals(List.of("t2/s-t2"), tail.events().stream().map(Event::id).toList());
+        assertEquals(true, tail.truncated());
+        ILoggingEvent line = appender.list.get(0);
+        assertEquals(List.of(Markers.OPS), line.getMarkerList());
+        Map<String, Object> fields = line.getKeyValuePairs().stream()
+                .filter(kv -> !"durationMs".equals(kv.key))
+                .collect(Collectors.toMap(kv -> kv.key, kv -> kv.value));
+        assertEquals(
+                Map.of(
+                        "event",
+                        "timeline.load",
+                        "traces",
+                        2,
+                        "spans",
+                        2,
+                        "events",
+                        1,
+                        "bytes",
+                        newestEvent,
+                        "truncated",
+                        true),
+                fields,
+                "the line counts the timeline read before the tail cut it, so it reports 2 events and not"
+                        + " truncated");
     }
 
     private static SessionTrace settled(String id, long endMs) {
