@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -108,6 +109,46 @@ class SessionTimelineServiceTest {
         verifyNoMoreInteractions(traces);
     }
 
+    /**
+     * Catches a tail through an instant that keeps the session's later events, or reads the spans of a trace that
+     * starts after that instant: the tail is the start of the full timeline, so a match that ends by then is the
+     * same match, and a backfill can reach the old part of a long session.
+     */
+    @Test
+    void aTailThroughAnInstantIsTheTimelineUpToThatInstant() {
+        stubTraces(
+                List.of(),
+                settledFrom("t5", 4990, 5000),
+                settledFrom("t4", 3990, 4000),
+                settledFrom("t3", 2990, 3000),
+                settledFrom("t2", 1990, 2000),
+                settledFrom("t1", 990, 1000));
+        when(spans.listByTraceIds(eq(PID), anyCollection(), eq(Integer.MAX_VALUE)))
+                .thenAnswer(call -> {
+                    Collection<String> ids = call.getArgument(1);
+                    return ids.stream()
+                            .map(SessionTimelineServiceTest::toolSpan)
+                            .toList();
+                });
+        when(payloads.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        when(toolCalls.listByTraceIds(eq(PID), anyCollection())).thenReturn(List.of());
+        SessionTimelineService service = new SessionTimelineService(traces, spans, payloads, toolCalls);
+
+        SessionTimeline tail = service.loadTailThrough(PID, SID, Long.MAX_VALUE, T0.plusMillis(3000));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<String>> read = ArgumentCaptor.forClass(Collection.class);
+        verify(spans, atLeastOnce()).listByTraceIds(eq(PID), read.capture(), eq(Integer.MAX_VALUE));
+        assertEquals(
+                List.of("t3", "t2", "t1"),
+                read.getAllValues().stream().flatMap(Collection::stream).toList(),
+                "a trace that starts after the instant has no event at or before it");
+        assertEquals(
+                List.of("t1/s-t1", "t2/s-t2", "t3/s-t3"),
+                tail.events().stream().map(Event::id).toList());
+        assertEquals(false, tail.truncated());
+    }
+
     @Test
     void theLoadLineOfATailCountsTheEventsTheTailReturns() {
         stubTraces(List.of(), settled("t2", 2000), settled("t1", 1000));
@@ -203,6 +244,16 @@ class SessionTimelineServiceTest {
             int from = after == null ? 0 : all.indexOf(after) + 1;
             return all.subList(from, Math.min(all.size(), from + limit));
         });
+    }
+
+    private static SessionTrace settledFrom(String id, long startMs, long endMs) {
+        return new SessionTrace(
+                id,
+                null,
+                null,
+                T0.plusMillis(startMs).toString(),
+                true,
+                T0.plusMillis(endMs).toString());
     }
 
     private static SessionTrace settled(String id, long endMs) {

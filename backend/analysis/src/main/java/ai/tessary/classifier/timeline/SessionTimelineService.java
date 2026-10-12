@@ -56,7 +56,7 @@ public class SessionTimelineService {
 
     /** The whole timeline of the session. */
     public SessionTimeline load(String projectId, String sessionId) {
-        return read(projectId, sessionId, Long.MAX_VALUE);
+        return read(projectId, sessionId, Long.MAX_VALUE, null);
     }
 
     /**
@@ -74,11 +74,23 @@ public class SessionTimelineService {
      * trace's latest span end, a tail can miss it.
      */
     public SessionTimeline loadTail(String projectId, String sessionId, long maxBytes) {
-        return read(projectId, sessionId, maxBytes);
+        return read(projectId, sessionId, maxBytes, null);
+    }
+
+    /**
+     * {@code load(projectId, sessionId)} with only its events at or before {@code through}, then {@code tail(maxBytes)}:
+     * the start of the full timeline, numbered from 0. The order puts every event at or before an instant ahead of
+     * every event after it, so a match that ends at or before {@code through} is the same match on this timeline as
+     * on the whole one; a caller reaches the old part of a long session with it, where {@link #loadTail} keeps only the
+     * newest. Reads as {@link #loadTail} does, and does not read the spans of a settled trace that starts after
+     * {@code through}, since none of its events can be at or before it.
+     */
+    public SessionTimeline loadTailThrough(String projectId, String sessionId, long maxBytes, Instant through) {
+        return read(projectId, sessionId, maxBytes, through);
     }
 
     /** The tail of at most {@code maxBytes}; the load line counts the events it returns, not the events it read. */
-    private SessionTimeline read(String projectId, String sessionId, long maxBytes) {
+    private SessionTimeline read(String projectId, String sessionId, long maxBytes, @Nullable Instant through) {
         Instant start = Instant.now();
         SessionTraces source = new SessionTraces(traces, projectId, sessionId);
         List<SessionTimelineBuilder.Derived> derived = new ArrayList<>();
@@ -94,14 +106,18 @@ public class SessionTimelineService {
                 tracesRemain = true;
                 break;
             }
-            Map<String, List<TimelineSpan>> byTrace = timelineSpans(projectId, page);
+            List<SessionTrace> reached =
+                    page.stream().filter(trace -> reaches(trace, through)).toList();
+            Map<String, List<TimelineSpan>> byTrace = timelineSpans(projectId, reached);
             for (SessionTrace trace : page) {
                 if (enough(derived, bytes, maxBytes, trace)) {
                     tracesRemain = true;
                     break pages;
                 }
+                if (!reaches(trace, through)) continue;
                 List<TimelineSpan> spansOfTrace = byTrace.getOrDefault(trace.id(), List.of());
                 for (SessionTimelineBuilder.Derived d : SessionTimelineBuilder.derive(spansOfTrace, trace.settled())) {
+                    if (through != null && d.event().at().isAfter(through)) continue;
                     derived.add(d);
                     bytes += d.event().bytes();
                 }
@@ -165,6 +181,16 @@ public class SessionTimelineService {
             }
             return page;
         }
+    }
+
+    /**
+     * Whether the trace can hold an event at or before {@code through}: every trace with no bound, a trace that has not
+     * settled (its start can still move earlier), and a settled one that starts at or before it.
+     */
+    private static boolean reaches(SessionTrace trace, @Nullable Instant through) {
+        return through == null
+                || !trace.settled()
+                || !Instant.parse(trace.startedAt()).isAfter(through);
     }
 
     /** Whether the events loaded after the trace's end already fill the tail, so the trace and the ones after it are not read. */
