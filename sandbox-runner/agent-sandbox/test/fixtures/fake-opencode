@@ -7,10 +7,13 @@
  *
  * It parses --port, answers the three session routes runAgent uses, and announces itself the way
  * opencode does. Behaviour is chosen by env:
- *   FAKE_OPENCODE_RECORD_DIR  write <pid>.json = {pid, args, config} there on start
+ *   FAKE_OPENCODE_RECORD_DIR  write <pid>.json = {pid, args, config, env} there on start, and append
+ *     each prompt body to <pid>-prompts.jsonl
  *   FAKE_OPENCODE_EXIT_BEFORE_READY=1  exit 1 right after recording, never announcing
  *   FAKE_OPENCODE_IGNORE_SIGTERM=1  survive SIGTERM, so only SIGKILL stops it (the bug's shape)
  *   FAKE_OPENCODE_REPLY  the assistant's text; unset or empty = an empty completion
+ *   FAKE_OPENCODE_SESSION_SCRIPT=<file>  play a scripted session over the event stream instead; see
+ *     serveSession below for the script and the switches that go with it
  */
 const fs = require('node:fs');
 const http = require('node:http');
@@ -41,12 +44,21 @@ function serve() {
   if (process.env.FAKE_OPENCODE_RECORD_DIR) {
     fs.writeFileSync(
       path.join(process.env.FAKE_OPENCODE_RECORD_DIR, `${process.pid}.json`),
-      JSON.stringify({ pid: process.pid, args, config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}') }),
+      JSON.stringify({
+        pid: process.pid,
+        args,
+        config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}'),
+        env: process.env,
+      }),
     );
   }
   if (process.env.FAKE_OPENCODE_EXIT_BEFORE_READY === '1') {
     process.stderr.write('fake opencode: exiting before ready\n');
     process.exit(1);
+  }
+  if (process.env.FAKE_OPENCODE_SESSION_SCRIPT) {
+    serveSession(port);
+    return;
   }
   const text = process.env.FAKE_OPENCODE_REPLY || '';
   const assistant = {
@@ -69,6 +81,253 @@ function serve() {
     req.on('end', () => {
       if (req.method === 'POST' && url.pathname === '/session') return send({ id: `s${++sessions}` });
       if (/^\/session\/[^/]+\/message$/.test(url.pathname)) return send(req.method === 'GET' ? [assistant] : assistant);
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  server.listen(port, '127.0.0.1', () => {
+    process.stdout.write(`opencode server listening on http://127.0.0.1:${port}\n`);
+  });
+}
+
+/*
+ * A scripted session, in the event shapes of the opencode 1.18.30 binary (recorded against it with a
+ * stub provider): the v2 `message.updated`, `message.part.updated`, `message.part.delta`,
+ * `session.status`, `session.idle` and `session.error` events on `GET /event`, one assistant message
+ * per step with `parentID` set to the user message, MCP tools named `<server>_<tool>`. The script is
+ * `{ replies: [Reply, ...] }`, and reply i answers the i-th prompt:
+ *
+ *   Reply: { steps: [Step, ...], error?: { name, data: { message } } }
+ *   Step:  { text?: [chunk, ...], reasoning?: [chunk, ...], silent?: true,
+ *            tools?: [{ name, input, duration_ms, hang? }],
+ *            usage: { input, output, cache_read, cache_write, cost } }
+ *
+ * A tool `<server>_<tool>` whose server is a key of the config's `mcp` is called for real with a
+ * JSON-RPC `tools/call`, and its output is the reply's first text block. A `hang` tool stays running
+ * until `POST /session/{id}/abort`. A `silent` step stores its parts but publishes none of their
+ * events. The binary ends an aborted or failed reply in this order, so the fake does too:
+ * `session.error`, the idle pair, then the tool part's error and the assistant message's completion,
+ * then a second idle pair. The binary keeps offering tools on the step that reaches `steps` (it only
+ * tells the model to stop), so the fake plays every step as written.
+ *
+ * Switches: FAKE_OPENCODE_HEARTBEAT_MS (default 10000), FAKE_OPENCODE_EXIT_ON_PROMPT=<n> (exit 3 when
+ * the n-th prompt arrives, before answering), FAKE_OPENCODE_STRAY_IDLE=1 (publish a late
+ * `session.status idle` right after accepting a prompt), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
+ * first reply, end every `/event` response instead of publishing the final idle pair).
+ */
+function serveSession(port) {
+  const script = JSON.parse(fs.readFileSync(process.env.FAKE_OPENCODE_SESSION_SCRIPT, 'utf8'));
+  const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}');
+  const heartbeatMs = Number(process.env.FAKE_OPENCODE_HEARTBEAT_MS || 10_000);
+  const exitOnPrompt = Number(process.env.FAKE_OPENCODE_EXIT_ON_PROMPT || 0);
+  const recordDir = process.env.FAKE_OPENCODE_RECORD_DIR;
+  const streams = new Set();
+  const messages = [];
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let eventSeq = 0;
+  let sessionID = null;
+  let prompts = 0;
+  let playing = false;
+  let dropped = false;
+  let abort = null;
+
+  const publish = (type, properties) => {
+    const line = `data: ${JSON.stringify({ id: `evt_${++eventSeq}`, type, properties: clone(properties) })}\n\n`;
+    for (const res of streams) res.write(line);
+  };
+  const idlePair = () => {
+    publish('session.status', { sessionID, status: { type: 'idle' } });
+    publish('session.idle', { sessionID });
+  };
+  setInterval(() => publish('server.heartbeat', {}), heartbeatMs);
+
+  async function callMcp(name, input) {
+    const i = name.indexOf('_');
+    const server = i > 0 ? name.slice(0, i) : null;
+    const entry = server && config.mcp && config.mcp[server];
+    if (!entry) return { output: 'ok' };
+    try {
+      const res = await fetch(entry.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: name.slice(i + 1), arguments: input } }),
+      });
+      const body = await res.json();
+      return { output: body.result.content[0].text };
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  }
+
+  function complete(info, usage, finish) {
+    info.tokens = { input: usage.input, output: usage.output, reasoning: 0, cache: { read: usage.cache_read, write: usage.cache_write } };
+    info.cost = usage.cost;
+    info.finish = finish;
+    info.time.completed = Date.now();
+  }
+
+  async function streamPart(pub, msg, part, chunks) {
+    msg.parts.push(part);
+    part.time = { start: Date.now() };
+    pub('message.part.updated', { sessionID, part, time: Date.now() });
+    for (const delta of chunks) {
+      part.text += delta;
+      pub('message.part.delta', { sessionID, messageID: msg.info.id, partID: part.id, field: 'text', delta });
+      await sleep(1);
+    }
+    part.time.end = Date.now();
+    pub('message.part.updated', { sessionID, part, time: Date.now() });
+  }
+
+  async function endInterrupted(msg, usage, error, runningPart) {
+    publish('session.error', { sessionID, error });
+    playing = false;
+    idlePair();
+    await sleep(30);
+    if (runningPart) {
+      runningPart.state = { status: 'error', input: runningPart.state.input, error: 'Tool execution aborted', time: { start: runningPart.state.time.start, end: Date.now() } };
+      publish('message.part.updated', { sessionID, part: runningPart, time: Date.now() });
+    }
+    if (msg) {
+      complete(msg.info, usage, undefined);
+      msg.info.error = error;
+      publish('message.updated', { sessionID, info: msg.info });
+    }
+    idlePair();
+  }
+
+  async function play(k, text) {
+    const reply = (script.replies || [])[k - 1] || { steps: [] };
+    const uid = `msg_u${k}`;
+    const user = {
+      info: { id: uid, sessionID, role: 'user', time: { created: Date.now() } },
+      parts: [{ id: `prt_u${k}`, sessionID, messageID: uid, type: 'text', text }],
+    };
+    messages.push(user);
+    publish('message.updated', { sessionID, info: user.info });
+    publish('message.part.updated', { sessionID, part: user.parts[0], time: Date.now() });
+    publish('session.status', { sessionID, status: { type: 'busy' } });
+    const steps = reply.steps || [];
+    let msg = null;
+    for (let j = 1; j <= steps.length; j++) {
+      const step = steps[j - 1];
+      const usage = step.usage || { input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0 };
+      const pub = step.silent ? () => {} : publish;
+      const aid = `msg_a${k}_${j}`;
+      msg = {
+        info: {
+          id: aid, sessionID, role: 'assistant', parentID: uid, time: { created: Date.now() },
+          modelID: 'fake/model', providerID: 'fake', mode: 'tessary-session', agent: 'tessary-session',
+          cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [],
+      };
+      messages.push(msg);
+      publish('message.updated', { sessionID, info: msg.info });
+      if (step.reasoning) {
+        await streamPart(pub, msg, { id: `prt_r${k}_${j}`, sessionID, messageID: aid, type: 'reasoning', text: '' }, step.reasoning);
+      }
+      if (step.text) {
+        await streamPart(pub, msg, { id: `prt_t${k}_${j}`, sessionID, messageID: aid, type: 'text', text: '' }, step.text);
+      }
+      const tools = step.tools || [];
+      for (let i = 0; i < tools.length; i++) {
+        const tool = tools[i];
+        const part = {
+          id: `prt_c${k}_${j}_${i + 1}`, sessionID, messageID: aid, type: 'tool', callID: `call_${k}_${j}_${i + 1}`,
+          tool: tool.name, state: { status: 'pending', input: {}, raw: '' },
+        };
+        msg.parts.push(part);
+        pub('message.part.updated', { sessionID, part, time: Date.now() });
+        const start = Date.now();
+        part.state = { status: 'running', input: tool.input || {}, time: { start } };
+        pub('message.part.updated', { sessionID, part, time: Date.now() });
+        if (tool.hang) {
+          await new Promise((resolve) => { abort = resolve; });
+          await endInterrupted(msg, usage, { name: 'MessageAbortedError', data: { message: 'Aborted' } }, part);
+          return;
+        }
+        const result = await callMcp(tool.name, tool.input || {});
+        const time = { start, end: start + (tool.duration_ms || 0) };
+        part.state = result.error === undefined
+          ? { status: 'completed', input: part.state.input, output: result.output, title: tool.name, metadata: {}, time }
+          : { status: 'error', input: part.state.input, error: result.error, time };
+        pub('message.part.updated', { sessionID, part, time: Date.now() });
+      }
+      if (reply.error && j === steps.length) {
+        await endInterrupted(msg, usage, reply.error, null);
+        return;
+      }
+      complete(msg.info, usage, tools.length ? 'tool-calls' : 'stop');
+      publish('message.updated', { sessionID, info: msg.info });
+      publish('message.updated', { sessionID, info: msg.info });
+    }
+    if (reply.error) {
+      await endInterrupted(null, null, reply.error, null);
+      return;
+    }
+    playing = false;
+    if (process.env.FAKE_OPENCODE_DROP_BEFORE_IDLE === '1' && !dropped) {
+      dropped = true;
+      for (const res of streams) res.end();
+      streams.clear();
+      return;
+    }
+    publish('session.status', { sessionID, status: { type: 'busy' } });
+    idlePair();
+  }
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://x');
+    const send = (status, body) => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (req.method === 'GET' && url.pathname === '/event') {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      res.write(`data: ${JSON.stringify({ id: `evt_${++eventSeq}`, type: 'server.connected', properties: {} })}\n\n`);
+      streams.add(res);
+      req.on('close', () => streams.delete(res));
+      return;
+    }
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (req.method === 'POST' && url.pathname === '/session') {
+        sessionID = 'ses_1';
+        return send(200, { id: sessionID, title: 'fake' });
+      }
+      if (req.method === 'GET' && url.pathname === '/session/status') {
+        return send(200, playing ? { [sessionID]: { type: 'busy' } } : {});
+      }
+      const m = /^\/session\/([^/]+)\/(message|prompt_async|abort)$/.exec(url.pathname);
+      if (m && m[2] === 'message' && req.method === 'GET') return send(200, clone(messages));
+      if (m && m[2] === 'prompt_async' && req.method === 'POST') {
+        const body = JSON.parse(raw);
+        prompts += 1;
+        if (recordDir) fs.appendFileSync(path.join(recordDir, `${process.pid}-prompts.jsonl`), JSON.stringify(body) + '\n');
+        if (prompts === exitOnPrompt) process.exit(3);
+        playing = true;
+        res.writeHead(204);
+        res.end();
+        if (process.env.FAKE_OPENCODE_STRAY_IDLE === '1') publish('session.status', { sessionID, status: { type: 'idle' } });
+        const text = (body.parts || []).map((p) => p.text).join('');
+        setTimeout(() => void play(prompts, text), 5);
+        return;
+      }
+      if (m && m[2] === 'abort' && req.method === 'POST') {
+        send(200, true);
+        if (abort) {
+          const wake = abort;
+          abort = null;
+          wake();
+        } else if (!playing) {
+          idlePair();
+        }
+        return;
+      }
       res.writeHead(404);
       res.end();
     });
