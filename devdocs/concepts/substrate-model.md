@@ -488,6 +488,13 @@ What resolves late is the **derived ancestry**:
   terminal-state device as `correlation_state = 'none'` (§6.3) — otherwise orphans would sit
   permanently in the unresolved-path index and eventually starve the fixpoint of genuinely
   resolvable rows.
+- **A late parent takes its orphans back.** "Never arrives" is decided at settle time, and a
+  parent that outlives its children by more than the settle window — a 30-second agent turn, a
+  queue consumer — arrives after they were retired. Its write puts its retired descendants, to any
+  depth, back to `pending` in the same transaction (`SpanRepository.upsertAll`), the parent gets
+  its own path on the next pass, and the subtree resolves level by level as if it had arrived in
+  order. Only the arrival's own descendants: a sibling orphan whose parent is still missing stays
+  retired, so the index stays drainable.
 - The resolver **iterates to a fixpoint**: each pass resolves one level, and chains arrive
   deepest-first, so a chain of depth *n* resolves over at most *n* passes. The partial index
   `ix_span_unresolved_path` (§8) makes each pass a small indexed scan.

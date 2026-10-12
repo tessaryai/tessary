@@ -181,11 +181,62 @@ public class SpanRepository {
      * <p>The caller must re-arm the trace timer on both paths, insert and conflict, because a version
      * replacement changes token counts and so must un-settle the trace exactly like a new span. And the
      * write must share its transaction with that re-arm (§6.1).
+     *
+     * <p><b>An arrival takes back the orphans it is the parent of.</b> A batch exporter ships a span when
+     * it ends, so a parent that outlives its children by more than the settle window, a 30-second agent
+     * turn or a queue consumer, arrives after the trace settled and {@link #markOrphanPaths} retired them.
+     * Orphan is terminal for the resolver, which only ever claims {@code pending} rows, so without this
+     * step the parent would stand in the trace with no children under it, forever. The arrived span's
+     * retired descendants, to any depth, go back to {@code pending} here, in the same transaction as the
+     * write; the parent gets its path on the next pass and the fixpoint resolves the subtree level by
+     * level. Only descendants of this batch's spans: a sibling orphan whose own parent is still missing
+     * stays retired, so the queue remains drainable (§6.4).
      */
     public void upsertAll(List<SpanRow> rows) {
         int[] applied = named.batchUpdate(
                 UPSERT_SQL, rows.stream().map(SpanRepository::params).toArray(SqlParameterSource[]::new));
         BatchCounts.requireReal(applied);
+        reclaimOrphansUnder(rows);
+    }
+
+    /**
+     * Put the retired ({@code orphan}) descendants of the given spans back into the resolver's queue. The
+     * walk is per trace and follows {@code parent_span_id} downward through orphans only, so a resolved
+     * subtree is never touched and a cycle cannot recurse ({@code UNION} de-duplicates).
+     */
+    private void reclaimOrphansUnder(List<SpanRow> rows) {
+        StringBuilder values = new StringBuilder();
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        for (int i = 0; i < rows.size(); i++) {
+            SpanRow row = rows.get(i);
+            if (i > 0) values.append(", ");
+            values.append("(:p")
+                    .append(i)
+                    .append(", :t")
+                    .append(i)
+                    .append(", :s")
+                    .append(i)
+                    .append(')');
+            params.addValue("p" + i, row.projectId());
+            params.addValue("t" + i, row.traceId());
+            params.addValue("s" + i, row.id());
+        }
+        named.update(
+                "WITH RECURSIVE arrived(project_id, trace_id, id) AS (VALUES " + values + "),"
+                        + " reclaim AS ("
+                        + "   SELECT c.project_id, c.trace_id, c.id FROM span c"
+                        + "     JOIN arrived a ON a.project_id = c.project_id AND a.trace_id = c.trace_id"
+                        + "                   AND a.id = c.parent_span_id"
+                        + "    WHERE c.path_state = 'orphan'"
+                        + "   UNION"
+                        + "   SELECT c.project_id, c.trace_id, c.id FROM span c"
+                        + "     JOIN reclaim r ON r.project_id = c.project_id AND r.trace_id = c.trace_id"
+                        + "                   AND r.id = c.parent_span_id"
+                        + "    WHERE c.path_state = 'orphan')"
+                        + " UPDATE span s SET path_state = 'pending'"
+                        + "   FROM reclaim r"
+                        + "  WHERE s.project_id = r.project_id AND s.trace_id = r.trace_id AND s.id = r.id",
+                params);
     }
 
     // ----- resolver work queues (substrate-model.md §6.3, §6.4) ------------------------------------

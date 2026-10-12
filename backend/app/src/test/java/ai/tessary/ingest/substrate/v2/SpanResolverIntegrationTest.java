@@ -119,6 +119,73 @@ class SpanResolverIntegrationTest {
         assertEquals(0, pendingPaths(), "and it is out of the partial index for good");
     }
 
+    /**
+     * Catches: children retired as orphans while their long-running parent was still open stayed orphans
+     * after it arrived, so a 30-second agent turn or queue-consumer span never got its children under it.
+     * The exporter ships a span when it ends, so a parent that outlives its children by more than the
+     * settle window always arrives after they were retired.
+     */
+    @Test
+    @DisplayName("a parent that arrives after its children were retired as orphans takes them back")
+    void pathFixpoint_aLateParentReclaimsItsOrphanedSubtree() {
+        String traceId = SubstrateV2Fixtures.traceId();
+        // The turn's children end and ship first: a step, the llm call inside it, and the reply.
+        fx.span(pid, traceId, "assemble", "turn", "step", t0, t0.plusSeconds(1));
+        fx.span(pid, traceId, "route", "assemble", "llm", t0, t0.plusSeconds(1));
+        fx.span(pid, traceId, "reply", "turn", "llm", t0.plusSeconds(2), t0.plusSeconds(3));
+        PathResolver resolver = resolver(500);
+        settle(traceId);
+        resolver.runOnce();
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "assemble").orElseThrow().pathState());
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "reply").orElseThrow().pathState());
+        resolver.runOnce();
+        assertEquals(
+                "orphan",
+                spans.findById(pid, traceId, "route").orElseThrow().pathState(),
+                "retired behind its orphan parent");
+        assertEquals(0, pendingPaths());
+
+        // Twenty seconds later the turn itself ends and ships.
+        fx.span(pid, traceId, "turn", null, "step", t0, t0.plusSeconds(25));
+
+        assertEquals(
+                4,
+                pendingPaths(),
+                "the arrival, a pending root itself, put its whole retired subtree back in the queue");
+        for (int pass = 0; pass < 3; pass++) resolver.runOnce();
+        String turn = pathOf(traceId, "turn");
+        assertEquals(turn + ".assemble", pathOf(traceId, "assemble"));
+        assertEquals(turn + ".assemble.route", pathOf(traceId, "route"), "two levels down, through the reclaimed step");
+        assertEquals(turn + ".reply", pathOf(traceId, "reply"));
+        assertEquals(0, pendingPaths());
+    }
+
+    /** Catches: a reclaim that un-retires every orphan in the trace, rather than the arrival's own descendants. */
+    @Test
+    @DisplayName("an arrival takes back only its own descendants, never a sibling orphan whose parent is still missing")
+    void pathFixpoint_aLateParentLeavesUnrelatedOrphansRetired() {
+        String traceId = SubstrateV2Fixtures.traceId();
+        fx.span(pid, traceId, "mine", "late", "llm", t0, t0);
+        fx.span(pid, traceId, "stray", "aparentthatnevership", "llm", t0, t0);
+        PathResolver resolver = resolver(500);
+        settle(traceId);
+        resolver.runOnce();
+        assertEquals(0, pendingPaths());
+
+        fx.span(pid, traceId, "late", null, "step", t0, t0.plusSeconds(20));
+
+        assertEquals(2, pendingPaths(), "the arrival and its own child are back in the queue, nothing else");
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "stray").orElseThrow().pathState());
+        resolver.runOnce();
+        resolver.runOnce();
+        assertEquals(pathOf(traceId, "late") + ".mine", pathOf(traceId, "mine"));
+        assertEquals(
+                "orphan", spans.findById(pid, traceId, "stray").orElseThrow().pathState());
+    }
+
     @Test
     @DisplayName("a third-party span that arrived before its trace was known inherits the trace's handles")
     void correlation_copiesTheTraceHandlesDown() {
