@@ -647,6 +647,37 @@ class SessionTimelineBuilderTest {
                 "the message is placed at the start of the agent span that holds the model call carrying it");
     }
 
+    /**
+     * Catches a tool event that loses what the tool returned or received: ingest stores only a JSON object or array in
+     * the tool_call row, so a tool that returns text, or takes text, has it only in the span's payload.
+     */
+    @Test
+    void aToolThatTakesAndReturnsTextKeepsItsInputAndOutput() {
+        List<TimelineSpan> spans = List.of(
+                span("tr-t", "t1", "tool")
+                        .at(0, 20)
+                        .in("friday")
+                        .out("free at 8")
+                        .tool("find_slot", null, null)
+                        .build(),
+                span("tr-t", "t2", "tool")
+                        .at(30, 40)
+                        .out("ok")
+                        .tool("book", "{\"day\":\"fri\"}", null)
+                        .build());
+
+        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
+
+        assertEquals(
+                List.of(
+                        json("{\"name\":\"find_slot\",\"mcp\":false,\"status\":null,\"error_type\":null,"
+                                + "\"input\":\"friday\",\"output\":\"free at 8\"}"),
+                        json("{\"name\":\"book\",\"mcp\":false,\"status\":null,\"error_type\":null,"
+                                + "\"input\":{\"day\":\"fri\"},\"output\":\"ok\"}")),
+                data(timeline),
+                "a tool's text input or result is in its event");
+    }
+
     @Test
     void anOpenSpanGivesItsUserMessageButNoEventOrReply() {
         List<TimelineSpan> spans = List.of(span("tr-o", "o1", "llm")
@@ -1480,7 +1511,7 @@ class SessionTimelineBuilderTest {
             return this;
         }
 
-        SpanBuilder tool(String toolName, String arguments, @Nullable String result) {
+        SpanBuilder tool(String toolName, @Nullable String arguments, @Nullable String result) {
             this.tool = new TimelineSpan.Tool(toolName, arguments, result);
             return this;
         }

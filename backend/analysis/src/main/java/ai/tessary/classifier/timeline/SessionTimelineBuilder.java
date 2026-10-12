@@ -756,7 +756,10 @@ public final class SessionTimelineBuilder {
         }
     }
 
-    /** The data of a span event of any kind but {@code llm}. */
+    /**
+     * The data of a span event of any kind but {@code llm}. A tool's input and output are its {@code tool_call}
+     * arguments and result, else the span's payload, which holds a text result the row does not.
+     */
     private static ObjectNode spanData(TimelineSpan span) {
         ObjectNode data = MAPPER.createObjectNode();
         switch (eventKind(span)) {
@@ -767,8 +770,8 @@ public final class SessionTimelineBuilder {
                         .put("mcp", MCP.equals(span.kind()))
                         .put("status", span.status())
                         .put("error_type", span.errorType());
-                data.set("input", parse(tool == null ? span.input() : tool.arguments()));
-                data.set("output", parse(tool == null ? span.output() : tool.result()));
+                data.set("input", parse(orElse(tool == null ? null : tool.arguments(), span.input())));
+                data.set("output", parse(orElse(tool == null ? null : tool.result(), span.output())));
             }
             case STEP -> {
                 data.put("name", span.name());
@@ -783,6 +786,10 @@ public final class SessionTimelineBuilder {
             }
         }
         return data;
+    }
+
+    private static @Nullable String orElse(@Nullable String value, @Nullable String fallback) {
+        return value == null ? fallback : value;
     }
 
     private static ObjectNode llmData(TimelineSpan span, List<DialogueMessage> input, List<DialogueMessage> output) {

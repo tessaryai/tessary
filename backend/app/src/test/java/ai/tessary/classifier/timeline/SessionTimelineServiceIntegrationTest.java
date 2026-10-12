@@ -467,6 +467,40 @@ class SessionTimelineServiceIntegrationTest {
                 data(timeline).get(0));
     }
 
+    /**
+     * Catches a tool event that loses a text result or text arguments: ingest keeps only a JSON object or array in the
+     * tool_call row's result and arguments, so the text is in the span payload and in arguments_raw.
+     */
+    @Test
+    void anIngestedToolThatTakesAndReturnsTextKeepsItsInputAndOutput() {
+        String sessionId = SubstrateV2Fixtures.sessionId();
+        String traceId = "tr-" + UUID.randomUUID();
+        writer.write(
+                pid,
+                List.of(new RawEntry(
+                        "s1",
+                        "find_slot",
+                        "friday",
+                        "free at 8",
+                        null,
+                        Map.of(GenAiAttributes.SESSION_ID, sessionId, GenAiAttributes.TOOL_NAME, "find_slot"),
+                        null,
+                        traceId,
+                        at(0).toString(),
+                        "tool",
+                        at(40).toString(),
+                        null,
+                        null)));
+
+        SessionTimeline timeline = timelines.load(pid, sessionId);
+
+        assertEquals(
+                List.of(json("{\"name\":\"find_slot\",\"mcp\":false,\"status\":null,\"error_type\":null,"
+                        + "\"input\":\"friday\",\"output\":\"free at 8\"}")),
+                data(timeline),
+                "a tool's text arguments and result reach its event");
+    }
+
     /** Section 5.1 of the CC-01 plan, plus a trace of another session that shares tr-a's thread id. */
     private Seeded seedAcceptanceSession() {
         String sessionId = SubstrateV2Fixtures.sessionId();

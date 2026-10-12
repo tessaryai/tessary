@@ -68,7 +68,13 @@ public record TimelineSpan(
                 payload == null ? null : payload.input(),
                 payload == null ? null : payload.output(),
                 payload == null ? null : payload.attributes(),
-                toolCall == null ? null : new Tool(toolCall.name(), toolCall.arguments(), toolCall.result()));
+                toolCall == null ? null : new Tool(toolCall.name(), arguments(toolCall), toolCall.result()));
+    }
+
+    /** The parsed arguments, else the text a producer sent, which ingest keeps only in {@code arguments_raw}. */
+    private static @Nullable String arguments(ToolCallRow toolCall) {
+        String parsed = toolCall.arguments();
+        return parsed == null ? toolCall.argumentsRaw() : parsed;
     }
 
     public record Usage(
@@ -82,7 +88,10 @@ public record TimelineSpan(
         public static final Usage NONE = new Usage(null, null, null, null, null, null);
     }
 
-    /** The tool call's name ({@code gen_ai.tool.name}), arguments and result, as stored. */
+    /**
+     * The tool call's name ({@code gen_ai.tool.name}), arguments and result, as stored; {@code result} is null when it
+     * is not a JSON object or array, and the span's output then holds it.
+     */
     public record Tool(
             @Nullable String name,
             @Nullable String arguments,
