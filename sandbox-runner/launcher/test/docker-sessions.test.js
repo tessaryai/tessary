@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnLauncher, request, readSse, freePort, tempDir, withoutElapsed } = require('./fixtures/launcher-harness');
+const { spawnLauncher, request, readSse, freePort, tempDir, withoutElapsed, reply, numbered, sleep, until } = require('./fixtures/launcher-harness');
 const { startFakeSession } = require('./fixtures/fake-session');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -33,32 +33,6 @@ const START = {
   max_tool_calls_per_message: 40,
 };
 const NOT_FOUND = { error: 'not found', kind: 'unknown_session' };
-
-function reply(n, text) {
-  return [
-    { type: 'text', data: { delta: `echo:${text}` } },
-    { type: 'tool_start', data: { call_id: `call-${n}`, server: 'tessary', tool: 'get_trace', input_summary: '{}' } },
-    { type: 'tool_end', data: { call_id: `call-${n}`, result_summary: 'ok', bytes: 2, duration_ms: 5, ok: true } },
-    {
-      type: 'message_end',
-      data: { usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.001 }, reason: 'done' },
-    },
-  ];
-}
-
-function numbered(events, firstId) {
-  return events.map((e, i) => ({ id: firstId + i, ...e }));
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function until(condition, what) {
-  const deadline = Date.now() + 5000;
-  while (!condition()) {
-    assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
-    await sleep(10);
-  }
-}
 
 /*
  * A fake Engine API that knows session containers. A create whose Cmd[1] is session.js is a

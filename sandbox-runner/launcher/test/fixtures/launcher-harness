@@ -159,4 +159,31 @@ function withoutElapsed(body) {
   return rest;
 }
 
-module.exports = { spawnLauncher, startLauncher, postJson, request, readSse, freePort, tempDir, withoutElapsed };
+/** The fake session's fixed reply to message `n` with `text` (fixtures/fake-session's playReply). */
+function reply(n, text) {
+  return [
+    { type: 'text', data: { delta: `echo:${text}` } },
+    { type: 'tool_start', data: { call_id: `call-${n}`, server: 'tessary', tool: 'get_trace', input_summary: '{}' } },
+    { type: 'tool_end', data: { call_id: `call-${n}`, result_summary: 'ok', bytes: 2, duration_ms: 5, ok: true } },
+    {
+      type: 'message_end',
+      data: { usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.001 }, reason: 'done' },
+    },
+  ];
+}
+
+function numbered(events, firstId) {
+  return events.map((e, i) => ({ id: firstId + i, ...e }));
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function until(condition, what) {
+  const deadline = Date.now() + 5000;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+    await sleep(10);
+  }
+}
+
+module.exports = { spawnLauncher, startLauncher, postJson, request, readSse, freePort, tempDir, withoutElapsed, reply, numbered, sleep, until };

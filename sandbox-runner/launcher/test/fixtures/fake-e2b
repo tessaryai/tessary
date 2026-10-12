@@ -5,9 +5,16 @@
  * in-process stand-in instead of the real SDK's HTTP client. FAKE_E2B_MODE picks how the run goes;
  * every call is appended to FAKE_E2B_LOG as one JSON line for the test to read back.
  *
+ * Relay mode (FAKE_E2B_CONTROL_URL set) is for launcher sessions: a session sandbox has to live in
+ * the test process, where the test can release, kill and inspect it. Every SDK call is then posted
+ * to that control server as POST /<op> with a JSON body, and the fake returns what it answers; a
+ * 500 answer { name, message } is thrown as an error with that name. getHost needs no relay: the
+ * test's fake session listens on 127.0.0.1.
+ *
  * No extension on purpose: node --test runs every .js/.cjs under test/ as a test file.
  */
 const fs = require('node:fs');
+const http = require('node:http');
 const Module = require('node:module');
 
 const MODE = process.env.FAKE_E2B_MODE || 'ok';
@@ -61,11 +68,66 @@ class Sandbox {
   }
 }
 
+const CONTROL = process.env.FAKE_E2B_CONTROL_URL;
+
+function control(op, body) {
+  return new Promise((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body));
+    const req = http.request(`${CONTROL}/${op}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': data.length } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        const answer = text ? JSON.parse(text) : {};
+        if (res.statusCode === 200) resolve(answer);
+        else reject(named(answer.name || 'Error', answer.message || `control ${op} -> ${res.statusCode}`));
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+class RelaySandbox {
+  static async create(template, opts) {
+    const body = { template, apiKey: opts.apiKey, timeoutMs: opts.timeoutMs, metadata: opts.metadata };
+    if (opts.network) body.network = opts.network;
+    const { sandboxId } = await control('create', body);
+    return new RelaySandbox(sandboxId);
+  }
+
+  constructor(sandboxId) {
+    this.sandboxId = sandboxId;
+    this.files = { write: async (path, content) => { await control('write', { sandboxId, path, content }); } };
+    this.commands = {
+      run: async (cmd, opts) => {
+        await control('run', { sandboxId, cmd, background: opts.background, timeoutMs: opts.timeoutMs, envs: opts.envs });
+        return {
+          wait: async () => {
+            const { exitCode, stderr = '' } = await control('wait', { sandboxId });
+            if (exitCode === 0) return { exitCode, stdout: '', stderr };
+            throw named('CommandExitError', stderr, { exitCode, stderr, result: { exitCode, stdout: '', stderr } });
+          },
+        };
+      },
+    };
+  }
+
+  getHost(port) {
+    return `127.0.0.1:${port}`;
+  }
+
+  async kill() {
+    await control('kill', { sandboxId: this.sandboxId });
+  }
+}
+
 // The real Secret.fill is a local formatting helper too: it names the secret, it never reads it.
 const Secret = { fill: (name) => `\${e2b.secrets.${name}}` };
 
 const load = Module._load;
 Module._load = function (request, ...rest) {
-  if (request === 'e2b') return { Sandbox, Secret };
+  if (request === 'e2b') return { Sandbox: CONTROL ? RelaySandbox : Sandbox, Secret };
   return load.call(this, request, ...rest);
 };
