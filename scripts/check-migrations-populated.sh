@@ -247,6 +247,7 @@ expect "retention_policy both classes"        2 "SELECT count(DISTINCT data_clas
 expect "alert_event payload classifier keys"  1 "SELECT count(*) FROM alert_event WHERE payload_json LIKE '%\"classifiers\"%' AND payload_json LIKE '%\"classifier_key\"%'"
 expect "pre_deploy_check rows"                1 "SELECT count(*) FROM pre_deploy_check"
 expect "telemetry_install row"                1 "SELECT count(*) FROM telemetry_install"
+expect "llm_call.lane='authoring' (pre-0039)"  1 "SELECT count(*) FROM llm_call WHERE lane='authoring'"
 # The old six-table detection UNION view is gone; these are its three open arms, asked
 # directly. All three fixture rows are span-grain (see scripts/lib/populated-fixture.sql), which
 # is the fact this checks rather than assuming.
@@ -367,6 +368,21 @@ if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0022-frustra
   expect "frustration_detection is empty"       0 "SELECT count(*) FROM frustration_detection"
 else
   skip "0022 frustration off" "0022 is not in databasechangelog, it has not landed"
+fi
+
+echo
+echo "0039: the authoring lane becomes agent_run"
+if [ "$(q "SELECT EXISTS (SELECT 1 FROM databasechangelog WHERE id='0039-agent-run-lane')")" = "t" ]; then
+  expect "no ledger row still reads authoring"  0 "SELECT count(*) FROM llm_call WHERE lane='authoring'"
+  expect "the fixture's agent run is agent_run" agent_run "SELECT lane FROM llm_call WHERE id='llc_fix_agent'"
+  expect "the triage ledger row is untouched"   triage "SELECT lane FROM llm_call WHERE id='llc_fix_trg'"
+  expect "the triage setting is untouched"      1 "SELECT count(*) FROM project_model_setting WHERE lane='triage'"
+  expect "ck_project_model_setting_lane allows agent_run, not authoring" t "SELECT EXISTS (SELECT 1 FROM pg_constraint
+                                WHERE conname='ck_project_model_setting_lane'
+                                  AND pg_get_constraintdef(oid) LIKE '%agent_run%'
+                                  AND pg_get_constraintdef(oid) NOT LIKE '%authoring%')"
+else
+  skip "0039 agent_run lane" "0039 is not in databasechangelog, it has not landed"
 fi
 
 # ---------------------------------------------------------------- summary

@@ -269,7 +269,12 @@ VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', NULL, '20
 INSERT INTO llm_call (id, project_id, lane, model, service_tier, funding, input_tokens, output_tokens,
                       cost_usd, created_at, subject_kind, subject_id)
 VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', 'platform',
-        800, 120, 0.0002400000, '2026-08-01T00:00:00Z', NULL, NULL);
+        800, 120, 0.0002400000, '2026-08-01T00:00:00Z', NULL, NULL),
+-- A run on the agent lane under its first id, authoring (0033), which 0039 renames to agent_run. The
+-- baseline's CHECK refuses an authoring setting, so only the ledger can hold one here; 0039 re-adds that
+-- CHECK without authoring, which fails on any setting its UPDATE missed.
+       ('llc_fix_agent', 'prj_fix', 'authoring', 'anthropic.claude-sonnet-4-5', 'standard', 'byo',
+        1200, 300, 0.0081000000, '2026-08-01T00:00:00Z', NULL, NULL);
 
 -- ---------------------------------------------------------------- telemetry identity
 -- The singleton the heartbeat reads its UUID from, as the baseline shapes it (ping_seq arrives with a
