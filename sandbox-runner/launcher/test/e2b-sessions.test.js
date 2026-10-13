@@ -441,7 +441,7 @@ test('on E2B the credential never reaches session.json; the secret and the keys 
     }
 
     const run = control.calls.find((c) => c.op === 'run');
-    assert.equal(run.cmd, 'node /home/user/session.js /home/user/session.json');
+    assert.equal(run.cmd, '/usr/local/bin/node-sealed /home/user/session.js /home/user/session.json');
     assert.equal(run.background, true);
     assert.equal(run.timeoutMs, 0, 'a command timeout would kill the session script after 60 s');
     assert.equal(run.envs.AWS_ACCESS_KEY_ID, 'test-akid');

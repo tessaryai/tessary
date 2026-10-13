@@ -79,7 +79,12 @@ narrower.
 - **Token scrubbing:** the short-lived clone token rides in the clone URL and is scrubbed from every
   line this launcher logs, and from the scripts' own output before it leaves the sandbox.
 - **Sessions:** a session sandbox serves `session.js` on `SESSION_PORT`, behind its own 32-byte
-  `SESSION_SECRET`, and the launcher alone holds that secret. On E2B that port is public through
+  `SESSION_SECRET`. The script reads it from its env at start and runs from an execute-only `node`
+  (`/usr/local/bin/node-sealed`), which makes it non-dumpable: the agent runs as the same user but
+  cannot read the script's memory (the MCP tokens) or its environment (the secret) through `/proc`,
+  and no child inherits the secret. This holds while the agent cannot become root; the agent image
+  installs no `sudo`, and on E2B whether the sandbox user can reach envd's root exec is E2B's
+  posture, not checked here. On E2B that port is public through
   the sandbox host, and the secret is its only gate. With `SANDBOX_NETWORK_ISOLATION` on,
   the launcher joins the isolated bridge to reach the sessions, so on that bridge the sandboxes can
   reach the launcher's port (which needs `SANDBOX_API_KEY`) and each other's session port (which
@@ -90,8 +95,9 @@ narrower.
 `agent-sandbox/session.js` keeps one OpenCode session alive for many messages, where the lane
 scripts run one prompt and exit. It is generic: it knows a system prompt, files, a model and named
 MCP servers, and nothing about what the caller builds with them. A launcher runs it once per
-session as `node session.js /home/user/session.json` (E2B) or `node session.js /work/session.json`
-(Docker) and drives it over HTTP.
+session as `/usr/local/bin/node-sealed session.js /home/user/session.json` (E2B) or
+`/usr/local/bin/node-sealed session.js /work/session.json` (Docker), with the execute-only `node`
+both recipes make (see Sessions under the security notes above), and drives it over HTTP.
 
 ### Start
 
@@ -101,7 +107,7 @@ session as `node session.js /home/user/session.json` (E2B) or `node session.js /
 | `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
 | `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
-| `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
+| `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`, so no child inherits it; the script's own start-time environment stays unreadable to the agent only because the script runs from the execute-only `node`. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
 | `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
 | Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied, `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders. |
 
@@ -294,7 +300,7 @@ fails at `create` until `SANDBOX_SESSION_MAX_MS` is at most `3540000`.
 ### Docker
 
 A session container is built like a one-shot one (the same hardening, the one work-volume mount)
-and runs `node session.js /work/session.json` with the labels `tessary.sandbox=1`,
+and runs `/usr/local/bin/node-sealed session.js /work/session.json` with the labels `tessary.sandbox=1`,
 `tessary.sandbox.script=session.js`, `tessary.sandbox.timeout-ms=<SANDBOX_SESSION_MAX_MS>` and
 `tessary.sandbox.session=<id>`. The launcher dials the script at the container's address on the
 network it shares with the container, chosen by that network's name, never the first one listed.
@@ -304,7 +310,7 @@ network it shares with the container, chosen by that network's name, never the f
 A session sandbox is created from `E2B_ANALYZER_TEMPLATE` with `timeoutMs` set to
 `SANDBOX_SESSION_MAX_MS` + 60 s and the metadata `tessary.sandbox.session=<id>`. The launcher
 writes `session.json` to `/home/user/session.json` through the files API, then runs
-`node /home/user/session.js /home/user/session.json` in the background with no command timeout,
+`/usr/local/bin/node-sealed /home/user/session.js /home/user/session.json` in the background with no command timeout,
 the credential env, `SESSION_SECRET` and `SESSION_PORT`. It dials the script at
 `https://<port>-<sandbox id>.<domain>` (the SDK's `getHost`), or over `http://` under the SDK's own
 `E2B_DEBUG=true`. When the command ends, the session closes as `failed`, and the launcher logs one

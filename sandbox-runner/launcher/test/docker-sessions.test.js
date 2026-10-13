@@ -439,7 +439,7 @@ test('the credential never reaches session.json; the secret and the keys ride in
     }
 
     const create = daemon.createBodies.c1;
-    assert.deepEqual(create.Cmd, ['node', 'session.js', '/work/session.json']);
+    assert.deepEqual(create.Cmd, ['/usr/local/bin/node-sealed', 'session.js', '/work/session.json']);
     assert.equal(create.WorkingDir, '/home/user');
     assert.ok(create.Env.includes('WORK_DIR=/work'));
     assert.ok(create.Env.includes(`SESSION_PORT=${sessionPort}`));

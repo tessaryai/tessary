@@ -2,12 +2,15 @@
 'use strict';
 /*
  * One agent session: one `opencode serve`, one OpenCode session, many messages. The launcher runs
- * `node session.js <session.json>` once per session and drives it over HTTP on SESSION_PORT; the
- * routes, the events and their order are pinned in sandbox-runner/README.md, "Agent sessions".
+ * `/usr/local/bin/node-sealed session.js <session.json>` once per session and drives it over HTTP
+ * on SESSION_PORT; the routes, the events and their order are pinned in sandbox-runner/README.md,
+ * "Agent sessions".
  *
- * Two invariants. session.json is deleted as soon as it is read, so no MCP token is on disk while
- * the agent runs: the tokens live only in the relay's memory. SESSION_SECRET leaves process.env
- * before `opencode serve` is spawned, so the agent's bash cannot read it back with `env`.
+ * Three invariants. session.json is deleted as soon as it is read, so no MCP token is on disk while
+ * the agent runs: the tokens live only in this process's memory, in the relay. This process runs
+ * from an execute-only node, so it is not dumpable and the agent's processes, which run as the same
+ * user, cannot read its memory or its environment through /proc. SESSION_SECRET leaves process.env
+ * before `opencode serve` is spawned, so no child inherits it.
  */
 const crypto = require('node:crypto');
 const fs = require('node:fs');

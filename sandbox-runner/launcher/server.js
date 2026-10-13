@@ -344,6 +344,9 @@ const SESSION_TOMBSTONE_MS = 300_000;
 const SESSION_STOP_SECONDS = 5;
 const SESSION_RECONNECT_MS = 250;
 const SESSION_SCRIPT = 'session.js';
+// The agent image's execute-only node (agent-sandbox/Dockerfile and template.ts): session.js run
+// from it is not dumpable, so the agent cannot read its MCP tokens or secret through /proc.
+const SESSION_NODE = '/usr/local/bin/node-sealed';
 const SANDBOX_LABEL_SESSION = 'tessary.sandbox.session';
 const SESSION_TEXT_MAX_BYTES = 1 << 20;
 // The launcher's life timer starts when POST /sessions arrives and its close can take the abort
@@ -1959,7 +1962,7 @@ const dockerSessionDriver = {
     const networkMode = await sandboxNetwork();
     fs.writeFileSync(path.join(workDir, 'session.json'), JSON.stringify(sessionFile), { mode: 0o600 });
     const created = await dockerJson('POST', '/containers/create', agentContainerBody({
-      cmd: ['node', SESSION_SCRIPT, '/work/session.json'],
+      cmd: [SESSION_NODE, SESSION_SCRIPT, '/work/session.json'],
       env: [...containerEnvFor(AGENT_POSTURE, credential, model, modelCost), `SESSION_SECRET=${s.secret}`, `SESSION_PORT=${SANDBOX_SESSION_PORT}`],
       labels: {
         'tessary.sandbox.script': SESSION_SCRIPT,
@@ -2031,7 +2034,7 @@ const e2bSessionDriver = {
     s.handle = { sbx, sandboxId: sbx.sandboxId };
     const file = `${SESSION_E2B_HOME}/session.json`;
     await sbx.files.write(file, JSON.stringify(sessionFile));
-    const command = await sbx.commands.run(`node ${SESSION_E2B_HOME}/${SESSION_SCRIPT} ${file}`, {
+    const command = await sbx.commands.run(`${SESSION_NODE} ${SESSION_E2B_HOME}/${SESSION_SCRIPT} ${file}`, {
       background: true,
       timeoutMs: 0,
       envs: { ...agentEnvs(credential, model, modelCost), SESSION_SECRET: s.secret, SESSION_PORT: String(SANDBOX_SESSION_PORT) },

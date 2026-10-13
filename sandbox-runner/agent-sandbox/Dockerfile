@@ -15,7 +15,8 @@
 #   docker build -f sandbox-runner/agent-sandbox/Dockerfile -t <tag> .
 #
 # No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per lane invocation
-# (see runScriptInDocker), or a long-lived `node session.js /work/session.json` for an agent session.
+# (see runScriptInDocker), or a long-lived `/usr/local/bin/node-sealed session.js /work/session.json`
+# for an agent session (see the node-sealed RUN below).
 #
 # BASE IMAGE: node:24-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
 # Why 24 and not 22: 22 has been maintenance-only since 2025-10-21 and is EOL 2027-04-30; 24 runs
@@ -100,6 +101,12 @@ RUN set -e; \
     done; \
     [ -x "$(command -v opencode)" ] && opencode --version >/dev/null; \
     npm cache clean --force
+
+# An execute-only copy of node for session.js. A process started from a binary its user cannot read
+# is not dumpable, so the agent's processes, which run as the same user, cannot read its memory
+# (the MCP tokens the relay holds) or its environment (SESSION_SECRET) through /proc. The plain
+# node stays for the agent. Costs one layer the size of the node binary. Mirrored by template.ts.
+RUN cp /usr/local/bin/node /usr/local/bin/node-sealed && chmod 0111 /usr/local/bin/node-sealed
 
 ENV HOME=/home/user
 ENV PIP_BREAK_SYSTEM_PACKAGES=1

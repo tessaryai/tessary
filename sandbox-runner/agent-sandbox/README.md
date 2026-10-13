@@ -40,6 +40,11 @@ as the Docker backend's agent image.
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
   maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
   `closed` events. The contract is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
+  The launcher runs it with `/usr/local/bin/node-sealed`, an execute-only copy of `node` both
+  recipes make: a process started from a binary its user cannot read is not dumpable, so the
+  agent, which runs as the same user, cannot read the relay's MCP tokens out of its memory or
+  `SESSION_SECRET` out of its environment through `/proc`. `test/session-image.test.js` checks this
+  in a built image (skipped unless `SESSION_IMAGE_UNDER_TEST` names one).
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's
@@ -65,7 +70,7 @@ pnpm exec tsx build.ts                            # == pnpm run build
 |---|---|---|
 | *(none)* | build + publish under the `default` tag | by hand |
 | `--release=<semver>` | build **only if the recipe hash changed**, tag `<semver>` + `recipe-<hash>` | `build-agent-template` |
-| `--verify=<semver>` | assert public + namespaced name, then boot it and run four checks | `verify-agent-template` |
+| `--verify=<semver>` | assert public + namespaced name, then boot it and run five checks | `verify-agent-template` |
 | `--promote=<semver>` | move `latest` and `default` onto that build | `finalize` |
 | `--rollback=<semver>` | remove the `<semver>` tag, keep `recipe-<hash>` | `cleanup` |
 
