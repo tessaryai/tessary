@@ -24,6 +24,7 @@ import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.sandbox.AgentSpanTelemetry;
 import ai.tessary.usage.LlmUsageAccountant;
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -36,6 +37,7 @@ import java.net.ServerSocket;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -535,7 +537,7 @@ class LauncherAgentSessionClientTest {
     }
 
     /**
-     * Catches a double release (the paid lease finished twice), and a second reply started while the
+     * Catches a double release (the credential's lease released twice), and a second reply started while the
      * aborted one still runs.
      */
     @Test
@@ -715,5 +717,135 @@ class LauncherAgentSessionClientTest {
                         "POST /sessions/s-1/abort",
                         "DELETE /sessions/s-1"),
                 fake.seen().stream().map(r -> r.method() + " " + r.path()).toList());
+    }
+    /**
+     * Catches a replayed {@code message_end} that frees the newer reply's credential, so a Tessary AI
+     * run slot is over-committed while that reply still runs.
+     */
+    @Test
+    void aMessageEndReplayedWhileANewerReplyRunsFreesNothing() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED, REPLY2_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
+                FakeLauncher.frame(2, "message_end", messageEnd("done")));
+        fake.events(
+                "/sessions/s-1/events?after=1",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(2, "message_end", messageEnd("done")));
+        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "one"));
+        read(client, 0);
+        verify(credentials).release(REPLY_CRED);
+        assertEquals(AgentSessionClient.SendOutcome.ACCEPTED, client.send("s-1", "two"));
+
+        read(client, 1);
+
+        verify(credentials, never()).release(REPLY2_CRED);
+        assertEquals(AgentSessionClient.SendOutcome.BUSY, client.send("s-1", "three"));
+        verifyBookedOnce(false);
+        verifyNoMoreInteractions(usage);
+    }
+
+    /**
+     * Catches the last reply's spend lost when an abort finds the session already closing: the 404
+     * must not drop what the reconnected stream still has to book.
+     */
+    @Test
+    void aMessageEndReadAfterAnAbortFoundTheSessionClosingIsStillBooked() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.answer("POST", "/sessions/s-1/abort", 404, "{\"error\":\"not found\",\"kind\":\"unknown_session\"}");
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"));
+        fake.events(
+                "/sessions/s-1/events?after=1",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(2, "message_end", messageEnd("aborted")),
+                FakeLauncher.frame(3, "closed", "{\"reason\":\"idle\"}"));
+        client.send("s-1", "hello");
+        read(client, 0);
+
+        client.abort("s-1");
+
+        verify(credentials).release(REPLY_CRED);
+        int requests = fake.seen().size();
+        assertEquals(AgentSessionClient.SendOutcome.CLOSED, client.send("s-1", "again"));
+        assertEquals(requests, fake.seen().size(), "a session the launcher closed is not asked again");
+        read(client, 1);
+        verifyBookedOnce(false);
+        verify(credentials).release(REPLY_CRED);
+    }
+
+    /**
+     * Catches spend lost silently: a {@code message_end} the client has no session for (as after a
+     * backend restart) cannot be booked, so it is a warning that carries the cost.
+     */
+    @Test
+    void aMessageEndThisClientCannotBookIsAWarningWithItsCost() {
+        LauncherAgentSessionClient client = client();
+        fake.events(
+                "/sessions/s-1/events?after=0",
+                FakeLauncher.Ending.END,
+                FakeLauncher.frame(1, "message_end", messageEnd("aborted")));
+
+        read(client, 0);
+
+        verifyNoInteractions(usage);
+        List<ILoggingEvent> unbooked = logged("agentsession.reply-unbooked");
+        assertEquals(1, unbooked.size());
+        assertEquals(Level.WARN, unbooked.getFirst().getLevel());
+        assertEquals("0.0123", String.valueOf(fields(unbooked.getFirst()).get("costUsd")));
+        assertEquals(List.of(), logged("agentsession.reply-ended"));
+    }
+
+    /**
+     * Catches a message accepted with no trace in the log, so a reply whose {@code message_end} never
+     * comes cannot be found, and a start whose prompt and files sizes are unknown.
+     */
+    @Test
+    void startSendAbortAndStopEachLogTheirOutcomeAndSize() {
+        LauncherAgentSessionClient client = aStartedSessionWith(START_CRED, REPLY_CRED);
+        fake.answer("POST", "/sessions/s-1/messages", 202, null);
+        fake.answer("POST", "/sessions/s-1/abort", 204, null);
+        fake.answer("DELETE", "/sessions/s-1", 204, null);
+
+        client.send("s-1", "h\u00e9llo");
+        client.send("s-1", "again");
+        client.abort("s-1");
+        client.stop("s-1");
+
+        Map<String, Object> started = fields(logged("agentsession.started").getFirst());
+        assertEquals("9", String.valueOf(started.get("systemPromptBytes")));
+        assertEquals("7", String.valueOf(started.get("fileBytes")));
+        List<Map<String, Object>> messages = logged("agentsession.message").stream()
+                .map(LauncherAgentSessionClientTest::fields)
+                .toList();
+        assertEquals(
+                List.of("ACCEPTED", "BUSY"),
+                messages.stream().map(m -> m.get("outcome")).toList());
+        assertEquals(
+                List.of("6", "5"),
+                messages.stream().map(m -> String.valueOf(m.get("bytes"))).toList());
+        assertEquals("s-1", messages.getFirst().get("session"));
+        assertEquals(
+                "aborted", fields(logged("agentsession.aborted").getFirst()).get("outcome"));
+        assertEquals(
+                "stopped", fields(logged("agentsession.stopped").getFirst()).get("outcome"));
+    }
+
+    private List<ILoggingEvent> logged(String event) {
+        return appender.list.stream()
+                .filter(e -> event.equals(fields(e).get("event")))
+                .toList();
+    }
+
+    private static Map<String, Object> fields(ILoggingEvent event) {
+        Map<String, Object> out = new HashMap<>();
+        if (event.getKeyValuePairs() != null) event.getKeyValuePairs().forEach(kv -> out.put(kv.key, kv.value));
+        return out;
     }
 }

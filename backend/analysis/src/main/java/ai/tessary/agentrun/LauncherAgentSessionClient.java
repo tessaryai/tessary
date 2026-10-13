@@ -123,8 +123,10 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
     /**
      * What the client keeps per session: what its spend is booked on, the reply that holds a
-     * credential, and the last sequence booked. A session leaves the map when its stream yields
-     * {@code closed}, so the caller keeps a reader on every session it started.
+     * credential, and the last sequence booked. A session leaves the map only when its stream yields
+     * {@code closed} or the launcher no longer knows it on {@code events}, so the caller keeps a reader
+     * on every session it started; a 404 on a message, an abort or a stop only marks it gone, because
+     * a reconnected stream may still hold the last reply's {@code message_end}.
      */
     private static final class SessionState {
         final String projectId;
@@ -136,6 +138,9 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
         final LlmUsageAccountant.Subject subject;
         final AtomicReference<@Nullable Reply> open = new AtomicReference<>();
+
+        /** The launcher answered 404 for it: no new reply starts. */
+        volatile boolean gone;
 
         /** Read and written only inside {@code synchronized (this)}. */
         long lastBookedSeq;
@@ -220,12 +225,16 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                         choice.provider(),
                         credential.platformFunded(),
                         start.subject()));
+        long fileBytes = start.files().values().stream()
+                .mapToLong(LauncherAgentSessionClient::utf8Bytes)
+                .sum();
         StructuredLog.info(log, Markers.OPS, "agentsession.started")
                 .message(
-                        "agent session %s started on lane %s with %d files and %d MCP servers",
+                        "agent session %s started on lane %s with %d files (%d bytes) and %d MCP servers",
                         sessionId,
                         start.lane().wire(),
                         start.files().size(),
+                        fileBytes,
                         start.mcpServers().size())
                 .field("project", start.projectId())
                 .field("lane", start.lane().wire())
@@ -233,6 +242,8 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
                 .field("subjectId", start.subject().id())
                 .field("session", sessionId)
                 .field("files", start.files().size())
+                .field("fileBytes", fileBytes)
+                .field("systemPromptBytes", utf8Bytes(start.systemPrompt()))
                 .field("mcpServers", start.mcpServers().size())
                 .field("durationMs", Duration.between(began, clock.instant()).toMillis())
                 .log();
@@ -241,8 +252,21 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
     @Override
     public SendOutcome send(String sessionId, String text) {
+        Instant began = clock.instant();
+        SendOutcome outcome = sendOnce(sessionId, text);
+        StructuredLog.info(log, Markers.OPS, "agentsession.message")
+                .message("session %s message %s", sessionId, outcome.name())
+                .field("session", sessionId)
+                .field("outcome", outcome.name())
+                .field("bytes", utf8Bytes(text))
+                .field("durationMs", Duration.between(began, clock.instant()).toMillis())
+                .log();
+        return outcome;
+    }
+
+    private SendOutcome sendOnce(String sessionId, String text) {
         SessionState state = sessions.get(sessionId);
-        if (state == null) return SendOutcome.CLOSED;
+        if (state == null || state.gone) return SendOutcome.CLOSED;
         if (state.open.get() != null) return SendOutcome.BUSY;
         String launcherUrl = launcherUrl();
         Reply reply = new Reply(credentials.resolve(state.projectId, state.provider));
@@ -268,7 +292,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             }
             if (status == 409 && "busy".equals(E2bAgentRunSandbox.kindOf(resp.body()))) return SendOutcome.BUSY;
             if (unknownSession(status, resp.body())) {
-                closed(sessionId, state);
+                gone(state);
                 return SendOutcome.CLOSED;
             }
             throw refusal("message", status, resp.body(), launcherUrl, state.lane.wire(), REQUEST_TIMEOUT);
@@ -284,6 +308,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
     @Override
     public void abort(String sessionId) {
+        Instant began = clock.instant();
         String launcherUrl = launcherUrl();
         SessionState state = sessions.get(sessionId);
         String lane = state == null ? null : state.lane.wire();
@@ -296,10 +321,12 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
             // The reply stays open until its message_end, so no second reply starts while it winds down.
             Reply reply = state == null ? null : state.open.get();
             if (reply != null) reply.release();
+            logAnswered("abort", sessionId, "aborted", began);
             return;
         }
         if (unknownSession(resp.statusCode(), resp.body())) {
-            closed(sessionId, state);
+            gone(state);
+            logAnswered("abort", sessionId, "closed", began);
             return;
         }
         throw refusal("abort", resp.statusCode(), resp.body(), launcherUrl, lane, REQUEST_TIMEOUT);
@@ -307,6 +334,7 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
 
     @Override
     public void stop(String sessionId) {
+        Instant began = clock.instant();
         String launcherUrl = launcherUrl();
         SessionState state = sessions.get(sessionId);
         String lane = state == null ? null : state.lane.wire();
@@ -318,13 +346,29 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         if (resp.statusCode() / 100 == 2) {
             // The state stays until the stream yields closed, so the reply's last message_end is still booked.
             if (state != null) state.releaseOpen();
+            logAnswered("stop", sessionId, "stopped", began);
             return;
         }
         if (unknownSession(resp.statusCode(), resp.body())) {
-            closed(sessionId, state);
+            gone(state);
+            logAnswered("stop", sessionId, "closed", began);
             return;
         }
         throw refusal("stop", resp.statusCode(), resp.body(), launcherUrl, lane, STOP_TIMEOUT);
+    }
+
+    /** One line per abort or stop the launcher answered: aborted, stopped or closed (unknown to it). */
+    private void logAnswered(String op, String sessionId, String outcome, Instant began) {
+        StructuredLog.info(log, Markers.OPS, "abort".equals(op) ? "agentsession.aborted" : "agentsession.stopped")
+                .message("session %s %s: %s", sessionId, op, outcome)
+                .field("session", sessionId)
+                .field("outcome", outcome)
+                .field("durationMs", Duration.between(began, clock.instant()).toMillis())
+                .log();
+    }
+
+    private static long utf8Bytes(String text) {
+        return text.getBytes(StandardCharsets.UTF_8).length;
     }
 
     @Override
@@ -367,38 +411,61 @@ public class LauncherAgentSessionClient implements AgentSessionClient {
         sessions.remove(sessionId, state);
     }
 
+    /** A 404 outside the stream: the open reply is freed and no new one starts, but its stream may still book. */
+    private static void gone(@Nullable SessionState state) {
+        if (state == null) return;
+        state.gone = true;
+        state.releaseOpen();
+    }
+
     /**
      * Books a {@code message_end} the session has not booked yet, then frees its reply. Booking comes
      * first, so a ledger write that throws ends the stream and the reconnect books it again. A replay
      * at or below the last booked sequence books and frees nothing: the open reply may be a newer one.
+     * With no state (a session this client did not start, as after a backend restart) nothing can be
+     * booked, so the spend is a warning with its usage, never a silent loss.
      */
     private void ended(String sessionId, @Nullable SessionState state, SessionEvent.MessageEnd end) {
         AgentSpanTelemetry.AgentUsage u = end.usage();
-        boolean booked = false;
-        if (state != null) {
-            synchronized (state) {
-                if (end.seq() > state.lastBookedSeq) {
-                    usage.recordSandboxRun(
-                            state.projectId,
-                            state.lane.wire(),
-                            state.model,
-                            state.platformFunded,
-                            u.inputTokens(),
-                            u.outputTokens(),
-                            u.cacheReadTokens(),
-                            u.cacheWriteTokens(),
-                            u.costUsd(),
-                            state.subject);
-                    state.lastBookedSeq = end.seq();
-                    booked = true;
-                }
-            }
-            if (booked) state.releaseOpen();
+        if (state == null) {
+            StructuredLog.warn(log, Markers.OPS, "agentsession.reply-unbooked")
+                    .message(
+                            "session %s reply ended (%s) at seq %d with no session to book it on; its spend is not booked",
+                            sessionId, end.reason().name(), end.seq())
+                    .field("session", sessionId)
+                    .field("seq", end.seq())
+                    .field("reason", end.reason().name())
+                    .field("inputTokens", u.inputTokens())
+                    .field("outputTokens", u.outputTokens())
+                    .field("cacheReadTokens", u.cacheReadTokens())
+                    .field("cacheWriteTokens", u.cacheWriteTokens())
+                    .field("costUsd", u.costUsd())
+                    .log();
+            return;
         }
+        boolean booked = false;
+        synchronized (state) {
+            if (end.seq() > state.lastBookedSeq) {
+                usage.recordSandboxRun(
+                        state.projectId,
+                        state.lane.wire(),
+                        state.model,
+                        state.platformFunded,
+                        u.inputTokens(),
+                        u.outputTokens(),
+                        u.cacheReadTokens(),
+                        u.cacheWriteTokens(),
+                        u.costUsd(),
+                        state.subject);
+                state.lastBookedSeq = end.seq();
+                booked = true;
+            }
+        }
+        if (booked) state.releaseOpen();
         StructuredLog.info(log, Markers.OPS, "agentsession.reply-ended")
                 .message(
                         "session %s reply ended (%s) at seq %d, %s",
-                        sessionId, end.reason().name(), end.seq(), booked ? "booked" : "already booked or not ours")
+                        sessionId, end.reason().name(), end.seq(), booked ? "booked" : "already booked")
                 .field("session", sessionId)
                 .field("seq", end.seq())
                 .field("reason", end.reason().name())
