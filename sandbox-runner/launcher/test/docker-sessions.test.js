@@ -186,7 +186,7 @@ async function withSessionLauncher(opts, fn) {
 
 const T = { timeout: 15000 };
 
-test('a session takes two messages and streams their events with increasing ids', T, async () => {
+test('a session takes two messages and streams their events with increasing ids (a session that drops or misnumbers a reply)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, events }) => {
     const started = await start();
     assert.equal(started.status, 201, JSON.stringify(started.body));
@@ -202,7 +202,7 @@ test('a session takes two messages and streams their events with increasing ids'
   });
 });
 
-test('a reconnect with after replays only the rest, then follows live', T, async () => {
+test('a reconnect with after replays only the rest, then follows live (a resume that replays twice or skips)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, events }) => {
     const id = (await start()).body.session_id;
     await send(id, 'one');
@@ -219,7 +219,7 @@ test('a reconnect with after replays only the rest, then follows live', T, async
   });
 });
 
-test('a message during a reply is 409 busy, and the reply ends once', T, async () => {
+test('a message during a reply is 409 busy, and the reply ends once (two prompts racing in one sandbox)', T, async () => {
   await withSessionLauncher({ shape: { hold: true } }, async ({ start, send, events, daemon }) => {
     const id = (await start()).body.session_id;
     assert.equal((await send(id, 'one')).status, 202);
@@ -239,7 +239,7 @@ test('a message during a reply is 409 busy, and the reply ends once', T, async (
   });
 });
 
-test('DELETE stops the session: closed stopped, container gone, later calls 404', T, async () => {
+test('DELETE stops the session: closed stopped, container gone, later calls 404 (a stopped session that keeps its container)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, abort, stop, events, daemon }) => {
     const id = (await start()).body.session_id;
     const reader = events(id, { after: 0 });
@@ -259,7 +259,7 @@ test('DELETE stops the session: closed stopped, container gone, later calls 404'
   });
 });
 
-test('abort ends the reply and keeps the session', T, async () => {
+test('abort ends the reply and keeps the session (an abort that kills the sandbox)', T, async () => {
   await withSessionLauncher({ shape: { hold: true } }, async ({ start, send, abort, events, daemon }) => {
     const id = (await start()).body.session_id;
     assert.equal((await send(id, 'one')).status, 202);
@@ -276,7 +276,7 @@ test('abort ends the reply and keeps the session', T, async () => {
   });
 });
 
-test('idle closes the session with closed: idle, and removes its container and work dir', T, async () => {
+test('idle closes the session with closed: idle, and removes its container and work dir (an idle session that holds its container and dossier forever)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, stop, events, daemon, workDir }) => {
     const id = (await start({ ...START, idle_timeout_ms: 200 })).body.session_id;
 
@@ -295,7 +295,7 @@ test('idle closes the session with closed: idle, and removes its container and w
   });
 });
 
-test('idle never closes a session while a reply runs', T, async () => {
+test('idle never closes a session while a reply runs (a long reply cut by the idle clock)', T, async () => {
   await withSessionLauncher({ shape: { hold: true } }, async ({ start, send, events, daemon }) => {
     const id = (await start({ ...START, idle_timeout_ms: 200 })).body.session_id;
     assert.equal((await send(id, 'long')).status, 202);
@@ -313,7 +313,7 @@ test('idle never closes a session while a reply runs', T, async () => {
   });
 });
 
-test('max lifetime aborts the running reply, lets it end, then closes the session', T, async () => {
+test('max lifetime aborts the running reply, lets it end, then closes the session (a reply\'s spend lost when the life timer closes the session)', T, async () => {
   await withSessionLauncher({ shape: { hold: true, startingPolls: 0 }, env: { SANDBOX_SESSION_MAX_MS: '1500' } }, async ({ start, send, events, daemon }) => {
     const id = (await start()).body.session_id;
     assert.equal((await send(id, 'long')).status, 202);
@@ -328,7 +328,7 @@ test('max lifetime aborts the running reply, lets it end, then closes the sessio
   });
 });
 
-test('a session that never becomes ready is 502, leaves nothing behind, and frees its slot', T, async () => {
+test('a session that never becomes ready is 502, leaves nothing behind, and frees its slot (a failed start that leaks a container or a cap slot)', T, async () => {
   await withSessionLauncher({ shapes: [{ startFails: true }], env: { SANDBOX_SESSION_CAP: '1' } }, async ({ start, daemon, workDir, stderr }) => {
     const failed = await start();
     assert.equal(failed.status, 502);
@@ -352,7 +352,7 @@ test('a session that never becomes ready is 502, leaves nothing behind, and free
   });
 });
 
-test('a sandbox that reports its own death closes the session as failed, once', T, async () => {
+test('a sandbox that reports its own death closes the session as failed, once (a dead session left open, or closed twice)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, events, daemon }) => {
     const id = (await start()).body.session_id;
     const reader = events(id, { after: 0 });
@@ -370,7 +370,7 @@ test('a sandbox that reports its own death closes the session as failed, once', 
   });
 });
 
-test('a sandbox that exits without a word still closes the session as failed', T, async () => {
+test('a sandbox that exits without a word still closes the session as failed (an exit seen only through the container wait missed)', T, async () => {
   await withSessionLauncher({}, async ({ start, events, daemon }) => {
     const id = (await start()).body.session_id;
     const reader = events(id, { after: 0 });
@@ -383,7 +383,7 @@ test('a sandbox that exits without a word still closes the session as failed', T
   });
 });
 
-test('a cut event stream from the sandbox is resumed with from and loses nothing', T, async () => {
+test('a cut event stream from the sandbox is resumed with from and loses nothing (events lost or doubled when the NDJSON stream drops)', T, async () => {
   await withSessionLauncher({ shape: { cutEventsAfter: 2 } }, async ({ start, send, events, daemon }) => {
     const id = (await start()).body.session_id;
     assert.equal((await send(id, 'one')).status, 202);
@@ -394,7 +394,7 @@ test('a cut event stream from the sandbox is resumed with from and loses nothing
   });
 });
 
-test('with isolation on, the launcher joins the sandbox network at boot and runs sessions on it', T, async () => {
+test('with isolation on, the launcher joins the sandbox network at boot and runs sessions on it (an isolated session the launcher cannot reach)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_NETWORK_ISOLATION: '1' }, selfNetworks: ['tessary_tessary'] }, async ({ start, daemon }) => {
     await until(() => daemon.calls.some((c) => c.startsWith('GET /containers/json')), 'the boot chain to reach the reaper');
     assert.deepEqual(daemon.connects, [{ name: 'tessary-sandbox', body: { Container: 'launcher-self' } }]);
@@ -403,7 +403,7 @@ test('with isolation on, the launcher joins the sandbox network at boot and runs
   });
 });
 
-test('a launcher already on the sandbox network does not join it again', T, async () => {
+test('a launcher already on the sandbox network does not join it again (a boot that fails on a second network join)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_NETWORK_ISOLATION: '1' }, selfNetworks: ['tessary_tessary', 'tessary-sandbox'] }, async ({ start, daemon }) => {
     await until(() => daemon.calls.some((c) => c.startsWith('GET /containers/json')), 'the boot chain to reach the reaper');
     assert.deepEqual(daemon.connects, []);
@@ -411,7 +411,7 @@ test('a launcher already on the sandbox network does not join it again', T, asyn
   });
 });
 
-test('an unknown session id is 404 on every route', T, async () => {
+test('an unknown session id is 404 on every route (a launcher that answers for sessions it does not hold)', T, async () => {
   await withSessionLauncher({}, async ({ send, abort, stop, port }) => {
     for (const id of ['00000000-0000-4000-8000-000000000000', 'nope']) {
       assert.deepEqual(await send(id, 'x'), { status: 404, body: NOT_FOUND }, `messages ${id}`);
@@ -422,7 +422,7 @@ test('an unknown session id is 404 on every route', T, async () => {
   });
 });
 
-test('the credential never reaches session.json; the secret and the keys ride in the env', T, async () => {
+test('the credential never reaches session.json; the secret and the keys ride in the env (a credential on the shared volume)', T, async () => {
   await withSessionLauncher({}, async ({ start, daemon, sessionPort }) => {
     assert.equal((await start()).status, 201);
 
@@ -456,7 +456,7 @@ test('the credential never reaches session.json; the secret and the keys ride in
   });
 });
 
-test('a session container has the one-shot hardening and its own labels', T, async () => {
+test('a session container has the one-shot hardening and its own labels (a session container with weaker hardening, or one the reaper ages wrong)', T, async () => {
   await withSessionLauncher({}, async ({ start, daemon }) => {
     const id = (await start()).body.session_id;
     const { HostConfig, Labels } = daemon.createBodies.c1;
@@ -482,7 +482,7 @@ test('a session container has the one-shot hardening and its own labels', T, asy
   });
 });
 
-test('the launcher reaches the session on its network by name, not on the first network listed', T, async () => {
+test('the launcher reaches the session on its network by name, not on the first network listed (a session dialed on an address the launcher cannot reach)', T, async () => {
   await withSessionLauncher({}, async ({ start }) => {
     const begun = Date.now();
     const started = await start();
@@ -491,7 +491,7 @@ test('the launcher reaches the session on its network by name, not on the first 
   });
 });
 
-test('the cap refuses the next start with 429, spends no sandbox on it, and frees on DELETE', T, async () => {
+test('the cap refuses the next start with 429, spends no sandbox on it, and frees on DELETE (a cap that still creates a container, or never frees)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_SESSION_CAP: '1' } }, async ({ start, stop, daemon }) => {
     const a = await start();
     assert.equal(a.status, 201);
@@ -505,7 +505,7 @@ test('the cap refuses the next start with 429, spends no sandbox on it, and free
   });
 });
 
-test('the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is 410', T, async () => {
+test('the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is 410 (a stale reader that gets a silent gap)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_SESSION_BUFFER: '3' } }, async ({ start, send, events, port }) => {
     const id = (await start()).body.session_id;
     const live = events(id, { after: 0, until: 4 });
@@ -523,7 +523,7 @@ test('the buffer keeps the last SANDBOX_SESSION_BUFFER events; an older after is
   });
 });
 
-test('a live session does not hold the docker run slot', T, async () => {
+test('a live session does not hold the docker run slot (one open session that freezes every one-shot run)', T, async () => {
   await withSessionLauncher({ env: { SANDBOX_DOCKER_CONCURRENCY: '1' } }, async ({ start, port }) => {
     assert.equal((await start()).status, 201);
     const triage = await request(port, 'POST', '/triage', {
@@ -534,7 +534,7 @@ test('a live session does not hold the docker run slot', T, async () => {
   });
 });
 
-test('a message with no text, or text over 1 MiB, is the caller\'s bad_request', T, async () => {
+test('a message with no text, or text over 1 MiB, is the caller\'s bad_request (a bad text sent into the sandbox)', T, async () => {
   await withSessionLauncher({}, async ({ start, send, daemon }) => {
     const id = (await start()).body.session_id;
     for (const text of ['', 'a'.repeat((1 << 20) + 1)]) {
