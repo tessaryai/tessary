@@ -107,7 +107,7 @@ class E2bAgentRunSandboxTest {
             @Nullable String cloneUrl, @Nullable String headSha, @Nullable String jsonSchema) {
         return new AgentRunSandbox.Request(
                 "proj",
-                "authoring",
+                "agent_run",
                 "You write classifiers.",
                 "Write one for timeouts.",
                 Map.of("brief.md", "the description"),
@@ -261,7 +261,7 @@ class E2bAgentRunSandboxTest {
         verify(usage)
                 .recordSandboxRun(
                         "proj",
-                        "authoring",
+                        "agent_run",
                         "claude-sonnet-5-5",
                         false,
                         100L,
@@ -395,7 +395,7 @@ class E2bAgentRunSandboxTest {
 
         assertEquals(AgentRunError.RUN_FAILED, ex.error());
         verify(usage)
-                .recordSandboxRun("proj", "authoring", "claude-sonnet-5-5", false, 120L, 40L, 0L, 0L, null, SUBJECT);
+                .recordSandboxRun("proj", "agent_run", "claude-sonnet-5-5", false, 120L, 40L, 0L, 0L, null, SUBJECT);
     }
 
     /** One real round trip over a loopback socket: the path, the bearer and the body the launcher actually sees. */

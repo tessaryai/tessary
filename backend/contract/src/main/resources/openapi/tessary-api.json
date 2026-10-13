@@ -6820,7 +6820,7 @@
             "enum" : [
               "rca",
               "triage",
-              "authoring",
+              "agent_run",
               "frustration"
             ],
             "type" : "string"
@@ -8270,7 +8270,7 @@
             "enum" : [
               "rca",
               "triage",
-              "authoring",
+              "agent_run",
               "frustration"
             ],
             "type" : "string"

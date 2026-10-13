@@ -149,7 +149,7 @@ test('a docker backend with no SANDBOX_WORK_VOLUME refuses to boot', async () =>
 // ---- Launcher sessions: the front door ------------------------------------------------------
 
 const SESSION_START = {
-  lane: 'authoring',
+  lane: 'agent_run',
   system_prompt: 'You help.',
   files: {},
   model: 'global.anthropic.claude-sonnet-4-6',

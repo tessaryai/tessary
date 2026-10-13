@@ -18,7 +18,7 @@ const { startFakeSession } = require('./fixtures/fake-session');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CREDENTIAL = { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'test-akid', aws_secret_key: 'test-secret' };
 const START = {
-  lane: 'authoring',
+  lane: 'agent_run',
   system_prompt: 'You help.',
   files: { 'notes.md': 'hello' },
   model: 'global.anthropic.claude-sonnet-4-6',

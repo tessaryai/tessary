@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 /**
  * The generic agent-sandbox run ({@code agentrun/}), bound from {@code tessary.agentrun.*}: one
  * coding-agent session in a fresh sandbox over a caller-supplied prompt, file set and schema, with
- * the project's repository and the platform's MCP surface in reach. The {@code AUTHORING} lane runs
+ * the project's repository and the platform's MCP surface in reach. The {@code AGENT_RUN} lane runs
  * through it.
  *
  * <p>{@link #launcherUrl}, {@link #launcherApiKey} and {@link #mcpBaseUrl} are blank by default and

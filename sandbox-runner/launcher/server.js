@@ -24,7 +24,7 @@
  *                                                    the caller's files + system prompt, the platform's
  *                                                    MCP surface, and ./repo/ (read-only) when a
  *                                                    clone_url is sent. Behind the backend's
- *                                                    AgentRunService (the AUTHORING lane) — see runAgentRun.
+ *                                                    AgentRunService (the AGENT_RUN lane) — see runAgentRun.
  *   POST   /sessions  { lane, system_prompt, files, model, model_cost?, provider, credential,
  *                       mcp_servers, idle_timeout_ms, max_tool_calls_per_message }
  *                                                    -> 201 { session_id }  a long-lived agent

@@ -28,7 +28,7 @@ as the Docker backend's agent image.
   production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
   under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
   computes what is mechanical rather than eyeballing it. (Node builtins only.)
-- `run.js` — the generic agent run behind the backend's `AgentRunService` (the `AUTHORING`
+- `run.js` — the generic agent run behind the backend's `AgentRunService` (the `AGENT_RUN`
   lane): materialize the caller's files under `dossier/`, clone the repository at the requested
   commit when a `clone_url` is sent (quarantined like RCA's), run the agent under the caller's own
   system prompt wired to the platform's MCP surface, and emit the schema-constrained answer, or

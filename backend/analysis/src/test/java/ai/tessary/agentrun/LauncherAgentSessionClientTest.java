@@ -82,7 +82,7 @@ class LauncherAgentSessionClientTest {
     private static final LlmUsageAccountant.Subject SUBJECT = new LlmUsageAccountant.Subject("work_item", "w1");
     private static final AgentSessionClient.Start START = new AgentSessionClient.Start(
             PROJECT,
-            ModelLane.AUTHORING,
+            ModelLane.AGENT_RUN,
             "You help.",
             Map.of("notes.md", "read me"),
             List.of(
@@ -142,7 +142,7 @@ class LauncherAgentSessionClientTest {
     }
 
     private void aGrokLane() {
-        when(modelSettings.resolveAgenticModel(PROJECT, ModelLane.AUTHORING))
+        when(modelSettings.resolveAgenticModel(PROJECT, ModelLane.AGENT_RUN))
                 .thenReturn(Optional.of(
                         new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
     }
@@ -178,7 +178,7 @@ class LauncherAgentSessionClientTest {
         assertEquals("/sessions", seen.path());
         assertEquals("Bearer " + LAUNCHER_KEY, seen.headers().get("authorization"));
         ObjectNode expected = (ObjectNode) MAPPER.readTree("""
-                {"lane":"authoring","system_prompt":"You help.","files":{"notes.md":"read me"},
+                {"lane":"agent_run","system_prompt":"You help.","files":{"notes.md":"read me"},
                  "model":"grok-4.6","provider":"GROK",
                  "credential":{"provider":"GROK","api_key":"xai-key","platform_funded":false},
                  "mcp_servers":[{"name":"platform","url":"https://api.example/mcp","token":"tsy_a_secret"},
@@ -498,7 +498,7 @@ class LauncherAgentSessionClientTest {
         verify(usage)
                 .recordSandboxRun(
                         "proj",
-                        "authoring",
+                        "agent_run",
                         "grok-4.6",
                         platformFunded,
                         1200L,
@@ -633,7 +633,7 @@ class LauncherAgentSessionClientTest {
         verifyBookedOnce(false);
         verify(usage)
                 .recordSandboxRun(
-                        "proj", "authoring", "grok-4.6", false, 10L, 2L, 0L, 0L, new BigDecimal("0.0021"), SUBJECT);
+                        "proj", "agent_run", "grok-4.6", false, 10L, 2L, 0L, 0L, new BigDecimal("0.0021"), SUBJECT);
         verifyNoMoreInteractions(usage);
     }
 

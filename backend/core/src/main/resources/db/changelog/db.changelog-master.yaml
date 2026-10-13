@@ -142,3 +142,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0038-trace-session-end-order.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0039-agent-run-lane.sql
+      relativeToChangelogFile: false
