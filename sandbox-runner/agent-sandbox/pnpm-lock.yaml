@@ -12,8 +12,8 @@ importers:
         specifier: 1.18.30
         version: 1.18.30
       e2b:
-        specifier: ^2.52.0
-        version: 2.52.0
+        specifier: ^2.55.0
+        version: 2.55.0
       undici:
         specifier: ^6.29.0
         version: 6.29.0
@@ -40,6 +40,10 @@ packages:
     resolution: {integrity: sha512-M63OQ1ZFcPUm85CuewJ9G9CMV8LjzGR9935xOnXNQGSazAbwMb3x2W7vXBYM1zqrP7XFD8uxp/dUAhirclgwnQ==}
     peerDependencies:
       '@bufbuild/protobuf': ^2.7.0
+
+  '@e2b/dockerfile-utils@0.1.0':
+    resolution: {integrity: sha512-JBiWrLHESy6E08PTGLf0RlE0BCKyi5+Et6TzX8pQOz3GRl/B89EnR3PZaIvp15QgD8STMY92D9KEHQqrOdWRKQ==}
+    engines: {node: '>=20.18.1 <21 || >=22'}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -227,16 +231,13 @@ packages:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
-  dockerfile-ast@0.7.1:
-    resolution: {integrity: sha512-oX/A4I0EhSkGqrFv0YuvPkBUSYp1XiY8O8zAKc8Djglx8ocz+JfOr8gP0ryRMC2myqvDLagmnZaU9ot1vG2ijw==}
-
   dotenv@18.0.5:
     resolution: {integrity: sha512-aBrGvt6KhjxbEnatqMWOMidftwsrCiCvqh1yNIGB9QyF0J+VcWkKDMsvYOEm7ZS82oiV+BT1sTOtIlAmUlTpwQ==}
     engines: {node: '>=12'}
     hasBin: true
 
-  e2b@2.52.0:
-    resolution: {integrity: sha512-TmUZlAvQq8BbguodpA+BBdawR/x5uILMQtHcLkdaLUqevsDjDdh46IYYU8ZRYKsQ4OhWr4xhsFIPSg1kgf+O0w==}
+  e2b@2.55.0:
+    resolution: {integrity: sha512-viC7GLHMPqzilndlKgNXWN0ebMV8fpbI1IfDlPd+GHuNcJIcUCXKyr5HAxjcC5sDMym3rrbyUyUQ+zQVAU9oGA==}
     engines: {node: '>=20.18.1 <21 || >=22'}
 
   esbuild@0.28.2:
@@ -314,15 +315,9 @@ packages:
     resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+  undici@8.11.2:
+    resolution: {integrity: sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==}
     engines: {node: '>=22.19.0'}
-
-  vscode-languageserver-textdocument@1.0.15:
-    resolution: {integrity: sha512-Gsfr9S8LU3S6885cS+NaleasJ0n3V5y/SOTqHCifQiXWFw3G9w9/YItDfwHrlCz+dSZWWZ8ilYVMcJe7Sz7Sxw==}
-
-  vscode-languageserver-types@3.18.4:
-    resolution: {integrity: sha512-nQsacoiijvl0fRf2q28uFDrAVwRhdCa3QveiF7/CX0r18mLR5FU/1WskSsCKOjmEbtteKUnY8x8Yzxop+k0zwg==}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -345,6 +340,8 @@ snapshots:
   '@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0)':
     dependencies:
       '@bufbuild/protobuf': 2.16.0
+
+  '@e2b/dockerfile-utils@0.1.0': {}
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
@@ -450,28 +447,23 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
-  dockerfile-ast@0.7.1:
-    dependencies:
-      vscode-languageserver-textdocument: 1.0.15
-      vscode-languageserver-types: 3.18.4
-
   dotenv@18.0.5: {}
 
-  e2b@2.52.0:
+  e2b@2.55.0:
     dependencies:
       '@bufbuild/protobuf': 2.16.0
       '@connectrpc/connect': 2.2.0(@bufbuild/protobuf@2.16.0)
       '@connectrpc/connect-web': 2.2.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.2.0(@bufbuild/protobuf@2.16.0))
+      '@e2b/dockerfile-utils': 0.1.0
       chalk: 5.6.2
       compare-versions: 6.1.1
-      dockerfile-ast: 0.7.1
       glob: 13.0.6
       openapi-fetch: 0.17.0
       platform: 1.3.6
       tar: 7.5.22
       undici: 7.30.0
     optionalDependencies:
-      undici8: undici@8.10.2
+      undici8: undici@8.11.2
 
   esbuild@0.28.2:
     optionalDependencies:
@@ -564,12 +556,8 @@ snapshots:
 
   undici@7.30.0: {}
 
-  undici@8.10.2:
+  undici@8.11.2:
     optional: true
-
-  vscode-languageserver-textdocument@1.0.15: {}
-
-  vscode-languageserver-types@3.18.4: {}
 
   which@2.0.2:
     dependencies:
