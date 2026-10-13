@@ -34,6 +34,7 @@ final class FakeLauncher implements AutoCloseable {
     /** One request as the launcher saw it; header names are lower-case. */
     record Seen(String method, String path, Map<String, String> headers, String body) {}
 
+    /** {@code CUT} closes the connection after the frames are flushed, without the last chunk. */
     enum Ending {
         END,
         CUT
@@ -171,7 +172,7 @@ final class FakeLauncher implements AutoCloseable {
                     streamHead(out);
                     for (String frame : f.frames()) chunk(out, frame);
                     if (f.ending() == Ending.CUT) {
-                        client.setSoLinger(true, 0);
+                        out.flush();
                         return;
                     }
                     out.write("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
