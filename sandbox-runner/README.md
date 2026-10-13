@@ -210,10 +210,18 @@ checks the body in this order, each a `bad_request` with this `detail`:
 | `model` non-empty string | `session.js: model must be a non-empty string` |
 | `idle_timeout_ms` positive integer | `session.js: idle_timeout_ms must be a positive integer` |
 | an `egress_secret` credential on docker | `session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)` |
+| `system_prompt` non-empty string | `session.js: system_prompt must be a non-empty string` |
+| `files`, if present, an object of strings | `session.js: files must map relative paths to strings` |
+| `mcp_servers` an array | `session.js: mcp_servers must be an array` |
+| each `mcp_servers` name matches `^[a-z][a-z0-9-]{0,31}$` | `session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$` |
+| each name once | `session.js: mcp_servers name repeated: <name>` |
 | on E2B, an `mcp_servers` entry whose `url` is missing or points at localhost (the one-shot routes' check) | `session.js: mcp_servers[<i>].url is missing or unreachable from an E2B microVM` |
+| each entry has a string `url` and `token` | `session.js: mcp_servers <name> needs a url and a token` |
+| `max_tool_calls_per_message` an integer from 1 to 1000 | `session.js: max_tool_calls_per_message must be an integer from 1 to 1000` |
 
-The script checks `system_prompt`, `files`, `mcp_servers` and `max_tool_calls_per_message`; a bad
-one is a start failure. `provider` is ignored, as on the one-shot routes: `credential.provider`
+These are the script's own checks of `session.json`, made here as well so a caller's mistake is a
+`bad_request` (the backend's `RUN_FAILED`) that spends no sandbox, never a failed start that reads
+as an outage. A dossier path that escapes is still found only by the script. `provider` is ignored, as on the one-shot routes: `credential.provider`
 decides. `session.json` holds exactly `{ system_prompt, files, model, mcp_servers,
 max_tool_calls_per_message }`, with the model qualified as on the one-shot routes; the credential
 reaches the sandbox only through its env, with `model_cost` declared in `OPENCODE_CONFIG_CONTENT`.

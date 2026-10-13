@@ -1633,6 +1633,11 @@ function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
   };
 }
 
+// session.js's own checks of session.json, repeated here so a bad one spends no sandbox; the two
+// run in different images, so they share no code.
+const SESSION_SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const SESSION_MAX_TOOL_CALLS = 1000;
+
 // Request-shape checks, in the order README "Launcher sessions" lists them. A bad body is the
 // caller's bad_request and spends no sandbox. Only these five fields reach session.json; the
 // credential reaches the sandbox through its env alone.
@@ -1644,12 +1649,27 @@ function parseSessionStart(rawBody) {
   if (typeof body.model !== 'string' || !body.model) bad('model must be a non-empty string');
   if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
   if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
-  if (BACKEND !== 'docker') {
-    const servers = Array.isArray(body.mcp_servers) ? body.mcp_servers : [];
-    servers.forEach((server, i) => {
-      const url = server && server.url;
-      if (typeof url !== 'string' || pointsAtLocalhost(url)) bad(`mcp_servers[${i}].url is missing or unreachable from an E2B microVM`);
-    });
+  if (typeof body.system_prompt !== 'string' || !body.system_prompt) bad('system_prompt must be a non-empty string');
+  const files = body.files === undefined ? {} : body.files;
+  if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
+    bad('files must map relative paths to strings');
+  }
+  if (!Array.isArray(body.mcp_servers)) bad('mcp_servers must be an array');
+  const names = new Set();
+  body.mcp_servers.forEach((server, i) => {
+    if (!server || typeof server.name !== 'string' || !SESSION_SERVER_NAME.test(server.name)) {
+      bad(`each mcp_servers name must match ${SESSION_SERVER_NAME.source}`);
+    }
+    if (names.has(server.name)) bad(`mcp_servers name repeated: ${server.name}`);
+    if (BACKEND !== 'docker' && (typeof server.url !== 'string' || pointsAtLocalhost(server.url))) {
+      bad(`mcp_servers[${i}].url is missing or unreachable from an E2B microVM`);
+    }
+    if (typeof server.url !== 'string' || typeof server.token !== 'string') bad(`mcp_servers ${server.name} needs a url and a token`);
+    names.add(server.name);
+  });
+  const maxToolCalls = body.max_tool_calls_per_message;
+  if (!Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > SESSION_MAX_TOOL_CALLS) {
+    bad(`max_tool_calls_per_message must be an integer from 1 to ${SESSION_MAX_TOOL_CALLS}`);
   }
   const model = toProviderModel(body.model, body.credential);
   return {
@@ -1661,7 +1681,7 @@ function parseSessionStart(rawBody) {
     idleTimeoutMs: body.idle_timeout_ms,
     sessionFile: {
       system_prompt: body.system_prompt,
-      files: body.files,
+      files,
       model,
       mcp_servers: body.mcp_servers,
       max_tool_calls_per_message: body.max_tool_calls_per_message,

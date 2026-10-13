@@ -168,7 +168,7 @@ const SESSION_ROUTES = [
   ['DELETE', '/sessions/x'],
 ];
 
-test('every session route needs the launcher key before its body is read', async () => {
+test('every session route needs the launcher key before its body is read (a session route open to anyone who reaches the launcher)', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
     for (const [method, urlPath] of SESSION_ROUTES) {
@@ -185,7 +185,7 @@ test('every session route needs the launcher key before its body is read', async
   }
 });
 
-test('a session path with another method or segment is 404', async () => {
+test('a session path with another method or segment is 404 (a malformed session path that reaches the session router or a one-shot route)', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
     for (const [method, urlPath] of [
@@ -203,7 +203,7 @@ test('a session path with another method or segment is 404', async () => {
   }
 });
 
-test('POST /sessions refuses a bad body before any sandbox is spent', async () => {
+test('POST /sessions refuses a bad body before any sandbox is spent (a caller error that spends a sandbox and reads as a retryable outage)', async () => {
   // A docker backend whose socket does not exist: a start that got past validation would fail as
   // an orchestration error at its first daemon call, never as bad_request.
   const scratch = tempDir('http-edges-sessions-');
@@ -232,6 +232,19 @@ test('POST /sessions refuses a bad body before any sandbox is spent', async () =
       [{ idle_timeout_ms: 1.5 }, 'session.js: idle_timeout_ms must be a positive integer'],
       [{ idle_timeout_ms: '60000' }, 'session.js: idle_timeout_ms must be a positive integer'],
       [{ credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' } }, 'session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)'],
+      [{ system_prompt: undefined }, 'session.js: system_prompt must be a non-empty string'],
+      [{ system_prompt: '' }, 'session.js: system_prompt must be a non-empty string'],
+      [{ files: [] }, 'session.js: files must map relative paths to strings'],
+      [{ files: { 'a.md': 7 } }, 'session.js: files must map relative paths to strings'],
+      [{ mcp_servers: undefined }, 'session.js: mcp_servers must be an array'],
+      [{ mcp_servers: [{ name: 'Tessary', url: 'http://backend:8080/mcp', token: 't' }] }, 'session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$'],
+      [{ mcp_servers: [{ name: 'x_y', url: 'http://backend:8080/mcp', token: 't' }] }, 'session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$'],
+      [{ mcp_servers: [SESSION_START.mcp_servers[0], SESSION_START.mcp_servers[0]] }, 'session.js: mcp_servers name repeated: tessary'],
+      [{ mcp_servers: [{ name: 'tessary', url: 'http://backend:8080/mcp' }] }, 'session.js: mcp_servers tessary needs a url and a token'],
+      [{ max_tool_calls_per_message: undefined }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 0 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 1001 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 2.5 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
     ];
     for (const [change, detail] of rows) {
       const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body: { ...SESSION_START, ...change } });
@@ -262,7 +275,7 @@ test('on the e2b backend a session whose MCP server has no url or points at loca
   }
 });
 
-test('a session env value that is not a positive integer refuses to boot', async () => {
+test('a session env value that is not a positive integer refuses to boot (a bad env that makes every session timer fire at once)', async () => {
   for (const [name, value] of [['SANDBOX_SESSION_CAP', 'abc'], ['SANDBOX_SESSION_BUFFER', '0'], ['SANDBOX_SESSION_MAX_MS', '-5'], ['SANDBOX_SESSION_PORT', '1.5']]) {
     const child = spawnLauncher({ ...E2B_ENV, [name]: value });
     let stderr = '';
