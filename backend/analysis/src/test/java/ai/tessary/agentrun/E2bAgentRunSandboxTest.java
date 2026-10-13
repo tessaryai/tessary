@@ -148,7 +148,7 @@ class E2bAgentRunSandboxTest {
 
         sandbox(client).run(fullRequest());
 
-        assertEquals("http://launcher/authoring", client.lastRequest().uri().toString());
+        assertEquals("http://launcher/runs", client.lastRequest().uri().toString());
         assertEquals(
                 List.of("Bearer " + API_KEY), client.lastRequest().headers().allValues("Authorization"));
         JsonNode expected = MAPPER.readTree(String.format(Locale.ROOT, """
@@ -208,8 +208,7 @@ class E2bAgentRunSandboxTest {
 
         sandbox(own, observer("http://observer-launcher", "observer-k"), client).run(fullRequest());
 
-        assertEquals(
-                "http://observer-launcher/authoring", client.lastRequest().uri().toString());
+        assertEquals("http://observer-launcher/runs", client.lastRequest().uri().toString());
         assertEquals(
                 List.of("Bearer observer-k"), client.lastRequest().headers().allValues("Authorization"));
     }
@@ -329,7 +328,7 @@ class E2bAgentRunSandboxTest {
             delimiter = '|',
             value = {
                 "401 | unauthorized        | LAUNCHER_MISCONFIGURED | The agent launcher refused the run: status 401 from http://launcher, the shared secret does not match; TESSARY_AGENTRUN_LAUNCHER_API_KEY (or the observer's) must equal the launcher's SANDBOX_API_KEY",
-                "404 | ''                  | LAUNCHER_MISCONFIGURED | The agent launcher refused the run: status 404 from http://launcher, no /authoring route; the launcher image is older than this backend",
+                "404 | ''                  | LAUNCHER_MISCONFIGURED | The agent launcher refused the run: status 404 from http://launcher, no /runs route; the launcher image is older than this backend",
                 "502 | orchestration       | LAUNCHER_UNAVAILABLE   | The agent launcher is not answering: status 502 from http://launcher, kind=orchestration detail=the launcher's diagnosis",
                 "502 | timeout             | TIMED_OUT              | The agent run hit its 900000ms wall clock",
                 "502 | script_exit         | RUN_FAILED             | The agent run failed: kind=script_exit detail=the launcher's diagnosis",
@@ -401,7 +400,7 @@ class E2bAgentRunSandboxTest {
 
     /** One real round trip over a loopback socket: the path, the bearer and the body the launcher actually sees. */
     @Test
-    void aRealRoundTripReachesTheAuthoringRoute() throws Exception {
+    void aRealRoundTripReachesTheRunsRoute() throws Exception {
         try (LoopbackHttpStub launcher = LoopbackHttpStub.answering(200, envelope(Map.of("result", "ok")))) {
             E2bAgentRunSandbox sandbox = sandbox(
                     props(launcher.baseUrl()),
@@ -412,7 +411,7 @@ class E2bAgentRunSandboxTest {
 
             assertEquals("ok", result.resultText());
             LoopbackHttpStub.Request seen = launcher.lastRequest();
-            assertEquals("/authoring", seen.path());
+            assertEquals("/runs", seen.path());
             assertEquals("Bearer " + API_KEY, seen.headers().get("authorization"));
             assertEquals(
                     "Write one for timeouts.",

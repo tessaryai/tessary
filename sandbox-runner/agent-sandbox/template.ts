@@ -112,12 +112,12 @@ export const template = Template()
   .setEnvs({ HOME: '/home/user', PIP_BREAK_SYSTEM_PACKAGES: '1' })
   .runCmd('mkdir -p /home/user')
   .setWorkdir('/home/user')
-  // Shared OpenCode runner required by rca.js/triage.js/authoring.js/session.js — must be baked beside
+  // Shared OpenCode runner required by rca.js/triage.js/run.js/session.js — must be baked beside
   // them or their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same
-  // way, by agent-stream.js on the system-prompt (triage, authoring) path and by session.js.
+  // way, by agent-stream.js on the system-prompt (triage.js, run.js) path and by session.js.
   .copy('agent-stream.js', '/home/user/agent-stream.js')
   .copy('mcp-relay.js', '/home/user/mcp-relay.js')
   .copy('rca.js', '/home/user/rca.js')
   .copy('triage.js', '/home/user/triage.js')
-  .copy('authoring.js', '/home/user/authoring.js')
+  .copy('run.js', '/home/user/run.js')
   .copy('session.js', '/home/user/session.js');

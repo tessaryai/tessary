@@ -9,7 +9,7 @@ as the Docker backend's agent image.
 - `template.ts` — the image definition (base image, `git`, the `opencode-ai` CLI +
   `@opencode-ai/sdk` pinned in lockstep, and the in-VM scripts).
 - `agent-stream.js` — the shared OpenCode runner: starts `opencode` as a server and drives it
-  through the SDK. Required by `rca.js`, `triage.js`, `authoring.js` and `session.js`.
+  through the SDK. Required by `rca.js`, `triage.js`, `run.js` and `session.js`.
 - `mcp-relay.js` — a loopback MCP proxy with named upstreams: each name is served at
   `/mcp/<name>` and forwards to its own URL with its own bearer token, so no token reaches
   OpenCode's config. Every `tools/call` result is saved whole to `checks/mcp/NNN-<tool>.json` (one
@@ -28,7 +28,7 @@ as the Docker backend's agent image.
   production traffic is true. It reads the substrate through MCP instead, and may edit anywhere
   under the work dir — `checks/` is where its own scripts go, beside every saved tool result, so it
   computes what is mechanical rather than eyeballing it. (Node builtins only.)
-- `authoring.js` — the generic agent run behind the backend's `AgentRunService` (the `AUTHORING`
+- `run.js` — the generic agent run behind the backend's `AgentRunService` (the `AUTHORING`
   lane): materialize the caller's files under `dossier/`, clone the repository at the requested
   commit when a `clone_url` is sent (quarantined like RCA's), run the agent under the caller's own
   system prompt wired to the platform's MCP surface, and emit the schema-constrained answer, or

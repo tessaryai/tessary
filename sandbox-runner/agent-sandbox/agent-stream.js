@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js, authoring.js) and the long-lived
+ * Shared OpenCode runner for the agent lanes (rca.js, triage.js, run.js) and the long-lived
  * session.js. ONE source of truth for:
  *   - starting `opencode serve` and driving it over the SDK, and the config it starts with
  *     (basePermission, customAgent, remoteMcp),
@@ -817,7 +817,7 @@ function remoteMcp(urls) {
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
  *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
- *     is that reply. Null (authoring.js, asked for prose) drops the constraint: no schema
+ *     is that reply. Null (run.js, asked for prose) drops the constraint: no schema
  *     instruction, no schema-miss retry, and the reply's text is the answer, with
  *     `structured_output` present only when that text happened to carry a JSON object.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
@@ -995,7 +995,7 @@ async function runAgent(spec) {
       }
       // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
       // so "we parsed an object at all" is the check that carries the prose case. No schema at all
-      // (authoring.js, asked for prose) means any non-empty reply is the answer.
+      // (run.js, asked for prose) means any non-empty reply is the answer.
       const missing = missingKeys(structured, spec.jsonSchema);
       if (!spec.jsonSchema || (structured && missing.length === 0)) break;
       if (attempt === 0) console.error(describeSchemaMiss(text, turns, spec.jsonSchema));

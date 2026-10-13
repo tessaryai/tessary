@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Generic agent runner, the lane behind POST /authoring — runs INSIDE an E2B microVM (template
+ * Generic agent runner, the run behind POST /runs — runs INSIDE an E2B microVM (template
  * tessary-agent-sandbox) or a docker sibling, exactly like rca.js and triage.js. The launcher
- * injects the agent auth and invokes:  node authoring.js <input.json>
+ * injects the agent auth and invokes:  node run.js <input.json>
  *
  *   input.json : { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model,
  *                  mcp: {url, token}, timeout_ms, max_turns }

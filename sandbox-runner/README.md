@@ -1,7 +1,7 @@
 # sandbox-runner
 
 Runs the platform's own **agent** in an isolated sandbox: agentic RCA (`/rca`), Layer-2 triage
-(`/triage`) and the generic agent run behind the authoring lane (`/authoring`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
+(`/triage`) and the generic agent run behind `AgentRunService` (`/runs`). The Java backend has no E2B SDK and no Docker client, so it calls this Node sidecar over
 HTTP and the sidecar owns the sandbox lifecycle — one request, one fresh sandbox, torn down after.
 The one exception is a [launcher session](#launcher-sessions): one sandbox serves one session's
 messages until the session closes, and is never shared with another session.
@@ -21,7 +21,7 @@ from the platform, and with it five of the seven routes this service served:
 | `/analyze` | the git observer's drift analysis | gone with the observer |
 | **`/rca`** | agentic root-cause analysis | **survives** |
 | **`/triage`** | Layer-2 ruling on a classifier finding | **survives** |
-| **`/authoring`** | a generic agent run over caller-supplied files, the repo and the traces | **added 2026-10** |
+| **`/runs`** | a generic agent run over caller-supplied files, the repo and the traces | **added 2026-10** |
 
 Three whole subtrees went with them: `lambda/` (the AWS Lambda grading executor and the shared
 `harness.js`), `template/` (the air-gapped E2B grader sandbox), and the `grade.js` / `lint.js` /
@@ -41,7 +41,7 @@ E2B; nothing in this tree can delete it.
 
 - `launcher/` — the HTTP sidecar (`server.js`). Owns the two backends below and the
   [launcher sessions](#launcher-sessions).
-- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `authoring.js`, the long-lived agent
+- `agent-sandbox/` — the agent sandbox: `rca.js`, `triage.js`, `run.js`, the long-lived agent
   session `session.js` (see [Agent sessions](#agent-sessions-sessionjs)), the shared
   `agent-stream.js` OpenCode runner and `mcp-relay.js`, and TWO INDEPENDENTLY MAINTAINED RECIPES for
   one runtime — `template.ts` (the E2B template, published by `build.ts`) and `Dockerfile` (the

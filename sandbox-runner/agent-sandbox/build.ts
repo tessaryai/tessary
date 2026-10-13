@@ -55,7 +55,7 @@ const RECIPE_INPUTS = [
   'mcp-relay.js',
   'rca.js',
   'triage.js',
-  'authoring.js',
+  'run.js',
   'session.js',
 ];
 
@@ -195,7 +195,7 @@ async function verify(version: string) {
       ['jq runs', 'jq --version'],
       [
         'agent scripts are baked',
-        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/authoring.js'
+        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/run.js'
           + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
           + ' && test -f /home/user/session.js',
       ],

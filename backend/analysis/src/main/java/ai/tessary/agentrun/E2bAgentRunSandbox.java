@@ -34,7 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * The launcher-backed {@link AgentRunSandbox}: one {@code POST /authoring} to the sidecar is one
+ * The launcher-backed {@link AgentRunSandbox}: one {@code POST /runs} to the sidecar is one
  * fresh sandbox that materializes the caller's files under {@code dossier/}, clones the repository
  * when the request names one, runs the agent against them and the platform's MCP surface, and tears
  * down. The body is triage's plus {@code clone_url}/{@code head_sha} when present; {@code
@@ -60,7 +60,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     /** Telemetry name for the run's root span and Langfuse trace; the lane rides as an attribute. */
     static final String OPERATION = "agent-run";
 
-    private static final String ROUTE = "/authoring";
+    private static final String ROUTE = "/runs";
 
     /** Why nothing is sent when neither this lane nor the observer names a launcher. */
     static final String NO_LAUNCHER = "tessary.agentrun.launcher-url and tessary.observer.agentic.launcher-url are both"
@@ -227,7 +227,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
     }
 
     /**
-     * One {@code POST /authoring}; the 2xx body, or a thrown {@link AgentRunError}. A non-2xx body is
+     * One {@code POST /runs}; the 2xx body, or a thrown {@link AgentRunError}. A non-2xx body is
      * booked against the ledger before the throw, since the launcher carries the run's usage in its
      * error body whenever the agent spent tokens before failing.
      */

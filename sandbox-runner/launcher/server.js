@@ -18,13 +18,13 @@
  *                                                    -> { raw: "<agent stdout>" }  Layer-2 ruling over
  *                                                    the finding's dossier + the platform's MCP surface.
  *                                                    The one agentic route with NO clone — see runTriage.
- *   POST /authoring { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
- *                     timeout_ms }
+ *   POST /runs { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
+ *               timeout_ms }
  *                                                    -> { raw: "<agent stdout>" }  a generic agent run:
  *                                                    the caller's files + system prompt, the platform's
  *                                                    MCP surface, and ./repo/ (read-only) when a
  *                                                    clone_url is sent. Behind the backend's
- *                                                    AgentRunService (the AUTHORING lane) — see runAuthoring.
+ *                                                    AgentRunService (the AUTHORING lane) — see runAgentRun.
  *   POST   /sessions  { lane, system_prompt, files, model, model_cost?, provider, credential,
  *                       mcp_servers, idle_timeout_ms, max_tool_calls_per_message }
  *                                                    -> 201 { session_id }  a long-lived agent
@@ -42,7 +42,7 @@
  * FIVE ROUTES WERE REMOVED, and the list is worth keeping because the shape of what remains is
  * the argument for the rename: /grade and /lint ran user-authored grader code, /synthesize and
  * /codegen authored it, and /analyze served the git observer. All five went with grading and the
- * observer. What is left — /rca, /triage and /authoring — is OUR agent working on the surviving
+ * observer. What is left — /rca, /triage and /runs — is OUR agent working on the surviving
  * classifier product, which is why this service is no longer named for graders.
  *
  * Failure contract: every orchestration failure answers 502 with
@@ -1624,8 +1624,8 @@ function runTriage(payload) {
 // agent under the caller's own system prompt, wired to the platform's MCP surface via the short-lived
 // key in payload.mcp (scrubbed from all output, never returned to the backend). json_schema is
 // optional here: without one the agent answers in prose.
-function runAuthoring(payload) {
-  return runAgenticScript('authoring.js', payload);
+function runAgentRun(payload) {
+  return runAgenticScript('run.js', payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -2223,7 +2223,7 @@ async function handleSessionRoute(req, res, route) {
 const AGENTIC_ROUTES = new Map([
   ['/rca', runRca],
   ['/triage', runTriage],
-  ['/authoring', runAuthoring],
+  ['/runs', runAgentRun],
 ]);
 
 function readBody(req) {
