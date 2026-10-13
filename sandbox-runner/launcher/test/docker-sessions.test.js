@@ -547,3 +547,81 @@ test('a message with no text, or text over 1 MiB, is the caller\'s bad_request',
   });
 });
 
+
+test('a reply text split inside a multi-byte character reaches the reader whole (non-ASCII text turned into U+FFFD for good)', T, async () => {
+  await withSessionLauncher({ shape: { splitMultibyte: true } }, async ({ start, send, events }) => {
+    const id = (await start()).body.session_id;
+    assert.equal((await send(id, 'café — ✓ 日本 🙂')).status, 202);
+
+    const read = await events(id, { after: 0, until: 4 });
+    assert.deepEqual(read.events, numbered(reply(1, 'café — ✓ 日本 🙂'), 1));
+  });
+});
+
+test('a message accepted while the session closes ends its reply before closed (a reply\'s spend lost to a close that ran during the message)', T, async () => {
+  await withSessionLauncher({ shape: { hold: true, acceptAfterMs: 300 } }, async ({ start, send, stop, events }) => {
+    const id = (await start()).body.session_id;
+    const sent = send(id, 'one');
+    await sleep(100);
+    const stopped = stop(id);
+
+    assert.deepEqual(await sent, { status: 202, body: undefined });
+    assert.deepEqual(await stopped, { status: 204, body: undefined });
+    const read = await events(id, { after: 0 });
+    assert.deepEqual(read.events.map((e) => [e.id, e.type, e.data.reason]), [
+      [1, 'text', undefined], [2, 'message_end', 'aborted'], [3, 'closed', 'stopped'],
+    ]);
+  });
+});
+
+test('a message the script cannot take any more closes the session as failed and is 404 (a dead script kept live, or read as an outage)', T, async () => {
+  for (const messageAnswer of ['drop', 503]) {
+    await withSessionLauncher({ shape: { messageAnswer } }, async ({ start, send, events, daemon }) => {
+      const id = (await start()).body.session_id;
+
+      assert.deepEqual(await send(id, 'one'), { status: 404, body: NOT_FOUND }, String(messageAnswer));
+      const read = await events(id, { after: 0 });
+      assert.deepEqual(read.events, [{ id: 1, type: 'closed', data: { reason: 'failed' } }], String(messageAnswer));
+      await until(() => daemon.calls.includes('DELETE /containers/c1?force=true'), 'the container removal');
+    });
+  }
+});
+
+test('a message the script refuses for another reason is a 502 orchestration and the session stays (a refusal read as accepted or as closed)', T, async () => {
+  await withSessionLauncher({ shape: { messageAnswer: 500 } }, async ({ start, send, stop }) => {
+    const id = (await start()).body.session_id;
+
+    const res = await send(id, 'one');
+    assert.equal(res.status, 502);
+    assert.equal(res.body.kind, 'orchestration');
+    assert.equal(res.body.detail, 'session.js refused the message (HTTP 500)');
+    assert.deepEqual(await stop(id), { status: 204, body: undefined }, 'the session is still there to stop');
+  });
+});
+
+test('an abort the script cannot take closes the session as failed and is 404, and any other refusal is 502 (an abort error that leaves a dead session live)', T, async () => {
+  await withSessionLauncher({ shape: { abortAnswer: 'drop' } }, async ({ start, abort, events }) => {
+    const id = (await start()).body.session_id;
+    assert.deepEqual(await abort(id), { status: 404, body: NOT_FOUND });
+    assert.deepEqual((await events(id, { after: 0 })).events, [{ id: 1, type: 'closed', data: { reason: 'failed' } }]);
+  });
+  await withSessionLauncher({ shape: { abortAnswer: 500 } }, async ({ start, abort }) => {
+    const id = (await start()).body.session_id;
+    const res = await abort(id);
+    assert.equal(res.status, 502);
+    assert.equal(res.body.kind, 'orchestration');
+    assert.equal(res.body.detail, 'session.js refused the abort (HTTP 500)');
+  });
+});
+
+test('a reply whose message_end beats the 202 does not leave the session busy (a session stuck at 409 with no idle clock)', T, async () => {
+  await withSessionLauncher({ shape: { replyBefore202: true } }, async ({ start, send, events, stderr }) => {
+    const id = (await start({ ...START, idle_timeout_ms: 400 })).body.session_id;
+    const reader = events(id, { after: 0 });
+    await sleep(50);
+
+    assert.equal((await send(id, 'one')).status, 202);
+    const read = await reader;
+    assert.deepEqual(read.events, [...numbered(reply(1, 'one'), 1), { id: 5, type: 'closed', data: { reason: 'idle' } }], stderr());
+  });
+});

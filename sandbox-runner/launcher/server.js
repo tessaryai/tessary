@@ -192,6 +192,7 @@ const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 
 // `e2b` is required LAZILY (only inside the E2B code paths) so the docker backend, the default,
 // needs no `e2b` install at all.
@@ -1757,9 +1758,12 @@ function readSessionEventsOnce(s) {
         resolve();
         return;
       }
+      // One decoder for the whole response: a multi-byte character split across two reads is joined,
+      // never decoded half by half into U+FFFD.
+      const decoder = new StringDecoder('utf8');
       let buffered = '';
       res.on('data', (chunk) => {
-        buffered += chunk.toString('utf8');
+        buffered += decoder.write(chunk);
         let cut;
         while ((cut = buffered.indexOf('\n')) !== -1) {
           const line = buffered.slice(0, cut);
@@ -1844,6 +1848,9 @@ function closeSession(s, reason) {
       s.state = 'closing';
       clearIdle(s);
       if (s.lifeTimer) clearTimeout(s.lifeTimer);
+      // A message in flight to the script may be accepted: wait for its answer, so a reply it starts
+      // is aborted and ends below like any other.
+      await waitUntil(() => !s.sending || s.exited, SESSION_REQUEST_MS + SESSION_CLOSE_GRACE_MS);
       // Abort a running reply first and let it end, so its message_end, and the spend it carries,
       // reaches the caller before the session closes.
       if (s.replyOpen && !s.exited) {
@@ -1871,7 +1878,8 @@ function logStartFailure(s) {
   return new Promise((resolve) => {
     const req = sessionTransport(s.address).request(`${s.address}/events?from=0`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
       let text = '';
-      res.on('data', (c) => { text += c.toString('utf8'); });
+      res.setEncoding('utf8');
+      res.on('data', (c) => { text += c; });
       res.on('end', done);
       res.on('error', done);
       res.on('aborted', done);
@@ -2032,6 +2040,7 @@ async function sendSessionMessage(s, req) {
   if (typeof text !== 'string' || !text || Buffer.byteLength(JSON.stringify({ text })) > SESSION_TEXT_MAX_BYTES) {
     throw sessionFailure(`${SESSION_SCRIPT}: text must be a non-empty string of at most 1 MiB`, 'bad_request');
   }
+  if (s.state !== 'live') return { status: 404, body: SESSION_UNKNOWN };
   if (s.replyOpen || s.sending) return { status: 409, body: { error: 'session busy', kind: 'busy' } };
   s.sending = true;
   clearIdle(s);
@@ -2045,6 +2054,8 @@ async function sendSessionMessage(s, req) {
       return { status: 404, body: SESSION_UNKNOWN };
     }
     if (answer.status === 202) {
+      // A close that could not wait for this answer already emitted closed: no message_end follows.
+      if (s.closedSent) return { status: 404, body: SESSION_UNKNOWN };
       // The reply's events travel on another connection and can beat this answer here.
       s.replyOpen = s.messageEnds === endsBefore;
       return { status: 202 };

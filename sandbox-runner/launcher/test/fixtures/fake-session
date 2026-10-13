@@ -17,6 +17,13 @@ const { finished } = require('node:stream');
  *   startFails     /healthz is always 503 failed, and the log holds the script's start error
  *   hold           the first message emits one text delta and waits for release() or /abort
  *   cutEventsAfter the first /events response is destroyed after this many lines
+ *   splitMultibyte a line that holds a multi-byte character is written in two writes 30 ms apart,
+ *                  split inside that character's bytes
+ *   messageAnswer  /message answers this status ({ kind: 'failed' } for 503) and starts no reply;
+ *                  'drop' destroys the connection instead
+ *   abortAnswer    /abort answers this status, or 'drop' destroys the connection
+ *   acceptAfterMs  /message answers 202 only after this delay, then the reply starts
+ *   replyBefore202 /message plays the whole reply first and answers 202 100 ms later
  */
 async function startFakeSession({ port, secret, shape = {} }) {
   const startingPolls = shape.startingPolls === undefined ? 1 : shape.startingPolls;
@@ -36,6 +43,23 @@ async function startFakeSession({ port, secret, shape = {} }) {
   const exited = new Promise((r) => { resolveExited = r; });
 
   function write(reader, line) {
+    if (shape.splitMultibyte) {
+      reader.chain = reader.chain.then(() => new Promise((resolve) => {
+        const bytes = Buffer.from(line);
+        const cut = bytes.findIndex((b) => b >= 0x80);
+        if (cut < 0) {
+          reader.res.write(bytes);
+          resolve();
+          return;
+        }
+        reader.res.write(bytes.subarray(0, cut + 1));
+        setTimeout(() => {
+          reader.res.write(bytes.subarray(cut + 1));
+          resolve();
+        }, 30);
+      }));
+      return;
+    }
     reader.written++;
     if (reader.cutAfter !== undefined && reader.written >= reader.cutAfter) {
       readers.delete(reader);
@@ -53,10 +77,10 @@ async function startFakeSession({ port, secret, shape = {} }) {
 
   function endLog() {
     logEnded = true;
-    const flushed = [...readers].map((reader) => new Promise((resolve) => {
+    const flushed = [...readers].map((reader) => reader.chain.then(() => new Promise((resolve) => {
       finished(reader.res, () => resolve());
       reader.res.end();
-    }));
+    })));
     readers.clear();
     return Promise.all(flushed);
   }
@@ -109,13 +133,13 @@ async function startFakeSession({ port, secret, shape = {} }) {
         eventsCalls++;
         res.writeHead(200, { 'content-type': 'application/x-ndjson' });
         res.flushHeaders();
-        const reader = { res, written: 0, cutAfter: eventsCalls === 1 ? shape.cutEventsAfter : undefined };
+        const reader = { res, written: 0, cutAfter: eventsCalls === 1 ? shape.cutEventsAfter : undefined, chain: Promise.resolve() };
         readers.add(reader);
         res.on('close', () => readers.delete(reader));
         for (let i = from; i < lines.length && readers.has(reader); i++) write(reader, lines[i]);
         if (logEnded && readers.has(reader)) {
           readers.delete(reader);
-          res.end();
+          reader.chain.then(() => res.end());
         }
         return undefined;
       }
@@ -123,20 +147,33 @@ async function startFakeSession({ port, secret, shape = {} }) {
         let text = null;
         try { text = JSON.parse(Buffer.concat(chunks).toString('utf8')).text; } catch { text = null; }
         if (typeof text !== 'string' || !text) return send(400, { kind: 'bad_request' });
+        if (shape.messageAnswer === 'drop') return req.socket.destroy();
+        if (shape.messageAnswer) return send(shape.messageAnswer, { kind: shape.messageAnswer === 503 ? 'failed' : 'prompt' });
         if (replyOpen) return send(409, { kind: 'busy' });
         messages.push(text);
         messageCount++;
         replyOpen = true;
-        send(202);
-        if (shape.hold && messageCount === 1) {
-          held = true;
-          setImmediate(() => emit('text', { delta: 'partial' }));
-        } else {
-          setImmediate(() => playReply(text));
+        if (shape.replyBefore202) {
+          playReply(text);
+          setTimeout(() => send(202), 100);
+          return undefined;
         }
+        const accept = () => {
+          send(202);
+          if (shape.hold && messageCount === 1) {
+            held = true;
+            setImmediate(() => emit('text', { delta: 'partial' }));
+          } else {
+            setImmediate(() => playReply(text));
+          }
+        };
+        if (shape.acceptAfterMs) setTimeout(accept, shape.acceptAfterMs);
+        else accept();
         return undefined;
       }
       if (route === 'POST /abort') {
+        if (shape.abortAnswer === 'drop') return req.socket.destroy();
+        if (shape.abortAnswer) return send(shape.abortAnswer, { kind: 'abort' });
         if (held) setImmediate(() => endReply('aborted'));
         return send(204);
       }

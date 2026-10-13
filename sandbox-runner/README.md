@@ -193,8 +193,8 @@ sandbox exists); its `detail` is launcher-authored, never script output, a token
 | Route | Success | Other answers |
 |---|---|---|
 | `POST /sessions` | `201 { session_id }` once the script reports ready | `429 { "error": "sandbox session capacity reached", "kind": "capacity" }` at `SANDBOX_SESSION_CAP`, before any sandbox is spent; `502 kind: "bad_request"` for a bad body; `502 kind: "orchestration"` (or `"timeout"` after 90 s) when the sandbox never became ready |
-| `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message |
-| `POST /sessions/{id}/abort` | `204`, also with no reply running; the reply ends with `message_end.reason = "aborted"` and the session stays | `404`; `502 orchestration` when the script refused the abort |
+| `POST /sessions/{id}/messages` `{ text }` | `202`, no body | `409 { "error": "session busy", "kind": "busy" }` while a reply runs; `404`, also when the script cannot be reached or answers `503` (it is no longer ready), and the session then closes as `failed`; `502 bad_request` for a bad `text`; `502 orchestration` when the script refused the message with another status |
+| `POST /sessions/{id}/abort` | `204`, also with no reply running; the reply ends with `message_end.reason = "aborted"` and the session stays | `404`, also when the script cannot be reached, and the session then closes as `failed`; `502 orchestration` when the script refused the abort |
 | `GET /sessions/{id}/events?after=<seq>` | `200 text/event-stream` | `404`; `410 { "error": "events no longer held", "kind": "gone" }`; `502 bad_request` for an `after` that is not a non-negative integer or is past the last event |
 | `DELETE /sessions/{id}` | `204` after the sandbox is stopped and removed; `204` again on a closed session | `404` |
 
@@ -255,9 +255,11 @@ it the same way, with one `closed { reason }` event:
 | No message for the caller's `idle_timeout_ms`. The clock starts when the session is live and again at each `message_end`, and stops while a reply runs, so a reply longer than the idle time is never cut. | `idle` |
 | `SANDBOX_SESSION_MAX_MS` after the `POST /sessions` arrived | `idle` (both clocks end a healthy session) |
 | `DELETE /sessions/{id}` | `stopped` |
-| The sandbox exits, the script sends `closed`, or the script refuses connections on a message or an abort | `failed` |
+| The sandbox exits, the script sends `closed`, the script refuses connections on a message or an abort, or it answers a message with `503` | `failed` |
 
-To close, the launcher stops both clocks; if a reply runs and the sandbox is still up, it aborts the
+To close, the launcher stops both clocks and waits for the answer to a message it is forwarding,
+if any, so a message the script accepts during the close has a reply that ends below; if a reply
+runs and the sandbox is still up, it aborts the
 reply and waits up to 5 s for its `message_end`, so the reply's spend reaches the caller; then it
 sends `closed`, ends every open event stream, and stops the sandbox (Docker: stops and removes the
 container and removes the work dir; E2B: kills the sandbox). When the sandbox exits by itself, the launcher first waits up to 1 s for the script's own last

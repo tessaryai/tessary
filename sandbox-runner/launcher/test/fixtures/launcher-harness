@@ -108,8 +108,9 @@ function readSse(port, id, { after, until, timeoutMs = 5000, auth = 'Bearer test
         return;
       }
       let buffered = '';
+      res.setEncoding('utf8');
       res.on('data', (chunk) => {
-        buffered += chunk.toString('utf8');
+        buffered += chunk;
         let cut;
         while ((cut = buffered.indexOf('\n\n')) !== -1) {
           const frame = buffered.slice(0, cut);
