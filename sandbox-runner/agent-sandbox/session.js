@@ -145,11 +145,14 @@ function createEventLog() {
 /**
  * Maps OpenCode's events for one reply onto the session's events. A reply is armed by the first
  * user message it has not seen before: OpenCode re-sends the previous user message and a second
- * idle pair after a reply ends, and either one must not end the next reply. An idle ends the reply
- * only once every assistant message of it is complete, because after an abort or a provider error
- * OpenCode reports idle before it settles the running tool and the message.
+ * idle pair after a reply ends, and either one must not end the next reply. A user message that is
+ * new while the reply is armed is OpenCode's own (an automatic compaction and the message that
+ * continues after it), because the script takes no second message while a reply is open, so the
+ * assistant messages answering it are the reply's too. An idle ends the reply only once every
+ * assistant message of it is complete, because after an abort or a provider error OpenCode reports
+ * idle before it settles the running tool and the message.
  */
-function createReplyTracker({ log, serverNames, steps }) {
+function createReplyTracker({ log, serverNames, steps, maxToolCalls }) {
   const userIds = new Set();
   let reply = null;
 
@@ -160,19 +163,44 @@ function createReplyTracker({ log, serverNames, steps }) {
     reply.emitted.set(partId, text.length);
   }
 
+  /** True when this part's start takes the reply past its tool cap. */
   function emitTool(part) {
     const status = part.state && part.state.status;
+    let overCap = false;
     if (!reply.started.has(part.callID) && (status === 'running' || status === 'completed' || status === 'error')) {
       reply.started.add(part.callID);
       log.emit('tool_start', toolStartOf(part, serverNames));
+      if (reply.started.size > maxToolCalls && !reply.limitHit) {
+        reply.limitHit = true;
+        overCap = true;
+      }
     }
     if (!reply.ended.has(part.callID) && (status === 'completed' || status === 'error')) {
       reply.ended.add(part.callID);
       log.emit('tool_end', toolEndOf(part));
     }
+    return overCap;
+  }
+
+  function onUser(info) {
+    if (reply && !userIds.has(info.id)) {
+      if (!reply.armed) {
+        reply.armed = true;
+        reply.userId = info.id;
+      }
+      reply.parents.add(info.id);
+    }
+    userIds.add(info.id);
+  }
+
+  function onAssistant(info) {
+    if (!reply || !reply.armed || !reply.parents.has(info.parentID)) return;
+    reply.assistants.set(info.id, Boolean(info.time && info.time.completed));
+    if (info.summary) reply.summaries.add(info.id);
   }
 
   const ofReply = (messageId) => reply !== null && reply.armed && reply.assistants.has(messageId);
+  const spokenBy = (messageId) => ofReply(messageId) && !reply.summaries.has(messageId);
 
   return {
     get open() {
@@ -185,13 +213,16 @@ function createReplyTracker({ log, serverNames, steps }) {
       reply = {
         armed: false,
         userId: null,
+        parents: new Set(),
         assistants: new Map(),
+        summaries: new Set(),
         partTypes: new Map(),
         emitted: new Map(),
         finalParts: new Set(),
         started: new Set(),
         ended: new Set(),
         abortRequested: false,
+        limitHit: false,
       };
     },
     cancel() {
@@ -200,36 +231,43 @@ function createReplyTracker({ log, serverNames, steps }) {
     requestAbort() {
       if (reply) reply.abortRequested = true;
     },
-    /** 'end' when the reply is over, 'settle' when OpenCode is idle but a message is still open. */
+    /** Takes in stored messages, in order, whose events may have been lost in a reconnect. */
+    adopt(messages) {
+      for (const m of messages) {
+        const info = (m && m.info) || {};
+        if (info.role === 'user') onUser(info);
+        else if (info.role === 'assistant') onAssistant(info);
+      }
+    },
+    /**
+     * 'end' when the reply is over, 'settle' when OpenCode is idle but a message is still open,
+     * 'limit' when a tool call takes the reply past its cap.
+     */
     onEvent(event) {
       const p = event.properties || {};
       switch (event.type) {
         case 'message.updated': {
           const info = p.info || {};
-          if (info.role === 'user') {
-            if (reply && !reply.armed && !userIds.has(info.id)) {
-              reply.armed = true;
-              reply.userId = info.id;
-            }
-            userIds.add(info.id);
-          } else if (info.role === 'assistant' && reply && reply.armed && info.parentID === reply.userId) {
-            reply.assistants.set(info.id, Boolean(info.time && info.time.completed));
-          }
+          if (info.role === 'user') onUser(info);
+          else if (info.role === 'assistant') onAssistant(info);
           return null;
         }
         case 'message.part.updated': {
           const part = p.part || {};
           if (!ofReply(part.messageID)) return null;
           reply.partTypes.set(part.id, part.type);
-          if (part.type === 'text' && !part.synthetic && part.time && part.time.end && !reply.finalParts.has(part.id)) {
+          if (
+            part.type === 'text' && !part.synthetic && part.time && part.time.end &&
+            spokenBy(part.messageID) && !reply.finalParts.has(part.id)
+          ) {
             emitText(part.id, String(part.text || ''));
             reply.finalParts.add(part.id);
           }
-          if (part.type === 'tool') emitTool(part);
+          if (part.type === 'tool' && emitTool(part)) return 'limit';
           return null;
         }
         case 'message.part.delta': {
-          if (p.field !== 'text' || !ofReply(p.messageID)) return null;
+          if (p.field !== 'text' || !spokenBy(p.messageID)) return null;
           if (reply.partTypes.get(p.partID) !== 'text' || reply.finalParts.has(p.partID)) return null;
           const delta = String(p.delta || '');
           if (!delta) return null;
@@ -256,10 +294,13 @@ function createReplyTracker({ log, serverNames, steps }) {
     },
     /** Reconcile against the stored messages, then end the reply with its summed usage. */
     finish(messages) {
-      const own = messages.filter((m) => m && m.info && m.info.role === 'assistant' && m.info.parentID === reply.userId);
+      this.adopt(messages);
+      const own = messages.filter((m) => m && m.info && m.info.role === 'assistant' && reply.parents.has(m.info.parentID));
       for (const m of own) {
         const parts = m.parts || [];
-        for (const part of parts) if (part.type === 'text' && !part.synthetic) emitText(part.id, String(part.text || ''));
+        if (!m.info.summary) {
+          for (const part of parts) if (part.type === 'text' && !part.synthetic) emitText(part.id, String(part.text || ''));
+        }
         for (const part of parts) {
           if (part.type !== 'tool') continue;
           emitTool(part);
@@ -270,7 +311,8 @@ function createReplyTracker({ log, serverNames, steps }) {
         }
       }
       const usage = sumUsage(own.map((m) => ({ usage: usageOf(m.info) })));
-      const reason = reply.abortRequested ? 'aborted' : own.length >= steps ? 'limit' : 'done';
+      const stepsTaken = own.filter((m) => !m.info.summary).length;
+      const reason = reply.limitHit ? 'limit' : reply.abortRequested ? 'aborted' : stepsTaken >= steps ? 'limit' : 'done';
       log.emit('message_end', { usage, reason });
       reply = null;
     },
@@ -446,13 +488,40 @@ async function main() {
     }
   }
 
+  /**
+   * After a reconnect, a reply whose user message was lost is armed from the stored messages; a
+   * reply whose idle was lost ends here.
+   */
+  async function recoverReply() {
+    if (!tracker.open) return;
+    if (!tracker.armed) {
+      try {
+        const listed = await client.session.messages({ path: { id: sessionId } });
+        tracker.adopt(Array.isArray(listed.data) ? listed.data : []);
+      } catch (e) {
+        console.error(`session messages unread after a reconnect: ${describeError(e)}`);
+        return;
+      }
+      if (!tracker.armed) return;
+    }
+    await finishIfIdle();
+  }
+
+  async function abortAtCap() {
+    try {
+      await client.session.abort({ path: { id: sessionId } });
+    } catch (e) {
+      console.error(`reply not aborted at its tool cap: ${describeError(e)}`);
+    }
+  }
+
   async function onOpencodeEvent(event) {
     if (!event || typeof event !== 'object') return;
     if (event.type === 'server.connected') {
       onConnected();
       if (lost) {
         lost = false;
-        if (tracker.armed) await finishIfIdle();
+        await recoverReply();
       }
       return;
     }
@@ -460,6 +529,7 @@ async function main() {
     const signal = tracker.onEvent(event);
     if (signal === 'end') await finishReply();
     else if (signal === 'settle' && !settleTimer) settleTimer = setTimeout(() => void finishReply(), SETTLE_MS);
+    else if (signal === 'limit') void abortAtCap();
   }
 
   async function runEventLoop() {
@@ -539,7 +609,7 @@ async function main() {
     });
     const { createOpencodeClient } = await import('@opencode-ai/sdk');
     client = createOpencodeClient({ baseUrl: server.url, fetch: makeFetch(REQUEST_MS), throwOnError: true });
-    tracker = createReplyTracker({ log, serverNames: new Set(input.servers.map((s) => s.name)), steps });
+    tracker = createReplyTracker({ log, serverNames: new Set(input.servers.map((s) => s.name)), steps, maxToolCalls: input.maxToolCalls });
     void runEventLoop();
     await Promise.race([
       connected,

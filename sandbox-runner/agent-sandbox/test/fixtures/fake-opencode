@@ -100,12 +100,16 @@ function serve() {
  *   Reply: { steps: [Step, ...], error?: { name, data: { message } } }
  *   Step:  { text?: [chunk, ...], reasoning?: [chunk, ...], silent?: true,
  *            tools?: [{ name, input, duration_ms, hang? }],
- *            usage: { input, output, cache_read, cache_write, cost } }
+ *            usage: { input, output, cache_read, cache_write, cost },
+ *            compact?: { summary: [chunk, ...], usage } }
  *
  * A tool `<server>_<tool>` whose server is a key of the config's `mcp` is called for real with a
  * JSON-RPC `tools/call`, and its output is the reply's first text block. A `hang` tool stays running
- * until `POST /session/{id}/abort`. A `silent` step stores its parts but publishes none of their
- * events. The binary ends an aborted or failed reply in this order, so the fake does too:
+ * until `POST /session/{id}/abort`; an abort that finds no hanging tool ends the reply at the next
+ * tool or step. A `silent` step stores its parts but publishes none of their events. A `compact`
+ * step is preceded by an automatic compaction, as the binary runs one when the context fills: a
+ * user message holding a `compaction` part, an assistant message with `summary: true` answering it,
+ * and a user message that continues, which the step and every later one answer. The binary ends an aborted or failed reply in this order, so the fake does too:
  * `session.error`, the idle pair, then the tool part's error and the assistant message's completion,
  * then a second idle pair. The binary keeps offering tools on the step that reaches `steps` (it only
  * tells the model to stop), so the fake plays every step as written.
@@ -115,6 +119,8 @@ function serve() {
  * a prompt, publish the previous user message again and a `session.status idle`: the tail of the
  * previous reply, which the binary sends after its idle), FAKE_OPENCODE_DROP_BEFORE_IDLE=1 (on the
  * first reply, end every `/event` response instead of publishing the final idle pair),
+ * FAKE_OPENCODE_DROP_BEFORE_USER=1 (on the first reply, end every `/event` response just before
+ * publishing the new user message, and play the reply on with no stream open),
  * FAKE_OPENCODE_NEVER_SETTLE=1 (after an abort or an error, stop at the first idle pair: the tool
  * and the message are never settled).
  */
@@ -134,11 +140,13 @@ function serveSession(port) {
   let playing = false;
   let dropped = false;
   let abort = null;
+  let abortPending = false;
 
   const publish = (type, properties) => {
     const line = `data: ${JSON.stringify({ id: `evt_${++eventSeq}`, type, properties: clone(properties) })}\n\n`;
     for (const res of streams) res.write(line);
   };
+  const ABORTED = { name: 'MessageAbortedError', data: { message: 'Aborted' } };
   const idlePair = () => {
     publish('session.status', { sessionID, status: { type: 'idle' } });
     publish('session.idle', { sessionID });
@@ -186,6 +194,7 @@ function serveSession(port) {
   async function endInterrupted(msg, usage, error, runningPart) {
     publish('session.error', { sessionID, error });
     playing = false;
+    abortPending = false;
     idlePair();
     if (process.env.FAKE_OPENCODE_NEVER_SETTLE === '1') return;
     await sleep(30);
@@ -201,22 +210,54 @@ function serveSession(port) {
     idlePair();
   }
 
-  async function play(k, text) {
-    const reply = (script.replies || [])[k - 1] || { steps: [] };
-    const uid = `msg_u${k}`;
-    const user = {
-      info: { id: uid, sessionID, role: 'user', time: { created: Date.now() } },
-      parts: [{ id: `prt_u${k}`, sessionID, messageID: uid, type: 'text', text }],
-    };
+  function userMessage(id, part) {
+    const user = { info: { id, sessionID, role: 'user', time: { created: Date.now() } }, parts: [{ id: `prt_${id}`, sessionID, messageID: id, ...part }] };
     messages.push(user);
     publish('message.updated', { sessionID, info: user.info });
     publish('message.part.updated', { sessionID, part: user.parts[0], time: Date.now() });
+    return user;
+  }
+
+  /** The binary's automatic compaction: returns the id of the user message that continues. */
+  async function compact(k, j, parentID, spec) {
+    const cid = userMessage(`msg_u${k}_c${j}`, { type: 'compaction', auto: true }).info.id;
+    const sid = `msg_a${k}_s${j}`;
+    const summary = {
+      info: {
+        id: sid, sessionID, role: 'assistant', parentID: cid, summary: true, mode: 'compaction', time: { created: Date.now() },
+        modelID: 'fake/model', providerID: 'fake', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [],
+    };
+    messages.push(summary);
+    publish('message.updated', { sessionID, info: summary.info });
+    await streamPart(publish, summary, { id: `prt_s${k}_${j}`, sessionID, messageID: sid, type: 'text', text: '' }, spec.summary || []);
+    complete(summary.info, spec.usage, 'stop');
+    publish('message.updated', { sessionID, info: summary.info });
+    return userMessage(`msg_u${k}_n${j}`, { type: 'text', text: 'Continue if you have next steps', synthetic: true }).info.id;
+  }
+
+  async function play(k, text) {
+    const reply = (script.replies || [])[k - 1] || { steps: [] };
+    let uid = `msg_u${k}`;
+    if (process.env.FAKE_OPENCODE_DROP_BEFORE_USER === '1' && !dropped) {
+      dropped = true;
+      for (const res of streams) res.end();
+      streams.clear();
+    }
+    userMessage(uid, { type: 'text', text });
     publish('session.status', { sessionID, status: { type: 'busy' } });
     const steps = reply.steps || [];
     let msg = null;
+    let usage = null;
     for (let j = 1; j <= steps.length; j++) {
+      if (abortPending) {
+        await endInterrupted(null, null, ABORTED, null);
+        return;
+      }
       const step = steps[j - 1];
-      const usage = step.usage || { input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0 };
+      if (step.compact) uid = await compact(k, j, uid, step.compact);
+      usage = step.usage || { input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0 };
       const pub = step.silent ? () => {} : publish;
       const aid = `msg_a${k}_${j}`;
       msg = {
@@ -249,7 +290,8 @@ function serveSession(port) {
         pub('message.part.updated', { sessionID, part, time: Date.now() });
         if (tool.hang) {
           await new Promise((resolve) => { abort = resolve; });
-          await endInterrupted(msg, usage, { name: 'MessageAbortedError', data: { message: 'Aborted' } }, part);
+          abortPending = false;
+          await endInterrupted(msg, usage, ABORTED, part);
           return;
         }
         const result = await callMcp(tool.name, tool.input || {});
@@ -258,6 +300,10 @@ function serveSession(port) {
           ? { status: 'completed', input: part.state.input, output: result.output, title: tool.name, metadata: {}, time }
           : { status: 'error', input: part.state.input, error: result.error, time };
         pub('message.part.updated', { sessionID, part, time: Date.now() });
+        if (abortPending) {
+          await endInterrupted(msg, usage, ABORTED, null);
+          return;
+        }
       }
       if (reply.error && j === steps.length) {
         await endInterrupted(msg, usage, reply.error, null);
@@ -272,6 +318,7 @@ function serveSession(port) {
       return;
     }
     playing = false;
+    abortPending = false;
     if (process.env.FAKE_OPENCODE_DROP_BEFORE_IDLE === '1' && !dropped) {
       dropped = true;
       for (const res of streams) res.end();
@@ -331,7 +378,9 @@ function serveSession(port) {
           const wake = abort;
           abort = null;
           wake();
-        } else if (!playing) {
+        } else if (playing) {
+          abortPending = true;
+        } else {
           idlePair();
         }
         return;

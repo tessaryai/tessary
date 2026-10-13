@@ -100,7 +100,7 @@ session as `node session.js /home/user/session.json` (E2B) or `node session.js /
 | `session.json` | `{ system_prompt, files, model, mcp_servers: [ { name, url, token } ], max_tool_calls_per_message }`. The script reads it and deletes it before anything else runs, so no token is on disk while the agent runs. |
 | `files` | Relative path to content, written under `<WORK>/dossier/` (the lanes' layout). A path that escapes is a start failure. |
 | `mcp_servers` | Names match `^[a-z][a-z0-9-]{0,31}$` and are unique. The tokens go only to the relay (`mcp-relay.js`), which serves each name at `http://127.0.0.1:<port>/mcp/<name>`; OpenCode's config gets one remote entry per name with no headers. |
-| `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`. |
+| `max_tool_calls_per_message` | An integer from 1 to 1000. The session agent `tessary-session` gets `steps = max_tool_calls_per_message + 1`, and the script aborts a reply whose tool calls go past it (see `reason` below). |
 | `SESSION_SECRET` | Env var, at least 32 characters (the launcher sends 32 random bytes as hex). The script reads it, then removes it from its env before it spawns `opencode serve`. Missing or short: `SESSION_SECRET is required` on stderr, exit 2, nothing listens. |
 | `SESSION_PORT` | Env var, default `9400`. The launcher sets it from `SANDBOX_SESSION_PORT`, default 9400; the tests use free ports. The session server binds `0.0.0.0`; OpenCode and the relay stay on `127.0.0.1`. |
 | Permissions | The lanes' base (`basePermission` in `agent-stream.js`): bash allowed, webfetch and websearch denied, `edit` a blanket allow, outside directories denied except OpenCode's own scratch folders. |
@@ -131,12 +131,14 @@ with a wrong one: `401 { "kind": "unauthorized" }`. Another path or method: `404
 `input_summary` is the scrubbed tool input as JSON and `result_summary` the scrubbed output (or the
 error), each cut to 2000 characters; `bytes` is the size of the whole output before the cut.
 
-`reason` is `aborted` when an abort was asked during the reply, else `limit` when the reply used
-`steps` model steps or more, else `done`. OpenCode 1.18.30 does not enforce `steps`: on the step
-that reaches it, it tells the model that tools are disabled and to answer in text, but it still
-offers the tools, and a model that calls one anyway goes on to further steps. So
-`max_tool_calls_per_message` bounds the tool steps of a model that follows OpenCode's instruction,
-and `limit` reports every reply that reached the last step, whether the model stopped there or not.
+`reason` is `limit` when the script cut the reply at its tool cap, else `aborted` when an abort was
+asked during the reply, else `limit` when the reply used `steps` model steps or more, else `done`.
+OpenCode 1.18.30 does not enforce `steps`: on the step that reaches it, it tells the model that
+tools are disabled and to answer in text, but it still offers the tools. So the script counts the
+reply's tool calls itself, and when a call starts that takes the count past
+`max_tool_calls_per_message`, it aborts the reply in OpenCode; that call ends with `tool_end`
+`ok: false` (or its result, if it finished first) and the reply with `limit`. A model that follows
+OpenCode's instruction ends on the last step in text, also with `limit`.
 
 | `error.kind` | Cause | Then |
 |---|---|---|
@@ -154,13 +156,21 @@ which sends `server.heartbeat` about every 10 s). Three facts of the 1.18.30 bin
 - After a reply ends, OpenCode sends the reply's user message again, and after an abort or a
   provider error it sends a second idle pair. So a reply counts an idle only after it has seen its
   own user message, the first user message whose id is new.
+- When the context fills, OpenCode compacts the session in the middle of a reply: it adds a user
+  message with a `compaction` part, an assistant message with `summary: true` that answers it, and
+  a user message that continues, which the later steps answer. The script takes no second message
+  while a reply runs, so a user message that is new during a reply is OpenCode's own, and the
+  assistant messages that answer it belong to the reply: their text and tools are sent and their
+  usage is in `message_end`. The summary's text is not sent, and the summary is not a step.
 - After an abort or a provider error, OpenCode reports idle before it settles the running tool and
   completes the assistant message. So an idle ends the reply only when every assistant message of
   the reply is complete; if one is still open 2 s after an idle, the reply ends anyway.
 - The event stream has no replay. At the end of a reply the script reads the session's messages
   once and sends any text or tool event the stream did not deliver, so a frame lost in a reconnect
-  loses nothing. After the stream reconnects during a reply, the script asks OpenCode for the
-  session status and ends the reply if the session is idle.
+  loses nothing. After the stream reconnects during a reply, the script reads the session's
+  messages if it has not yet seen the reply's user message, so a reply whose user message was lost
+  is still found, then asks OpenCode for the session status and ends the reply if the session is
+  idle.
 
 ## Launcher sessions
 

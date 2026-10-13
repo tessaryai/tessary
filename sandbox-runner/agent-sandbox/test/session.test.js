@@ -215,17 +215,25 @@ test('the tool cap ends a reply with reason limit', async (t) => {
   assert.equal(events.at(-1).data.usage.cost_usd, 0.375);
 });
 
-test('a model that keeps calling tools past the last step still ends with reason limit', async (t) => {
-  // Bug caught: OpenCode only tells the model to stop at `steps` (it keeps offering tools), so a
-  // reply that ran past it must not read as done.
-  const script = { replies: [{ steps: [toolStep(1), toolStep(2), toolStep(3), { text: ['s4'], usage: usage(1, 1, 0, 0, 0.125) }] }] };
+test('a model that keeps calling tools past the cap is cut at the cap with reason limit', async (t) => {
+  // Bug caught: OpenCode only tells the model to stop at `steps` and keeps offering tools, so a
+  // reply that calls one tool more runs until the session's max lifetime, holding its credential
+  // and spending. The third call hangs, so only the script's abort at the cap ends the reply.
+  const hanging = { text: ['s3'], tools: [{ name: 'alpha_list_traces', input: { q: 'q3' }, duration_ms: 1, hang: true }], usage: usage(1, 1, 0, 0, 0.125) };
+  const script = { replies: [{ steps: [toolStep(1), toolStep(2), hanging, toolStep(4)] }] };
   const { session } = await readySession(t, { script });
 
   await send(session, 'keep going');
   const events = await session.readEvents(0, 'message_end', 1);
 
-  assert.equal(events.filter((e) => e.type === 'tool_end').length, 3);
-  assert.equal(events.at(-1).data.reason, 'limit');
+  assert.deepEqual(events.map((e) => (e.type === 'text' ? `text:${e.data.delta}` : e.type)), [
+    'text:s1', 'tool_start', 'tool_end', 'text:s2', 'tool_start', 'tool_end', 'text:s3', 'tool_start', 'tool_end', 'message_end',
+  ]);
+  assert.deepEqual(events.at(-2).data, { call_id: 'call_1_3_1', result_summary: 'Tool execution aborted', bytes: 22, duration_ms: events.at(-2).data.duration_ms, ok: false });
+  assert.deepEqual(events.at(-1), ev('message_end', {
+    usage: { input_tokens: 3, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.375 },
+    reason: 'limit',
+  }));
 });
 
 test('a request without the secret is 401 on every route', async (t) => {
@@ -428,6 +436,60 @@ test('a reply whose idle was lost in a stream reconnect still ends', async (t) =
   const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_IDLE: '1' } });
 
   assert.deepEqual(await playScriptA(session), [...REPLY_1_EVENTS, ...REPLY_2_EVENTS]);
+});
+
+test('a reply whose user message was lost in a stream reconnect still ends', async (t) => {
+  // Bug caught: the reply is never armed, ignores every later event and idle, and stays open, so
+  // every later message is 409 and its spend is never booked.
+  const { session } = await readySession(t, { env: { FAKE_OPENCODE_DROP_BEFORE_USER: '1' } });
+
+  await send(session, 'find the angry traces');
+  assert.deepEqual(await session.readEvents(0, 'message_end', 1), [
+    ev('text', { delta: 'Looking.' }),
+    REPLY_1_EVENTS[2],
+    REPLY_1_EVENTS[3],
+    ev('text', { delta: 'Found 3.' }),
+    REPLY_1_EVENTS[5],
+  ]);
+  await send(session, 'now the widget');
+  assert.deepEqual(await session.readEvents(5, 'message_end', 1), REPLY_2_EVENTS);
+});
+
+test('a reply OpenCode compacts midway streams the steps after it and books every step', async (t) => {
+  // Bug caught: the steps after an automatic compaction answer a new user message, so their text
+  // and tools are dropped and the compaction's and the continuation's spend is never booked. The
+  // summary is OpenCode's own note, not the agent's words, and is not a step: at a cap of 3 the
+  // agent has 4 steps, so three steps and the summary still end as done.
+  const script = {
+    replies: [{
+      steps: [
+        { text: ['Look.'], tools: [{ name: 'alpha_list_traces', input: { q: 'a' }, duration_ms: 2 }], usage: usage(100, 10, 0, 0, 0.25) },
+        {
+          compact: { summary: ['Earlier: looked.'], usage: usage(50, 20, 0, 0, 0.5) },
+          tools: [{ name: 'beta_get_thing', input: { id: 'w1' }, duration_ms: 4 }],
+          usage: usage(10, 2, 0, 0, 0.125),
+        },
+        { text: ['Done.'], usage: usage(12, 3, 0, 0, 0.125) },
+      ],
+    }],
+  };
+  const { session } = await readySession(t, { script, input: { max_tool_calls_per_message: 3 } });
+
+  await send(session, 'go');
+  const events = await session.readEvents(0, 'message_end', 1);
+
+  assert.deepEqual(events, [
+    ev('text', { delta: 'Look.' }),
+    ev('tool_start', { call_id: 'call_1_1_1', server: 'alpha', tool: 'list_traces', input_summary: '{"q":"a"}' }),
+    ev('tool_end', { call_id: 'call_1_1_1', result_summary: '{"count":3,"file":"checks/mcp/001-list_traces.json"}', bytes: 52, duration_ms: 2, ok: true }),
+    ev('tool_start', { call_id: 'call_1_2_1', server: 'beta', tool: 'get_thing', input_summary: '{"id":"w1"}' }),
+    ev('tool_end', { call_id: 'call_1_2_1', result_summary: '{"name":"widget","file":"checks/mcp/002-get_thing.json"}', bytes: 56, duration_ms: 4, ok: true }),
+    ev('text', { delta: 'Done.' }),
+    ev('message_end', {
+      usage: { input_tokens: 172, output_tokens: 35, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 1 },
+      reason: 'done',
+    }),
+  ]);
 });
 
 function withDeadline(promise, ms) {
