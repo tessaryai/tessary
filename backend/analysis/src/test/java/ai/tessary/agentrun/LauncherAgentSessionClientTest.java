@@ -401,15 +401,19 @@ class LauncherAgentSessionClientTest {
     @Test
     void aCutStreamEndsWithoutClosedSoTheCallerResumes() {
         LauncherAgentSessionClient client = aStartedSession();
-        fake.events(
-                "/sessions/s-1/events?after=0",
-                FakeLauncher.Ending.CUT,
-                FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"),
-                FakeLauncher.frame(2, "text", "{\"delta\":\"b\"}"));
+        FakeLauncher.LiveEvents live = fake.liveEvents("/sessions/s-1/events?after=0");
+        live.push(FakeLauncher.frame(1, "text", "{\"delta\":\"a\"}"));
+        live.push(FakeLauncher.frame(2, "text", "{\"delta\":\"b\"}"));
 
-        List<SessionEvent> events = read(client, 0);
+        try (Stream<SessionEvent> events = client.events("s-1", 0)) {
+            Iterator<SessionEvent> it = events.iterator();
+            assertEquals(new SessionEvent.Text(1, "a"), it.next());
+            assertEquals(new SessionEvent.Text(2, "b"), it.next());
 
-        assertEquals(List.of(new SessionEvent.Text(1, "a"), new SessionEvent.Text(2, "b")), events);
+            live.cut();
+
+            assertFalse(it.hasNext());
+        }
     }
 
     /** Catches a launcher restart that leaves the caller waiting on a session that is gone. */

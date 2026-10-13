@@ -15,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -45,6 +44,8 @@ final class FakeLauncher implements AutoCloseable {
         void push(String frame);
 
         void end();
+
+        void cut();
     }
 
     private sealed interface Answer {}
@@ -53,15 +54,20 @@ final class FakeLauncher implements AutoCloseable {
 
     private record Frames(Ending ending, List<String> frames) implements Answer {}
 
-    private record Live(BlockingQueue<Optional<String>> queue) implements Answer, LiveEvents {
+    private record Live(BlockingQueue<Object> queue) implements Answer, LiveEvents {
         @Override
         public void push(String frame) {
-            queue.add(Optional.of(frame));
+            queue.add(frame);
         }
 
         @Override
         public void end() {
-            queue.add(Optional.empty());
+            queue.add(Ending.END);
+        }
+
+        @Override
+        public void cut() {
+            queue.add(Ending.CUT);
         }
     }
 
@@ -181,9 +187,13 @@ final class FakeLauncher implements AutoCloseable {
                 case Live l -> {
                     streamHead(out);
                     while (true) {
-                        Optional<String> frame = l.queue().take();
-                        if (frame.isEmpty()) break;
-                        chunk(out, frame.get());
+                        Object item = l.queue().take();
+                        if (item == Ending.CUT) {
+                            out.flush();
+                            return;
+                        }
+                        if (item == Ending.END) break;
+                        chunk(out, (String) item);
                     }
                     out.write("0\r\n\r\n".getBytes(StandardCharsets.UTF_8));
                     out.flush();
