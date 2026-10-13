@@ -2116,6 +2116,7 @@ async function sendSessionMessage(s, req) {
   s.sending = true;
   clearIdle(s);
   const endsBefore = s.messageEnds;
+  const sentAt = Date.now();
   let answer;
   try {
     try {
@@ -2129,6 +2130,7 @@ async function sendSessionMessage(s, req) {
       if (s.closedSent) return { status: 404, body: SESSION_UNKNOWN };
       // The reply's events travel on another connection and can beat this answer here.
       s.replyOpen = s.messageEnds === endsBefore;
+      console.log(`session ${s.id}: message accepted bytes=${Buffer.byteLength(text)} ms=${Date.now() - sentAt} reply_open=${s.replyOpen}`);
       return { status: 202 };
     }
     if (answer.status === 409) return { status: 409, body: { error: 'session busy', kind: 'busy' } };

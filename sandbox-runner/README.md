@@ -331,6 +331,10 @@ The launcher ships as its own image, built and pushed by
 `launcher/Dockerfile`, and runs as the `sandbox-runner` service in both compose files. The backend
 reaches it by service DNS at `http://sandbox-runner:8080` and authenticates with `SANDBOX_API_KEY`.
 
+The launcher starts every session as `/usr/local/bin/node-sealed`, which only an agent image or E2B
+template built from the current recipes has; with an older one every session start fails. Ship the
+launcher, the agent image and the template together. The template's `--verify` checks the binary.
+
 The E2B backend's template is published by that same workflow, from the `E2B_API_KEY` repository
 secret, in two jobs either side of the commit point:
 
