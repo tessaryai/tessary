@@ -1994,6 +1994,31 @@ const dockerSessionDriver = {
   },
 };
 
+// command.wait() also rejects when only its event stream to E2B broke (a stream that stays open for
+// up to SANDBOX_SESSION_MAX_MS) while session.js runs on. Only an exit code is an exit; any other
+// rejection reattaches to the same pid, and a process E2B no longer finds has exited.
+async function followSessionCommand(s, sbx, command) {
+  let handle = command;
+  for (;;) {
+    try {
+      const r = await handle.wait();
+      return { code: r.exitCode, stderr: r.stderr };
+    } catch (e) {
+      const code = exitCodeOf(e);
+      if (code !== undefined) return { code, stderr: (e && e.stderr) || '' };
+      if (s.state === 'closing' || s.state === 'closed') return { code: null, stderr: '' };
+      console.error(`session ${s.id}: lost the ${SESSION_SCRIPT} command stream (${(e && e.name) || 'Error'}); reattaching to pid ${command.pid}`);
+    }
+    await new Promise((r) => setTimeout(r, SESSION_RECONNECT_MS));
+    try {
+      handle = await sbx.commands.connect(command.pid, { timeoutMs: 0 });
+    } catch (e) {
+      console.error(`session ${s.id}: ${SESSION_SCRIPT} pid ${command.pid} not found on reattach (${(e && e.name) || 'Error'})`);
+      return { code: null, stderr: '' };
+    }
+  }
+}
+
 const e2bSessionDriver = {
   async start(s, { sessionFile, credential, model, modelCost }) {
     const mcpUrls = Array.isArray(sessionFile.mcp_servers) ? sessionFile.mcp_servers.map((m) => m && m.url) : [];
@@ -2011,8 +2036,7 @@ const e2bSessionDriver = {
       timeoutMs: 0,
       envs: { ...agentEnvs(credential, model, modelCost), SESSION_SECRET: s.secret, SESSION_PORT: String(SANDBOX_SESSION_PORT) },
     });
-    const exited = command.wait()
-      .then((r) => ({ code: r.exitCode, stderr: r.stderr }), (e) => ({ code: exitCodeOf(e) ?? null, stderr: (e && e.stderr) || '' }))
+    const exited = followSessionCommand(s, sbx, command)
       .then(({ code, stderr }) => {
         const tail = stderr ? ` stderr: ${scrubToken(stderr).slice(-500)}` : '';
         console.error(`session ${s.id}: ${SESSION_SCRIPT} ended code=${code}${tail}`);

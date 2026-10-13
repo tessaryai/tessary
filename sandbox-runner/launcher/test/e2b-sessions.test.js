@@ -52,6 +52,8 @@ function startE2bControl({ shape = {}, shapes = [], createFailures = 0, writeFai
   const envs = {};
   const fakes = {};
   const exits = {};
+  const ended = {};
+  const waitDrops = {};
   const abortedBeforeStop = {};
   let created = 0;
   let sessionCount = 0;
@@ -96,9 +98,21 @@ function startE2bControl({ shape = {}, shapes = [], createFailures = 0, writeFai
           fakes[id] = await startFakeSession({ port: Number(body.envs.SESSION_PORT), secret: body.envs.SESSION_SECRET, shape: own });
           exits[id] = fakes[id].exited.then((code) => ({ exitCode: code, stderr: '' }));
         }
+        exits[id].then(() => { ended[id] = true; });
+        waitDrops[id] = own.waitDrops || 0;
         return send(200, { pid: 1 });
       }
-      if (op === 'wait') return send(200, await exits[id]);
+      if (op === 'wait') {
+        if (waitDrops[id] > 0) {
+          waitDrops[id]--;
+          return send(500, { name: 'SandboxError', message: 'Process exited without a result' });
+        }
+        return send(200, await exits[id]);
+      }
+      if (op === 'connect') {
+        if (ended[id] || body.pid !== 1) return send(500, { name: 'NotFoundError', message: `process with pid ${body.pid} not found` });
+        return send(200, {});
+      }
       if (op === 'kill') {
         if (fakes[id] && !(id in abortedBeforeStop)) abortedBeforeStop[id] = fakes[id].requests.some((r) => r.path === '/abort');
         if (fakes[id]) await fakes[id].close();
@@ -361,6 +375,29 @@ test('an E2B sandbox whose script exits without a word still closes the session 
     assert.deepEqual(read.events, [{ id: 1, type: 'closed', data: { reason: 'failed' } }]);
     await until(() => control.kills().length > 0, 'the sandbox kill');
     assert.deepEqual(control.kills(), [SBX1]);
+  });
+});
+
+test('an E2B session whose command stream drops while the script runs is reattached and stays live (a healthy session closed as failed by a transport error)', T, async () => {
+  await withE2bLauncher({ shape: { waitDrops: 2 } }, async ({ start, send, events, control }) => {
+    const id = (await start()).body.session_id;
+    await until(() => control.calls.filter((c) => c.op === 'connect').length === 2, 'the launcher to reattach twice');
+
+    assert.equal((await send(id, 'one')).status, 202);
+    assert.deepEqual((await events(id, { after: 0, until: 4 })).events, numbered(reply(1, 'one'), 1));
+    assert.deepEqual(control.kills(), []);
+    assert.deepEqual(control.calls.filter((c) => c.op === 'connect').map((c) => [c.pid, c.timeoutMs]), [[1, 0], [1, 0]]);
+  });
+});
+
+test('an E2B session script that exits after its command stream dropped still closes the session as failed (an exit missed after a reattach)', T, async () => {
+  await withE2bLauncher({ shape: { waitDrops: 1 } }, async ({ start, events, control }) => {
+    const id = (await start()).body.session_id;
+    await until(() => control.calls.some((c) => c.op === 'connect'), 'the launcher to reattach');
+    await control.fakes[SBX1].die({ withClosed: false });
+
+    assert.deepEqual((await events(id, { after: 0 })).events, [{ id: 1, type: 'closed', data: { reason: 'failed' } }]);
+    await until(() => control.kills().length > 0, 'the sandbox kill');
   });
 });
 

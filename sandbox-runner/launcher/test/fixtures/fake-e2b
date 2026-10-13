@@ -100,16 +100,22 @@ class RelaySandbox {
   constructor(sandboxId) {
     this.sandboxId = sandboxId;
     this.files = { write: async (path, content) => { await control('write', { sandboxId, path, content }); } };
+    const handle = (pid) => ({
+      pid,
+      wait: async () => {
+        const { exitCode, stderr = '' } = await control('wait', { sandboxId, pid });
+        if (exitCode === 0) return { exitCode, stdout: '', stderr };
+        throw named('CommandExitError', stderr, { exitCode, stderr, result: { exitCode, stdout: '', stderr } });
+      },
+    });
     this.commands = {
       run: async (cmd, opts) => {
-        await control('run', { sandboxId, cmd, background: opts.background, timeoutMs: opts.timeoutMs, envs: opts.envs });
-        return {
-          wait: async () => {
-            const { exitCode, stderr = '' } = await control('wait', { sandboxId });
-            if (exitCode === 0) return { exitCode, stdout: '', stderr };
-            throw named('CommandExitError', stderr, { exitCode, stderr, result: { exitCode, stdout: '', stderr } });
-          },
-        };
+        const { pid } = await control('run', { sandboxId, cmd, background: opts.background, timeoutMs: opts.timeoutMs, envs: opts.envs });
+        return handle(pid);
+      },
+      connect: async (pid, opts) => {
+        await control('connect', { sandboxId, pid, timeoutMs: opts && opts.timeoutMs });
+        return handle(pid);
       },
     };
   }

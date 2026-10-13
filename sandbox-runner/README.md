@@ -308,7 +308,11 @@ writes `session.json` to `/home/user/session.json` through the files API, then r
 the credential env, `SESSION_SECRET` and `SESSION_PORT`. It dials the script at
 `https://<port>-<sandbox id>.<domain>` (the SDK's `getHost`), or over `http://` under the SDK's own
 `E2B_DEBUG=true`. When the command ends, the session closes as `failed`, and the launcher logs one
-console line with the exit code and the scrubbed tail of its stderr. Every close, and every failed
+console line with the exit code and the scrubbed tail of its stderr. The command's event stream to
+E2B stays open for the session's whole life, and the SDK's `wait()` also rejects when only that
+stream breaks; so only a rejection with an exit code is an exit, and on any other the launcher
+reattaches to the same pid with `commands.connect` (no timeout). A pid E2B no longer finds has
+exited. Every close, and every failed
 start after the `create`, kills the sandbox. There is no boot reaper: after a launcher restart a
 session sandbox has no owner and lives until its E2B `timeoutMs`. Listing sandboxes at boot would
 also kill the sessions of any other launcher on the same E2B key; the metadata is there for a human
