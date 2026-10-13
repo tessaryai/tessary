@@ -478,6 +478,7 @@ test('a session container has the one-shot hardening and its own labels (a sessi
       'tessary.sandbox.script': 'session.js',
       'tessary.sandbox.timeout-ms': '7200000',
       'tessary.sandbox.session': id,
+      'tessary.sandbox.work': mount.VolumeOptions.Subpath,
     });
   });
 });

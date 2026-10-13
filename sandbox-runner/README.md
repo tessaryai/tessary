@@ -391,7 +391,11 @@ SigV4 pair `docker-compose.yml` already carries as a pure opt-in default.
   being redeployed mid-run. A session container is removed when its session closes, or when its
   start fails; the startup pass reaps every container labeled `tessary.sandbox.session` whatever
   its age, because the session registry lives in memory and no caller can reach the session after
-  a restart.
+  a restart. Each container carries `tessary.sandbox.work`, the name of its work dir under
+  `LAUNCHER_WORK_DIR`; the startup pass removes the work dir of every container it reaps, and every
+  other `run-*` or `session-*` dir last changed before this boot that no container it keeps uses
+  (a dossier, the saved MCP results, or a `session.json` with its tokens that the launcher wrote
+  before it died).
 - **The Docker-outside-of-Docker work volume:** the launcher runs AS a container itself
   (`docker-compose.yml`'s `sandbox-runner` service), so a sibling container's mount source has to
   be something the HOST daemon can resolve — the launcher's own in-container temp dir means
@@ -445,7 +449,8 @@ manual proof below is for. `docker-sessions.test.js` drives the launcher session
 fake daemon starts a fake `session.js` (`test/fixtures/fake-session`) for each session container,
 and the tests cover the routes, the numbered events and their replay, busy, abort, idle, the max
 lifetime, the cap, the buffer, a dead or unreachable sandbox, the network join and the session
-container's create body. `docker-failures.test.js` covers the boot reaper's session rule.
+container's create body. `docker-failures.test.js` covers the boot reaper's session rule and its
+removal of the work dirs a dead launcher left.
 `e2b-sessions.test.js` runs the same session tests on the e2b backend: the fake E2B
 (`test/fixtures/fake-e2b`) relays each SDK call to the test, which runs a fake `session.js` per
 sandbox, and the tests also cover the create, the file, the command, the kill on every way out and

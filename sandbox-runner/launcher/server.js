@@ -309,6 +309,14 @@ const SANDBOX_LABEL_VALUE = '1';
 const SANDBOX_ORPHAN_GRACE_MULTIPLIER = 2;
 const SANDBOX_ORPHAN_MAX_AGE_MS = SANDBOX_TIMEOUT_MS * 4;
 const SANDBOX_LABEL_TIMEOUT_MS = 'tessary.sandbox.timeout-ms';
+// The container's work dir under LAUNCHER_WORK_DIR, so the boot reaper removes the dir of every
+// container it reaps and keeps the dir of every container it leaves running.
+const SANDBOX_LABEL_WORK = 'tessary.sandbox.work';
+const WORK_DIR_NAME = /^(run|session)-[A-Za-z0-9]{6}$/;
+// A work dir changed this close to the boot may be a request to this launcher, made while the
+// reaper runs: the filesystem's mtime can be a whole second coarse.
+const WORK_DIR_BOOT_SLACK_MS = 2_000;
+const BOOT_MS = Date.now();
 
 // Launcher sessions (POST /sessions): long-lived sandboxes, one per session, on either backend.
 // Each env value must be a positive integer; anything else stops the boot (see the checks near the
@@ -1206,6 +1214,8 @@ async function reapOrphanSandboxContainers() {
     return;
   }
   const now = Date.now();
+  const reapedWork = new Set();
+  const keptWork = new Set();
   for (const c of list) {
     const createdMs = (c.Created || 0) * 1000; // Engine API reports `Created` as unix SECONDS
     // Reap against THIS container's own declared timeout (see SANDBOX_LABEL_TIMEOUT_MS's
@@ -1219,10 +1229,44 @@ async function reapOrphanSandboxContainers() {
     // A session container is reaped whatever its age: the session registry lives in memory, so after
     // this boot no caller can reach it any more.
     const isSession = Boolean(labels[SANDBOX_LABEL_SESSION]);
-    if (!isSession && now - createdMs < maxAgeMs) continue; // still plausibly a live run
+    const work = labels[SANDBOX_LABEL_WORK];
+    if (!isSession && now - createdMs < maxAgeMs) { // still plausibly a live run
+      if (work) keptWork.add(work);
+      continue;
+    }
+    if (work) reapedWork.add(work);
     console.error(`docker backend: reaping orphaned sandbox container ${c.Id} (created ${new Date(createdMs).toISOString()}, maxAgeMs=${maxAgeMs})`);
     try { await dockerJson('POST', `/containers/${c.Id}/stop?t=1`); } catch { /* best effort */ }
     try { await dockerJson('DELETE', `/containers/${c.Id}?force=true`); } catch { /* best effort */ }
+  }
+  removeOrphanWorkDirs(reapedWork, keptWork);
+}
+
+// A work dir holds a request's input, a session's dossier and every MCP result it saved, and a
+// session.json the script has not read yet holds its MCP tokens. Only the run or session that made
+// it removes it, so after a restart nothing would: here the dir of every reaped container goes, and
+// so does every other work dir older than this boot that no kept container uses.
+function removeOrphanWorkDirs(reapedWork, keptWork) {
+  let entries;
+  try {
+    entries = fs.readdirSync(LAUNCHER_WORK_DIR, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const d of entries) {
+    if (!d.isDirectory() || !WORK_DIR_NAME.test(d.name) || keptWork.has(d.name)) continue;
+    const dir = path.join(LAUNCHER_WORK_DIR, d.name);
+    if (!reapedWork.has(d.name)) {
+      let changedMs;
+      try { changedMs = fs.statSync(dir).mtimeMs; } catch { continue; }
+      if (changedMs >= BOOT_MS - WORK_DIR_BOOT_SLACK_MS) continue;
+    }
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.error(`docker backend: removed orphaned work dir ${d.name}`);
+    } catch (e) {
+      console.error(`warning: could not remove orphaned work dir ${d.name}: ${(e && e.code) || 'error'}`);
+    }
   }
 }
 
@@ -1249,7 +1293,7 @@ function agentContainerBody({ cmd, env, labels, workSubpath, networkMode }) {
     Env: env,
     // Findable/reapable by reconciliation (reapOrphanSandboxContainers) and by a human running
     // `docker ps --filter label=tessary.sandbox=1` — see the constant's own comment above.
-    Labels: { [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE, ...labels },
+    Labels: { [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE, [SANDBOX_LABEL_WORK]: workSubpath, ...labels },
     HostConfig: {
       // The ONLY mount: the per-request work dir, read-write, nothing else from the host. The
       // shared volume by NAME plus the subdirectory this request wrote, never a host path — see
@@ -1911,9 +1955,9 @@ const dockerSessionDriver = {
     fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
     const workDir = fs.mkdtempSync(path.join(LAUNCHER_WORK_DIR, 'session-'));
     s.handle = { containerId: null, workDir };
-    fs.writeFileSync(path.join(workDir, 'session.json'), JSON.stringify(sessionFile), { mode: 0o600 });
     await ensureAgentImage();
     const networkMode = await sandboxNetwork();
+    fs.writeFileSync(path.join(workDir, 'session.json'), JSON.stringify(sessionFile), { mode: 0o600 });
     const created = await dockerJson('POST', '/containers/create', agentContainerBody({
       cmd: ['node', SESSION_SCRIPT, '/work/session.json'],
       env: [...containerEnvFor(AGENT_POSTURE, credential, model, modelCost), `SESSION_SECRET=${s.secret}`, `SESSION_PORT=${SANDBOX_SESSION_PORT}`],
