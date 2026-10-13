@@ -71,7 +71,7 @@
              `testcontainers-postgresql` / `testcontainers-junit-jupiter`, NOT the 1.x
              `postgresql` / `junit-jupiter` names. Docker is required to run `mvn verify`. -->
         <testcontainers.version>2.0.5</testcontainers.version>
-        <archunit.version>1.5.0</archunit.version>
+        <archunit.version>1.5.1</archunit.version>
         <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
         <!-- Verified latest stable on Maven Central 2026-09-01. Only the 11 open modules
              below bare-activate this plugin (backend/test-support and the modules outside this
