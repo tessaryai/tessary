@@ -26,7 +26,8 @@ import {
   Spinner,
   cn,
 } from "../../ui";
-import { useProjectApi } from "../../tenant/TenantContext";
+import { useProjectApi, useTenant } from "../../tenant/TenantContext";
+import { classifierHref } from "../traceLinker";
 import {
   COLUMN_DEFS,
   ColumnsControl,
@@ -61,7 +62,7 @@ import {
   type TraceListItem,
   filterParams,
 } from "./index-data";
-import { ANY_DETECTION, DETECTED_BY_DETECTORS, DetectionMarker } from "./detection-marker";
+import { ANY_DETECTION, DetectionMarker } from "./detection-marker";
 import { useSessionsIndex, sessionName, sessionDurationMs, type SessionListItem } from "./session-index-data";
 import { TraceRail } from "./TraceRail";
 import { SessionRail } from "./SessionRail";
@@ -93,7 +94,8 @@ export function TracesIndex() {
 }
 
 function TracesList() {
-  const api = useProjectApi();
+  const { api, orgSlug, projectSlug } = useTenant();
+  const basePath = `/orgs/${orgSlug}/projects/${projectSlug}`;
   const { visible, toggle, reset } = useColumnConfig();
 
   // Deep-link filters: Vitals rows land here with ?call_site=<slug>. Chips mirror
@@ -163,9 +165,9 @@ function TracesList() {
   const q = useTracesIndex(filters, epoch, !groupBySession);
   const sq = useSessionsIndex(filters, epoch, groupBySession);
 
-  // The classifiers Detected by offers: those whose flags these views show.
+  // The classifiers Detected by offers: those the server says these views show.
   const classifiersQ = useQuery({ queryKey: ["classifiers", api.base], queryFn: api.listClassifiers });
-  const detectors = (classifiersQ.data ?? []).filter((c) => DETECTED_BY_DETECTORS.has(c.detector));
+  const detectors = (classifiersQ.data ?? []).filter((c) => c.shown_in_trace_views);
   const detectedByOptions = detectors.map((c) => ({ value: c.id, label: c.name }));
   const pickedDetector = detectors.find((c) => c.id === facets.detected_by) ?? null;
 
@@ -400,7 +402,10 @@ function TracesList() {
           onShowAll={callSite === "any" ? () => setCallSite("all") : undefined}
           offClassifier={
             pickedDetector && !pickedDetector.enabled
-              ? { name: pickedDetector.name, href: `../classifiers/detectors?classifier=${encodeURIComponent(pickedDetector.id)}` }
+              ? {
+                  name: pickedDetector.name,
+                  href: classifierHref(pickedDetector, basePath),
+                }
               : undefined
           }
         />
@@ -977,7 +982,7 @@ function NothingHere({
           It has no detections to filter by. Turn it on to start scoring.
         </p>
         <p className="text-muted mt-3 text-body">
-          <Link to={offClassifier.href} relative="path" className="text-accent hover:underline">
+          <Link to={offClassifier.href} className="text-accent hover:underline">
             Open {offClassifier.name}
           </Link>
           <span className="text-subtle"> · </span>

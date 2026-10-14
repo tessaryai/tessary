@@ -4,12 +4,6 @@ import type { TraceDetailView } from "../../api/types";
 
 export type DetectionMark = TraceDetailView["detections"][number];
 
-/**
- * The detectors whose flags the trace and session views show. The server keeps the same set; a classifier
- * outside it is not offered in the Detected by filter.
- */
-export const DETECTED_BY_DETECTORS = new Set(["frustration"]);
-
 /** The Detected by value that matches a flag by any classifier. */
 export const ANY_DETECTION = "any";
 
