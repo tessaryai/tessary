@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
   CaseDetail,
+  ClassifierDetail,
   FlaggedAnswer,
   FrustratedConversation,
   FrustrationDetail,
@@ -712,6 +713,90 @@ describe("a frustration case", () => {
     await heading("Users on support-agent grew frustrated");
 
     expect(screen.queryByText("Likely cause")).toBeNull();
+  });
+});
+
+describe("a case with a classifier detail", () => {
+  const ONSET = "2026-09-22T07:30:00Z";
+  const DETAIL: ClassifierDetail = {
+    rate: { ...GROUNDEDNESS_DETAIL.rate, onsetAt: ONSET },
+    baselineFlagged: 21,
+    flagLabel: "Yes",
+    flagThreshold: 0.8,
+    arlTarget: 50000,
+    minDecisionInterval: null,
+    learningUntil: null,
+    words: {
+      unitOne: "item",
+      unitMany: "items",
+      figureNote: "Share of items the check flagged",
+      referenceLabel: "is the reference",
+      referenceDetail: "Set from the first 1,000 items.",
+      thresholdLine: "An item counts when its score is 0.80 or higher.",
+    },
+  };
+  const OWNED_REPORT: RcaReport = {
+    ...GROUNDEDNESS_REPORT,
+    id: "rca-o",
+    report_kind: "owned_causes",
+    causes: [
+      { ...GROUNDEDNESS_REPORT.causes[0], title: "The prompt stopped asking for a check", affected_count: 3, evidence_trace_ids: ["t-1", "t-2", "t-2"] },
+      { ...GROUNDEDNESS_REPORT.causes[0], title: "A tool started returning empty pages", affected_count: 1, evidence_trace_ids: [] },
+    ],
+  };
+  const classifierCase = (over: Partial<CaseDetail> = {}): CaseDetail => ({
+    ...BASE,
+    groundedness: null,
+    classifier_detail: DETAIL,
+    rca: null,
+    rca_report_id: null,
+    ...over,
+    case: { ...BASE.case, detector: "item_check", title: "Flagged items on support-agent rose", rca_verdict: null },
+  });
+
+  // Bug: a detailed case drew no figure ("nothing here to plot"), or another story's words around its rate.
+  it("draws What changed from the classifier detail and no Why block before RCA", async () => {
+    api.getCase.mockResolvedValue(classifierCase());
+    renderPage();
+    await heading("Flagged items on support-agent rose");
+
+    expect(screen.getByRole("heading", { name: "What changed" })).toBeTruthy();
+    expect(screen.getByText("Share of items the check flagged")).toBeTruthy();
+    expect(screen.getByText("6.40% of items are flagged")).toBeTruthy();
+    expect(screen.getByText("2.10% is the reference")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Set from the first 1,000 items. The current rate is 4.3 percentage points higher. An item counts when its score is 0.80 or higher.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/nothing here to plot/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Why" })).toBeNull();
+    expect(screen.getByText(new RegExp(`^${stamp(ONSET)}`))).toBeTruthy();
+  });
+
+  // Bug: an owned_causes report's causes offered no way to narrow the flagged list to the cause.
+  it("offers a cause filter for an owned_causes report", async () => {
+    api.getCase.mockResolvedValue(classifierCase({ rca: OWNED_REPORT, rca_report_id: "rca-o" }));
+    renderPage();
+    await heading("Flagged items on support-agent rose");
+
+    expect(screen.getByText("The prompt stopped asking for a check")).toBeTruthy();
+    expect(screen.getByText("3 flagged items")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Show \d+ items?$/ }).map((b) => b.textContent)).toEqual([
+      "Show 2 items",
+    ]);
+  });
+
+  // Bug: a report of another kind on a detailed case offered a filter its causes cannot drive.
+  it("offers no cause filter for a report of another kind", async () => {
+    api.getCase.mockResolvedValue(
+      classifierCase({ rca: { ...OWNED_REPORT, report_kind: "attribution" }, rca_report_id: "rca-o" }),
+    );
+    renderPage();
+    await heading("Flagged items on support-agent rose");
+
+    expect(screen.getByText("The prompt stopped asking for a check")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Show \d+ items?$/ })).toBeNull();
   });
 });
 

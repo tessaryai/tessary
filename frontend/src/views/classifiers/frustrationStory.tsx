@@ -63,26 +63,71 @@ export function FrustrationHeader({
   );
 }
 
-/** "What changed": the rate chart tool error uses, and the two numbers behind it in sessions. */
-export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
-  const rate = detail.rate;
+/**
+ * "What changed" for a rate of flagged trials: the rate chart tool error uses, then two pins. Pin 1 is the
+ * current rate in the caller's noun; pin 2 is the reference rate, with the caller's reference words, how far
+ * the current rate sits from it, and the caller's line on when a trial counts. Every word that differs by
+ * classifier comes from the caller.
+ */
+export function RateFigure({
+  rate,
+  label,
+  unit,
+  flagged,
+  flaggedLine,
+  referenceLabel,
+  referenceDetail,
+  thresholdLine,
+}: {
+  rate: FrustrationDetail["rate"];
+  /** The chart's name. */
+  label: string;
+  /** What the rate counts, plural: "sessions". */
+  unit: string;
+  /** Pin 1's claim after "N% of <unit>": "are frustrated". */
+  flagged: string;
+  /** Pin 1's line after "F of N <unit> since <onset>": "had a user frustrated with the agent." */
+  flaggedLine: string;
+  /** Pin 2's claim after the reference rate: "is normal for this call site". */
+  referenceLabel: string;
+  /** Pin 2's line before the distance from the reference, or null. */
+  referenceDetail: string | null;
+  /** Pin 2's line after it, on when a trial counts as flagged, or null. */
+  thresholdLine: string | null;
+}) {
   const since = rate.onsetAt ? new Date(rate.onsetAt).toLocaleString(undefined, DAY_MONTH_TIME) : null;
   const points = Math.abs(rate.deltaPp);
+  const distance = `The current rate is ${points.toFixed(1)} percentage ${points === 1 ? "point" : "points"} ${
+    rate.deltaPp < 0 ? "lower" : "higher"
+  }.`;
   return (
     <>
-      <RateChart rate={rate} label="Frustrated sessions" />
+      <RateChart rate={rate} label={label} />
       <PinList>
-        <Pin n={1} title={`${formatRate(rate.curRate)} of sessions are frustrated`}>
-          {rate.failuresCur.toLocaleString()} of {rate.nCur.toLocaleString()} sessions
-          {since ? ` since ${since}` : ""} had a user frustrated with the agent. This rate opened the case.
+        <Pin n={1} title={`${formatRate(rate.curRate)} of ${unit} ${flagged}`}>
+          {`${rate.failuresCur.toLocaleString()} of ${rate.nCur.toLocaleString()} ${unit}${since ? ` since ${since}` : ""} ${flaggedLine}`}
         </Pin>
-        <Pin n={2} title={`${formatRate(rate.refRate)} is normal for this call site`}>
-          Learned from its first {rate.nRef.toLocaleString()} sessions. The current rate is{" "}
-          {points.toFixed(1)} percentage {points === 1 ? "point" : "points"} higher. A message counts as
-          frustrated when its score is above {detail.jevThreshold.toFixed(2)}.
+        <Pin n={2} title={`${formatRate(rate.refRate)} ${referenceLabel}`}>
+          {[referenceDetail, distance, thresholdLine].filter(Boolean).join(" ")}
         </Pin>
       </PinList>
     </>
+  );
+}
+
+/** "What changed": the rate figure in sessions, with frustration's words. */
+export function FrustrationRate({ detail }: { detail: FrustrationDetail }) {
+  return (
+    <RateFigure
+      rate={detail.rate}
+      label="Frustrated sessions"
+      unit="sessions"
+      flagged="are frustrated"
+      flaggedLine="had a user frustrated with the agent. This rate opened the case."
+      referenceLabel="is normal for this call site"
+      referenceDetail={`Learned from its first ${detail.rate.nRef.toLocaleString()} sessions.`}
+      thresholdLine={`A message counts as frustrated when its score is above ${detail.jevThreshold.toFixed(2)}.`}
+    />
   );
 }
 
