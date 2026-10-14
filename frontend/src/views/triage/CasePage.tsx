@@ -56,9 +56,15 @@ import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
 import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
-import { FrustrationRate } from "../classifiers/frustrationStory";
-import { ConversationFilter, FrustratedConversations } from "../classifiers/FrustratedConversations";
+import {
+  FRUSTRATION_LIST_COPY,
+  FrustrationRate,
+  frustrationLoader,
+  frustrationRows,
+} from "../classifiers/frustrationStory";
+import { ConversationFilter, FlaggedList } from "../classifiers/FlaggedList";
 import { GroundednessRate } from "../classifiers/groundednessStory";
+import { ClassifierRate, FLAGGED_LIST_ID } from "../classifiers/classifierStory";
 import { FlaggedAnswers } from "../classifiers/FlaggedAnswers";
 import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } from "./bits";
 import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
@@ -168,6 +174,7 @@ export function CasePage() {
   const live = c.state !== "resolved";
   const frustration = detail.frustration ?? null;
   const groundedness = detail.groundedness ?? null;
+  const classifierDetail = detail.classifier_detail ?? null;
   const frustrationCauses =
     frustration && report?.report_kind === "frustration_causes" && !analysing ? report.causes : [];
   const groundednessCauses =
@@ -196,6 +203,7 @@ export function CasePage() {
     detail.secret_leak?.firstAt ??
     detail.frustration?.rate.onsetAt ??
     detail.groundedness?.rate.onsetAt ??
+    detail.classifier_detail?.rate.onsetAt ??
     driftWindow?.openedAt ??
     c.onset_at;
   const closedAt =
@@ -331,6 +339,7 @@ export function CasePage() {
             ) : undefined
           }
           kind={causeKind(detail)}
+          affected={affectedUnit(detail)}
           basePath={basePath}
           show={
             frustration && report?.report_kind === "frustration_causes"
@@ -351,7 +360,16 @@ export function CasePage() {
                       document.getElementById("flagged-answers")?.scrollIntoView({ behavior: "smooth", block: "start" });
                     },
                   }
-                : undefined
+                : classifierDetail && report?.report_kind === "owned_causes"
+                  ? {
+                      count: causeTraceCount,
+                      unit: [classifierDetail.words.unitOne, classifierDetail.words.unitMany],
+                      onShow: (i) => {
+                        setCauseFilter(String(i));
+                        document.getElementById(FLAGGED_LIST_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      },
+                    }
+                  : undefined
           }
         />
       )}
@@ -548,6 +566,13 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
       </Block>
     );
   }
+  if (detail.classifier_detail) {
+    return (
+      <Block label="What changed" note={detail.classifier_detail.words.figureNote}>
+        <ClassifierRate detail={detail.classifier_detail} />
+      </Block>
+    );
+  }
   const rate = detail.tool_error;
   const shift = detail.metric;
   const secretLeak = detail.secret_leak;
@@ -609,6 +634,7 @@ function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: str
 function causeKind(detail: CaseDetail): CauseKind {
   if (detail.frustration) return "frustration";
   if (detail.groundedness) return "groundedness";
+  if (detail.classifier_detail) return "classifier";
   if (detail.tool_error) return "tool_error";
   if (detail.malformed_output) return "malformed";
   if (detail.secret_leak) return "secret_leak";
@@ -617,9 +643,13 @@ function causeKind(detail: CaseDetail): CauseKind {
 }
 
 /** What a cause's affected count counts, by case type. */
-function affectedUnit(kind: CauseKind): [string, string] {
-  if (kind === "frustration") return ["frustrated session", "frustrated sessions"];
-  if (kind === "groundedness") return ["flagged answer", "flagged answers"];
+function affectedUnit(detail: CaseDetail): [string, string] {
+  if (detail.frustration) return ["frustrated session", "frustrated sessions"];
+  if (detail.groundedness) return ["flagged answer", "flagged answers"];
+  if (detail.classifier_detail) {
+    const words = detail.classifier_detail.words;
+    return [`flagged ${words.unitOne}`, `flagged ${words.unitMany}`];
+  }
   return ["flagged trace", "flagged traces"];
 }
 
@@ -638,6 +668,7 @@ function Why({
   analysing,
   actions,
   kind,
+  affected,
   basePath,
   show,
 }: {
@@ -646,8 +677,10 @@ function Why({
   /** Close and Absorb. Shown only beside a finished analysis, never while one runs. */
   actions?: React.ReactNode;
   kind: CauseKind;
+  /** What a cause's affected count counts, singular and plural. */
+  affected: [string, string];
   basePath: string;
-  /** How a frustration or groundedness cause filters the list below; the index is the cause's stored one. */
+  /** How a cause filters the flagged list below; the index is the cause's stored one. */
   show?: { count: (cause: RcaCause) => number; unit: [string, string]; onShow: (index: number) => void };
 }) {
   if (analysing) {
@@ -687,7 +720,7 @@ function Why({
             cause={cause}
             kind={kind}
             basePath={basePath}
-            affected={affectedUnit(kind)}
+            affected={affected}
             repoRead={report.repo_available !== false}
             show={
               show && {
@@ -869,6 +902,7 @@ function FrustrationList({
   onFilter: (key: string) => void;
   basePath: string;
 }) {
+  const { api } = useTenant();
   const index = filter === "all" ? -1 : Number(filter);
   const cause = index >= 0 ? causes[index] : undefined;
   const options = [
@@ -883,13 +917,11 @@ function FrustrationList({
         {options.length > 1 && (
           <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
         )}
-        <FrustratedConversations
-          findingId={findingId}
-          first={{
-            rows: frustration.conversations,
-            nextCursor: frustration.conversationsNextCursor,
-            total: frustration.rate.failuresCur,
-          }}
+        <FlaggedList
+          {...FRUSTRATION_LIST_COPY}
+          listKey={findingId}
+          first={frustrationRows(frustration)}
+          loadPage={frustrationLoader(api, findingId)}
           filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
           readAhead={
             rcaReportId

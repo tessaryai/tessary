@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Shared OpenCode runner for the agent lanes (rca.js, triage.js, authoring.js). ONE source of truth for:
- *   - starting `opencode serve` and driving it over the SDK,
+ * Shared OpenCode runner for the agent lanes (rca.js, triage.js, run.js) and the long-lived
+ * session.js. ONE source of truth for:
+ *   - starting `opencode serve` and driving it over the SDK, and the config it starts with
+ *     (basePermission, customAgent, remoteMcp),
  *   - turning its session messages into the `turns[]` shape the backend's
  *     AgentSpanTelemetry.recordTurns expects,
  *   - synthesising the result envelope the backend parses (`resultRaw`),
@@ -20,9 +22,10 @@
  * the run was over. Ours SIGTERMs, waits, SIGKILLs, and releases the child's pipes, and runAgent
  * awaits all of it. Everything spoken over HTTP still goes through the SDK's client.
  *
- * WHY WE LIST MESSAGES INSTEAD OF STREAMING: nothing here renders live progress. The
+ * WHY runAgent LISTS MESSAGES INSTEAD OF STREAMING: no lane renders live progress. The
  * backend reads one payload at the end, so reading the session's messages once the
- * prompt resolves is the same data with none of the event-ordering exposure.
+ * prompt resolves is the same data with none of the event-ordering exposure. session.js
+ * streams, because a person watches its replies as they are written.
  *
  * Runs identically in-VM (E2B template, /home/user) and in local/host mode
  * (agent-sandbox/), because `require('./agent-stream')` resolves beside the caller in
@@ -54,6 +57,67 @@ const OPENCODE_TOOL_OUTPUT_GLOB = path.join(
   'tool-output',
   '*',
 );
+
+/**
+ * The permission base every lane starts from, with the lane's own rules merged over it.
+ *
+ * Headless: every tool the lane needs must be 'allow' outright, because an 'ask' has nobody to
+ * answer it and would burn the run's wall-clock waiting. bash is on (git, the agent's own check
+ * scripts); webfetch is off — nothing here has a reason to reach the network, and it would be the
+ * cheapest exfiltration channel out of a sandbox holding cloud credentials. external_directory pins
+ * the agent inside AGENT_CWD, with OpenCode's own tmp and tool-output globs allowed when
+ * `scratchDirs` (see OPENCODE_TMP_GLOB above) — opencode matches multiple rules on the SAME map by
+ * taking the last one that matches a given path, so listing the allows after the `'*': 'deny'` is
+ * what makes them win rather than be shadowed by it.
+ *
+ * webfetch/websearch take a BARE action, not a `{'*': ...}` map — those two are not pattern-scoped
+ * the way bash/edit/external_directory are. Sending the map form makes the server reject the whole
+ * config with ConfigInvalidError, which 400s every endpoint including session creation, so the
+ * lane fails before it can invoke anything.
+ */
+function basePermission(lanePermission, { scratchDirs = false } = {}) {
+  return {
+    bash: { '*': 'allow' },
+    webfetch: 'deny',
+    websearch: 'deny',
+    edit: { '*': 'deny' },
+    ...lanePermission,
+    external_directory: scratchDirs
+      ? { '*': 'deny', [OPENCODE_TMP_GLOB]: 'allow', [OPENCODE_TOOL_OUTPUT_GLOB]: 'allow' }
+      : { '*': 'deny' },
+  };
+}
+
+/**
+ * A custom primary agent whose `prompt` REPLACES the provider's default system prompt. `task` and
+ * `skill` are denied because no lane runs sub-agents or ships skills of its own; `todowrite` stays
+ * allowed, so the agent may still track its own steps. `steps` is OpenCode's step count: on the
+ * step that reaches it OpenCode tells the model to answer in text only.
+ */
+function customAgent({ prompt, steps }) {
+  return {
+    mode: 'primary',
+    prompt,
+    ...(steps !== undefined ? { steps } : {}),
+    permission: { task: 'deny', skill: 'deny', todowrite: 'allow' },
+  };
+}
+
+/**
+ * Materialize a dossier (relative path → content) under root, refusing anything that would escape
+ * it. The paths come from the backend's own store, but a traversal must be impossible by
+ * construction rather than by trust.
+ */
+function writeDossier(root, files) {
+  for (const [rel, content] of Object.entries(files || {})) {
+    const full = path.resolve(root, rel);
+    if (full !== root && !full.startsWith(root + path.sep)) {
+      throw new Error('dossier path escapes root: ' + rel);
+    }
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+}
 
 /**
  * Raise Node's 300s cap on a SINGLE fetch to the run's own deadline.
@@ -297,8 +361,10 @@ function stopProcess(proc) {
 }
 
 /**
- * Spawn `opencode serve` and resolve with `{url, close}` once it announces itself. `close()`
- * returns a promise that settles only when the process is gone (see stopProcess).
+ * Spawn `opencode serve` and resolve with `{url, close, exited}` once it announces itself. `close()`
+ * returns a promise that settles only when the process is gone (see stopProcess). `exited` settles
+ * with `{code, signal}` whenever the process exits, also after the announcement, so a long-lived
+ * caller learns that its OpenCode died.
  *
  * Rejects, after stopping the process, with the same messages createOpencodeServer used:
  *   - the process exits → `Server exited with code N` plus the stdout+stderr it printed,
@@ -313,6 +379,7 @@ function spawnOpencodeServer({ hostname, port, timeout, config }) {
     env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
   });
   const close = () => stopProcess(proc);
+  const exited = new Promise((resolve) => proc.once('exit', (code, signal) => resolve({ code, signal })));
 
   return new Promise((resolve, reject) => {
     let output = '';
@@ -340,7 +407,7 @@ function spawnOpencodeServer({ hostname, port, timeout, config }) {
         if (!match) return fail(new Error(`Failed to parse server url from output: ${line}`));
         settled = true;
         clearTimeout(timer);
-        return resolve({ url: match[1], close });
+        return resolve({ url: match[1], close, exited });
       }
     });
     proc.stderr.on('data', (chunk) => {
@@ -734,6 +801,14 @@ function toEnvelope(turns, structured, text) {
 
 // --- the run -----------------------------------------------------------------
 
+/** One remote OpenCode MCP entry per relay URL. No headers: the relay holds every token. */
+function remoteMcp(urls) {
+  const mcp = {};
+  for (const [name, url] of Object.entries(urls)) mcp[name] = { type: 'remote', url, enabled: true, oauth: false };
+  return mcp;
+}
+
+
 /**
  * Run one agent invocation against `spec.prompt`; collect per-turn telemetry + a result envelope.
  *
@@ -742,7 +817,7 @@ function toEnvelope(turns, structured, text) {
  *   - model: a `provider/model` id (see toProviderModel in the launcher); split for the wire.
  *   - jsonSchema: the reply is schema-constrained and lands in `structured_output`. The run
  *     rejects when it produced no usable reply, or no reply that satisfies the schema: its VALUE
- *     is that reply. Null (authoring.js, asked for prose) drops the constraint: no schema
+ *     is that reply. Null (run.js, asked for prose) drops the constraint: no schema
  *     instruction, no schema-miss retry, and the reply's text is the answer, with
  *     `structured_output` present only when that text happened to carry a JSON object.
  *   - permission: the lane's OpenCode permission rules. Every lane passes one — an agent that
@@ -775,29 +850,8 @@ async function runAgent(spec) {
   // Since schemaInstruction replaces `format` entirely (see there), v2 buys nothing.
   const { createOpencodeClient } = await import('@opencode-ai/sdk');
 
-  // Headless: every tool the lane needs must be 'allow' outright, because an 'ask' has nobody to
-  // answer it and would burn the run's wall-clock waiting. bash is on for both lanes (git,
-  // triage's own check scripts); webfetch is off for both — nothing here has a reason to reach the network, and it would be the cheapest exfiltration channel
-  // out of a sandbox holding cloud credentials. external_directory pins the agent inside AGENT_CWD,
-  // with two named exceptions for triage (see OPENCODE_TMP_GLOB above) — opencode matches multiple
-  // rules on the SAME map by taking the last one that matches a given path, so listing the allows
-  // after the `'*': 'deny'` is what makes them win rather than be shadowed by it.
-  //
-  // webfetch/websearch take a BARE action, not a `{'*': ...}` map — those two are not
-  // pattern-scoped the way bash/edit/external_directory are. Sending the map form makes the
-  // server reject the whole config with ConfigInvalidError, which 400s every endpoint including
-  // session creation, so the lane fails before it can invoke anything.
   const config = {
-    permission: {
-      bash: { '*': 'allow' },
-      webfetch: 'deny',
-      websearch: 'deny',
-      edit: { '*': 'deny' },
-      ...spec.permission,
-      external_directory: spec.systemPrompt
-        ? { '*': 'deny', [OPENCODE_TMP_GLOB]: 'allow', [OPENCODE_TOOL_OUTPUT_GLOB]: 'allow' }
-        : { '*': 'deny' },
-    },
+    permission: basePermission(spec.permission, { scratchDirs: Boolean(spec.systemPrompt) }),
     lsp: {},
   };
   // The turn budget as an opencode step count, shared by both branches below — 2 lower than the
@@ -808,22 +862,12 @@ async function runAgent(spec) {
   if (spec.systemPrompt) {
     // Triage only. The relay holds the live platform token; opencode's own MCP config never sees
     // it (see mcp-relay.js's header for why that split matters).
-    relay = await startMcpRelay({ url: spec.mcp.url, token: spec.mcp.token, workDir: WORK });
-    config.mcp = {
-      'tessary-evals': { type: 'remote', url: relay.url, enabled: true, oauth: false },
-    };
-    // The custom agent's `prompt` REPLACES the provider's default system prompt (verified against
-    // opencode source, see the research notes this change was built from). `task`/`skill` are
-    // denied because this lane runs no sub-agents and ships no skills of its own; `todowrite`
-    // stays allowed — the agent may still track its own steps.
-    config.agent = {
-      [TRIAGE_AGENT]: {
-        mode: 'primary',
-        prompt: spec.systemPrompt,
-        ...(steps !== undefined ? { steps } : {}),
-        permission: { task: 'deny', skill: 'deny', todowrite: 'allow' },
-      },
-    };
+    relay = await startMcpRelay({
+      servers: [{ name: 'tessary-evals', url: spec.mcp.url, token: spec.mcp.token }],
+      workDir: WORK,
+    });
+    config.mcp = remoteMcp(relay.urls);
+    config.agent = { [TRIAGE_AGENT]: customAgent({ prompt: spec.systemPrompt, steps }) };
   } else {
     // Config, never argv: the platform key must not be visible in the process table.
     config.mcp = {
@@ -951,7 +995,7 @@ async function runAgent(spec) {
       }
       // Both halves matter. A schema with no `required` list makes missingKeys vacuously empty,
       // so "we parsed an object at all" is the check that carries the prose case. No schema at all
-      // (authoring.js, asked for prose) means any non-empty reply is the answer.
+      // (run.js, asked for prose) means any non-empty reply is the answer.
       const missing = missingKeys(structured, spec.jsonSchema);
       if (!spec.jsonSchema || (structured && missing.length === 0)) break;
       if (attempt === 0) console.error(describeSchemaMiss(text, turns, spec.jsonSchema));
@@ -1028,6 +1072,15 @@ async function runAgent(spec) {
 module.exports = {
   git,
   runAgent,
+  startServer,
+  makeFetch,
+  splitModel,
+  usageOf,
+  scrubToken,
+  basePermission,
+  customAgent,
+  remoteMcp,
+  writeDossier,
   describeError,
   quarantineRepo,
   sumUsage,

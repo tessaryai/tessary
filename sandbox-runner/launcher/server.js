@@ -4,7 +4,9 @@
  * Node launcher sidecar. The tessary backend (Java, no E2B SDK) calls
  * this over HTTP; we wrap the E2B SDK. One request == one FRESH microVM: create
  * a sandbox from the runner template, run run.js, tear the sandbox down. No
- * sandbox is ever reused across requests or tenants.
+ * sandbox is ever reused across requests or tenants. The one exception is a launcher session
+ * (POST /sessions): one sandbox runs session.js for the life of that session and serves its
+ * messages, and is still never shared with another session.
  *
  * Endpoints (Bearer-authed with SANDBOX_API_KEY):
  *   POST /rca      { clone_url?, head_sha?, onset_at?, files, prompt, json_schema, model, mcp, timeout_ms }
@@ -16,19 +18,31 @@
  *                                                    -> { raw: "<agent stdout>" }  Layer-2 ruling over
  *                                                    the finding's dossier + the platform's MCP surface.
  *                                                    The one agentic route with NO clone — see runTriage.
- *   POST /authoring { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
- *                     timeout_ms }
+ *   POST /runs { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model, mcp,
+ *               timeout_ms }
  *                                                    -> { raw: "<agent stdout>" }  a generic agent run:
  *                                                    the caller's files + system prompt, the platform's
  *                                                    MCP surface, and ./repo/ (read-only) when a
  *                                                    clone_url is sent. Behind the backend's
- *                                                    AgentRunService (the AUTHORING lane) — see runAuthoring.
+ *                                                    AgentRunService (the AGENT_RUN lane) — see runAgentRun.
+ *   POST   /sessions  { lane, system_prompt, files, model, model_cost?, provider, credential,
+ *                       mcp_servers, idle_timeout_ms, max_tool_calls_per_message }
+ *                                                    -> 201 { session_id }  a long-lived agent
+ *                                                    session (session.js) in its own sandbox; 429
+ *                                                    at SANDBOX_SESSION_CAP
+ *   POST   /sessions/{id}/messages { text }          -> 202; 409 while a reply runs
+ *   POST   /sessions/{id}/abort                      -> 204; the reply ends, the session stays
+ *   GET    /sessions/{id}/events?after=<seq>         -> text/event-stream, numbered, replayed
+ *                                                    from the session's buffer; 410 past it
+ *   DELETE /sessions/{id}                            -> 204 once the sandbox is gone
+ *                                                    An unknown session is 404 on every route.
+ *                                                    See sandbox-runner/README.md "Launcher sessions".
  *   GET  /healthz                                    -> 200
  *
  * FIVE ROUTES WERE REMOVED, and the list is worth keeping because the shape of what remains is
  * the argument for the rename: /grade and /lint ran user-authored grader code, /synthesize and
  * /codegen authored it, and /analyze served the git observer. All five went with grading and the
- * observer. What is left — /rca, /triage and /authoring — is OUR agent working on the surviving
+ * observer. What is left — /rca, /triage and /runs — is OUR agent working on the surviving
  * classifier product, which is why this service is no longer named for graders.
  *
  * Failure contract: every orchestration failure answers 502 with
@@ -162,10 +176,23 @@
  *   EGRESS_EXTRA_ALLOW            comma-separated hosts an egress-credential run may reach besides
  *                                 the model provider, the MCP door and the clone host; every other
  *                                 host is denied for those runs (default: none)
+ *
+ * Launcher sessions (each a positive integer, else the launcher refuses to boot):
+ *   SANDBOX_SESSION_CAP     live sessions at once, on every backend (default 4)
+ *   SANDBOX_SESSION_BUFFER  events kept per session for replay (default 5000)
+ *   SANDBOX_SESSION_MAX_MS  a session's whole life (default 7200000); an E2B session sandbox gets
+ *                           this plus SESSION_E2B_GRACE_MS as its E2B timeoutMs
+ *   SANDBOX_SESSION_PORT    the port session.js listens on inside the sandbox, passed to it as
+ *                           SESSION_PORT (default 9400; the tests use free ports)
+ *   E2B_DEBUG               the e2b SDK's own switch for a local E2B; a session's port is then
+ *                           dialed over http instead of https
  */
+const crypto = require('node:crypto');
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 
 // `e2b` is required LAZILY (only inside the E2B code paths) so the docker backend, the default,
 // needs no `e2b` install at all.
@@ -282,6 +309,55 @@ const SANDBOX_LABEL_VALUE = '1';
 const SANDBOX_ORPHAN_GRACE_MULTIPLIER = 2;
 const SANDBOX_ORPHAN_MAX_AGE_MS = SANDBOX_TIMEOUT_MS * 4;
 const SANDBOX_LABEL_TIMEOUT_MS = 'tessary.sandbox.timeout-ms';
+// The container's work dir under LAUNCHER_WORK_DIR, so the boot reaper removes the dir of every
+// container it reaps and keeps the dir of every container it leaves running.
+const SANDBOX_LABEL_WORK = 'tessary.sandbox.work';
+const WORK_DIR_NAME = /^(run|session)-[A-Za-z0-9]{6}$/;
+// A work dir changed this close to the boot may be a request to this launcher, made while the
+// reaper runs: the filesystem's mtime can be a whole second coarse.
+const WORK_DIR_BOOT_SLACK_MS = 2_000;
+const BOOT_MS = Date.now();
+
+// Launcher sessions (POST /sessions): long-lived sandboxes, one per session, on either backend.
+// Each env value must be a positive integer; anything else stops the boot (see the checks near the
+// bottom of this file), because Number('abc') is NaN and a NaN timer fires at once.
+const badIntEnv = [];
+function positiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    badIntEnv.push(name);
+    return fallback;
+  }
+  return n;
+}
+const SANDBOX_SESSION_CAP = positiveIntEnv('SANDBOX_SESSION_CAP', 4);
+const SANDBOX_SESSION_BUFFER = positiveIntEnv('SANDBOX_SESSION_BUFFER', 5000);
+const SANDBOX_SESSION_MAX_MS = positiveIntEnv('SANDBOX_SESSION_MAX_MS', 7200000);
+const SANDBOX_SESSION_PORT = positiveIntEnv('SANDBOX_SESSION_PORT', 9400);
+const SESSION_START_MS = 90_000;
+const SESSION_POLL_MS = 250;
+const SESSION_REQUEST_MS = 10_000;
+const SESSION_CLOSE_GRACE_MS = 5_000;
+const SESSION_TOMBSTONE_MS = 300_000;
+const SESSION_STOP_SECONDS = 5;
+const SESSION_RECONNECT_MS = 250;
+const SESSION_SCRIPT = 'session.js';
+// The agent image's execute-only node (agent-sandbox/Dockerfile and template.ts): session.js run
+// from it is not dumpable, so the agent cannot read its MCP tokens or secret through /proc.
+const SESSION_NODE = '/usr/local/bin/node-sealed';
+const SANDBOX_LABEL_SESSION = 'tessary.sandbox.session';
+const SESSION_TEXT_MAX_BYTES = 1 << 20;
+// The launcher's life timer starts when POST /sessions arrives and its close can take the abort
+// grace plus the kill, so the E2B sandbox outlives SANDBOX_SESSION_MAX_MS by this much and the
+// launcher always closes first.
+const SESSION_E2B_GRACE_MS = 60_000;
+const SESSION_E2B_HOME = '/home/user';
+// The SDK reads the same variable: true means a local E2B served over plain http. Production never
+// sets it.
+const E2B_DEBUG = (process.env.E2B_DEBUG || 'false').toLowerCase() === 'true';
+const SESSION_EVENT_TYPES = new Set(['text', 'tool_start', 'tool_end', 'message_end', 'error', 'closed']);
 
 // Which OpenCode provider serves a given backend model id, and on what wire.
 //
@@ -613,14 +689,15 @@ function hostOf(url) {
 
 /**
  * The `network` option for Sandbox.create, set only for an egress credential: E2B's proxy injects the
- * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the MCP
- * door, the clone host and EGRESS_EXTRA_ALLOW. A rule's host must also be allowed, or the provider is
- * unreachable, which is why it leads `allowOut`.
+ * secret as the model provider's `x-api-key`, and egress is limited to the model provider, the hosts
+ * of `urls` (the run's MCP door and clone host, or a session's MCP servers) and EGRESS_EXTRA_ALLOW.
+ * A rule's host must also be allowed, or the provider is unreachable, which is why it leads
+ * `allowOut`.
  */
-function egressNetwork(credential, payload) {
+function egressNetwork(credential, urls) {
   if (!credential.egress_secret) return {};
   const modelHost = hostOf((credential.base_url || '').trim() || defaultBaseUrlFor(ANTHROPIC_MODE));
-  const hosts = [modelHost, hostOf(payload.mcp && payload.mcp.url), hostOf(payload.clone_url), ...EGRESS_EXTRA_ALLOW];
+  const hosts = [modelHost, ...urls.map(hostOf), ...EGRESS_EXTRA_ALLOW];
   return {
     network: {
       allowOut: [...new Set(hosts.filter(Boolean))],
@@ -1108,6 +1185,24 @@ async function ensureSandboxNetwork() {
   }
 }
 
+// With isolation on, sessions run on DOCKER_SANDBOX_NETWORK and the launcher dials them there, so it
+// joins that bridge itself (once, at boot). It then shares the bridge with the sandboxes: they can
+// reach its port (which needs SANDBOX_API_KEY) and each other's session port (which needs that
+// session's secret), and still not the service network. Best effort: a failure costs session
+// starts, one at a time, never the boot.
+async function joinSandboxNetwork() {
+  if (!SANDBOX_NETWORK_ISOLATION) return;
+  try {
+    const self = await dockerJson('GET', `/containers/${process.env.HOSTNAME}/json`);
+    const networks = (self && self.NetworkSettings && self.NetworkSettings.Networks) || {};
+    if (Object.prototype.hasOwnProperty.call(networks, DOCKER_SANDBOX_NETWORK)) return;
+    await dockerJson('POST', `/networks/${DOCKER_SANDBOX_NETWORK}/connect`, { Container: process.env.HOSTNAME });
+    console.log(`docker backend: joined sandbox network '${DOCKER_SANDBOX_NETWORK}'`);
+  } catch (e) {
+    console.error(`warning: could not join sandbox network '${DOCKER_SANDBOX_NETWORK}': ${e && e.message}`);
+  }
+}
+
 // Best-effort startup reconciliation: stop + remove any tessary.sandbox=1 container older than
 // SANDBOX_ORPHAN_MAX_AGE_MS. Every normal run already removes its own container in
 // runScriptInDocker's `finally` — this exists solely for the crash/redeploy case, where `finally`
@@ -1122,6 +1217,8 @@ async function reapOrphanSandboxContainers() {
     return;
   }
   const now = Date.now();
+  const reapedWork = new Set();
+  const keptWork = new Set();
   for (const c of list) {
     const createdMs = (c.Created || 0) * 1000; // Engine API reports `Created` as unix SECONDS
     // Reap against THIS container's own declared timeout (see SANDBOX_LABEL_TIMEOUT_MS's
@@ -1132,10 +1229,47 @@ async function reapOrphanSandboxContainers() {
     const maxAgeMs = Number.isFinite(labeledTimeoutMs) && labeledTimeoutMs > 0
       ? labeledTimeoutMs * SANDBOX_ORPHAN_GRACE_MULTIPLIER
       : SANDBOX_ORPHAN_MAX_AGE_MS;
-    if (now - createdMs < maxAgeMs) continue; // still plausibly a live run
+    // A session container is reaped whatever its age: the session registry lives in memory, so after
+    // this boot no caller can reach it any more.
+    const isSession = Boolean(labels[SANDBOX_LABEL_SESSION]);
+    const work = labels[SANDBOX_LABEL_WORK];
+    if (!isSession && now - createdMs < maxAgeMs) { // still plausibly a live run
+      if (work) keptWork.add(work);
+      continue;
+    }
+    if (work) reapedWork.add(work);
     console.error(`docker backend: reaping orphaned sandbox container ${c.Id} (created ${new Date(createdMs).toISOString()}, maxAgeMs=${maxAgeMs})`);
     try { await dockerJson('POST', `/containers/${c.Id}/stop?t=1`); } catch { /* best effort */ }
     try { await dockerJson('DELETE', `/containers/${c.Id}?force=true`); } catch { /* best effort */ }
+  }
+  removeOrphanWorkDirs(reapedWork, keptWork);
+}
+
+// A work dir holds a request's input, a session's dossier and every MCP result it saved, and a
+// session.json the script has not read yet holds its MCP tokens. Only the run or session that made
+// it removes it, so after a restart nothing would: here the dir of every reaped container goes, and
+// so does every other work dir older than this boot that no kept container uses.
+function removeOrphanWorkDirs(reapedWork, keptWork) {
+  let entries;
+  try {
+    entries = fs.readdirSync(LAUNCHER_WORK_DIR, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const d of entries) {
+    if (!d.isDirectory() || !WORK_DIR_NAME.test(d.name) || keptWork.has(d.name)) continue;
+    const dir = path.join(LAUNCHER_WORK_DIR, d.name);
+    if (!reapedWork.has(d.name)) {
+      let changedMs;
+      try { changedMs = fs.statSync(dir).mtimeMs; } catch { continue; }
+      if (changedMs >= BOOT_MS - WORK_DIR_BOOT_SLACK_MS) continue;
+    }
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.error(`docker backend: removed orphaned work dir ${d.name}`);
+    } catch (e) {
+      console.error(`warning: could not remove orphaned work dir ${d.name}: ${(e && e.code) || 'error'}`);
+    }
   }
 }
 
@@ -1150,6 +1284,51 @@ async function reapOrphanSandboxContainers() {
 function runScriptInDocker(scriptName, payload, timeoutMs, posture, credential) {
   requirePosture(posture, 'runScriptInDocker');
   return dockerSemaphore.run(() => runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential));
+}
+
+// The create body of every sibling agent container, one-shot or session, so the hardening is one
+// copy. The caller names the command, env, extra labels, work subdirectory and network.
+function agentContainerBody({ cmd, env, labels, workSubpath, networkMode }) {
+  return {
+    Image: AGENT_IMAGE,
+    Cmd: cmd,
+    WorkingDir: '/home/user',
+    Env: env,
+    // Findable/reapable by reconciliation (reapOrphanSandboxContainers) and by a human running
+    // `docker ps --filter label=tessary.sandbox=1` — see the constant's own comment above.
+    Labels: { [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE, [SANDBOX_LABEL_WORK]: workSubpath, ...labels },
+    HostConfig: {
+      // The ONLY mount: the per-request work dir, read-write, nothing else from the host. The
+      // shared volume by NAME plus the subdirectory this request wrote, never a host path — see
+      // LAUNCHER_WORK_DIR's comment for why a path cannot work here.
+      Mounts: [
+        {
+          Type: 'volume',
+          Source: SANDBOX_WORK_VOLUME,
+          Target: '/work',
+          ReadOnly: false,
+          VolumeOptions: { Subpath: workSubpath },
+        },
+      ],
+      // Explicit remove by the owner (runScriptInDockerInner's `finally`, a session's close), not
+      // AutoRemove — the orphan-leak note above is exactly why: AutoRemove only fires on a normal
+      // container exit, never on a launcher crash, so an explicit, always-attempted remove plus the
+      // startup reconciliation pass is the actual guarantee, not a single `--rm`-equivalent flag.
+      AutoRemove: false,
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges'],
+      Memory: SANDBOX_DOCKER_MEMORY_MB * 1024 * 1024,
+      NanoCpus: Math.round(SANDBOX_DOCKER_CPUS * 1e9),
+      PidsLimit: SANDBOX_DOCKER_PIDS_LIMIT,
+      // Never host networking. Which network an agent-posture sibling lands on is
+      // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the tessary service network
+      // by default so the agent can reach the backend's MCP door by service name, the dedicated
+      // bridge when an operator has opted into cutting it off. Either way the network stays ON
+      // (not `--network none`): the agent needs egress for the repo clone and the model-provider
+      // call.
+      NetworkMode: networkMode,
+    },
+  };
 }
 
 async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, credential) {
@@ -1177,50 +1356,14 @@ async function runScriptInDockerInner(scriptName, payload, timeoutMs, posture, c
   let containerId;
   try {
     await ensureAgentImage();
-    const created = await dockerJson('POST', '/containers/create', {
-      Image: AGENT_IMAGE,
-      Cmd: ['node', scriptName, '/work/input.json'],
-      WorkingDir: '/home/user',
-      Env: envList,
-      // Findable/reapable by reconciliation (reapOrphanSandboxContainers) and by a human running
-      // `docker ps --filter label=tessary.sandbox=1` — see the constant's own comment above.
-      Labels: {
-        [SANDBOX_LABEL]: SANDBOX_LABEL_VALUE,
-        'tessary.sandbox.script': scriptName,
-        [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs),
-      },
-      HostConfig: {
-        // The ONLY mount: the per-request work dir, read-write, nothing else from the host. The
-        // shared volume by NAME plus the subdirectory this request wrote, never a host path — see
-        // LAUNCHER_WORK_DIR's comment for why a path cannot work here.
-        Mounts: [
-          {
-            Type: 'volume',
-            Source: SANDBOX_WORK_VOLUME,
-            Target: '/work',
-            ReadOnly: false,
-            VolumeOptions: { Subpath: workSubpath },
-          },
-        ],
-        // Explicit remove in `finally` below, not AutoRemove — the orphan-leak note above is
-        // exactly why: AutoRemove only fires on a normal container exit, never on a launcher
-        // crash, so an explicit, always-attempted remove plus the startup reconciliation pass is
-        // the actual guarantee, not a single `--rm`-equivalent flag.
-        AutoRemove: false,
-        CapDrop: ['ALL'],
-        SecurityOpt: ['no-new-privileges'],
-        Memory: SANDBOX_DOCKER_MEMORY_MB * 1024 * 1024,
-        NanoCpus: Math.round(SANDBOX_DOCKER_CPUS * 1e9),
-        PidsLimit: SANDBOX_DOCKER_PIDS_LIMIT,
-        // Never host networking. Which network an agent-posture sibling lands on is
-        // SANDBOX_NETWORK_ISOLATION's call — see that constant's comment: the tessary service network
-        // by default so the agent can reach the backend's MCP door by service name, the dedicated
-        // bridge when an operator has opted into cutting it off. Either way the network stays ON
-        // (not `--network none`): the agent needs egress for the repo clone and the model-provider
-        // call. A non-agent posture still gets no network at all.
-        NetworkMode: posture === AGENT_POSTURE ? await sandboxNetwork() : 'none',
-      },
-    });
+    const created = await dockerJson('POST', '/containers/create', agentContainerBody({
+      cmd: ['node', scriptName, '/work/input.json'],
+      env: envList,
+      labels: { 'tessary.sandbox.script': scriptName, [SANDBOX_LABEL_TIMEOUT_MS]: String(timeoutMs) },
+      workSubpath,
+      // A non-agent posture gets no network at all; see agentContainerBody for the agent's.
+      networkMode: posture === AGENT_POSTURE ? await sandboxNetwork() : 'none',
+    }));
     containerId = created.Id;
   } catch (e) {
     cleanupDir();
@@ -1404,7 +1547,7 @@ async function runAgenticScript(scriptName, rawPayload) {
   const fail = (e) => stampFailure(e, { launcherMeta: { ...meta, elapsed_ms: Date.now() - startedAt } });
   let sbx;
   try {
-    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs, ...egressNetwork(credential, payload) });
+    sbx = await Sandbox().create(ANALYZER_TEMPLATE, { apiKey: E2B_API_KEY, timeoutMs, ...egressNetwork(credential, [payload.mcp && payload.mcp.url, payload.clone_url]) });
   } catch (e) {
     // No microVM ever existed (quota, missing template, E2B outage). Previously indistinguishable
     // from an agent that ran and crashed, since both ended as the same bare 502.
@@ -1481,15 +1624,606 @@ function runTriage(payload) {
 // agent under the caller's own system prompt, wired to the platform's MCP surface via the short-lived
 // key in payload.mcp (scrubbed from all output, never returned to the backend). json_schema is
 // optional here: without one the agent answers in prose.
-function runAuthoring(payload) {
-  return runAgenticScript('authoring.js', payload);
+function runAgentRun(payload) {
+  return runAgenticScript('run.js', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Launcher sessions: POST /sessions starts one long-lived sandbox running session.js, and the
+// routes below forward messages to it, number its events and replay them. The registry, routes,
+// buffer and timers are backend-neutral; a backend is one driver (sessionDriver):
+//   driver.start(s, { sessionFile, credential, model, modelCost }) -> { handle, address, exited: Promise<{ code }> }
+//     Each driver builds the sandbox env itself, and sets s.handle as soon as it owns a resource, so
+//     a failed start can be torn down.
+//   driver.stop(s) -> Promise<void>, best effort, never throws
+// The registry lives in memory only: after a restart every session is unknown (404). On Docker the
+// boot reaper removes the containers no caller can reach any more; on E2B such a sandbox lives
+// until its own E2B timeout.
+
+const SESSION_UNKNOWN = { error: 'not found', kind: 'unknown_session' };
+const sessions = new Map();
+
+function sessionFailure(message, launcherKind) {
+  return stampFailure(new Error(message), { launcherKind });
+}
+
+function liveSessionCount() {
+  let n = 0;
+  for (const s of sessions.values()) if (s.state !== 'closed') n++;
+  return n;
+}
+
+function newSessionRecord({ lane, idleTimeoutMs, createdAt }) {
+  return {
+    id: crypto.randomUUID(),
+    lane,
+    secret: crypto.randomBytes(32).toString('hex'),
+    state: 'starting',
+    handle: null,
+    address: null,
+    seq: 0,
+    buffer: [],
+    scriptLines: 0,
+    subscribers: new Set(),
+    replyOpen: false,
+    sending: false,
+    messageEnds: 0,
+    closedSent: false,
+    ended: false,
+    idleTimeoutMs,
+    idleTimer: null,
+    lifeTimer: null,
+    createdAt,
+    closing: null,
+    exited: false,
+    eventsReq: null,
+    readerDone: Promise.resolve(),
+  };
+}
+
+// session.js's own checks of session.json, repeated here so a bad one spends no sandbox; the two
+// run in different images, so they share no code.
+const SESSION_SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const SESSION_MAX_TOOL_CALLS = 1000;
+
+// Request-shape checks, in the order README "Launcher sessions" lists them. A bad body is the
+// caller's bad_request and spends no sandbox. Only these five fields reach session.json; the
+// credential reaches the sandbox through its env alone.
+function parseSessionStart(rawBody) {
+  const body = rawBody && typeof rawBody === 'object' ? rawBody : {};
+  const bad = (why) => { throw sessionFailure(`${SESSION_SCRIPT}: ${why}`, 'bad_request'); };
+  if (typeof body.lane !== 'string' || !body.lane) bad('lane must be a non-empty string');
+  requireCredential(body.credential, SESSION_SCRIPT);
+  if (typeof body.model !== 'string' || !body.model) bad('model must be a non-empty string');
+  if (!Number.isSafeInteger(body.idle_timeout_ms) || body.idle_timeout_ms <= 0) bad('idle_timeout_ms must be a positive integer');
+  if (body.credential.egress_secret && BACKEND !== 'e2b') bad(`an egress_secret credential needs SANDBOX_BACKEND=e2b (got ${BACKEND})`);
+  if (typeof body.system_prompt !== 'string' || !body.system_prompt) bad('system_prompt must be a non-empty string');
+  const files = body.files === undefined ? {} : body.files;
+  if (!files || typeof files !== 'object' || Array.isArray(files) || Object.values(files).some((c) => typeof c !== 'string')) {
+    bad('files must map relative paths to strings');
+  }
+  if (!Array.isArray(body.mcp_servers)) bad('mcp_servers must be an array');
+  const names = new Set();
+  body.mcp_servers.forEach((server, i) => {
+    if (!server || typeof server.name !== 'string' || !SESSION_SERVER_NAME.test(server.name)) {
+      bad(`each mcp_servers name must match ${SESSION_SERVER_NAME.source}`);
+    }
+    if (names.has(server.name)) bad(`mcp_servers name repeated: ${server.name}`);
+    if (BACKEND !== 'docker' && (typeof server.url !== 'string' || pointsAtLocalhost(server.url))) {
+      bad(`mcp_servers[${i}].url is missing or unreachable from an E2B microVM`);
+    }
+    if (typeof server.url !== 'string' || typeof server.token !== 'string') bad(`mcp_servers ${server.name} needs a url and a token`);
+    names.add(server.name);
+  });
+  const maxToolCalls = body.max_tool_calls_per_message;
+  if (!Number.isInteger(maxToolCalls) || maxToolCalls < 1 || maxToolCalls > SESSION_MAX_TOOL_CALLS) {
+    bad(`max_tool_calls_per_message must be an integer from 1 to ${SESSION_MAX_TOOL_CALLS}`);
+  }
+  const model = toProviderModel(body.model, body.credential);
+  return {
+    lane: body.lane,
+    credential: body.credential,
+    rawModel: body.model,
+    model,
+    modelCost: body.model_cost,
+    idleTimeoutMs: body.idle_timeout_ms,
+    sessionFile: {
+      system_prompt: body.system_prompt,
+      files,
+      model,
+      mcp_servers: body.mcp_servers,
+      max_tool_calls_per_message: body.max_tool_calls_per_message,
+    },
+  };
+}
+
+function sseFrame(event) {
+  return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
+}
+
+// Numbers one event, keeps it for replay and sends it to every open reader. Exactly one `closed`
+// per session and always the last event: nothing is emitted after it.
+function emitSessionEvent(s, type, data, fromScript) {
+  if (s.closedSent) return;
+  const event = { seq: ++s.seq, type, data };
+  s.buffer.push(event);
+  if (s.buffer.length > SANDBOX_SESSION_BUFFER) s.buffer.shift();
+  const frame = sseFrame(event);
+  for (const res of s.subscribers) res.write(frame);
+  if (type === 'message_end') {
+    s.replyOpen = false;
+    s.messageEnds++;
+    armIdle(s);
+  }
+  if (type === 'closed') {
+    s.closedSent = true;
+    if (fromScript) closeSession(s, data && data.reason);
+  }
+}
+
+function e2bSessionAddress(host, debug) {
+  return `${debug ? 'http' : 'https'}://${host}`;
+}
+
+function sessionTransport(address) {
+  return new URL(address).protocol === 'https:' ? https : http;
+}
+
+// One call from the launcher to the session script, with the session's bearer secret. Resolves
+// { status, body } for any HTTP answer; rejects when the script cannot be reached.
+function sessionCall(s, method, urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const data = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+    const headers = { Authorization: `Bearer ${s.secret}` };
+    if (data) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = data.length;
+    }
+    const req = sessionTransport(s.address).request(`${s.address}${urlPath}`, { method, headers, timeout: SESSION_REQUEST_MS }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        let parsed = null;
+        try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* no JSON body */ }
+        resolve({ status: res.statusCode, body: parsed });
+      });
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(sessionFailure(`${SESSION_SCRIPT} did not answer ${method} ${urlPath} in ${SESSION_REQUEST_MS}ms`, 'orchestration')));
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+// Reads the script's NDJSON event log into the session. Every line counts toward scriptLines, the
+// `from` of the next read, whether it is kept or dropped.
+function readSessionEventsOnce(s) {
+  return new Promise((resolve) => {
+    const req = sessionTransport(s.address).request(`${s.address}/events?from=${s.scriptLines}`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        resolve();
+        return;
+      }
+      // One decoder for the whole response: a multi-byte character split across two reads is joined,
+      // never decoded half by half into U+FFFD.
+      const decoder = new StringDecoder('utf8');
+      let buffered = '';
+      res.on('data', (chunk) => {
+        buffered += decoder.write(chunk);
+        let cut;
+        while ((cut = buffered.indexOf('\n')) !== -1) {
+          const line = buffered.slice(0, cut);
+          buffered = buffered.slice(cut + 1);
+          s.scriptLines++;
+          let event = null;
+          try { event = JSON.parse(line); } catch { /* counted, dropped below */ }
+          const type = event && typeof event.type === 'string' ? event.type : 'unparseable';
+          if (!SESSION_EVENT_TYPES.has(type)) {
+            console.error(`session ${s.id}: dropped event of type ${type.slice(0, 40)}`);
+            continue;
+          }
+          emitSessionEvent(s, type, event.data, true);
+        }
+      });
+      res.on('end', resolve);
+      res.on('error', resolve);
+      res.on('aborted', resolve);
+    });
+    req.on('error', resolve);
+    s.eventsReq = req;
+    req.end();
+  });
+}
+
+async function readSessionEvents(s) {
+  for (;;) {
+    await readSessionEventsOnce(s);
+    if (s.ended || s.exited) return;
+    await new Promise((r) => setTimeout(r, SESSION_RECONNECT_MS));
+    if (s.ended || s.exited) return;
+  }
+}
+
+// The idle clock runs only while no reply is open and no message is in flight, so a reply longer
+// than the idle time is never cut.
+function armIdle(s) {
+  clearIdle(s);
+  if (s.state !== 'live' || s.replyOpen || s.sending) return;
+  s.idleTimer = setTimeout(() => closeSession(s, 'idle'), s.idleTimeoutMs);
+}
+
+function clearIdle(s) {
+  if (s.idleTimer) clearTimeout(s.idleTimer);
+  s.idleTimer = null;
+}
+
+function waitUntil(condition, ms) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + ms;
+    const tick = () => {
+      if (condition() || Date.now() >= deadline) resolve();
+      else setTimeout(tick, 20);
+    };
+    tick();
+  });
+}
+
+// Start step 6: the script answers /healthz once OpenCode and its session are up.
+async function waitSessionReady(s, startedAt) {
+  for (;;) {
+    if (s.exited) throw sessionFailure(`${SESSION_SCRIPT} did not become ready (sandbox exited)`, 'orchestration');
+    if (Date.now() - startedAt >= SESSION_START_MS) {
+      throw sessionFailure(`${SESSION_SCRIPT} did not become ready in ${SESSION_START_MS}ms`, 'timeout');
+    }
+    let answer = null;
+    try {
+      answer = await sessionCall(s, 'GET', '/healthz');
+    } catch { /* refused or reset: the server is not up yet */ }
+    if (answer && answer.status === 200 && answer.body && answer.body.state === 'ready') return;
+    if (answer && answer.status === 503 && answer.body && answer.body.state === 'failed') {
+      throw sessionFailure(`${SESSION_SCRIPT} did not become ready (failed)`, 'orchestration');
+    }
+    await new Promise((r) => setTimeout(r, SESSION_POLL_MS));
+  }
+}
+
+// The only way out of `live`. A second call returns the first call's promise.
+function closeSession(s, reason) {
+  if (!s.closing) {
+    s.closing = (async () => {
+      s.state = 'closing';
+      clearIdle(s);
+      if (s.lifeTimer) clearTimeout(s.lifeTimer);
+      // A message in flight to the script may be accepted: wait for its answer, so a reply it starts
+      // is aborted and ends below like any other.
+      await waitUntil(() => !s.sending || s.exited, SESSION_REQUEST_MS + SESSION_CLOSE_GRACE_MS);
+      // Abort a running reply first and let it end, so its message_end, and the spend it carries,
+      // reaches the caller before the session closes.
+      if (s.replyOpen && !s.exited) {
+        try { await sessionCall(s, 'POST', '/abort'); } catch { /* the script is gone; nothing to wait for */ }
+        await waitUntil(() => !s.replyOpen || s.exited || s.closedSent, SESSION_CLOSE_GRACE_MS);
+      }
+      emitSessionEvent(s, 'closed', { reason });
+      s.ended = true;
+      for (const res of s.subscribers) res.end();
+      s.subscribers.clear();
+      if (s.eventsReq) s.eventsReq.destroy();
+      await sessionDriver.stop(s);
+      s.state = 'closed';
+      console.log(`session ${s.id}: closed reason=${reason} events=${s.seq} age_ms=${Date.now() - s.createdAt}`);
+      setTimeout(() => sessions.delete(s.id), SESSION_TOMBSTONE_MS).unref();
+    })().catch((e) => console.error(`session ${s.id}: close failed: ${(e && e.name) || 'Error'}`));
+  }
+  return s.closing;
+}
+
+// After a failed start the script ends its event log, which holds its start error: read it once and
+// keep it on this console, scrubbed and cut. Never in a response.
+function logStartFailure(s) {
+  if (!s.address) return Promise.resolve();
+  return new Promise((resolve) => {
+    const req = sessionTransport(s.address).request(`${s.address}/events?from=0`, { method: 'GET', headers: { Authorization: `Bearer ${s.secret}` } }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { text += c; });
+      res.on('end', done);
+      res.on('error', done);
+      res.on('aborted', done);
+      function done() {
+        for (const line of text.split('\n').filter(Boolean)) {
+          console.error(`session ${s.id}: start event ${scrubToken(line).slice(0, 500)}`);
+        }
+        resolve();
+      }
+    });
+    req.setTimeout(2000, () => req.destroy());
+    req.on('error', () => resolve());
+    req.end();
+  });
+}
+
+// A failed start: the same teardown without events or tombstone, because no caller holds the id.
+async function abandonStart(s) {
+  s.state = 'closed';
+  sessions.delete(s.id);
+  if (s.eventsReq) s.eventsReq.destroy();
+  await sessionDriver.stop(s);
+}
+
+// A session never takes a dockerSemaphore slot: at SANDBOX_DOCKER_CONCURRENCY=1 one open session
+// would freeze every one-shot run. SANDBOX_SESSION_CAP bounds sessions instead.
+const dockerSessionDriver = {
+  async start(s, { sessionFile, credential, model, modelCost }) {
+    fs.mkdirSync(LAUNCHER_WORK_DIR, { recursive: true });
+    const workDir = fs.mkdtempSync(path.join(LAUNCHER_WORK_DIR, 'session-'));
+    s.handle = { containerId: null, workDir };
+    await ensureAgentImage();
+    const networkMode = await sandboxNetwork();
+    fs.writeFileSync(path.join(workDir, 'session.json'), JSON.stringify(sessionFile), { mode: 0o600 });
+    const created = await dockerJson('POST', '/containers/create', agentContainerBody({
+      cmd: [SESSION_NODE, SESSION_SCRIPT, '/work/session.json'],
+      env: [...containerEnvFor(AGENT_POSTURE, credential, model, modelCost), `SESSION_SECRET=${s.secret}`, `SESSION_PORT=${SANDBOX_SESSION_PORT}`],
+      labels: {
+        'tessary.sandbox.script': SESSION_SCRIPT,
+        [SANDBOX_LABEL_TIMEOUT_MS]: String(SANDBOX_SESSION_MAX_MS),
+        [SANDBOX_LABEL_SESSION]: s.id,
+      },
+      workSubpath: path.basename(workDir),
+      networkMode,
+    }));
+    s.handle.containerId = created.Id;
+    await dockerJson('POST', `/containers/${created.Id}/start`);
+    const exited = dockerJson('POST', `/containers/${created.Id}/wait`).then(
+      (r) => ({ code: r && r.StatusCode }),
+      () => ({ code: null }),
+    );
+    // By the network's name, never the first entry: a container on several networks has one
+    // address per network, and only the one the launcher shares is reachable from here.
+    const info = await dockerJson('GET', `/containers/${created.Id}/json`);
+    const networks = (info && info.NetworkSettings && info.NetworkSettings.Networks) || {};
+    const ip = networks[networkMode] && networks[networkMode].IPAddress;
+    if (!ip) throw sessionFailure(`${SESSION_SCRIPT} has no address on ${networkMode}`, 'orchestration');
+    return { handle: s.handle, address: `http://${ip}:${SANDBOX_SESSION_PORT}`, exited };
+  },
+  async stop(s) {
+    const h = s.handle;
+    if (!h) return;
+    if (h.containerId) {
+      try { await dockerJson('POST', `/containers/${h.containerId}/stop?t=${SESSION_STOP_SECONDS}`); } catch { /* best effort */ }
+      try { await dockerJson('DELETE', `/containers/${h.containerId}?force=true`); } catch { /* best effort */ }
+    }
+    try { fs.rmSync(h.workDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  },
+};
+
+// command.wait() also rejects when only its event stream to E2B broke (a stream that stays open for
+// up to SANDBOX_SESSION_MAX_MS) while session.js runs on. Only an exit code is an exit; any other
+// rejection reattaches to the same pid, and a process E2B no longer finds has exited.
+async function followSessionCommand(s, sbx, command) {
+  let handle = command;
+  for (;;) {
+    try {
+      const r = await handle.wait();
+      return { code: r.exitCode, stderr: r.stderr };
+    } catch (e) {
+      const code = exitCodeOf(e);
+      if (code !== undefined) return { code, stderr: (e && e.stderr) || '' };
+      if (s.state === 'closing' || s.state === 'closed') return { code: null, stderr: '' };
+      console.error(`session ${s.id}: lost the ${SESSION_SCRIPT} command stream (${(e && e.name) || 'Error'}); reattaching to pid ${command.pid}`);
+    }
+    await new Promise((r) => setTimeout(r, SESSION_RECONNECT_MS));
+    try {
+      handle = await sbx.commands.connect(command.pid, { timeoutMs: 0 });
+    } catch (e) {
+      console.error(`session ${s.id}: ${SESSION_SCRIPT} pid ${command.pid} not found on reattach (${(e && e.name) || 'Error'})`);
+      return { code: null, stderr: '' };
+    }
+  }
+}
+
+const e2bSessionDriver = {
+  async start(s, { sessionFile, credential, model, modelCost }) {
+    const mcpUrls = Array.isArray(sessionFile.mcp_servers) ? sessionFile.mcp_servers.map((m) => m && m.url) : [];
+    const sbx = await Sandbox().create(ANALYZER_TEMPLATE, {
+      apiKey: E2B_API_KEY,
+      timeoutMs: SANDBOX_SESSION_MAX_MS + SESSION_E2B_GRACE_MS,
+      metadata: { [SANDBOX_LABEL_SESSION]: s.id },
+      ...egressNetwork(credential, mcpUrls),
+    });
+    s.handle = { sbx, sandboxId: sbx.sandboxId };
+    const file = `${SESSION_E2B_HOME}/session.json`;
+    await sbx.files.write(file, JSON.stringify(sessionFile));
+    const command = await sbx.commands.run(`${SESSION_NODE} ${SESSION_E2B_HOME}/${SESSION_SCRIPT} ${file}`, {
+      background: true,
+      timeoutMs: 0,
+      envs: { ...agentEnvs(credential, model, modelCost), SESSION_SECRET: s.secret, SESSION_PORT: String(SANDBOX_SESSION_PORT) },
+    });
+    const exited = followSessionCommand(s, sbx, command)
+      .then(({ code, stderr }) => {
+        const tail = stderr ? ` stderr: ${scrubToken(stderr).slice(-500)}` : '';
+        console.error(`session ${s.id}: ${SESSION_SCRIPT} ended code=${code}${tail}`);
+        return { code };
+      });
+    return { handle: s.handle, address: e2bSessionAddress(sbx.getHost(SANDBOX_SESSION_PORT), E2B_DEBUG), exited };
+  },
+  async stop(s) {
+    if (s.handle && s.handle.sbx) {
+      try { await s.handle.sbx.kill(); } catch { /* best effort */ }
+    }
+  },
+};
+
+const sessionDriver = BACKEND === 'docker' ? dockerSessionDriver : e2bSessionDriver;
+
+// The sandbox's own process ended. Let the reader take the script's last lines (its error and
+// closed) first, so they come before the launcher's own closed.
+async function onSandboxExit(s) {
+  s.exited = true;
+  if (s.state !== 'live') return;
+  await Promise.race([s.readerDone, new Promise((r) => setTimeout(r, 1000))]);
+  closeSession(s, 'failed');
+}
+
+async function startSession(body) {
+  const arrivedAt = Date.now();
+  const p = parseSessionStart(body);
+  // The count and the insert stay in one synchronous block, so two starts cannot both take the
+  // last slot.
+  if (liveSessionCount() >= SANDBOX_SESSION_CAP) {
+    return { status: 429, body: { error: 'sandbox session capacity reached', kind: 'capacity' } };
+  }
+  const s = newSessionRecord({ lane: p.lane, idleTimeoutMs: p.idleTimeoutMs, createdAt: arrivedAt });
+  sessions.set(s.id, s);
+  console.log(`session ${s.id}: model ${p.rawModel} -> ${p.model} (provider ${p.credential.provider}) lane ${p.lane}`);
+  try {
+    const started = await sessionDriver.start(s, {
+      sessionFile: p.sessionFile,
+      credential: p.credential,
+      model: p.model,
+      modelCost: p.modelCost,
+    });
+    s.handle = started.handle;
+    s.address = started.address;
+    started.exited.then(() => onSandboxExit(s));
+    await waitSessionReady(s, arrivedAt);
+  } catch (e) {
+    await logStartFailure(s);
+    await abandonStart(s);
+    const sandbox = s.handle && s.handle.sandboxId ? { sandbox_id: s.handle.sandboxId } : {};
+    throw stampFailure(e, { launcherMeta: { script: SESSION_SCRIPT, elapsed_ms: Date.now() - arrivedAt, timeout_ms: SESSION_START_MS, ...sandbox } });
+  }
+  s.state = 'live';
+  s.readerDone = readSessionEvents(s);
+  armIdle(s);
+  const lifeLeft = SANDBOX_SESSION_MAX_MS - (Date.now() - s.createdAt);
+  if (lifeLeft > 0) s.lifeTimer = setTimeout(() => closeSession(s, 'idle'), lifeLeft);
+  else setImmediate(() => closeSession(s, 'idle'));
+  const h = s.handle || {};
+  const where = h.containerId ? ` container=${h.containerId.slice(0, 12)}` : h.sandboxId ? ` sandbox=${h.sandboxId}` : '';
+  console.log(`session ${s.id}: live${where} ready_ms=${Date.now() - arrivedAt}`);
+  return { status: 201, body: { session_id: s.id } };
+}
+
+async function sendSessionMessage(s, req) {
+  const body = await readBody(req);
+  const text = body && body.text;
+  if (typeof text !== 'string' || !text || Buffer.byteLength(JSON.stringify({ text })) > SESSION_TEXT_MAX_BYTES) {
+    throw sessionFailure(`${SESSION_SCRIPT}: text must be a non-empty string of at most 1 MiB`, 'bad_request');
+  }
+  if (s.state !== 'live') return { status: 404, body: SESSION_UNKNOWN };
+  if (s.replyOpen || s.sending) return { status: 409, body: { error: 'session busy', kind: 'busy' } };
+  s.sending = true;
+  clearIdle(s);
+  const endsBefore = s.messageEnds;
+  const sentAt = Date.now();
+  let answer;
+  try {
+    try {
+      answer = await sessionCall(s, 'POST', '/message', { text });
+    } catch {
+      closeSession(s, 'failed');
+      return { status: 404, body: SESSION_UNKNOWN };
+    }
+    if (answer.status === 202) {
+      // A close that could not wait for this answer already emitted closed: no message_end follows.
+      if (s.closedSent) return { status: 404, body: SESSION_UNKNOWN };
+      // The reply's events travel on another connection and can beat this answer here.
+      s.replyOpen = s.messageEnds === endsBefore;
+      console.log(`session ${s.id}: message accepted bytes=${Buffer.byteLength(text)} ms=${Date.now() - sentAt} reply_open=${s.replyOpen}`);
+      return { status: 202 };
+    }
+    if (answer.status === 409) return { status: 409, body: { error: 'session busy', kind: 'busy' } };
+    if (answer.status === 503) {
+      closeSession(s, 'failed');
+      return { status: 404, body: SESSION_UNKNOWN };
+    }
+    throw sessionFailure(`${SESSION_SCRIPT} refused the message (HTTP ${answer.status})`, 'orchestration');
+  } finally {
+    s.sending = false;
+    if (!answer || answer.status !== 503) armIdle(s);
+  }
+}
+
+async function abortSessionReply(s) {
+  let answer;
+  try {
+    answer = await sessionCall(s, 'POST', '/abort');
+  } catch {
+    closeSession(s, 'failed');
+    return { status: 404, body: SESSION_UNKNOWN };
+  }
+  if (answer.status === 204) return { status: 204 };
+  throw sessionFailure(`${SESSION_SCRIPT} refused the abort (HTTP ${answer.status})`, 'orchestration');
+}
+
+function streamSessionEvents(s, rawAfter, res) {
+  const after = rawAfter === null ? 0 : /^\d+$/.test(rawAfter) ? Number(rawAfter) : NaN;
+  if (!Number.isSafeInteger(after)) throw sessionFailure(`${SESSION_SCRIPT}: after must be a non-negative integer`, 'bad_request');
+  const oldest = s.buffer.length > 0 ? s.buffer[0].seq : s.seq + 1;
+  if (after + 1 < oldest) return send(res, 410, { error: 'events no longer held', kind: 'gone' });
+  if (after > s.seq) throw sessionFailure(`${SESSION_SCRIPT}: after is past the last event`, 'bad_request');
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+  res.flushHeaders();
+  for (const event of s.buffer) if (event.seq > after) res.write(sseFrame(event));
+  if (s.ended) {
+    res.end();
+    return;
+  }
+  s.subscribers.add(res);
+  res.on('close', () => s.subscribers.delete(res));
+}
+
+// `/sessions` paths only: null for any other path (today's routes), 'other' for a session path
+// with another method or segment.
+function matchSessionRoute(method, rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl, 'http://launcher');
+  } catch {
+    return null;
+  }
+  const parts = url.pathname.split('/');
+  if (parts[1] !== 'sessions') return null;
+  const id = parts[2];
+  if (parts.length === 2 && method === 'POST') return { op: 'start' };
+  if (parts.length === 3 && id && method === 'DELETE') return { op: 'stop', id };
+  if (parts.length === 4 && id) {
+    if (method === 'POST' && parts[3] === 'messages') return { op: 'message', id };
+    if (method === 'POST' && parts[3] === 'abort') return { op: 'abort', id };
+    if (method === 'GET' && parts[3] === 'events') return { op: 'events', id, after: url.searchParams.get('after') };
+  }
+  return 'other';
+}
+
+function answer(res, { status, body }) {
+  if (body === undefined) {
+    res.writeHead(status);
+    res.end();
+    return;
+  }
+  send(res, status, body);
+}
+
+async function handleSessionRoute(req, res, route) {
+  if (route.op === 'start') return answer(res, await startSession(await readBody(req)));
+  const s = sessions.get(route.id);
+  if (!s) return answer(res, { status: 404, body: SESSION_UNKNOWN });
+  if (route.op === 'events') return streamSessionEvents(s, route.after, res);
+  if (route.op === 'stop') {
+    await closeSession(s, 'stopped');
+    return answer(res, { status: 204 });
+  }
+  if (s.state !== 'live') return answer(res, { status: 404, body: SESSION_UNKNOWN });
+  if (route.op === 'message') return answer(res, await sendSessionMessage(s, req));
+  return answer(res, await abortSessionReply(s));
 }
 
 // The whole route table: a POST anywhere else is 404 before the body is read.
 const AGENTIC_ROUTES = new Map([
   ['/rca', runRca],
   ['/triage', runTriage],
-  ['/authoring', runAuthoring],
+  ['/runs', runAgentRun],
 ]);
 
 function readBody(req) {
@@ -1518,14 +2252,41 @@ function send(res, status, obj) {
   res.end(body);
 }
 
+function authorized(req) {
+  const auth = req.headers['authorization'] || '';
+  return Boolean(SANDBOX_API_KEY) && auth === `Bearer ${SANDBOX_API_KEY}`;
+}
+
+function logFailure(urlPath, body) {
+  console.error(`${urlPath} failed: kind=${body.kind} timeout=${body.timeout} class=${body.error_class}`
+    + (body.script ? ` script=${body.script}` : '')
+    + (body.sandbox_id ? ` sandbox=${body.sandbox_id}` : '')
+    + (body.elapsed_ms !== undefined ? ` elapsed=${body.elapsed_ms}ms` : '')
+    + (body.timeout_ms !== undefined ? ` deadline=${body.timeout_ms}ms` : '')
+    + ` detail=${body.detail}`);
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/healthz') return send(res, 200, { ok: true });
+
+  const sessionRoute = matchSessionRoute(req.method, req.url);
+  if (sessionRoute === 'other') return send(res, 404, { error: 'not found' });
+  if (sessionRoute) {
+    if (!authorized(req)) return send(res, 401, { error: 'unauthorized' });
+    try {
+      return await handleSessionRoute(req, res, sessionRoute);
+    } catch (e) {
+      const body = buildErrorBody(e);
+      logFailure(req.url.split('?')[0], body);
+      if (res.headersSent) return res.end();
+      return send(res, 502, body);
+    }
+  }
 
   if (req.method !== 'POST' || !AGENTIC_ROUTES.has(req.url)) {
     return send(res, 404, { error: 'not found' });
   }
-  const auth = req.headers['authorization'] || '';
-  if (!SANDBOX_API_KEY || auth !== `Bearer ${SANDBOX_API_KEY}`) {
+  if (!authorized(req)) {
     return send(res, 401, { error: 'unauthorized' });
   }
   try {
@@ -1541,12 +2302,7 @@ const server = http.createServer(async (req, res) => {
     // content; the full (sliced, scrubbed) sandbox output stays on this console, joinable via
     // sandbox_id.
     const body = buildErrorBody(e);
-    console.error(`${req.url} failed: kind=${body.kind} timeout=${body.timeout} class=${body.error_class}`
-      + (body.script ? ` script=${body.script}` : '')
-      + (body.sandbox_id ? ` sandbox=${body.sandbox_id}` : '')
-      + (body.elapsed_ms !== undefined ? ` elapsed=${body.elapsed_ms}ms` : '')
-      + (body.timeout_ms !== undefined ? ` deadline=${body.timeout_ms}ms` : '')
-      + ` detail=${body.detail}`);
+    logFailure(req.url, body);
     return send(res, 502, body);
   }
 });
@@ -1561,6 +2317,11 @@ const server = http.createServer(async (req, res) => {
 // A missing SANDBOX_WORK_VOLUME would otherwise surface only when the Engine API rejects a mount
 // with an empty source, one confusing request at a time — see LAUNCHER_WORK_DIR's own comment for
 // the full mechanism this guards.
+if (badIntEnv.length > 0) {
+  for (const name of badIntEnv) console.error(`error: ${name} must be a positive integer`);
+  process.exit(1);
+}
+
 if (BACKEND === 'docker' && !SANDBOX_WORK_VOLUME) {
   console.error('error: SANDBOX_BACKEND=docker requires SANDBOX_WORK_VOLUME (the name of the Docker volume mounted at LAUNCHER_WORK_DIR).');
   console.error('       See docker-compose.yml\'s sandbox-runner service for how the two are wired together.');
@@ -1573,6 +2334,7 @@ if (BACKEND === 'docker' && !SANDBOX_WORK_VOLUME) {
 // comment for why a failure here degrades to a per-request error rather than a boot crash.
 if (require.main === module && BACKEND === 'docker') {
   ensureSandboxNetwork()
+    .then(joinSandboxNetwork)
     .then(reapOrphanSandboxContainers)
     .catch((e) => console.error(`docker backend startup reconciliation failed: ${e && e.message}`));
 }
@@ -1597,4 +2359,6 @@ module.exports = {
   toProviderModel,
   providerConfig,
   agentEnvs,
+  // test/e2b-sessions.test.js: the tests dial sessions over http, so the https choice is checked here.
+  e2bSessionAddress,
 };

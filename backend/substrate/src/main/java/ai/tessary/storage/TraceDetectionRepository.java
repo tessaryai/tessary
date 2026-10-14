@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.storage;
 
+import ai.tessary.detection.DetectionTable;
 import ai.tessary.detection.DetectionTableRegistry;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,9 +18,9 @@ import org.springframework.stereotype.Repository;
  * {@code detected_by} filter.
  *
  * <p>A classifier's flags live in its own detection table ({@link DetectionTableRegistry}), keyed by the
- * classifier row's {@code detector}. Only the detectors in {@link #CLEARABLE_BY_DETECTOR} show here; the others
- * join that map when the views take them on. A flag with {@code cleared_at} set was resolved as a false alarm and
- * is not a flag.
+ * classifier row's {@code detector}. Only the tables registered as shown in the trace views show here
+ * ({@link DetectionTableRegistry#shownInTraceViews()}). On a clearable table, a flag with {@code cleared_at} set was
+ * resolved as a false alarm and is not a flag.
  *
  * <p>Every read starts from the project's {@code classifier} rows, a handful, and probes the detection table's
  * unique {@code (project_id, classifier_id, subject_trace_id, …)} index from there, so it is bounded by the traces
@@ -32,31 +32,18 @@ public class TraceDetectionRepository {
     /** The {@code detected_by} value that matches a detection by any classifier. */
     public static final String ANY = "any";
 
-    /** The detectors these views show, each with whether its table carries {@code cleared_at}. */
-    private static final Map<String, Boolean> CLEARABLE_BY_DETECTOR = Map.of("frustration", true);
-
     /** One classifier's flag on one trace, at the span it judged. */
     public record Mark(String traceId, @Nullable String spanId, String classifierId, String classifierName) {}
 
     /** A classifier that flagged one of a session's traces, for the sessions list. */
     public record SessionMark(String sessionId, String classifierId, String classifierName) {}
 
-    private record Source(String detector, String table, boolean clearable) {}
-
     private final JdbcClient jdbc;
-    private final List<Source> sources;
+    private final List<DetectionTable> sources;
 
     public TraceDetectionRepository(JdbcClient jdbc, DetectionTableRegistry registry) {
         this.jdbc = jdbc;
-        List<Source> found = new ArrayList<>();
-        for (Map.Entry<String, Boolean> e : CLEARABLE_BY_DETECTOR.entrySet()) {
-            String table = registry.tableFor(e.getKey());
-            if (table != null) {
-                found.add(new Source(e.getKey(), table, e.getValue()));
-            }
-        }
-        found.sort(Comparator.comparing(Source::detector));
-        this.sources = List.copyOf(found);
+        this.sources = registry.shownInTraceViews();
     }
 
     /** Every uncleared flag on these traces, by classifier name. */
@@ -68,7 +55,7 @@ public class TraceDetectionRepository {
                 .map(s -> "SELECT d.subject_trace_id, d.subject_span_id, c.id AS classifier_id, c.name"
                         + " FROM classifier c JOIN " + s.table() + " d"
                         + " ON d.project_id = c.project_id AND d.classifier_id = c.id"
-                        + " WHERE c.project_id = :pid AND c.detector = '" + s.detector() + "'"
+                        + " WHERE c.project_id = :pid AND c.detector = '" + s.detectorKind() + "'"
                         + " AND d.subject_trace_id IN (:traceIds)" + uncleared(s))
                 .collect(Collectors.joining(" UNION ALL "));
         return jdbc.sql(sql + " ORDER BY name, subject_trace_id, subject_span_id")
@@ -90,7 +77,7 @@ public class TraceDetectionRepository {
         String sql = sources.stream()
                 .map(s -> "SELECT DISTINCT t.session_id, c.id AS classifier_id, c.name"
                         + " FROM trace t JOIN classifier c ON c.project_id = t.project_id"
-                        + " AND c.detector = '" + s.detector() + "'"
+                        + " AND c.detector = '" + s.detectorKind() + "'"
                         + " JOIN " + s.table() + " d ON d.project_id = c.project_id AND d.classifier_id = c.id"
                         + " AND d.subject_trace_id = t.id" + uncleared(s)
                         + " WHERE t.project_id = :pid AND t.session_id IN (:sessionIds) AND NOT t.is_deleted")
@@ -120,7 +107,9 @@ public class TraceDetectionRepository {
                             "SELECT id, detector FROM classifier WHERE project_id = :pid AND detector IN (:detectors)"
                                     + (any ? "" : " AND id = :id"))
                     .param("pid", projectId)
-                    .param("detectors", sources.stream().map(Source::detector).toList());
+                    .param(
+                            "detectors",
+                            sources.stream().map(DetectionTable::detectorKind).toList());
             if (!any) {
                 lookup = lookup.param("id", detectedBy);
             }
@@ -131,8 +120,8 @@ public class TraceDetectionRepository {
                             .add(e.getValue()));
         }
         List<String> arms = new ArrayList<>();
-        for (Source s : sources) {
-            List<String> ids = idsByDetector.get(s.detector());
+        for (DetectionTable s : sources) {
+            List<String> ids = idsByDetector.get(s.detectorKind());
             if (ids == null) {
                 continue;
             }
@@ -146,7 +135,7 @@ public class TraceDetectionRepository {
                 .append(')');
     }
 
-    private static String uncleared(Source s) {
+    private static String uncleared(DetectionTable s) {
         return s.clearable() ? " AND d.cleared_at IS NULL" : "";
     }
 }

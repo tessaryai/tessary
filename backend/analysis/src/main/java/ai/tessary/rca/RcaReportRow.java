@@ -61,13 +61,17 @@ public record RcaReportRow(
     public static final class ReportKind {
         private ReportKind() {}
 
-        /** What change moved a measured number. Every classifier but Frustration and Groundedness. */
+        /** What change moved a measured number. Every classifier but Frustration, Groundedness and the ones an
+         *  adapter owns. */
         public static final String METRIC_MOVEMENT = "metric_movement";
         /** What the agent did that frustrated the users of one call site. There is no baseline side. */
         public static final String FRUSTRATION_CAUSES = "frustration_causes";
         /** Why one call site's answers stopped being supported by the documents it retrieved. There is no
          *  baseline side either: the receipts are the traces with a flagged answer. */
         public static final String GROUNDEDNESS_CAUSES = "groundedness_causes";
+        /** What a classifier an adapter owns flagged, and why. Its finding measures a rate against a reference,
+         *  as frustration's does, so the header reads that rate. */
+        public static final String OWNED_CAUSES = "owned_causes";
 
         /** The kind of report a finding filed by {@code classifierKey} gets. */
         public static String forClassifier(String classifierKey) {
@@ -79,7 +83,9 @@ public record RcaReportRow(
         /** True for the kinds measured as a rate against a learned one, whose report header reads as that
          *  rate rather than as the classifier's asserted severity. */
         public static boolean namesCauses(String reportKind) {
-            return FRUSTRATION_CAUSES.equals(reportKind) || GROUNDEDNESS_CAUSES.equals(reportKind);
+            return FRUSTRATION_CAUSES.equals(reportKind)
+                    || GROUNDEDNESS_CAUSES.equals(reportKind)
+                    || OWNED_CAUSES.equals(reportKind);
         }
     }
 

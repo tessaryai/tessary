@@ -1,18 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * FrustratedConversations: the list shows each flagged message, selecting one reads its turns from the
- * real traces and draws the flagged user message in the flagged tint, the list reads the next page of
- * sessions when asked, and a session whose traces have aged out says so instead of drawing nothing.
- * Switching to a filter whose read is still in flight keeps the last list up, and only a slow read swaps
- * it for the skeleton, which then holds (#109).
+ * FlaggedList, first as frustration's list: the list shows each flagged message, selecting one reads its
+ * turns from the real traces and draws the flagged user message in the flagged tint, the list reads the
+ * next page of sessions when asked, and a session whose traces have aged out says so instead of drawing
+ * nothing. Switching to a filter whose read is still in flight keeps the last list up, and only a slow read
+ * swaps it for the skeleton, which then holds (#109). Then as a general list: it draws the marks a row
+ * carries and reads every page through the loader it was given.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { FrustratedConversation, FrustratedSessionPage, TraceDetailView } from "../../api/types";
-import { ConversationFilter, FrustratedConversations } from "./FrustratedConversations";
+import type { ProjectApi } from "../../api/client";
+import type {
+  FrustratedConversation,
+  FrustratedSessionPage,
+  FrustrationDetail,
+  TraceDetailView,
+} from "../../api/types";
+import { ConversationFilter, FlaggedList, type FlaggedLoader, type FlaggedRow } from "./FlaggedList";
+import { FRUSTRATION_LIST_COPY, frustrationLoader, frustrationRows } from "./frustrationStory";
 
 const getTrace = vi.fn<(id: string) => Promise<TraceDetailView>>();
 const getFrustratedSessions =
@@ -20,15 +28,13 @@ const getFrustratedSessions =
     (id: string, params?: { cursor?: string | null; cause?: { rcaReport: string; index: number } }) => Promise<FrustratedSessionPage>
   >();
 
+const api = { base: "/api/orgs/acme/projects/default", getTrace, getFrustratedSessions };
+
 vi.mock("../../tenant/TenantContext", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../tenant/TenantContext")>();
   return {
     ...actual,
-    useTenant: () => ({
-      orgSlug: "acme",
-      projectSlug: "default",
-      api: { base: "/api/orgs/acme/projects/default", getTrace, getFrustratedSessions },
-    }),
+    useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
   };
 });
 
@@ -78,23 +84,40 @@ function trace(id: string, user: string, reply: string, at: string): TraceDetail
   };
 }
 
+/** Frustration's list, wired the way the finding and case pages wire it. */
+function frustrationList(
+  rows: FrustratedConversation[],
+  total: number,
+  nextCursor: string | null,
+  filter?: { rcaReport: string; index: number },
+) {
+  const detail = {
+    conversations: rows,
+    conversationsNextCursor: nextCursor,
+    rate: { failuresCur: total },
+  } as unknown as FrustrationDetail;
+  return (
+    <FlaggedList
+      {...FRUSTRATION_LIST_COPY}
+      listKey="f-1"
+      first={frustrationRows(detail)}
+      loadPage={frustrationLoader(api as unknown as ProjectApi, "f-1")}
+      filter={filter}
+      basePath="/orgs/acme/projects/default"
+    />
+  );
+}
+
 function renderList(
   rows: FrustratedConversation[],
   total = rows.length,
   nextCursor: string | null = null,
   filter?: { rcaReport: string; index: number },
 ) {
-  renderRoute(
-    <FrustratedConversations
-      findingId="f-1"
-      first={{ rows, nextCursor, total }}
-      filter={filter}
-      basePath="/orgs/acme/projects/default"
-    />,
-  );
+  renderRoute(frustrationList(rows, total, nextCursor, filter));
 }
 
-describe("FrustratedConversations", () => {
+describe("FlaggedList", () => {
   it("draws the flagged turn after the turns before it, from the traces, with the flagged message marked", async () => {
     getTrace.mockImplementation(async (id) =>
       id === "t-1"
@@ -214,14 +237,7 @@ describe("FrustratedConversations", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const ui = (filter?: { rcaReport: string; index: number }) => (
       <QueryClientProvider client={qc}>
-        <MemoryRouter>
-          <FrustratedConversations
-            findingId="f-1"
-            first={{ rows: [conversation()], nextCursor: "50", total: 80 }}
-            filter={filter}
-            basePath="/orgs/acme/projects/default"
-          />
-        </MemoryRouter>
+        <MemoryRouter>{frustrationList([conversation()], 80, "50", filter)}</MemoryRouter>
       </QueryClientProvider>
     );
     const { rerender } = render(ui());
@@ -254,6 +270,91 @@ describe("FrustratedConversations", () => {
     await tick(1);
     expect(screen.queryByRole("status", { name: "Loading sessions" })).toBeNull();
     screen.getByRole("button", { name: /caused/ });
+  });
+
+  /** A row as any caller builds it, with neutral copy. */
+  function row(over: Partial<FlaggedRow> = {}): FlaggedRow {
+    return {
+      id: "row-1",
+      traceId: "t-3",
+      score: 0.9,
+      flaggedAt: "2026-07-27T16:57:00Z",
+      cleared: false,
+      sessionId: "sess-1",
+      contextTraceIds: ["t-1", "t-2", "t-3"],
+      preview: "row preview",
+      emphasis: [],
+      ...over,
+    };
+  }
+
+  const COPY = {
+    listLabel: "Listed items",
+    unit: ["item", "items"] as [string, string],
+    emptyText: "No items.",
+    missingText: "Its traces are gone.",
+  };
+
+  // A general caller's marks must reach the traces they name: the judged part on one trace, a matched
+  // part on another, and the rest of those two traces dimmed, while the trace with no mark is left alone.
+  it("draws the emphasis a row carries on the traces it names", async () => {
+    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, `reply ${id}`, "2026-07-27T16:00:00Z"));
+    renderRoute(
+      <FlaggedList
+        {...COPY}
+        listKey="list-1"
+        first={{
+          rows: [
+            row({
+              emphasis: [
+                { traceId: "t-3", spanId: null, part: "question", kind: "judged", label: "Judged here" },
+                { traceId: "t-2", spanId: null, part: "reply", kind: "matched", label: "Read with it" },
+              ],
+            }),
+          ],
+          nextCursor: null,
+          total: 1,
+        }}
+        loadPage={vi.fn<FlaggedLoader>()}
+        basePath="/orgs/acme/projects/default"
+        contextNote="Not read."
+      />,
+    );
+
+    await screen.findByText("message t-3");
+    const bubble = (text: string) => screen.getByText(text).closest(".chat-bubble") as HTMLElement;
+    expect(bubble("message t-3").style.border).toBe("1px solid var(--color-error)");
+    expect(screen.getByText("Judged here")).toBeTruthy();
+    expect(bubble("reply t-2").style.border).toBe("1px dashed var(--color-border-strong)");
+    expect(screen.getByText("Read with it")).toBeTruthy();
+    // t-2's question and t-3's reply are dimmed; t-1 carries no mark and is not.
+    expect(screen.getAllByText("Not read.")).toHaveLength(2);
+    expect(bubble("message t-1").className).not.toContain("text-muted");
+    expect(bubble("reply t-1").className).not.toContain("text-muted");
+  });
+
+  // The list must read through the caller's loader, not one classifier's endpoint: the first page with
+  // no cursor when no page came with the finding, then the next from the cursor that page returned.
+  it("reads pages through the loader it was given", async () => {
+    getTrace.mockImplementation(async (id) => trace(id, `message ${id}`, "reply", "2026-07-27T16:00:00Z"));
+    const loadPage = vi.fn<FlaggedLoader>(async (_filter, cursor) =>
+      cursor == null
+        ? { rows: [row()], nextCursor: "p2", total: 2 }
+        : { rows: [row({ id: "row-2", traceId: "t-9", contextTraceIds: ["t-9"], preview: "second row" })], nextCursor: null, total: 2 },
+    );
+    renderRoute(<FlaggedList {...COPY} listKey="list-1" loadPage={loadPage} basePath="/orgs/acme/projects/default" />);
+
+    await screen.findByRole("button", { name: /row preview/ });
+    expect(screen.getByText("1 of 2 items")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Load more items" }));
+
+    await screen.findByRole("button", { name: /second row/ });
+    expect(loadPage.mock.calls).toEqual([
+      [undefined, null],
+      [undefined, "p2"],
+    ]);
+    expect(screen.getByText("2 items")).toBeTruthy();
+    expect(getFrustratedSessions).not.toHaveBeenCalled();
   });
 });
 

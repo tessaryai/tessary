@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -424,6 +425,7 @@ class SharedFindingTableIntegrationTest {
                 FindingRow.SubjectKind.TOOL,
                 "search_docs",
                 "search_docs",
+                null,
                 12,
                 null,
                 null,
@@ -435,6 +437,76 @@ class SharedFindingTableIntegrationTest {
         assertEquals(
                 nasty,
                 findings.findById(p.id(), recorded.findingId()).orElseThrow().nativeCauseKey());
+    }
+
+    /**
+     * A recomputed rate's title is written on insert and rewritten on the refresh, so a title with the spell's rates
+     * in it follows the spell. The bug is a headline frozen at the numbers the spell opened with.
+     */
+    @Test
+    void aRecomputedRateRefreshRewritesTheTitle() {
+        Project p = project("finding-title-refresh");
+
+        String first = ownedRate(p, "Flagged replies rose from 2.0% to 9.0%", "2026-10-01T10:00:00Z");
+        assertEquals(
+                "Flagged replies rose from 2.0% to 9.0%",
+                findings.findById(p.id(), first).orElseThrow().title());
+
+        String refreshed = ownedRate(p, "Flagged replies rose from 2.0% to 12.0%", "2026-10-01T11:00:00Z");
+
+        assertEquals(first, refreshed, "the refresh lands on the live row");
+        assertEquals(
+                "Flagged replies rose from 2.0% to 12.0%",
+                findings.findById(p.id(), first).orElseThrow().title());
+    }
+
+    /**
+     * The live read returns the cause's open, unruled row whole, and neither a ruled row nor a closed row of the
+     * cause. The bugs are a writer that reads a ruled spell as the one it refreshes, and a read that drops a column.
+     */
+    @Test
+    void findLiveByCauseReturnsOnlyTheOpenUnruledRow() {
+        Project p = project("finding-live-by-cause");
+        String ruled = ownedRate(p, "first", "2026-10-01T10:00:00Z");
+        findings.recordHumanRuling(
+                p.id(), ruled, FindingRow.TriageVerdict.POSITIVE, "A person ruled this real.", "2026-10-01T11:00:00Z");
+        ownedRate(p, "second", "2026-10-01T12:00:00Z");
+        assertEquals(1, findings.closeUnruled(p.id(), OWNED_KEY, "2026-10-01T13:00:00Z"));
+
+        assertEquals(
+                Optional.empty(),
+                findings.findLiveByCause(p.id(), OWNED_KEY, OWNED_CAUSE),
+                "a ruled row and a closed row are not live");
+
+        String live = ownedRate(p, "third", "2026-10-01T14:00:00Z");
+
+        assertEquals(findings.findById(p.id(), live), findings.findLiveByCause(p.id(), OWNED_KEY, OWNED_CAUSE));
+    }
+
+    private static final String OWNED_KEY = "owned-x";
+    private static final String OWNED_CAUSE = "clf-owned:cs-1";
+
+    /** A recomputed rate of one cause with a stored title, seen at {@code eventAt}; returns the finding id. */
+    private String ownedRate(Project p, String title, String eventAt) {
+        return Objects.requireNonNull(findings.recordRecomputedRate(
+                        Ids.ulid(),
+                        p.id(),
+                        OWNED_KEY,
+                        OWNED_CAUSE,
+                        "owned_rate",
+                        "cs-1",
+                        FindingRow.SubjectKind.CLASSIFIER,
+                        "clf-owned",
+                        "Owned",
+                        title,
+                        40,
+                        "cs-1",
+                        eventAt,
+                        "{\"current_rate\":0.09}",
+                        eventAt,
+                        "2026-10-01T00:00:00Z",
+                        eventAt))
+                .findingId();
     }
 
     private static List<String> traces(FindingEvidenceRepository.SpanPage page) {

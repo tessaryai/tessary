@@ -40,12 +40,14 @@ public final class ClassifierDtos {
              * the org's key, no key is left, the org has no platform credit left, or the platform provider
              * refused the deployment's key.
              */
-            @Nullable String readiness) {
+            @Nullable String readiness,
+            /** Whether the trace and session views mark this classifier's flags and offer it in their filter. */
+            @JsonProperty("shown_in_trace_views") boolean shownInTraceViews) {
 
         /** Malformed Output with no call site schema to validate against. Arrives from the connected repo. */
         public static final String WAITING_ON_SCHEMAS = "waiting_on_schemas";
 
-        public static ClassifierView of(ClassifierRow r, @Nullable String readiness) {
+        public static ClassifierView of(ClassifierRow r, @Nullable String readiness, boolean shownInTraceViews) {
             return new ClassifierView(
                     r.id(),
                     r.classifierKey(),
@@ -60,7 +62,8 @@ public final class ClassifierDtos {
                     r.callSiteIds(),
                     r.createdAt(),
                     r.updatedAt(),
-                    readiness);
+                    readiness,
+                    shownInTraceViews);
         }
     }
 

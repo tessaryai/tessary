@@ -32,11 +32,22 @@ class DetectionTableSchemaCheckTest {
      * Answers the table-existence query with {@code tableExists} and the {@code subject_started_at} probe (SQL naming
      * {@code information_schema}) with {@code columnExists}.
      */
-    @SuppressWarnings("unchecked")
     private static DataSource fakeDataSource(boolean tableExists, boolean columnExists) {
+        return fakeDataSource(tableExists, columnExists, columnExists);
+    }
+
+    /**
+     * As above, with the {@code cleared_at} probe (the column query naming {@code cleared_at}) answered by
+     * {@code clearedAtExists}.
+     */
+    @SuppressWarnings("unchecked")
+    private static DataSource fakeDataSource(boolean tableExists, boolean columnExists, boolean clearedAtExists) {
         InvocationHandler statementHandler = (proxy, method, args) -> switch (method.getName()) {
-            case "executeQuery" ->
-                resultSetAnswering(((String) args[0]).contains("information_schema") ? columnExists : tableExists);
+            case "executeQuery" -> {
+                String sql = (String) args[0];
+                if (!sql.contains("information_schema")) yield resultSetAnswering(tableExists);
+                yield resultSetAnswering(sql.contains("'cleared_at'") ? clearedAtExists : columnExists);
+            }
             case "close" -> null;
             default -> throw new UnsupportedOperationException(method.getName());
         };
@@ -79,7 +90,7 @@ class DetectionTableSchemaCheckTest {
     @Test
     void noDataSourceBeanStartsClean() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false)));
         DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.<DataSource>of());
 
         assertDoesNotThrow(check::afterSingletonsInstantiated);
@@ -88,7 +99,7 @@ class DetectionTableSchemaCheckTest {
     @Test
     void missingTableFailsBootNamingKindAndTable() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                Providers.of(new DetectionTable("frustration", "frustration_detection", Grain.TRACE)));
+                Providers.of(new DetectionTable("frustration", "frustration_detection", Grain.TRACE, false, false)));
         DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(false)));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
@@ -100,7 +111,7 @@ class DetectionTableSchemaCheckTest {
     @Test
     void missingSubjectStartedAtColumnFailsBootNamingKindAndTable() {
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false)));
         DetectionTableSchemaCheck check =
                 new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(true, false)));
 
@@ -108,6 +119,37 @@ class DetectionTableSchemaCheckTest {
         assertTrue(ex.getMessage().contains("secret_leak"));
         assertTrue(ex.getMessage().contains("secret_leak_detection"));
         assertTrue(ex.getMessage().contains("subject_started_at"));
+    }
+
+    /**
+     * A table registered clearable whose changelog has no {@code cleared_at} refuses boot naming the kind, the table
+     * and the column. The bug is a trace view that filters on a column the table lacks and fails on the first read.
+     */
+    @Test
+    void aClearableTableNeedsItsClearedAtColumn() {
+        DetectionTableRegistry registry = new DetectionTableRegistry(
+                Providers.of(new DetectionTable("frustration", "frustration_detection", Grain.TRACE, true, true)));
+        DetectionTableSchemaCheck check =
+                new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(true, true, false)));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);
+
+        assertEquals(
+                "DetectionTable registered for kind 'frustration' names table 'frustration_detection', which has no"
+                        + " 'cleared_at' column — it is registered clearable, so its owning module's changelog must add"
+                        + " the column",
+                ex.getMessage());
+    }
+
+    /** A table not registered clearable is not asked for {@code cleared_at}. */
+    @Test
+    void aTableNotClearableBootsWithoutClearedAt() {
+        DetectionTableRegistry registry = new DetectionTableRegistry(
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false)));
+        DetectionTableSchemaCheck check =
+                new DetectionTableSchemaCheck(registry, Providers.of(fakeDataSource(true, true, false)));
+
+        assertDoesNotThrow(check::afterSingletonsInstantiated);
     }
 
     /** A refused connection at boot names the table and kind, keeping the driver's exception as its cause. */
@@ -120,7 +162,7 @@ class DetectionTableSchemaCheckTest {
                     throw new UnsupportedOperationException(m.getName());
                 });
         DetectionTableRegistry registry = new DetectionTableRegistry(
-                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN)));
+                Providers.of(new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false)));
         DetectionTableSchemaCheck check = new DetectionTableSchemaCheck(registry, Providers.of(down));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class, check::afterSingletonsInstantiated);

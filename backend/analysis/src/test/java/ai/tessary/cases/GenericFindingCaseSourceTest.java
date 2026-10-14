@@ -2,10 +2,12 @@
 package ai.tessary.cases;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRowBuilder;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -70,5 +72,40 @@ class GenericFindingCaseSourceTest {
                         null,
                         null),
                 source.shape(finding));
+    }
+
+    /**
+     * A finding of a classifier outside the catalog, under a key no dedicated source claims, is owned by this source
+     * and keyed on its own cause and classifier key. The bug is a positive ruling on such a finding that opens no case
+     * because a dedicated source, or no source, claims it.
+     */
+    @Test
+    void aFindingOfAClassifierOutsideTheCatalogOpensAGenericCase() {
+        String key = "ext-x";
+        var finding = FindingRowBuilder.of(key)
+                .causeKey("cls-1:cs-1")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+
+        assertTrue(source.owns(key));
+        assertEquals(
+                new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "cls-1:cs-1", key),
+                source.shape(finding).key());
+    }
+
+    /**
+     * A finding whose cause has no sentence of its own opens a case named by the title its writer stored, as a
+     * frustration case carries its finding's sentence. The bug is such a case headed by its bare cause key.
+     */
+    @Test
+    void aStoredTitleNamesTheCase() {
+        var finding = FindingRowBuilder.of("ext-x")
+                .causeKey("cls-1:cs-1")
+                .title("Flagged replies rose from 2.0% to 9.0%")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+
+        assertEquals(
+                "Flagged replies rose from 2.0% to 9.0%", source.shape(finding).title());
     }
 }

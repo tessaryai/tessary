@@ -1,28 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * A loopback JSON-RPC proxy in front of Tessary's own MCP endpoint, used ONLY on the triage path
- * (agent-stream.js starts one exactly when spec.systemPrompt is set; RCA never sees it).
+ * A loopback JSON-RPC proxy in front of one or more named MCP upstreams. agent-stream.js starts one
+ * on the system-prompt path (triage.js, run.js) with the single upstream `tessary-evals`; session.js
+ * starts one with every server its session names. RCA never sees it.
  *
  * WHY: triage's prompt tells the agent to read every evidence row rather than a sampled preview,
  * and a finding's evidence page can run to hundreds of rows — well past what belongs inline in a
  * model's context. opencode itself truncates any MCP tool result over 2000 lines or 50KB, so a
  * page that size would arrive at the agent silently cut off rather than as a page it could work
- * with. The relay sits between opencode and the real Tessary MCP server, on the SAME loopback
- * interface agent-stream.js already binds the opencode server to, and rewrites only the reply to a
+ * with. The relay sits between opencode and the upstreams, on the SAME loopback interface
+ * agent-stream.js already binds the opencode server to, and rewrites only the reply to a
  * `tools/call`: every result is saved whole to `checks/mcp/NNN-<tool>.json` under the run's WORK
- * dir, so the agent can script over any of them later. Small results still come back inline in
- * full, with the saved path added; large ones come back as a summary the agent can read at a
- * glance and then go compute over with its own bash/jq/scripts.
+ * dir, with one counter across every server so the numbers stay unique. Small results still come
+ * back inline in full, with the saved path added; large ones come back as a summary the agent can
+ * read at a glance and then go compute over with its own bash/jq/scripts.
  *
  * Everything else — `initialize` (whose `instructions` field must reach the agent unchanged, see
  * agent-stream.js's caller), `tools/list`, notifications — is forwarded byte-for-byte. This file
  * has no opinion on the MCP protocol beyond "find the tools/call result and maybe shrink it".
  *
- * The bearer token lives HERE, not in opencode's own MCP config: opencode config is written to
+ * One listening socket serves every name at `/mcp/<name>`, and each name forwards to its own URL
+ * with its own bearer token. A name the relay was not started with is a 404 and is never
+ * forwarded: falling back to some upstream would hand that upstream's token to a path the agent
+ * made up.
+ *
+ * The bearer tokens live HERE, not in opencode's own MCP config: opencode config is written to
  * OPENCODE_CONFIG_CONTENT and is at least in principle a value a curious agent could read back
- * (env, a debug endpoint). The relay is the one place that holds the live platform key, exactly
- * the way a same-origin reverse proxy would.
+ * (env, a debug endpoint). The relay is the one place that holds the live keys, exactly the way a
+ * same-origin reverse proxy would.
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -32,6 +38,7 @@ const path = require('node:path');
 // Estimated the same way the design doc does: compact JSON length / 4 as a cheap token proxy.
 const INLINE_TOKEN_BUDGET = 2000;
 const PREVIEW_ROW_COUNT = 3;
+const SERVER_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 
 function tokenEstimate(compactJson) {
   return Math.ceil(compactJson.length / 4);
@@ -112,12 +119,22 @@ function payloadOf(result) {
 }
 
 /**
- * Start the relay. `mcp.url`/`mcp.token` are the real Tessary MCP endpoint and its bearer token;
- * `workDir` is the run's WORK dir (results save under `<workDir>/checks/mcp/`).
+ * Start the relay. Each of `servers` is `{ name, url, token }`: an upstream MCP endpoint and its
+ * bearer token, served at `/mcp/<name>`. Names match SERVER_NAME and are unique, or the call
+ * rejects before anything listens. `workDir` is the run's WORK dir (results save under
+ * `<workDir>/checks/mcp/`).
  *
- * @returns {Promise<{url: string, close: () => void}>}
+ * @returns {Promise<{urls: Object<string, string>, close: () => void}>}
  */
-function startMcpRelay({ url, token, workDir }) {
+function startMcpRelay({ servers, workDir }) {
+  const upstreams = new Map();
+  for (const { name, url, token } of servers) {
+    if (typeof name !== 'string' || !SERVER_NAME.test(name)) {
+      return Promise.reject(new Error(`mcp server name must match ${SERVER_NAME}: ${name}`));
+    }
+    if (upstreams.has(name)) return Promise.reject(new Error(`mcp server name repeated: ${name}`));
+    upstreams.set(name, { url, token });
+  }
   const mcpDir = path.join(workDir, 'checks', 'mcp');
   fs.mkdirSync(mcpDir, { recursive: true });
   let seq = 0;
@@ -147,10 +164,18 @@ function startMcpRelay({ url, token, workDir }) {
   }
 
   const server = http.createServer((req, res) => {
-    if (req.method !== 'POST' || req.url !== '/mcp') {
+    if (req.method !== 'POST') {
       res.writeHead(405, { 'content-type': 'text/plain' }).end('method not allowed');
       return;
     }
+    const route = /^\/mcp\/([^/?]+)$/.exec(req.url);
+    const upstreamFor = route && upstreams.get(route[1]);
+    if (!upstreamFor) {
+      req.resume();
+      res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'unknown server' }));
+      return;
+    }
+    const { url, token } = upstreamFor;
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
@@ -206,8 +231,10 @@ function startMcpRelay({ url, token, workDir }) {
       // A relay closed mid-run can be holding open keep-alive sockets from opencode; without
       // dropping them first, server.close() waits for them to end on their own, which is exactly
       // the hang decision 2 removes from the server side of this same run.
+      const urls = {};
+      for (const name of upstreams.keys()) urls[name] = `http://127.0.0.1:${port}/mcp/${name}`;
       resolve({
-        url: `http://127.0.0.1:${port}/mcp`,
+        urls,
         close: () => {
           server.closeAllConnections();
           server.close();

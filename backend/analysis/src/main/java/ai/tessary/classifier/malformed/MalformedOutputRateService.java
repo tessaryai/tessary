@@ -163,6 +163,7 @@ public class MalformedOutputRateService implements ClassifierCatchUp {
                 FindingRow.SubjectKind.CLASSIFIER,
                 signal.id(),
                 signal.name(),
+                null,
                 decision.callsSinceOnset(),
                 callSite,
                 decision.onsetAt(),

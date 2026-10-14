@@ -2705,6 +2705,16 @@
               }
             ]
           },
+          "classifierDetail" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ClassifierDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "finding" : {
             "$ref" : "#/components/schemas/BehaviorFindingView"
           },
@@ -2771,6 +2781,7 @@
         },
         "required" : [
           "armedWindow",
+          "classifierDetail",
           "finding",
           "frustration",
           "groundedness",
@@ -3215,6 +3226,16 @@
           "case" : {
             "$ref" : "#/components/schemas/CaseView"
           },
+          "classifier_detail" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ClassifierDetail"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
           "detector_available" : {
             "type" : "boolean"
           },
@@ -3341,6 +3362,7 @@
         "required" : [
           "absorb_available",
           "case",
+          "classifier_detail",
           "detector_available",
           "events",
           "exemplars",
@@ -4461,6 +4483,68 @@
         ],
         "type" : "object"
       },
+      "ClassifierDetail" : {
+        "properties" : {
+          "arlTarget" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "baselineFlagged" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "flagLabel" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "flagThreshold" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "learningUntil" : {
+            "format" : "int64",
+            "type" : [
+              "integer",
+              "null"
+            ]
+          },
+          "minDecisionInterval" : {
+            "format" : "double",
+            "type" : [
+              "number",
+              "null"
+            ]
+          },
+          "rate" : {
+            "$ref" : "#/components/schemas/RateDetail"
+          },
+          "words" : {
+            "$ref" : "#/components/schemas/Words"
+          }
+        },
+        "required" : [
+          "arlTarget",
+          "baselineFlagged",
+          "flagLabel",
+          "flagThreshold",
+          "learningUntil",
+          "minDecisionInterval",
+          "rate",
+          "words"
+        ],
+        "type" : "object"
+      },
       "ClassifierEventView" : {
         "properties" : {
           "classifier_id" : {
@@ -4714,6 +4798,9 @@
               "null"
             ]
           },
+          "shown_in_trace_views" : {
+            "type" : "boolean"
+          },
           "updated_at" : {
             "type" : "string"
           },
@@ -4735,6 +4822,7 @@
           "mode",
           "name",
           "readiness",
+          "shown_in_trace_views",
           "updated_at",
           "version"
         ],
@@ -6820,7 +6908,7 @@
             "enum" : [
               "rca",
               "triage",
-              "authoring",
+              "agent_run",
               "frustration"
             ],
             "type" : "string"
@@ -8270,7 +8358,7 @@
             "enum" : [
               "rca",
               "triage",
-              "authoring",
+              "agent_run",
               "frustration"
             ],
             "type" : "string"
@@ -12178,6 +12266,43 @@
           "days",
           "from",
           "to"
+        ],
+        "type" : "object"
+      },
+      "Words" : {
+        "properties" : {
+          "figureNote" : {
+            "type" : "string"
+          },
+          "referenceDetail" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "referenceLabel" : {
+            "type" : "string"
+          },
+          "thresholdLine" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "unitMany" : {
+            "type" : "string"
+          },
+          "unitOne" : {
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "figureNote",
+          "referenceDetail",
+          "referenceLabel",
+          "thresholdLine",
+          "unitMany",
+          "unitOne"
         ],
         "type" : "object"
       }

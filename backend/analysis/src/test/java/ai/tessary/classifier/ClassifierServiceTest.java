@@ -3,9 +3,14 @@ package ai.tessary.classifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,6 +20,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierModelModule;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricDriftConfig;
@@ -23,6 +29,9 @@ import ai.tessary.classifier.metric.MetricHistogram;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
+import ai.tessary.classifier.worker.ClassifierSweep;
+import ai.tessary.classifier.worker.ClassifierSweepRegistry;
+import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
 import ai.tessary.llm.ModelProvider;
@@ -37,10 +46,16 @@ import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +64,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 /**
  * The metric-drift dial behind {@code GET/PUT .../tuning} and its false-alarm rate, {@link
@@ -72,6 +88,7 @@ class ClassifierServiceTest {
     private static final String PID = "proj-1";
     private static final String T0 = "2026-01-01T00:00:00Z";
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String UNDECLARED = "undeclared_kind";
 
     private final ClassifierRepository signals = mock(ClassifierRepository.class);
     private final ClassifierJobRepository jobs = mock(ClassifierJobRepository.class);
@@ -79,11 +96,17 @@ class ClassifierServiceTest {
     private final ProjectRepository projects = mock(ProjectRepository.class);
     private final DecisionProviderResolver decisionProviders = mock(DecisionProviderResolver.class);
     private final ClassifierProperties props = new ClassifierProperties();
+    private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
+
+    /** A sweep from outside the tree, for a kind no catalog module declares. */
+    private final ClassifierSweep undeclaredSweep = mock(ClassifierSweep.class);
+
     private final ClassifierService service = new ClassifierService(
             signals,
             mock(ClassifierDetectionRepository.class),
             jobs,
-            mock(BuiltInClassifierCatalog.class),
+            catalog,
+            new SweepRouting(catalog, sweepsFor(undeclaredSweep, UNDECLARED)),
             mock(SubstrateReadRepository.class),
             MAPPER,
             props,
@@ -311,6 +334,81 @@ class ClassifierServiceTest {
         verifyNoInteractions(signals);
     }
 
+    /**
+     * Catches an enable written before the sweep that runs the row is asked: the sweep's refusal reaches the caller
+     * as it was thrown, and the row stays off and paused as it was.
+     */
+    @Test
+    void aSweepThatRefusesTheRowKeepsItOff() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        TessaryException refusal = new TessaryException(ClassifierError.NOT_FOUND, "x");
+        doThrow(refusal).when(undeclaredSweep).checkEnable(row);
+
+        List<Map<String, Object>> events = logged(
+                ClassifierService.class,
+                "classifier.enable.refused",
+                () -> assertSame(
+                        refusal, assertThrows(TessaryException.class, () -> service.setEnabled(PID, "cls-u", true))));
+
+        assertEquals(
+                List.of(Map.of(
+                        "event",
+                        "classifier.enable.refused",
+                        "project",
+                        PID,
+                        "classifier",
+                        "cls-u",
+                        "detector",
+                        UNDECLARED,
+                        "error_code",
+                        ClassifierError.NOT_FOUND.code())),
+                events,
+                "a sweep's refusal reaches only the caller, with no line that names the classifier and the code");
+        verify(signals, never()).setEnabled(anyString(), anyString(), anyBoolean());
+        verify(signals, never()).unpause(anyString(), anyString());
+    }
+
+    /** Catches a disable that a refusing sweep blocks: turning a row off never asks the sweep. */
+    @Test
+    void turningARowOffNeverAsksTheSweep() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        doThrow(new TessaryException(ClassifierError.NOT_FOUND, "x"))
+                .when(undeclaredSweep)
+                .checkEnable(any());
+        when(signals.setEnabled(PID, "cls-u", false)).thenReturn(1);
+
+        assertSame(row, service.setEnabled(PID, "cls-u", false));
+
+        verify(undeclaredSweep, never()).checkEnable(any());
+        verify(signals).setEnabled(PID, "cls-u", false);
+    }
+
+    /** Catches the check replacing the write: a sweep that accepts the row lets the enable and the unpause land. */
+    @Test
+    void aSweepThatAcceptsTheRowLetsItOn() {
+        ClassifierRow row = undeclaredRow();
+        when(signals.findById(PID, "cls-u")).thenReturn(Optional.of(row));
+        when(signals.setEnabled(PID, "cls-u", true)).thenReturn(1);
+
+        service.setEnabled(PID, "cls-u", true);
+
+        verify(undeclaredSweep).checkEnable(row);
+        verify(signals).setEnabled(PID, "cls-u", true);
+        verify(signals).unpause(PID, "cls-u");
+    }
+
+    private static ClassifierRow undeclaredRow() {
+        return ClassifierRowBuilder.of(UNDECLARED)
+                .id("cls-u")
+                .custom()
+                .disabled()
+                .discovery()
+                .at(T0)
+                .build();
+    }
+
     private static MetricHistogram sketch(double... logValues) {
         MetricHistogram h = new MetricHistogram(MetricHistogram.Grid.duration());
         for (double v : logValues) h.add(v);
@@ -320,6 +418,50 @@ class ClassifierServiceTest {
     /** A control ring holding one closed day whose sketch is {@code sketchJson}. */
     private static String control(String sketchJson) {
         return "{\"kind\":\"control\",\"days\":[{\"d\":\"2026-09-01\",\"m\":" + sketchJson + "}]}";
+    }
+
+    /**
+     * Widening the call sites of a classifier a registered sweep runs does not rewind it. Its kind runs at window
+     * grain, so a rewind would send every match in the history to the model again and count it twice in fitted state;
+     * read from the catalog alone, the kind takes the observation default and is rewound.
+     */
+    @Test
+    void wideningAKindASweepRunsDoesNotRewindIt() {
+        when(catalog.grainFor(UNDECLARED)).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
+        ClassifierRow before = ClassifierRowBuilder.of(UNDECLARED)
+                .id("clf-u")
+                .custom()
+                .onCallSites("cs-1")
+                .build();
+        when(signals.findById(PID, "clf-u")).thenReturn(Optional.of(before));
+        when(signals.setCallSiteIds(PID, "clf-u", null)).thenReturn(1);
+
+        service.setCallSiteIds(PID, "clf-u", null);
+
+        verify(jobs, never()).rewindCursor(any(), any());
+    }
+
+    /** An undeclared kind no sweep claims still scores spans with no model, so widening it rewinds as before. */
+    @Test
+    void wideningAnUndeclaredKindNoSweepRunsRewindsIt() {
+        when(catalog.grainFor("other_undeclared_kind")).thenReturn(ClassifierModelModule.Grain.OBSERVATION);
+        ClassifierRow before = ClassifierRowBuilder.of("other_undeclared_kind")
+                .id("clf-o")
+                .custom()
+                .onCallSites("cs-1")
+                .build();
+        when(signals.findById(PID, "clf-o")).thenReturn(Optional.of(before));
+        when(signals.setCallSiteIds(PID, "clf-o", null)).thenReturn(1);
+        when(jobs.rewindCursor(PID, "clf-o")).thenReturn(1);
+
+        service.setCallSiteIds(PID, "clf-o", null);
+
+        verify(jobs).rewindCursor(PID, "clf-o");
+    }
+
+    private static ClassifierSweepRegistry sweepsFor(ClassifierSweep sweep, String kind) {
+        when(sweep.kinds()).thenReturn(java.util.Set.of(kind));
+        return new ClassifierSweepRegistry(TestObjectProvider.of(sweep));
     }
 
     private static ClassifierRow row(String id, String detector, @Nullable String configJson) {
@@ -394,5 +536,26 @@ class ClassifierServiceTest {
         NoCredit() {
             super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
         }
+    }
+
+    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
+    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(source);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (ILoggingEvent e : appender.list) {
+            if (e.getKeyValuePairs() == null) continue;
+            Map<String, Object> fields = new HashMap<>();
+            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
+            if (name.equals(fields.get("event"))) events.add(fields);
+        }
+        return events;
     }
 }

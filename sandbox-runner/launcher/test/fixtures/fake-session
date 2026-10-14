@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * A stand-in for agent-sandbox/session.js on its HTTP contract (sandbox-runner/README.md, "Agent
+ * sessions"): /healthz, /message, /abort and /events?from=<n> as NDJSON, behind the per-session
+ * bearer secret. It plays a fixed reply per message instead of running OpenCode, so the launcher
+ * tests can drive a session through every state without a model.
+ *
+ * No extension on purpose: node --test runs every .js/.cjs under test/ as a test file.
+ */
+const http = require('node:http');
+const { finished } = require('node:stream');
+
+/**
+ * shape (all optional):
+ *   startingPolls  /healthz answers 503 starting this many times before 200 ready (default 1)
+ *   startFails     /healthz is always 503 failed, and the log holds the script's start error
+ *   hold           the first message emits one text delta and waits for release() or /abort
+ *   cutEventsAfter the first /events response is destroyed after this many lines
+ *   splitMultibyte a line that holds a multi-byte character is written in two writes 30 ms apart,
+ *                  split inside that character's bytes
+ *   messageAnswer  /message answers this status ({ kind: 'failed' } for 503) and starts no reply;
+ *                  'drop' destroys the connection instead
+ *   abortAnswer    /abort answers this status, or 'drop' destroys the connection
+ *   acceptAfterMs  /message answers 202 only after this delay, then the reply starts
+ *   replyBefore202 /message plays the whole reply first and answers 202 100 ms later
+ */
+async function startFakeSession({ port, secret, shape = {} }) {
+  const startingPolls = shape.startingPolls === undefined ? 1 : shape.startingPolls;
+  const lines = [];
+  const readers = new Set();
+  let logEnded = false;
+  const requests = [];
+  const eventFroms = [];
+  const messages = [];
+  let polls = 0;
+  let replyOpen = false;
+  let held = null;
+  let messageCount = 0;
+  let eventsCalls = 0;
+  let stopping = null;
+  let resolveExited;
+  const exited = new Promise((r) => { resolveExited = r; });
+
+  function write(reader, line) {
+    if (shape.splitMultibyte) {
+      reader.chain = reader.chain.then(() => new Promise((resolve) => {
+        const bytes = Buffer.from(line);
+        const cut = bytes.findIndex((b) => b >= 0x80);
+        if (cut < 0) {
+          reader.res.write(bytes);
+          resolve();
+          return;
+        }
+        reader.res.write(bytes.subarray(0, cut + 1));
+        setTimeout(() => {
+          reader.res.write(bytes.subarray(cut + 1));
+          resolve();
+        }, 30);
+      }));
+      return;
+    }
+    reader.written++;
+    if (reader.cutAfter !== undefined && reader.written >= reader.cutAfter) {
+      readers.delete(reader);
+      reader.res.write(line, () => reader.res.socket.destroy());
+      return;
+    }
+    reader.res.write(line);
+  }
+
+  function emit(type, data) {
+    const line = JSON.stringify({ type, data }) + '\n';
+    lines.push(line);
+    for (const reader of [...readers]) write(reader, line);
+  }
+
+  function endLog() {
+    logEnded = true;
+    const flushed = [...readers].map((reader) => reader.chain.then(() => new Promise((resolve) => {
+      finished(reader.res, () => resolve());
+      reader.res.end();
+    })));
+    readers.clear();
+    return Promise.all(flushed);
+  }
+
+  function endReply(reason) {
+    emit('message_end', {
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.001 },
+      reason,
+    });
+    replyOpen = false;
+    held = null;
+  }
+
+  function playReply(text) {
+    const n = messageCount;
+    emit('text', { delta: `echo:${text}` });
+    emit('tool_start', { call_id: `call-${n}`, server: 'tessary', tool: 'get_trace', input_summary: '{}' });
+    emit('tool_end', { call_id: `call-${n}`, result_summary: 'ok', bytes: 2, duration_ms: 5, ok: true });
+    endReply('done');
+  }
+
+  if (shape.startFails) {
+    emit('error', { kind: 'start', detail: 'boom tsy_a_leaked' });
+    emit('closed', { reason: 'failed' });
+    logEnded = true;
+  }
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://session');
+    requests.push({ method: req.method, path: url.pathname, auth: req.headers.authorization });
+    const send = (status, body) => {
+      if (body === undefined) return res.writeHead(status).end();
+      return res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+    };
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      if (req.headers.authorization !== `Bearer ${secret}`) return send(401, { kind: 'unauthorized' });
+      const route = `${req.method} ${url.pathname}`;
+      if (route === 'GET /healthz') {
+        if (shape.startFails) return send(503, { state: 'failed' });
+        polls++;
+        return polls > startingPolls ? send(200, { state: 'ready' }) : send(503, { state: 'starting' });
+      }
+      if (route === 'GET /events') {
+        const raw = url.searchParams.get('from');
+        const from = raw === null ? 0 : Number(raw);
+        if (!Number.isSafeInteger(from) || from < 0 || from > lines.length) return send(400, { kind: 'bad_request' });
+        eventFroms.push(from);
+        eventsCalls++;
+        res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+        res.flushHeaders();
+        const reader = { res, written: 0, cutAfter: eventsCalls === 1 ? shape.cutEventsAfter : undefined, chain: Promise.resolve() };
+        readers.add(reader);
+        res.on('close', () => readers.delete(reader));
+        for (let i = from; i < lines.length && readers.has(reader); i++) write(reader, lines[i]);
+        if (logEnded && readers.has(reader)) {
+          readers.delete(reader);
+          reader.chain.then(() => res.end());
+        }
+        return undefined;
+      }
+      if (route === 'POST /message') {
+        let text = null;
+        try { text = JSON.parse(Buffer.concat(chunks).toString('utf8')).text; } catch { text = null; }
+        if (typeof text !== 'string' || !text) return send(400, { kind: 'bad_request' });
+        if (shape.messageAnswer === 'drop') return req.socket.destroy();
+        if (shape.messageAnswer) return send(shape.messageAnswer, { kind: shape.messageAnswer === 503 ? 'failed' : 'prompt' });
+        if (replyOpen) return send(409, { kind: 'busy' });
+        messages.push(text);
+        messageCount++;
+        replyOpen = true;
+        if (shape.replyBefore202) {
+          playReply(text);
+          setTimeout(() => send(202), 100);
+          return undefined;
+        }
+        const accept = () => {
+          send(202);
+          if (shape.hold && messageCount === 1) {
+            held = true;
+            setImmediate(() => emit('text', { delta: 'partial' }));
+          } else {
+            setImmediate(() => playReply(text));
+          }
+        };
+        if (shape.acceptAfterMs) setTimeout(accept, shape.acceptAfterMs);
+        else accept();
+        return undefined;
+      }
+      if (route === 'POST /abort') {
+        if (shape.abortAnswer === 'drop') return req.socket.destroy();
+        if (shape.abortAnswer) return send(shape.abortAnswer, { kind: 'abort' });
+        if (held) setImmediate(() => endReply('aborted'));
+        return send(204);
+      }
+      return send(404, { kind: 'not_found' });
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+
+  function stop(code) {
+    if (!stopping) {
+      stopping = endLog().then(() => new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      })).then(() => {
+        resolveExited(code);
+        return code;
+      });
+    }
+    return stopping;
+  }
+
+  return {
+    requests,
+    eventFroms,
+    messages,
+    exited,
+    release() {
+      if (held) endReply('done');
+    },
+    die({ withClosed } = {}) {
+      if (withClosed && !stopping) {
+        emit('error', { kind: 'opencode_exit', detail: 'exit code 1' });
+        emit('closed', { reason: 'failed' });
+      }
+      return stop(1);
+    },
+    close() {
+      return stop(0);
+    },
+  };
+}
+
+module.exports = { startFakeSession };

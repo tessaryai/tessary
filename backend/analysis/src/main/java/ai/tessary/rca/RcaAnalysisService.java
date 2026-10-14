@@ -2,11 +2,13 @@
 package ai.tessary.rca;
 
 import ai.tessary.classifier.finding.DossierPayload;
+import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
+import ai.tessary.classifier.finding.dossier.EvidenceContext;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.Cause;
@@ -18,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -61,18 +64,22 @@ public class RcaAnalysisService {
     private final RcaReportRepository reports;
     private final AgenticRcaEngine agenticEngine;
     private final ObjectMapper mapper;
+    /** The {@code method.md} of a finding a classifier outside the catalog filed; empty in the open edition. */
+    private final FindingAdapters adapters;
 
     public RcaAnalysisService(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             RcaReportRepository reports,
             AgenticRcaEngine agenticEngine,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            FindingAdapters adapters) {
         this.findings = findings;
         this.evidence = evidence;
         this.reports = reports;
         this.agenticEngine = agenticEngine;
         this.mapper = mapper;
+        this.adapters = adapters;
     }
 
     public void analyze(RcaJobRow job) {
@@ -212,7 +219,9 @@ public class RcaAnalysisService {
 
     /**
      * The dossier as sandbox files (relative path → content): the claim, the detector's own numbers
-     * verbatim, the classifier's RCA method when it has one, and the MCP tools. Files rather than one long
+     * verbatim (or the owning adapter's evidence file), the classifier's RCA method, or its adapter's RCA
+     * method, when it has one, and the MCP tools. The adapter is handed the {@link FindingClaim}, so the
+     * firewall above still holds. Files rather than one long
      * prompt because an agent that can open, re-read and quote a file reasons over it better than one
      * handed a wall of JSON — and the numbers stay verbatim instead of being paraphrased into prose.
      *
@@ -224,26 +233,43 @@ public class RcaAnalysisService {
             FindingClaim finding = subject.get(i);
             String folder = findingFolder(i, finding);
             files.put(folder + "finding.md", findingDoc(report, finding));
-            // A dedicated per-shape assembler writes markdown when this classifier's payload matches one (see
-            // ClassifierDossierAssembler's dispatch-by-shape note); any other payload is the stripped JSON, fenced,
-            // so the file is markdown under one name for every classifier.
-            String payload = ClassifierDossierAssembler.assemble(
+            // The owning adapter's evidence file comes first. Otherwise a dedicated per-shape assembler writes
+            // markdown when this classifier's payload matches one (see ClassifierDossierAssembler's dispatch-by-shape
+            // note); any other payload is the stripped JSON, fenced, so the file is markdown under one name for every
+            // classifier.
+            String payload = ownersEvidence(finding)
+                    .map(ClassifierDossierAssembler::budget)
+                    .or(() -> ClassifierDossierAssembler.assemble(
                             mapper,
                             evidence,
                             finding.projectId(),
                             finding.id(),
                             evidenceCounts(finding),
-                            finding.payloadJson())
+                            finding.payloadJson()))
                     .orElseGet(() -> fenced(DossierPayload.forAgent(mapper, finding.payloadJson())));
             if (payload != null && !payload.isBlank()) {
                 files.put(folder + EVIDENCE_FILE, payload);
             }
         }
         // One case, one classifier: the method is the same for every finding.
-        String method = AgenticRcaEngine.method(subject.get(0).classifierKey());
+        FindingClaim first = subject.get(0);
+        String method = AgenticRcaEngine.method(first.classifierKey());
+        if (method == null) method = adapters.rcaMethod(first).orElse(null);
         if (method != null) files.put(AgenticRcaEngine.METHOD_FILE, method);
         files.put(AgenticRcaEngine.TOOLS_FILE, AgenticRcaEngine.TOOLS);
         return files;
+    }
+
+    /**
+     * The owning adapter's {@code evidence.md}, handed the same counts and enumeration page the shape assemblers read.
+     * The page is read only when an adapter owns the finding.
+     */
+    private Optional<String> ownersEvidence(FindingClaim finding) {
+        if (adapters.ownerOf(finding).isEmpty()) return Optional.empty();
+        ClassifierDossierAssembler.EvidenceCounts counts = evidenceCounts(finding);
+        String enumeration =
+                ClassifierDossierAssembler.enumeration(evidence, finding.projectId(), finding.id(), counts);
+        return adapters.evidence(finding, new EvidenceContext(counts, enumeration));
     }
 
     /** {@link FindingClaim#evidenceCount} for every role, read once for the dossier assembler — see

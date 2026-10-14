@@ -13,33 +13,36 @@ import org.springframework.context.annotation.Configuration;
  * rule," parameterized by a classifier row. {@code DetectionTableRegistry} keys on
  * {@code detectorKind}, not {@code table}, so more than one kind can share a table.
  *
- * <p>{@code FRUSTRATION} is trace grain: its subject is a user turn, and a turn is a trace.
+ * <p>{@code FRUSTRATION} is trace grain: its subject is a user turn, and a turn is a trace. It is the one table the
+ * trace and session views show. It and {@code GROUNDEDNESS} are clearable: a case closed as a false alarm sets
+ * {@code cleared_at} on the flags it cites.
  */
 @Configuration
 public class OpenDetectionTables {
 
     @Bean
     public DetectionTable secretLeakDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.SECRET_LEAK, "secret_leak_detection", Grain.SPAN);
+        return new DetectionTable(BuiltInDetector.Kind.SECRET_LEAK, "secret_leak_detection", Grain.SPAN, false, false);
     }
 
     @Bean
     public DetectionTable malformedOutputDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.MALFORMED_OUTPUT, "malformed_output_detection", Grain.SPAN);
+        return new DetectionTable(
+                BuiltInDetector.Kind.MALFORMED_OUTPUT, "malformed_output_detection", Grain.SPAN, false, false);
     }
 
     @Bean
     public DetectionTable frustrationDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.FRUSTRATION, "frustration_detection", Grain.TRACE);
+        return new DetectionTable(BuiltInDetector.Kind.FRUSTRATION, "frustration_detection", Grain.TRACE, true, true);
     }
 
     @Bean
     public DetectionTable groundednessDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.GROUNDEDNESS, "groundedness_detection", Grain.SPAN);
+        return new DetectionTable(BuiltInDetector.Kind.GROUNDEDNESS, "groundedness_detection", Grain.SPAN, false, true);
     }
 
     @Bean
     public DetectionTable regexDetectionTable() {
-        return new DetectionTable(BuiltInDetector.Kind.REGEX, "user_classifier_detection", Grain.SPAN);
+        return new DetectionTable(BuiltInDetector.Kind.REGEX, "user_classifier_detection", Grain.SPAN, false, false);
     }
 }

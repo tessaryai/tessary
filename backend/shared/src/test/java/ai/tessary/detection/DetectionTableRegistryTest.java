@@ -14,8 +14,8 @@ class DetectionTableRegistryTest {
     @Test
     void twoBeansClaimingOneKindFailAtConstruction() {
         ObjectProvider<DetectionTable> dup = Providers.of(
-                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("classifier", "some_other_table", Grain.SPAN));
+                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN, false, false),
+                new DetectionTable("classifier", "some_other_table", Grain.SPAN, false, false));
 
         assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(dup));
     }
@@ -24,17 +24,19 @@ class DetectionTableRegistryTest {
     void badTableNameIsRejectedAtConstruction() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new DetectionTable("secret_leak", "Secret Leak; DROP TABLE x", Grain.SPAN));
-        assertThrows(IllegalArgumentException.class, () -> new DetectionTable("k", "1_leading_digit", Grain.SPAN));
+                () -> new DetectionTable("secret_leak", "Secret Leak; DROP TABLE x", Grain.SPAN, false, false));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new DetectionTable("k", "1_leading_digit", Grain.SPAN, false, false));
     }
 
     @Test
     void unionSqlHasOneArmPerDistinctTableAndThirteenColumnsPerArm() {
         DetectionTableRegistry registry = new DetectionTableRegistry(Providers.of(
-                new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN),
-                new DetectionTable("frustration", "frustration_detection", Grain.TRACE),
-                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN),
-                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN)));
+                new DetectionTable("secret_leak", "secret_leak_detection", Grain.SPAN, false, false),
+                new DetectionTable("frustration", "frustration_detection", Grain.TRACE, false, false),
+                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN, false, false),
+                new DetectionTable("regex", "user_classifier_detection", Grain.SPAN, false, false)));
 
         String sql = registry.unionSql();
         String[] arms = sql.split(" UNION ALL ");

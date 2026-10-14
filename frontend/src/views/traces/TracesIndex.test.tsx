@@ -111,6 +111,7 @@ function classifier(over: Partial<Classifier> = {}): Classifier {
     description: null,
     mode: "discovery",
     readiness: null,
+    shown_in_trace_views: true,
     version: 1,
     ...over,
   };
@@ -126,7 +127,13 @@ beforeEach(() => {
   api.getSessionSpans.mockImplementation(pending);
   api.listClassifiers.mockResolvedValue([
     classifier(),
-    classifier({ id: "cls-leak", classifier_key: "secret_leak", name: "Secret leak", detector: "secret_leak" }),
+    classifier({
+      id: "cls-leak",
+      classifier_key: "secret_leak",
+      name: "Secret leak",
+      detector: "secret_leak",
+      shown_in_trace_views: false,
+    }),
   ]);
 });
 
@@ -350,13 +357,33 @@ describe("kept for the tab", () => {
 });
 
 describe("detected by", () => {
-  it("offers any detection and the classifiers these views show, and asks the server for the pick", async () => {
+  // Bug: the offered set was a list of detector names kept in the browser, so a classifier the server shows was
+  // missing and one it hides was offered.
+  it("offers any detection and every classifier the server shows in trace views", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier(),
+      classifier({
+        id: "cls-leak",
+        classifier_key: "secret_leak",
+        name: "Secret leak",
+        detector: "secret_leak",
+        shown_in_trace_views: false,
+      }),
+      classifier({
+        id: "cls-item",
+        classifier_key: "item_check",
+        name: "Item check",
+        detector: "item_check",
+        built_in: false,
+      }),
+    ]);
     renderRoute(<TracesIndex />);
     await screen.findByText("checkout-agent");
 
     fireEvent.click(screen.getByRole("button", { name: /^Detected by/ }));
     const menu = screen.getByRole("group", { name: "Detected by" });
     expect(within(menu).getByRole("button", { name: /All traces/ })).toBeTruthy();
+    expect(within(menu).getByRole("button", { name: /Item check/ })).toBeTruthy();
     expect(within(menu).queryByRole("button", { name: /Secret leak/ })).toBeNull();
 
     fireEvent.click(within(menu).getByRole("button", { name: /Frustration/ }));
@@ -388,9 +415,19 @@ describe("detected by", () => {
     renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-fr" });
 
     expect(await screen.findByText("Frustration is off")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open Frustration" }).getAttribute("href")).toContain(
-      "classifiers/detectors?classifier=cls-fr",
-    );
+    expect(screen.getByRole("button", { name: "Clear all filters" })).toBeTruthy();
+  });
+
+  // Bug: the off classifier's link was built in place, so there was no one seam to send a classifier elsewhere.
+  it("links an off classifier through the classifier link", async () => {
+    api.listClassifiers.mockResolvedValue([
+      classifier({ id: "cls-item", name: "Item check", detector: "item_check", built_in: false, enabled: false }),
+    ]);
+    api.listTraces.mockResolvedValue(page([]));
+    renderRoute(<TracesIndex />, { route: "/traces?detected_by=cls-item" });
+
+    const link = await screen.findByRole("link", { name: "Open Item check" });
+    expect(link.getAttribute("href")).toBe("/orgs/acme/projects/default/classifiers/cls-item");
   });
 
   it("filters sessions by the same filters and marks the traces of an expanded session that did not match", async () => {

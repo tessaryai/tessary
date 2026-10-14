@@ -2,6 +2,8 @@
 
 Every prompt the platform sends to a model lives as markdown under
 `prompt-craft/<purpose>/`, in the resources of the module that owns it. One directory per purpose.
+The one exception is the `dossier/method.md` and RCA `evidence.md` of a classifier outside the catalog,
+which its `FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)).
 
 | module · purpose | who reads it | what it is for |
 |---|---|---|
@@ -18,9 +20,22 @@ Every prompt the platform sends to a model lives as markdown under
 | `rca/baseline_present.md` | The `baseline` rows are the traffic before the onset | In place of `{baseline}` when the evidence has `baseline` rows; nothing otherwise |
 | `rca/tools.md` | The MCP tools and how to page the evidence | `dossier/tools.md` |
 | `rca/response_schema.json` | The output contract, including what `high` and `medium` mean | The run's JSON schema |
-| `rca/methods/<classifier>.md` | One built-in classifier's instrument: what it measures, how its evidence reads, its quirks, where its code lives | `dossier/method.md`, chosen by classifier key. The two drift classifiers share `metric_drift.md`. A user or regex classifier gets none, and the prompt does not name the file |
+| `rca/methods/<classifier>.md` | One built-in classifier's instrument: what it measures, how its evidence reads, its quirks, where its code lives | `dossier/method.md`, chosen by classifier key. The two drift classifiers share `metric_drift.md`. A user or regex classifier gets none, and the prompt does not name the file, unless a `FindingAdapter` owns its finding |
 
 A method file states facts about the instrument only. It never lists causes, examples of causes, or look-alikes: a list of candidates anchors the agent on them, and a line telling it to look further does not undo that. `RcaMethodFilesTest` holds each file to the four sections and keeps it off `get_finding`.
+
+### Method text from a `FindingAdapter`
+
+A classifier outside the catalog has no file here. When a `FindingAdapter` owns its finding
+([classifier-extension-interface.md](classifier-extension-interface.md) §2), it gives one text per
+dossier file. `BehaviorTriageEngine.methodCard` uses `triageMethod` when the key has no built-in
+triage card, and `RcaAnalysisService.dossierFiles` uses `rcaMethod` when the key has no `rca/methods/`
+file; a built-in file always wins. `evidence` gives the RCA `evidence.md`, handed the evidence counts
+and the enumeration page the shape assemblers list; when it answers, the text is cut at the dossier
+budget and replaces the shape assembler and the fenced payload. The triage task and the RCA prompt
+then name `method.md` as they do for a built-in classifier. The text does not come from
+`prompt-craft/`, so `PromptResourceParityTest` does not pin it: the module that ships the adapter
+owns its tests.
 
 ## What belongs there, and what does not
 

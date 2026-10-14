@@ -223,6 +223,7 @@ public class GroundednessRateService implements ClassifierCatchUp {
                 FindingRow.SubjectKind.CLASSIFIER,
                 signal.id(),
                 signal.name(),
+                null,
                 // The flagged traces, not every trace: what the auto-escalation floor weighs is how many
                 // answers triage has to read, and the denominator is on the payload.
                 d.failuresSinceOnset(),

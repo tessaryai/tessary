@@ -20,6 +20,7 @@ import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
 import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
+import ai.tessary.detection.DetectionTableRegistry;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
 import jakarta.validation.Valid;
@@ -50,18 +51,27 @@ public class ClassifierController {
     private final FrustrationTuning frustrationTuning;
     private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
+    private final DetectionTableRegistry detectionTables;
 
     public ClassifierController(
             ClassifierService service,
             ClassifierReset reset,
             FrustrationTuning frustrationTuning,
             GroundednessStatus groundednessStatus,
-            TenantPathResolver resolver) {
+            TenantPathResolver resolver,
+            DetectionTableRegistry detectionTables) {
         this.service = service;
         this.reset = reset;
         this.frustrationTuning = frustrationTuning;
         this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
+        this.detectionTables = detectionTables;
+    }
+
+    /** The row as the API shows it: its readiness, and whether the trace views show its flags. */
+    private ClassifierView view(String projectId, ClassifierRow row) {
+        return ClassifierView.of(
+                row, service.readiness(projectId, row), detectionTables.showsInTraceViews(row.detector()));
     }
 
     @GetMapping
@@ -70,7 +80,7 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         String projectId = r.project().id();
         return ApiResponse.ok(service.list(projectId).stream()
-                .map(row -> ClassifierView.of(row, service.readiness(projectId, row)))
+                .map(row -> view(projectId, row))
                 .toList());
     }
 
@@ -97,8 +107,7 @@ public class ClassifierController {
             @PathVariable String id) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         ClassifierRow row = service.get(r.project().id(), id);
-        return ApiResponse.ok(
-                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+        return ApiResponse.ok(view(r.project().id(), row));
     }
 
     @PutMapping("/{id}/enabled")
@@ -111,8 +120,7 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "enable or disable signals");
         ClassifierRow row = service.setEnabled(r.project().id(), id, req.enabled());
-        return ApiResponse.ok(
-                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+        return ApiResponse.ok(view(r.project().id(), row));
     }
 
     /**
@@ -128,8 +136,7 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "reset a classifier");
         ClassifierRow row = reset.reset(r.project().id(), id, ctx.userEmail());
-        return ApiResponse.ok(
-                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+        return ApiResponse.ok(view(r.project().id(), row));
     }
 
     /**
@@ -146,8 +153,7 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "change a classifier's operating mode");
         ClassifierRow row = service.setMode(r.project().id(), id, req.mode());
-        return ApiResponse.ok(
-                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+        return ApiResponse.ok(view(r.project().id(), row));
     }
 
     /** Limit the classifier to some call sites, or run it on every call site again; mirrors {@link #setMode}. */
@@ -161,8 +167,7 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "choose the call sites a classifier runs on");
         ClassifierRow row = service.setCallSiteIds(r.project().id(), id, req.callSiteIds());
-        return ApiResponse.ok(
-                ClassifierView.of(row, service.readiness(r.project().id(), row)));
+        return ApiResponse.ok(view(r.project().id(), row));
     }
 
     /** The call sites a classifier can be limited to: those the bundle declares and those traces arrived on. */

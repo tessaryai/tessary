@@ -56,6 +56,9 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
      */
     private static final String SUBJECT_STARTED_AT = "subject_started_at";
 
+    /** The column a clearable table marks a false alarm in; a reader that filters on it fails on a table without. */
+    private static final String CLEARED_AT = "cleared_at";
+
     private void assertExists(DataSource ds, DetectionTable table) {
         try (Connection conn = ds.getConnection();
                 Statement stmt = conn.createStatement();
@@ -68,6 +71,9 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
                                 + " Liquibase changelog must run before this check does");
             }
             assertHasColumn(stmt, table, SUBJECT_STARTED_AT);
+            if (table.clearable()) {
+                assertHasColumn(stmt, table, CLEARED_AT);
+            }
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "failed to verify detection table '" + table.table() + "' for kind '" + table.detectorKind()
@@ -82,8 +88,10 @@ public class DetectionTableSchemaCheck implements SmartInitializingSingleton {
                 + column + "')")) {
             if (!rs.next() || !rs.getBoolean(1)) {
                 throw new IllegalStateException("DetectionTable registered for kind '" + table.detectorKind()
-                        + "' names table '" + table.table() + "', which has no '" + column
-                        + "' column — its owning module's Liquibase changelog is behind migration 0012");
+                        + "' names table '" + table.table() + "', which has no '" + column + "' column — "
+                        + (CLEARED_AT.equals(column)
+                                ? "it is registered clearable, so its owning module's changelog must add the column"
+                                : "its owning module's Liquibase changelog is behind migration 0012"));
             }
         }
     }

@@ -320,7 +320,8 @@ class BehaviorTriageWorkerTest {
 
         @Override
         public Optional<BehaviorFindingDetailView> detail(String projectId, String findingId) {
-            return Optional.of(new BehaviorFindingDetailView(claimed(), null, null, null, null, null, null, null));
+            return Optional.of(
+                    new BehaviorFindingDetailView(claimed(), null, null, null, null, null, null, null, null));
         }
 
         @Override

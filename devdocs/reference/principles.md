@@ -146,7 +146,9 @@ never really about grading:
 - **LLM inputs are never truncated.** Trace/span content fed to any platform LLM lane is bounded
   by count (fewer items), never by clipping content. `frustration`'s decision call is the recorded
   exception: it scores a fixed window with a fixed budget, so it clips long messages to head and tail
-  and replaces pastes with a marker (`FrustrationTurnBuilder`), and says so in the user docs.
+  and replaces pastes with a marker (`FrustrationTurnBuilder`), and says so in the user docs. A paid
+  custom classifier's code may also cut its judge input to the classifier's own token target; the
+  judged item is never removed.
 - **Cheap detection runs on all traffic; LLM work is the escalation.** Deterministic
   pattern/telemetry detectors and the `groundedness` encoder, a token head the self-hoster serves on
   their own GPU with `classifiers/groundedness/serve.py`, run unsampled: model cost is paid at
@@ -156,12 +158,20 @@ never really about grading:
   LLM only runs once a cheap detector has already filed a finding. This was the "online
   grading is opt-in and layered" principle, and it outlived the grading half: the layering was
   always the point, and Layer 2 is triage now.
-  **The one recorded exception is `frustration`**, which calls a hosted decision model per eligible
+  **The first recorded exception is `frustration`**, which calls a hosted decision model per eligible
   user turn in Layer 1. It is allowed only under all five conditions it meets today: off until a
   person turns it on, on the org's own provider key, filtered by an eligibility rule before any
-  call, stopped at a conversation's first flag, and booked in the usage ledger. A new per-event model
-  call that misses any of the five is the thing this rule forbids. See
+  call, stopped at a conversation's first flag, and booked in the usage ledger. See
   [concepts/frustration.md](../concepts/frustration.md).
+  **The second recorded exception is the paid custom classifiers.** A custom classifier calls the
+  decision model (Jev) one time for each match of its pattern. It is allowed only under all five
+  conditions it meets: off until a person turns it on, on the org's own provider key, filtered by a
+  deterministic pattern over the session timeline before any call, booked in the usage ledger, and
+  a configured maximum number of matches that one sweep pass judges. The matches over that maximum
+  wait for the next pass, and each match is judged one time. The paid repository holds the maximum
+  and the other limits of the call.
+  A new per-event model call that does not meet every condition of one of these two records is the
+  thing this rule forbids.
 
 ## Signals & subsystems
 

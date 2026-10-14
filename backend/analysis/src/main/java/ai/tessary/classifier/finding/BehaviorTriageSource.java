@@ -31,6 +31,7 @@ import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -130,6 +131,10 @@ public class BehaviorTriageSource implements TriageSource {
     /** The {@code groundedness_rate} branch of {@link #detail}; every other cause never touches it. */
     private final GroundednessDetailService groundednessDetail;
 
+    /** Findings a classifier outside the catalog filed: their escalation, and the detector-state half of
+     *  absorbing them. Empty in the open edition. */
+    private final FindingAdapters adapters;
+
     public BehaviorTriageSource(
             FindingRepository findings,
             FindingEvidenceRepository evidence,
@@ -148,7 +153,8 @@ public class BehaviorTriageSource implements TriageSource {
             SecretLeakDetailService secretLeaks,
             FrustrationDetailService frustrations,
             GroundednessRateRepository groundednessRates,
-            GroundednessDetailService groundednessDetail) {
+            GroundednessDetailService groundednessDetail,
+            FindingAdapters adapters) {
         this.findings = findings;
         this.evidence = evidence;
         this.signals = signals;
@@ -167,6 +173,7 @@ public class BehaviorTriageSource implements TriageSource {
         this.frustrations = frustrations;
         this.groundednessRates = groundednessRates;
         this.groundednessDetail = groundednessDetail;
+        this.adapters = adapters;
     }
 
     @Override
@@ -215,6 +222,7 @@ public class BehaviorTriageSource implements TriageSource {
                 secretLeaks.detail(finding),
                 frustrations.detail(finding),
                 groundednessDetail.detail(finding),
+                adapters.detail(finding).orElse(null),
                 failed));
     }
 
@@ -222,8 +230,9 @@ public class BehaviorTriageSource implements TriageSource {
 
     @Override
     public List<Escalatable> listAutoEscalatable(String projectId, long minObservations, int limit) {
-        List<FindingRow> rows = findings.listAutoEscalatable(projectId, BEHAVIOR_CLASSIFIERS, minObservations, limit);
-        List<Escalatable> out = new java.util.ArrayList<>();
+        List<FindingRow> rows = findings.listAutoEscalatable(
+                projectId, escalatableKeys(projectId, minObservations), minObservations, limit);
+        List<Escalatable> out = new ArrayList<>();
         for (FindingRow f : rows) {
             // No per-row re-read: eligibility is listAutoEscalatable's own predicate, and the population
             // is behind MCP, so nothing downstream needs a trace looked up per row.
@@ -233,15 +242,41 @@ public class BehaviorTriageSource implements TriageSource {
     }
 
     /**
+     * The built-in keys this source rules on, plus every key an adapter owns among the project's escalatable
+     * findings. With no adapter this is the built-in list and the candidate read never runs.
+     */
+    private List<String> escalatableKeys(String projectId, long minObservations) {
+        if (adapters.isEmpty()) return BEHAVIOR_CLASSIFIERS;
+        long start = System.nanoTime();
+        List<String> keys = new ArrayList<>(BEHAVIOR_CLASSIFIERS);
+        List<FindingClaim> candidates =
+                findings.escalationCandidatesByKey(projectId, BEHAVIOR_CLASSIFIERS, minObservations);
+        for (FindingClaim candidate : candidates) {
+            if (adapters.ownerOf(candidate).isPresent()) keys.add(candidate.classifierKey());
+        }
+        StructuredLog.info(log, Markers.OPS, "finding.adapter.escalation")
+                .field("project", projectId)
+                .field("candidates", candidates.size())
+                .field("owned", keys.size() - BEHAVIOR_CLASSIFIERS.size())
+                .field("durationMs", (System.nanoTime() - start) / 1_000_000)
+                .log();
+        return List.copyOf(keys);
+    }
+
+    /**
      * A finding whose classifier the org does not have reads as not-owned, the same 404 the rest of
-     * the surface gives it, so a stale tab cannot hand a withheld finding to Layer 2 by id.
+     * the surface gives it, so a stale tab cannot hand a withheld finding to Layer 2 by id. A finding no
+     * built-in rules on is escalated only when an adapter owns it.
      */
     @Override
     public Optional<BehaviorAnalysisView> analyze(String projectId, String findingId) {
         Optional<FindingRow> found = findings.findById(projectId, findingId);
         if (found.isEmpty()) return Optional.empty();
         FindingRow finding = found.get();
-        if (!BEHAVIOR_CLASSIFIERS.contains(finding.classifierKey())) return Optional.empty();
+        if (!BEHAVIOR_CLASSIFIERS.contains(finding.classifierKey())
+                && adapters.ownerOf(finding.claim()).isEmpty()) {
+            return Optional.empty();
+        }
         if (classifiers.unavailableDetectorKinds(projectId).contains(finding.classifierKey())) {
             return Optional.empty();
         }
@@ -363,7 +398,9 @@ public class BehaviorTriageSource implements TriageSource {
      * the classifiers sharing this table. Metric drift corrects a reference (see {@link #resolveShift});
      * tool error corrects a rate (see {@link #resolveRateShift}); a groundedness rate re-learns its
      * call site's reference on absorb (see {@link #relearnGroundedness}); malformed-output and armed-window
-     * causes have no fitted state to move. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
+     * causes have no fitted state to move. A finding a {@link FindingAdapter} owns is checked first, whatever its cause
+     * kind: absorbing it calls the adapter's {@link FindingAdapter#absorbed} before the ruling write, so a hook that
+     * throws rolls the ruling back. Every branch ends the same way: {@link FindingRepository#recordHumanRuling},
      * which is what actually opens or closes the finding.
      *
      * <p><b>A ruling freezes the finding by construction.</b> This is the same {@code status = 'open' AND
@@ -386,6 +423,14 @@ public class BehaviorTriageSource implements TriageSource {
         }
 
         String now = Instant.now().toString();
+        // Owner first: an adapter's finding may carry any cause kind, including one no branch below claims.
+        Optional<FindingAdapter> owner = adapters.ownerOf(finding.claim());
+        if (owner.isPresent()) {
+            if (expected) absorb(owner.get(), finding, userId, now);
+            writeHumanRuling(projectId, finding.id(), expected, userId, now);
+            logResolved(projectId, findingId, finding.causeKind(), action);
+            return Optional.of(reread(projectId, findingId));
+        }
         if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
             return Optional.of(resolveShift(projectId, finding, expected, action, userId, now));
         }
@@ -422,6 +467,11 @@ public class BehaviorTriageSource implements TriageSource {
     public void repin(String projectId, String findingId, @Nullable String userId) {
         FindingRow finding = requireReachableFinding(projectId, findingId);
         String now = Instant.now().toString();
+        Optional<FindingAdapter> owner = adapters.ownerOf(finding.claim());
+        if (owner.isPresent()) {
+            absorb(owner.get(), finding, userId, now);
+            return;
+        }
         if (FindingRow.Cause.DISTRIBUTION_SHIFT.equals(finding.causeKind())) {
             repinShift(projectId, finding, userId, now);
             return;
@@ -446,7 +496,9 @@ public class BehaviorTriageSource implements TriageSource {
      * newest one would leave the reference blind to every earlier spell the case also held. A
      * distribution_shift case's findings all read the SAME metric baseline's rolling control, so
      * re-pinning off any one of them (the newest, via {@link #repin}) already picks up the reference the
-     * whole case sits on; malformed_rate and armed_window causes have no fitted state to move at all.
+     * whole case sits on; malformed_rate and armed_window causes have no fitted state to move at all. A case of
+     * findings a {@link FindingAdapter} owns takes the same {@link #repin} of the newest finding, so the adapter's
+     * hook runs once per case absorb.
      *
      * @param caseFindings the case's own findings, newest first, as {@code FindingRepository#listByCase}
      *     returns them; a no-op for an empty list (an archived case with none)
@@ -454,7 +506,8 @@ public class BehaviorTriageSource implements TriageSource {
     public void repinCase(String projectId, List<FindingRow> caseFindings, @Nullable String userId) {
         if (caseFindings.isEmpty()) return;
         FindingRow newest = caseFindings.get(0);
-        if (!FindingRow.Cause.RATE_SHIFT.equals(newest.causeKind())) {
+        // Owner first, as resolve and repin ask: an adapter's finding may carry any cause kind, rate_shift included.
+        if (adapters.ownerOf(newest.claim()).isPresent() || !FindingRow.Cause.RATE_SHIFT.equals(newest.causeKind())) {
             repin(projectId, newest.id(), userId);
             return;
         }
@@ -483,6 +536,18 @@ public class BehaviorTriageSource implements TriageSource {
                 userId,
                 Instant.now().toString(),
                 "Absorbed.");
+    }
+
+    /** The detector-state half of absorbing a finding an adapter owns: the adapter's own hook, timed and logged. */
+    private void absorb(FindingAdapter owner, FindingRow finding, @Nullable String userId, String now) {
+        long start = System.nanoTime();
+        owner.absorbed(finding, userId, now);
+        StructuredLog.info(log, Markers.OPS, "finding.adapter.absorbed")
+                .field("project", finding.projectId())
+                .field("finding", finding.id())
+                .field("adapter", owner.getClass().getSimpleName())
+                .field("durationMs", (System.nanoTime() - start) / 1_000_000)
+                .log();
     }
 
     /** The finding's own ruling write: negative (absorbed) closes it, positive (real deviation) opens

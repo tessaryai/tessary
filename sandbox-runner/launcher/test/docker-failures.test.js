@@ -85,6 +85,7 @@ async function withLauncher(shape, env, fn) {
   const socketPath = path.join(scratch, 'docker.sock');
   const workDir = path.join(scratch, 'work');
   fs.mkdirSync(workDir);
+  if (shape.seedWork) shape.seedWork(workDir);
   const daemon = await startDaemon(socketPath, shape);
   const child = spawn('node', [SERVER_JS], {
     env: {
@@ -293,5 +294,54 @@ test('an isolated bridge that already exists is not created again', async () => 
     assert.equal((await post({})).status, 200);
     assert.ok(calls.includes('GET /networks/tessary-sandbox'));
     assert.ok(!calls.includes('POST /networks/create'));
+  });
+});
+
+test('startup reaps every session container whatever its age, and only stale one-shot ones', async () => {
+  const nowS = Math.floor(Date.now() / 1000);
+  const containers = [
+    { Id: 'session-young', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '7200000', 'tessary.sandbox.session': 'abc' } },
+    { Id: 'oneshot-young', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '600000' } },
+  ];
+  await withLauncher({ containers }, {}, async ({ calls, post }) => {
+    await until(() => calls.some((c) => c.startsWith('GET /containers/json')), 'the reaper to list');
+    assert.equal((await post({})).status, 200);
+
+    assert.deepEqual(
+      calls.filter((c) => /stop|DELETE/.test(c) && !/\/c1/.test(c)),
+      ['POST /containers/session-young/stop?t=1', 'DELETE /containers/session-young?force=true'],
+      'no caller can reach a session after a restart, so its container goes at once',
+    );
+  });
+});
+
+test('startup removes the work dirs a dead launcher left and keeps the ones still in use (trace data and MCP tokens left on the shared volume after a restart)', async () => {
+  const nowS = Math.floor(Date.now() / 1000);
+  const containers = [
+    { Id: 'session-old', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '7200000', 'tessary.sandbox.session': 'abc', 'tessary.sandbox.work': 'session-reaped' } },
+    { Id: 'oneshot-live', Created: nowS - 1, Labels: { 'tessary.sandbox.timeout-ms': '600000', 'tessary.sandbox.work': 'run-keptA1' } },
+  ];
+  const hourAgo = nowS - 3600;
+  const inAnHour = nowS + 3600;
+  const seedWork = (workDir) => {
+    const dirs = {
+      'session-orphan': hourAgo, // a session.json written by a launcher that died before the container
+      'run-gone01': hourAgo, // a run whose container is long gone
+      'run-keptA1': hourAgo, // a young one-shot run the reaper keeps
+      'session-reaped': inAnHour, // a reaped session container's dossier, written up to the end
+      'run-fresh1': inAnHour, // as if made by a request to this launcher, after its boot
+      notes: hourAgo, // not a work dir
+    };
+    for (const [name, t] of Object.entries(dirs)) {
+      fs.mkdirSync(path.join(workDir, name));
+      fs.writeFileSync(path.join(workDir, name, 'session.json'), '{"token":"tsy_a_x"}');
+      fs.utimesSync(path.join(workDir, name), t, t);
+    }
+  };
+  await withLauncher({ containers, seedWork }, {}, async ({ calls, workDir, stderr }) => {
+    await until(() => calls.includes('DELETE /containers/session-old?force=true'), 'the reaper to remove the session container');
+    await until(() => !fs.existsSync(path.join(workDir, 'session-reaped')), 'the reaped session\'s work dir to go');
+
+    assert.deepEqual(fs.readdirSync(workDir).sort(), ['notes', 'run-fresh1', 'run-keptA1'], stderr());
   });
 });

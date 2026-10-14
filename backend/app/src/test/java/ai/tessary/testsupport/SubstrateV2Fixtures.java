@@ -35,7 +35,8 @@ public final class SubstrateV2Fixtures {
 
     private static final AtomicLong COUNTER = new AtomicLong();
     private static final HexFormat HEX = HexFormat.of();
-    private static final String TOOL_CALL_VALUES = "(:id#, :pid#, :name#, :err#, :isErr#, CAST(:result# AS jsonb),"
+    private static final String TOOL_CALL_VALUES = "(:id#, :pid#, :name#, :err#, :isErr#, CAST(:args# AS jsonb),"
+            + " CAST(:result# AS jsonb),"
             + " :tid#, :sid#, :at#::timestamptz, :at#::timestamptz, :at#::timestamptz)";
 
     private final SessionRepository sessions;
@@ -587,6 +588,7 @@ public final class SubstrateV2Fixtures {
                     new SpanRef(traceId, span.id()),
                     tool,
                     call.errorType(),
+                    null,
                     call.resultJson(),
                     call.at()));
             timers.add(new TraceV2Repository.TimerUpdate(traceId, root.startedAt(), root.endedAt(), true));
@@ -602,6 +604,37 @@ public final class SubstrateV2Fixtures {
                 throw new IllegalStateException("seeded trace " + timer.traceId() + " did not settle");
             }
         }
+    }
+
+    /**
+     * Set a trace's {@code call_site_id}, which the rollup otherwise copies from the root span: get-or-create writes
+     * identity fields only.
+     */
+    public void traceCallSite(String projectId, String traceId, @Nullable String callSiteId) {
+        jdbc().sql("UPDATE trace SET call_site_id = :cs WHERE project_id = :pid AND id = :tid")
+                .param("cs", callSiteId)
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .update();
+    }
+
+    /** Make a trace a detached sub-agent of another: a sub-agent that outlived its turn gets its own trace. */
+    public void detachUnder(String projectId, String childTraceId, String parentTraceId) {
+        jdbc().sql("UPDATE trace SET parent_trace_id = :parent WHERE project_id = :pid AND id = :child")
+                .param("parent", parentTraceId)
+                .param("pid", projectId)
+                .param("child", childTraceId)
+                .update();
+    }
+
+    /** Settle a trace as its rollup does: its latest span end recorded, no more spans expected. */
+    public void settle(String projectId, String traceId, Instant endedAt) {
+        jdbc().sql(
+                        "UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND id = :tid")
+                .param("end", endedAt.toString())
+                .param("pid", projectId)
+                .param("tid", traceId)
+                .update();
     }
 
     // ---- side tables ------------------------------------------------------------------------------
@@ -624,8 +657,20 @@ public final class SubstrateV2Fixtures {
             @Nullable String errorType,
             @Nullable String resultJson,
             Instant at) {
-        ToolCallRow row =
-                new ToolCallRow("tc-" + COUNTER.incrementAndGet(), projectId, span, name, errorType, resultJson, at);
+        return toolCall(projectId, span, name, errorType, null, resultJson, at);
+    }
+
+    /** The same row with the call's arguments, bound as {@code jsonb} like the result. */
+    public String toolCall(
+            String projectId,
+            SpanRef span,
+            @Nullable String name,
+            @Nullable String errorType,
+            @Nullable String argumentsJson,
+            @Nullable String resultJson,
+            Instant at) {
+        ToolCallRow row = new ToolCallRow(
+                "tc-" + COUNTER.incrementAndGet(), projectId, span, name, errorType, argumentsJson, resultJson, at);
         insertToolCalls(List.of(row));
         return row.id();
     }
@@ -636,6 +681,7 @@ public final class SubstrateV2Fixtures {
             SpanRef span,
             @Nullable String name,
             @Nullable String errorType,
+            @Nullable String argumentsJson,
             @Nullable String resultJson,
             Instant at) {}
 
@@ -643,7 +689,7 @@ public final class SubstrateV2Fixtures {
         String values = IntStream.range(0, rows.size())
                 .mapToObj(i -> TOOL_CALL_VALUES.replace("#", Integer.toString(i)))
                 .collect(Collectors.joining(", "));
-        var spec = jdbc().sql("INSERT INTO tool_call (id, project_id, name, error_type, is_error, result,"
+        var spec = jdbc().sql("INSERT INTO tool_call (id, project_id, name, error_type, is_error, arguments, result,"
                 + " trace_id, span_id, started_at, created_at, event_ts) VALUES " + values);
         for (int i = 0; i < rows.size(); i++) {
             ToolCallRow row = rows.get(i);
@@ -652,6 +698,7 @@ public final class SubstrateV2Fixtures {
                     .param("name" + i, row.name())
                     .param("err" + i, row.errorType())
                     .param("isErr" + i, row.errorType() != null)
+                    .param("args" + i, row.argumentsJson())
                     .param("result" + i, row.resultJson())
                     .param("tid" + i, row.span().traceId())
                     .param("sid" + i, row.span().spanId())

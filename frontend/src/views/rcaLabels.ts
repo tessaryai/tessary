@@ -55,6 +55,7 @@ export type CauseKind =
   | "secret_leak"
   | "frustration"
   | "groundedness"
+  | "classifier"
   | "other";
 
 /** The three row labels of a cause card. The agent never writes these: they follow from the cause and the case type. */
@@ -70,6 +71,7 @@ const HOW: Record<CauseKind, string> = {
   secret_leak: "How the key got into the output",
   frustration: "Why users got frustrated",
   groundedness: "Why answers went unsupported",
+  classifier: "Why it changed",
   other: "Why it changed",
 };
 
@@ -100,7 +102,7 @@ export function causeLabels(kind: CauseKind, cause: Pick<RcaCause, "change" | "c
     };
   }
   const proven = cause.confidence === "high";
-  const agent = kind === "frustration" || kind === "groundedness";
+  const agent = kind === "frustration" || kind === "groundedness" || kind === "classifier";
   return {
     change: agent ? "What the agent did" : "What changed",
     how: proven ? HOW[kind] : "Why it might be",

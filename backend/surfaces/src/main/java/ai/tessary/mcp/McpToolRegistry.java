@@ -11,6 +11,7 @@ import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
+import ai.tessary.classifier.finding.ClassifierDetail;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.frustration.FrustrationEvidence;
@@ -710,7 +711,8 @@ public class McpToolRegistry {
                         + " span id of any kind — for the population the detector measured, page"
                         + " get_finding_evidence. Distinct from a single firing (see the classifier_events dataset"
                         + " in query_search/query_facets) and from an RCA report, which reads inline on the case"
-                        + " that owns it (see get_case).",
+                        + " that owns it (see get_case). A classifier outside the built-in set reports its rate,"
+                        + " reference and tuning under classifierDetail.",
                 schema(Map.of("id", strField("Finding id, e.g. from a Classifiers findings page URL.")), List.of("id")),
                 (ctx, args) -> getFinding(ctx, requireStr(args, "id"))));
 
@@ -817,6 +819,7 @@ public class McpToolRegistry {
         SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
         FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
         GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
+        ClassifierDetail classifierDetail = detail.classifierDetail();
         return new BehaviorFindingDetailView(
                 detail.finding().withoutTriage(),
                 detail.metric(),
@@ -825,7 +828,8 @@ public class McpToolRegistry {
                 secretLeak == null ? null : withoutIds(secretLeak),
                 detail.armedWindow(),
                 frustration == null ? null : frustration.withoutIds(),
-                groundedness == null ? null : groundedness.withoutIds());
+                groundedness == null ? null : groundedness.withoutIds(),
+                classifierDetail == null ? null : withoutIds(classifierDetail));
     }
 
     private static ToolErrorEvidence.RateDetail withoutIds(ToolErrorEvidence.RateDetail rate) {
@@ -848,6 +852,19 @@ public class McpToolRegistry {
                 rate.threshold(),
                 rate.effectSize(),
                 rate.criticality());
+    }
+
+    /** An owner's detail is numbers and words only; its rate's trace list is dropped like every other rate's. */
+    private static ClassifierDetail withoutIds(ClassifierDetail detail) {
+        return new ClassifierDetail(
+                withoutIds(detail.rate()),
+                detail.baselineFlagged(),
+                detail.flagLabel(),
+                detail.flagThreshold(),
+                detail.arlTarget(),
+                detail.minDecisionInterval(),
+                detail.learningUntil(),
+                detail.words());
     }
 
     private static MalformedOutputEvidence.MalformedDetail withoutIds(MalformedOutputEvidence.MalformedDetail detail) {
@@ -1202,6 +1219,7 @@ public class McpToolRegistry {
             SecretLeakEvidence.SecretLeakDetail secretLeak = detail.secretLeak();
             FrustrationEvidence.FrustrationDetail frustration = detail.frustration();
             GroundednessEvidence.GroundednessDetail groundedness = detail.groundedness();
+            ClassifierDetail classifierDetail = detail.classifierDetail();
             return new CaseDetailView(
                     detail.caseView(),
                     detail.events(),
@@ -1218,6 +1236,7 @@ public class McpToolRegistry {
                     secretLeak == null ? null : withoutIds(secretLeak),
                     frustration == null ? null : frustration.withoutIds(),
                     groundedness == null ? null : groundedness.withoutIds(),
+                    classifierDetail == null ? null : withoutIds(classifierDetail),
                     detail.rcaAvailable(),
                     detail.absorbAvailable(),
                     detail.detectorAvailable());

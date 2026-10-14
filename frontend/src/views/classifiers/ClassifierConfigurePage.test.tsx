@@ -101,6 +101,7 @@ function classifier(overrides: Partial<Classifier>): Classifier {
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
     readiness: null,
+    shown_in_trace_views: true,
     call_site_ids: null,
     ...overrides,
   };

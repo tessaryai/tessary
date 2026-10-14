@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import type { BehaviorFindingDetail, FrustrationDetail } from "../../api/types";
+import type { BehaviorFindingDetail, ClassifierDetail, FrustrationDetail } from "../../api/types";
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_DETAIL, GROUNDEDNESS_FINDING_DETAIL } from "../../test/groundednessFixtures";
 import { FindingPage } from "./FindingPage";
@@ -369,6 +369,165 @@ describe("a frustration finding", () => {
     renderPage();
 
     expect(await screen.findByText("Each flagged message with the turns before it")).toBeTruthy();
+  });
+
+  // Bug: the figure became general and reworded frustration's own pins.
+  it("tells its rate in sessions with frustration's own words", async () => {
+    api.getBehaviorFinding.mockResolvedValue(
+      plain(
+        { detector: "frustration" },
+        {
+          frustration: {
+            rate: RATE,
+            arlTarget: 50000,
+            baselineFrustrated: 10,
+            jevThreshold: 0.5,
+            minDecisionInterval: 3600,
+            scorerVersion: "v1",
+            conversations: [],
+            conversationsNextCursor: null,
+          } as unknown as FrustrationDetail,
+        },
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText("6.40% of sessions are frustrated")).toBeTruthy();
+    expect(
+      screen.getByText(
+        `58 of 906 sessions since ${sinceWords("2026-09-23T09:12:00Z")} had a user frustrated with the agent. This rate opened the case.`,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("2.10% is normal for this call site")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Learned from its first 1,000 sessions. The current rate is 4.3 percentage points higher. A message counts as frustrated when its score is above 0.50.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Frustrated sessions: 2.10% before, 6.40% after" })).toBeTruthy();
+  });
+});
+
+/** How the rate figure writes an onset: day, month and a 24-hour clock. */
+const sinceWords = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+
+const WORDS: ClassifierDetail["words"] = {
+  unitOne: "item",
+  unitMany: "items",
+  figureNote: "Share of items the check flagged",
+  referenceLabel: "is the reference",
+  referenceDetail: "Set from the first 1,000 items.",
+  thresholdLine: "An item counts when its score is 0.80 or higher.",
+};
+
+const CLASSIFIER_DETAIL: ClassifierDetail = {
+  rate: RATE,
+  baselineFlagged: 21,
+  flagLabel: "Yes",
+  flagThreshold: 0.8,
+  arlTarget: 50000,
+  minDecisionInterval: null,
+  learningUntil: null,
+  words: WORDS,
+};
+
+/** A finding its owning adapter details: a title it stored, on a call site. */
+const owned = (over: Partial<Finding> = {}, detail: ClassifierDetail = CLASSIFIER_DETAIL) =>
+  plain(
+    { detector: "item_check", title: "Flagged items on support-agent rose", callSiteId: "support-agent", ...over },
+    { classifierDetail: detail },
+  );
+
+describe("a finding with a classifier detail", () => {
+  // Bug: a detailed finding fell through to the generic layout, with no figure and the verbs below the title.
+  it("heads the page with its title and one triage button, and tells the rate in its unit", async () => {
+    api.getBehaviorFinding.mockResolvedValue(owned());
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Flagged items on support-agent rose" });
+    expect(screen.getByText("Item check")).toBeTruthy();
+    expect(screen.getByText("support-agent")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Run triage" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Absorb as legitimate" })).toBeTruthy();
+    expect(screen.queryByText(/This cause carries no measured shift/)).toBeNull();
+
+    expect(screen.getByText("What changed")).toBeTruthy();
+    expect(screen.getByText("Share of items the check flagged")).toBeTruthy();
+    expect(screen.getByText("6.40% of items are flagged")).toBeTruthy();
+    expect(screen.getByText(`58 of 906 items since ${sinceWords("2026-09-23T09:12:00Z")} were flagged.`)).toBeTruthy();
+    expect(screen.getByText("2.10% is the reference")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Set from the first 1,000 items. The current rate is 4.3 percentage points higher. An item counts when its score is 0.80 or higher.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(button("Run triage"));
+    await waitFor(() => expect(api.analyzeBehaviorFinding).toHaveBeenCalledWith("fnd-1"));
+  });
+
+  // Bug: a ruled finding kept offering verbs that 409, or hid the case its ruling opened.
+  it("shows the ruling and its case once triaged", async () => {
+    api.getBehaviorFinding.mockResolvedValue(
+      owned({
+        caseId: "case-9",
+        triageStatus: "done",
+        triageVerdict: "positive",
+        triageAction: "opened_case",
+        triageSummary: "The flagged share rose on one prompt change.",
+        triagedAt: "2026-09-23T13:52:00Z",
+      }),
+    );
+    renderPage();
+
+    const toCase = await screen.findByRole("link", { name: "View case" });
+    expect(toCase.getAttribute("href")).toBe("/orgs/acme/projects/default/cases/case-9");
+    expect(screen.getByText("Positive")).toBeTruthy();
+    expect(screen.getByText("The flagged share rose on one prompt change.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run triage" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Absorb as legitimate" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "What triage ruled" })).toBeNull();
+  });
+
+  // Bug: the raw witness rows listed the flagged traces again as bare ids under the figure.
+  it("shows no evidence table", async () => {
+    api.getBehaviorFinding.mockResolvedValue(owned());
+    renderPage();
+
+    await screen.findByText("6.40% of items are flagged");
+    expect(screen.queryByRole("heading", { name: "Evidence" })).toBeNull();
+    expect(api.getBehaviorFindingEvidence).not.toHaveBeenCalled();
+  });
+
+  // Bug: the open page put another story's words (sessions, answers, a learned normal) around a classifier's rate.
+  it("draws every figure word from the detail's words and none of its own", async () => {
+    const fell = { ...RATE, curRate: 0.021, refRate: 0.064, deltaPp: -4.3, direction: "down" };
+    api.getBehaviorFinding.mockResolvedValue(
+      owned({ title: "Flagged widgets on support-agent fell" }, {
+        ...CLASSIFIER_DETAIL,
+        rate: fell,
+        words: {
+          unitOne: "widget",
+          unitMany: "widgets",
+          figureNote: "Share of widgets the check marked",
+          referenceLabel: "is the agreed limit",
+          referenceDetail: null,
+          thresholdLine: null,
+        },
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("Share of widgets the check marked")).toBeTruthy();
+    expect(screen.getByText("2.10% of widgets are flagged")).toBeTruthy();
+    expect(screen.getByText(`58 of 906 widgets since ${sinceWords("2026-09-23T09:12:00Z")} were flagged.`)).toBeTruthy();
+    expect(screen.getByText("6.40% is the agreed limit")).toBeTruthy();
+    expect(screen.getByText("The current rate is 4.3 percentage points lower.")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Flagged widgets: 6.40% before, 2.10% after" })).toBeTruthy();
+    for (const word of [/items?\b/, /session/, /answer/, /frustrat/, /normal for this call site/, /Learned from/]) {
+      expect(screen.queryAllByText(word)).toHaveLength(0);
+    }
   });
 });
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * Generic agent runner, the lane behind POST /authoring — runs INSIDE an E2B microVM (template
+ * Generic agent runner, the run behind POST /runs — runs INSIDE an E2B microVM (template
  * tessary-agent-sandbox) or a docker sibling, exactly like rca.js and triage.js. The launcher
- * injects the agent auth and invokes:  node authoring.js <input.json>
+ * injects the agent auth and invokes:  node run.js <input.json>
  *
  *   input.json : { clone_url?, head_sha?, files, system_prompt, prompt, json_schema?, model,
  *                  mcp: {url, token}, timeout_ms, max_turns }
@@ -33,19 +33,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const { git, runAgent, describeError, sumUsage, quarantineRepo, WORK, REPO } = require('./agent-stream');
-
-// Materialize the dossier under root, refusing anything that would escape it.
-function writeDossier(root, files) {
-  for (const [rel, content] of Object.entries(files || {})) {
-    const full = path.resolve(root, rel);
-    if (full !== root && !full.startsWith(root + path.sep)) {
-      throw new Error('dossier path escapes root: ' + rel);
-    }
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, content);
-  }
-}
+const { git, runAgent, describeError, sumUsage, quarantineRepo, writeDossier, WORK, REPO } = require('./agent-stream');
 
 async function main() {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

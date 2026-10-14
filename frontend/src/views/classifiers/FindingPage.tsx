@@ -34,9 +34,16 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
-import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
-import { FrustratedConversations } from "./FrustratedConversations";
+import {
+  FRUSTRATION_LIST_COPY,
+  FrustrationHeader,
+  FrustrationRate,
+  frustrationLoader,
+  frustrationRows,
+} from "./frustrationStory";
+import { FlaggedList } from "./FlaggedList";
 import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
+import { ClassifierHeader, ClassifierRate } from "./classifierStory";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
 import { traceLinker } from "../traceLinker";
@@ -93,10 +100,11 @@ export function FindingPage() {
   const malformedOutput = detail.malformedOutput;
   const frustration = detail.frustration;
   const groundedness = detail.groundedness;
-  /* All six tell a before-and-after story with a figure, pins and a ruling. Five put their verbs
+  const classifierDetail = detail.classifierDetail;
+  /* All seven tell a before-and-after story with a figure, pins and a ruling. Six put their verbs
      behind triage; frustration is ruled when it is filed. The rest of the detectors keep the older
      layout until they get a story of their own. */
-  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration ?? groundedness;
+  const story = shift ?? rate ?? secretLeak ?? malformedOutput ?? frustration ?? groundedness ?? classifierDetail;
 
   return (
     <div style={CONTAINER}>
@@ -130,6 +138,14 @@ export function FindingPage() {
           basePath={basePath}
           busy={busy}
           onAnalyze={() => analyzeM.mutate()}
+        />
+      ) : classifierDetail ? (
+        <ClassifierHeader
+          finding={finding}
+          basePath={basePath}
+          busy={busy}
+          onAnalyze={() => analyzeM.mutate()}
+          onResolve={(action) => resolveM.mutate(action)}
         />
       ) : (
         <>
@@ -299,13 +315,11 @@ export function FindingPage() {
                   : "Each flagged message with the turns before it"}
               </span>
             </div>
-            <FrustratedConversations
-              findingId={findingId}
-              first={{
-                rows: frustration.conversations,
-                nextCursor: frustration.conversationsNextCursor,
-                total: frustration.rate.failuresCur,
-              }}
+            <FlaggedList
+              {...FRUSTRATION_LIST_COPY}
+              listKey={findingId}
+              first={frustrationRows(frustration)}
+              loadPage={frustrationLoader(api, findingId)}
               basePath={basePath}
             />
           </section>
@@ -341,6 +355,19 @@ export function FindingPage() {
         </>
       )}
 
+      {classifierDetail && (
+        <section
+          className={cn("flex flex-col gap-2.75", triaged && "border-t border-border")}
+          style={{ marginTop: triaged ? 28 : 24, paddingTop: triaged ? 22 : 0 }}
+        >
+          <div className="flex items-baseline gap-3">
+            <h2 className="font-mono text-label uppercase text-muted">What changed</h2>
+            <span className="text-subtle text-small">{classifierDetail.words.figureNote}</span>
+          </div>
+          <ClassifierRate detail={classifierDetail} />
+        </section>
+      )}
+
       {!story && (
         <p className="text-subtle mt-6 text-body" style={{ maxWidth: 560 }}>
           This cause carries no measured shift. It is a claim about the shape of what the agent did
@@ -351,8 +378,9 @@ export function FindingPage() {
       {triaged && !story && <TriageRuling finding={finding} basePath={basePath} />}
 
       {/* A frustration finding's evidence is its sessions, and a groundedness finding's its answers, drawn
-          above; the raw witness rows would list the same traces again as bare ids. */}
-      {!frustration && !groundedness && (
+          above; a detailed finding's flagged trials are listed by its owner. The raw witness rows would list
+          the same traces again as bare ids. */}
+      {!frustration && !groundedness && !classifierDetail && (
         <section className="mt-7">
           <h2 className="font-mono text-label uppercase text-muted mb-1.5">
             Evidence

@@ -25,6 +25,7 @@ import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
 import ai.tessary.classifier.finding.BehaviorDtos.EvidenceSpanView;
 import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidencePage;
 import ai.tessary.classifier.finding.BehaviorDtos.FindingEvidenceSpanPage;
+import ai.tessary.classifier.finding.ClassifierDetail;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
@@ -34,6 +35,7 @@ import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -111,7 +113,7 @@ class McpFindingToolsTest {
                 "{\"cause_kind\":\"" + FindingRow.Cause.MALFORMED_RATE + "\",\"workflow_key\":\"workflow-1\","
                         + "\"native_cause_key\":\"cause-key-1\"}");
         // No evidence on the detail: get_finding returns the claim and get_finding_evidence pages the population.
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
     }
 
     /** The same finding after triage ruled, which must never reach an agent. */
@@ -145,7 +147,8 @@ class McpFindingToolsTest {
                 base.secretLeak(),
                 base.armedWindow(),
                 base.frustration(),
-                base.groundedness());
+                base.groundedness(),
+                base.classifierDetail());
     }
 
     /**
@@ -182,6 +185,82 @@ class McpFindingToolsTest {
                 structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}")).get("finding");
 
         assertTrue(finding.get("humanVerdictAt").isNull(), "humanVerdictAt reached an agent");
+    }
+
+    private static ClassifierDetail classifierDetail(List<String> failingTraces) {
+        return new ClassifierDetail(
+                new ToolErrorEvidence.RateDetail(
+                        "cs-1",
+                        0.02,
+                        0.09,
+                        7.0,
+                        400,
+                        120,
+                        11,
+                        List.of(),
+                        false,
+                        failingTraces,
+                        "2026-06-01T00:00:00Z",
+                        null,
+                        null,
+                        "up",
+                        6.2,
+                        4.0,
+                        0.3,
+                        0.5),
+                8L,
+                "flagged",
+                0.7,
+                500L,
+                4.0,
+                null,
+                new ClassifierDetail.Words("reply", "replies", "since onset", "learned rate", null, "above 0.7"));
+    }
+
+    /** {@link #triagedFinding()} with an owner's detail on it. */
+    private static BehaviorFindingDetailView triagedFindingWith(ClassifierDetail detail) {
+        BehaviorFindingDetailView t = triagedFinding();
+        return new BehaviorFindingDetailView(
+                t.finding(),
+                t.metric(),
+                t.toolError(),
+                t.malformedOutput(),
+                t.secretLeak(),
+                t.armedWindow(),
+                t.frustration(),
+                t.groundedness(),
+                detail);
+    }
+
+    /**
+     * The agent view strips the triage ruling and keeps an owner's detail whole. The bugs are a ruling that rides in
+     * beside the detail, and a detail dropped or reshaped at the agent door.
+     */
+    @Test
+    void getFinding_keepsClassifierDetailWhole() throws Exception {
+        ClassifierDetail detail = classifierDetail(List.of());
+        when(behaviorDrift.finding(PROJECT_ID, "find-1")).thenReturn(triagedFindingWith(detail));
+
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}"));
+
+        assertTrue(body.get("finding").get("triageVerdict").isNull(), "triageVerdict reached an agent");
+        assertEquals(
+                new ObjectMapper().writeValueAsString(detail),
+                body.get("classifierDetail").toString(),
+                "the agent door reshaped the owner's detail");
+    }
+
+    /** An owner's rate loses its trace ids at the agent door, as every built-in rate does. */
+    @Test
+    void getFinding_classifierDetailDropsFailingTraces() throws Exception {
+        when(behaviorDrift.finding(PROJECT_ID, "find-1"))
+                .thenReturn(triagedFindingWith(classifierDetail(List.of("trace-secret-9"))));
+
+        JsonNode body = structured(mcp.callTool("get_finding", "{\"id\":\"find-1\"}"));
+
+        assertEquals(
+                0, body.get("classifierDetail").get("rate").get("failingTraces").size());
+        assertFalse(body.toString().contains("trace-secret-9"), "a failing trace id reached the agent");
     }
 
     @Test
@@ -243,7 +322,7 @@ class McpFindingToolsTest {
                         + "\"failures\":{\"cur\":8},"
                         + "\"failing_traces\":[\"trace-secret-1\",\"trace-secret-2\"],"
                         + "\"onset_at\":\"2026-06-01T00:00:00Z\",\"window\":{\"kind\":\"recomputed\"}}");
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
     }
 
     /** The summary carries every R3 number, and the agent view still drops {@code failing_traces}. */
@@ -297,7 +376,7 @@ class McpFindingToolsTest {
                 List.of(),
                 2L,
                 1L);
-        return BehaviorFindingDetailView.of(row, malformed, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, malformed, null, null, null, null, null);
     }
 
     @Test
@@ -338,7 +417,7 @@ class McpFindingToolsTest {
                 86_400L,
                 "2026-06-01T00:00:00Z",
                 "2026-06-02T00:00:00Z");
-        return BehaviorFindingDetailView.of(row, null, secretLeak, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, secretLeak, null, null, null, null);
     }
 
     /**
@@ -376,7 +455,7 @@ class McpFindingToolsTest {
                 "{\"cause_kind\":\"" + FindingRow.Cause.ARMED_WINDOW + "\",\"basis\":\"event_count\","
                         + "\"observed\":7,\"threshold\":5,\"window_seconds\":86400,"
                         + "\"window_start\":\"2026-06-01T00:00:00Z\",\"window_end\":\"2026-06-02T00:00:00Z\"}");
-        return BehaviorFindingDetailView.of(row, null, null, null, null, null);
+        return BehaviorFindingDetailView.of(row, null, null, null, null, null, null);
     }
 
     /**

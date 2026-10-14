@@ -845,6 +845,13 @@ CREATE INDEX ix_span_payload_project_fts ON span_payload USING gin (project_id, 
 CREATE INDEX ix_trace_project_started  ON trace (project_id, started_at DESC);
 CREATE INDEX ix_trace_session          ON trace (project_id, session_id, started_at)
                                           WHERE session_id IS NOT NULL;
+CREATE INDEX ix_trace_session_ended    ON trace (project_id, session_id, ended_at DESC,
+                                          started_at DESC, id DESC)
+                                          WHERE session_id IS NOT NULL AND NOT is_deleted
+                                            AND is_settled AND ended_at IS NOT NULL;  -- 0038, session timeline pages
+CREATE INDEX ix_trace_session_unended  ON trace (project_id, session_id, started_at DESC, id DESC)
+                                          WHERE session_id IS NOT NULL AND NOT is_deleted
+                                            AND (NOT is_settled OR ended_at IS NULL);  -- 0038
 CREATE INDEX ix_trace_rollup_due       ON trace (rollup_due_at)
                                           WHERE rollup_due_at IS NOT NULL;
 
@@ -853,9 +860,10 @@ CREATE INDEX ix_session_project_active ON session (project_id, last_activity_at 
 ```
 
 The partial indexes stay near-empty by construction: `ix_trace_rollup_due` holds only traces
-awaiting rollup, `ix_span_unresolved_path` only spans whose ancestry is pending,
-`ix_span_uncorrelated` only spans awaiting the correlation backfill, and `ix_span_orphan_parent`
-only retired spans, for the §6.4 reclaim to find by parent.
+awaiting rollup, `ix_trace_session_unended` only traces with no settled end,
+`ix_span_unresolved_path` only spans whose ancestry is pending, `ix_span_uncorrelated` only spans
+awaiting the correlation backfill, and `ix_span_orphan_parent` only retired spans, for the §6.4
+reclaim to find by parent.
 
 ## 9. Sub-agents
 

@@ -24,6 +24,7 @@ import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
 import ai.tessary.open.obs.StructuredLog;
 import ai.tessary.tenant.Ids;
+import jakarta.annotation.PostConstruct;
 import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
@@ -108,6 +109,9 @@ public class ClassifierWorker {
      */
     private final ClassifierSweepRegistry sweeps;
 
+    /** The grain each detector kind sweeps at; see {@link SweepRouting}. */
+    private final SweepRouting routing;
+
     /** Population work a classifier does once its sweep has caught up; see {@link ClassifierCatchUp}. */
     private final ObjectProvider<ClassifierCatchUp> catchUps;
 
@@ -128,6 +132,7 @@ public class ClassifierWorker {
             BuiltInClassifierCatalog catalog,
             PreDeployCheckService preDeployChecks,
             ClassifierSweepRegistry sweeps,
+            SweepRouting routing,
             ObjectProvider<ClassifierCatchUp> catchUps,
             ClassifierProperties props,
             TraceMdcBridge traceBridge,
@@ -141,10 +146,29 @@ public class ClassifierWorker {
         this.catalog = catalog;
         this.preDeployChecks = preDeployChecks;
         this.sweeps = sweeps;
+        this.routing = routing;
         this.catchUps = catchUps;
         this.props = props;
         this.traceBridge = traceBridge;
         this.executor = executor;
+    }
+
+    /**
+     * Fail the boot when a detector kind has both a {@link BuiltInDetector} and a {@link
+     * ClassifierSweep}. The worker dispatches a kind through one of them, so the other would stop
+     * scoring with nothing to say so.
+     */
+    @PostConstruct
+    void validateRouting() {
+        List<String> both = sweeps.registeredKinds().stream()
+                .filter(kind -> catalog.detectorFor(kind) != null)
+                .sorted()
+                .toList();
+        if (!both.isEmpty()) {
+            throw new IllegalStateException("detector kind(s) " + both
+                    + " have both a BuiltInDetector and a ClassifierSweep; a kind is dispatched through"
+                    + " one of them, so remove the other");
+        }
     }
 
     /**
@@ -365,9 +389,14 @@ public class ClassifierWorker {
      *
      * <p>Which sweep runs inside that seam is a lookup, not an {@code if/else} chain: it holds
      * {@link ClassifierSweepRegistry} and a classifier attaches by being on the classpath.
+     *
+     * <p>The grain of a kind the catalog declares comes from the catalog. A kind no catalog module
+     * declares runs at window grain when a sweep claims it, and otherwise takes the catalog's
+     * default; see {@link SweepRouting}.
      */
     private void sweepSignal(ClassifierJobRow job, ClassifierRow signal, Instant start) {
-        Grain grain = catalog.grainFor(signal.detector());
+        SweepRouting.Routing route = routing.routeFor(signal.detector());
+        Grain grain = route.grain();
         switch (grain) {
             case WINDOW -> {
                 Optional<ClassifierSweep> sweep = sweeps.forKind(signal.detector());
@@ -391,6 +420,7 @@ public class ClassifierWorker {
                             .field("project", job.projectId())
                             .field("detector", signal.detector())
                             .field("grain", grain.name().toLowerCase(Locale.ROOT))
+                            .field("route", route.route().field())
                             .field("registered", String.join(",", sweeps.registeredKinds()))
                             .log();
                     jobs.markSwept(job.id(), null, null);
@@ -399,7 +429,7 @@ public class ClassifierWorker {
                 }
                 SweepOutcome outcome = sweep.get().sweep(new SweepContext(job, signal));
                 sweepFailures.clear(job.id());
-                logSweepComplete(job, signal, grain, outcome.scanned(), outcome.fired(), 1, start);
+                logSweepComplete(job, signal, grain, route.route(), outcome.scanned(), outcome.fired(), 1, start);
             }
             case TURN, OBSERVATION -> sweepObservationGrain(job, signal, grain, start);
         }
@@ -595,7 +625,7 @@ public class ClassifierWorker {
                     .field("pages", pages)
                     .log();
         }
-        logSweepComplete(job, signal, grain, scanned, fired, pages, start);
+        logSweepComplete(job, signal, grain, SweepRouting.Route.CATALOG, scanned, fired, pages, start);
         // A genuinely-new production signal discovery closes the loop to the edge: register a
         // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
         // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
@@ -818,7 +848,14 @@ public class ClassifierWorker {
 
     /** One field set for every grain, so a Loki query does not have to know which sweep ran. */
     private void logSweepComplete(
-            ClassifierJobRow job, ClassifierRow signal, Grain grain, int scanned, int fired, int pages, Instant start) {
+            ClassifierJobRow job,
+            ClassifierRow signal,
+            Grain grain,
+            SweepRouting.Route route,
+            int scanned,
+            int fired,
+            int pages,
+            Instant start) {
         StructuredLog.info(log, Markers.OPS, "signal.sweep.complete")
                 .message(
                         "swept %d observation(s) for %s at %s grain over %d page(s), %d fired",
@@ -828,6 +865,7 @@ public class ClassifierWorker {
                 .field("classifierId", signal.id())
                 .field("project", job.projectId())
                 .field("grain", grain.name().toLowerCase(Locale.ROOT))
+                .field("route", route.field())
                 .field("scanned", scanned)
                 .field("fired", fired)
                 .field("pages", pages)

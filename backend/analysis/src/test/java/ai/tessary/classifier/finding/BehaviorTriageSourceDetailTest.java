@@ -2,6 +2,7 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,7 @@ import ai.tessary.classifier.finding.BehaviorTriageJobRepository.FailedTriage;
 import ai.tessary.classifier.frustration.FrustrationDetailService;
 import ai.tessary.classifier.malformed.MalformedOutputDetailService;
 import ai.tessary.classifier.secretleak.SecretLeakDetailService;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,6 +57,81 @@ class BehaviorTriageSourceDetailTest {
         assertEquals(TriageStatus.IN_FLIGHT, statusOf("f1"));
     }
 
+    /**
+     * A finding an adapter owns carries the owner's detail as {@code classifierDetail}, and no cause-kind block. The
+     * bug is an owner's numbers dropped between the adapter and the page.
+     */
+    @Test
+    void theOwnersDetailIsOnTheFindingView() {
+        stubOwnedFinding("f1");
+        ClassifierDetail detail = detail();
+
+        var view = source(FindingAdapters.of(List.of(
+                        FakeFindingAdapter.owning("owned-x", null, null, null).reporting(detail))))
+                .detail(PROJECT, "f1")
+                .orElseThrow();
+
+        assertEquals(detail, view.classifierDetail());
+        assertNull(view.frustration());
+    }
+
+    /** A finding no adapter owns has no {@code classifierDetail}, though an adapter for another key reports one. */
+    @Test
+    void aFindingNoAdapterOwnsHasNoClassifierDetail() {
+        stubEscalatedFinding("f1");
+        when(jobs.failedByFinding(PROJECT, List.of("f1"))).thenReturn(Map.of());
+
+        var view = source(FindingAdapters.of(List.of(
+                        FakeFindingAdapter.owning("owned-x", null, null, null).reporting(detail()))))
+                .detail(PROJECT, "f1")
+                .orElseThrow();
+
+        assertNull(view.classifierDetail());
+    }
+
+    private void stubOwnedFinding(String id) {
+        FindingRow row = FindingRowBuilder.of("owned-x")
+                .id(id)
+                .projectId(PROJECT)
+                .causeKey("cause:" + id)
+                .subject(FindingRow.SubjectKind.CLASSIFIER, "clf_1")
+                .payload("{\"cause_kind\":\"" + FindingRow.Cause.RATE_SHIFT + "\"}")
+                .build();
+        when(findings.findById(PROJECT, id)).thenReturn(Optional.of(row));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.failedByFinding(PROJECT, List.of(id))).thenReturn(Map.of());
+    }
+
+    private static ClassifierDetail detail() {
+        return new ClassifierDetail(
+                new RateDetail(
+                        "cs-1",
+                        0.02,
+                        0.09,
+                        7.0,
+                        400,
+                        120,
+                        11,
+                        List.of(),
+                        false,
+                        List.of(),
+                        "2026-08-01T00:00:00Z",
+                        null,
+                        null,
+                        "up",
+                        6.2,
+                        4.0,
+                        0.3,
+                        0.5),
+                8L,
+                "flagged",
+                0.7,
+                500L,
+                4.0,
+                null,
+                new ClassifierDetail.Words("reply", "replies", "since onset", "learned rate", null, null));
+    }
+
     private void stubEscalatedFinding(String id) {
         when(findings.findById(PROJECT, id)).thenReturn(Optional.of(escalatedRow(id)));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
@@ -64,9 +141,13 @@ class BehaviorTriageSourceDetailTest {
         return source().detail(PROJECT, id).orElseThrow().finding().triageStatus();
     }
 
+    private BehaviorTriageSource source() {
+        return source(FindingAdapters.of(List.of()));
+    }
+
     /** Only what {@code detail} reaches is real; the rest is null so a new dependency fails loudly. */
     @SuppressWarnings("NullAway") // deliberate: the null collaborators are unreachable on detail
-    private BehaviorTriageSource source() {
+    private BehaviorTriageSource source(FindingAdapters adapters) {
         return new BehaviorTriageSource(
                 findings,
                 null,
@@ -85,7 +166,8 @@ class BehaviorTriageSourceDetailTest {
                 mock(SecretLeakDetailService.class),
                 mock(FrustrationDetailService.class),
                 null,
-                mock(GroundednessDetailService.class));
+                mock(GroundednessDetailService.class),
+                adapters);
     }
 
     private static FindingRow escalatedRow(String id) {

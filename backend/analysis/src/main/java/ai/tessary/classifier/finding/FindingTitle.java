@@ -34,7 +34,8 @@ public final class FindingTitle {
     private FindingTitle() {}
 
     /**
-     * The sentence for this finding, or its cause key when the evidence cannot be read.
+     * The sentence for this finding, the title its writer stored for a cause with no sentence here, or its cause
+     * key when neither can be read.
      *
      * <p>Dispatch is on the cause kind rather than on which reader happens to parse the blob: the two
      * measured causes each own an evidence schema, and asking one to read the other's would turn a
@@ -48,8 +49,17 @@ public final class FindingTitle {
             case FindingRow.Cause.MALFORMED_RATE -> malformedRate(finding);
             case FindingRow.Cause.FRUSTRATION_RATE -> frustrationRate(finding);
             case FindingRow.Cause.GROUNDEDNESS_RATE -> groundednessRate(finding);
-            default -> finding.nativeCauseKey();
+            default -> stored(finding);
         };
+    }
+
+    /**
+     * A cause this class has no sentence for reads the title its writer stored, which a rate writer refreshes with
+     * the spell; else its cause key.
+     */
+    private static String stored(FindingRow finding) {
+        String title = finding.title();
+        return title == null || title.isBlank() ? finding.nativeCauseKey() : title;
     }
 
     /**

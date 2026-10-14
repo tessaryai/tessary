@@ -42,6 +42,8 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -165,14 +167,17 @@ class AgentRunServiceTest {
     }
 
     private AgentRunService service(AgentRunProperties props, CapturingSandbox sandbox, GitProviderFactory providers) {
+        return service(props, new RcaProperties(), sandbox, providers);
+    }
+
+    private AgentRunService service(
+            AgentRunProperties props, RcaProperties rcaProps, CapturingSandbox sandbox, GitProviderFactory providers) {
         return new AgentRunService(
                 List.of(sandbox),
                 props,
-                new RcaProperties(),
-                observer(),
-                modelSettings,
+                rcaProps,
+                new AgentModels(modelSettings, observer(), RATES),
                 credentials,
-                RATES,
                 apiKeys,
                 projects,
                 memberships,
@@ -199,7 +204,7 @@ class AgentRunServiceTest {
                 "key1",
                 PROJECT_ID,
                 "user1",
-                "authoring-d1 (system)",
+                "agent_run-d1 (system)",
                 "tsy_a_prefix",
                 "hash",
                 "2026-01-01T00:00:00Z",
@@ -209,19 +214,19 @@ class AgentRunServiceTest {
                 null,
                 null,
                 null);
-        when(apiKeys.issue(PROJECT_ID, "user1", "authoring-d1 (system)", KeyScope.ADMIN))
+        when(apiKeys.issue(PROJECT_ID, "user1", "agent_run-d1 (system)", KeyScope.ADMIN))
                 .thenReturn(new ApiKeyService.Issued(key, "tsy_a_secret"));
     }
 
     private void aResolvedGrokLane() {
-        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AUTHORING))
+        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AGENT_RUN))
                 .thenReturn(Optional.of(
                         new ProjectModelSettings.ResolvedAgenticModel(ModelProvider.GROK, "grok-4.6", "xai/grok-4.6")));
         when(credentials.resolve(PROJECT_ID, ModelProvider.GROK)).thenReturn(CREDENTIAL);
     }
 
     private AgentRunSandbox.Result run(AgentRunService service) {
-        return service.run(PROJECT_ID, ModelLane.AUTHORING, "system", "task", FILES, "{\"type\":\"object\"}", SUBJECT);
+        return service.run(PROJECT_ID, ModelLane.AGENT_RUN, "system", "task", FILES, "{\"type\":\"object\"}", SUBJECT);
     }
 
     /** The whole request, hand-built: a project with no repository sends no clone, and everything else rides. */
@@ -238,7 +243,7 @@ class AgentRunServiceTest {
         assertEquals(
                 new AgentRunSandbox.Request(
                         PROJECT_ID,
-                        "authoring",
+                        "agent_run",
                         "system",
                         "task",
                         FILES,
@@ -303,7 +308,7 @@ class AgentRunServiceTest {
     void anUnresolvedLaneRunsTheObserversModelOnBedrock() {
         anOwnedProject();
         aMintedKey();
-        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AUTHORING)).thenReturn(Optional.empty());
+        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AGENT_RUN)).thenReturn(Optional.empty());
         AgenticCredentialResolver.Credential bedrock = new AgenticCredentialResolver.Credential(
                 ModelProvider.BEDROCK, null, null, null, "us-east-1", "ak", "sk");
         when(credentials.resolve(PROJECT_ID, ModelProvider.BEDROCK)).thenReturn(bedrock);
@@ -324,7 +329,7 @@ class AgentRunServiceTest {
     /** No credential means no run: nothing is minted for a sandbox that cannot start. */
     @Test
     void aMissingCredentialMintsNoKey() {
-        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AUTHORING)).thenReturn(Optional.empty());
+        when(modelSettings.resolveAgenticModel(PROJECT_ID, ModelLane.AGENT_RUN)).thenReturn(Optional.empty());
         when(credentials.resolve(PROJECT_ID, ModelProvider.BEDROCK))
                 .thenThrow(new TessaryException(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.BEDROCK));
         CapturingSandbox sandbox = new CapturingSandbox(null);
@@ -367,6 +372,29 @@ class AgentRunServiceTest {
 
         assertEquals(AgentRunError.LAUNCHER_MISCONFIGURED, ex.error());
         verifyNoInteractions(credentials, apiKeys, modelSettings);
+    }
+
+    /**
+     * The session client builds its MCP servers from this URL: a trailing slash must not become
+     * {@code //mcp}, and a deployment that set only RCA's origin must not point the agent at nothing.
+     */
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "https://own.example/ | ''                  | https://own.example/mcp",
+                "''                   | https://rca.example | https://rca.example/mcp"
+            })
+    void platformMcpUrlIsTheOwnOriginElseRcasWithOneSlash(String own, String rca, String expected) {
+        AgentRunProperties props = props();
+        props.setMcpBaseUrl(own);
+        RcaProperties rcaProps = new RcaProperties();
+        rcaProps.getAgentic().setMcpBaseUrl(rca);
+
+        String url = service(props, rcaProps, new CapturingSandbox(null), new GitProviderFactory(List.of(), List.of()))
+                .platformMcpUrl();
+
+        assertEquals(expected, url);
     }
 
     /** A sandbox key nothing registered refuses to boot, rather than failing every run later. */

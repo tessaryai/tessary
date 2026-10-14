@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 import { cn } from "../../ui";
 import { ChatItems, PriorContext, messageItems, planConversation, planTools, spanItems } from "./detail-chat";
+import type { Emphasis } from "./detail-chat";
 import { Chevron, Pane, ToolCallBatch, ToolDetails, toolStepOf } from "./detail-tool";
 import type { ToolPlan } from "./detail-chat";
 import { SpanIcon, spanKindLabel, spanLabel } from "./detail-icons";
@@ -21,6 +22,19 @@ import type { Span, TraceRollup } from "./detail-data";
 import { clockLabel, depthOf, formatDuration, formatTokens, spanOrder, traceBounds } from "./detail-data";
 
 /* ------------------------------------------------------------ conversation */
+
+export type { Emphasis } from "./detail-chat";
+
+/**
+ * What a caller marks on a conversation, by span id. The root span carries its `question` and `reply`
+ * parts; any other span carries its `step` part.
+ */
+export type EmphasisBySpan = Map<string, Emphasis[]>;
+
+const NO_EMPHASIS: EmphasisBySpan = new Map();
+
+const ofPart = (entries: Emphasis[] | undefined, part: Emphasis["part"]) =>
+  (entries ?? []).filter((e) => e.part === part);
 
 /**
  * Chat grammar: one transcript for the trace, read in the order it happened —
@@ -41,6 +55,9 @@ export function ConversationView({
   focusId,
   marks = [],
   showPrior = true,
+  emphasis = NO_EMPHASIS,
+  dim = true,
+  contextNote,
 }: {
   spans: Span[];
   focusId: string | null;
@@ -48,6 +65,12 @@ export function ConversationView({
   marks?: string[];
   /** Offer the fold of earlier messages; off where the page already shows those turns. */
   showPrior?: boolean;
+  /** The parts a caller marks, by span id. */
+  emphasis?: EmphasisBySpan;
+  /** Whether a marked trace dims its parts with no entry, so the marked ones read first. */
+  dim?: boolean;
+  /** A line drawn under each dimmed part, saying why it is dimmed. */
+  contextNote?: string;
 }) {
   const plan = useMemo(() => planConversation(spans), [spans]);
   const tools = useMemo(() => planTools(spans), [spans]);
@@ -69,8 +92,16 @@ export function ConversationView({
   const question = rootPlan ? messageItems(rootPlan.input) : [];
   const reply = rootPlan ? messageItems(rootPlan.output ?? []) : [];
 
-  const chrome = (o: Span, body: React.ReactNode) => (
-    <SpanBlock key={o.id} o={o} focused={focusId === o.id} body={body} />
+  // Once any part of this trace is marked, every part with no entry reads as context.
+  const dimming = dim && spans.some((o) => (emphasis.get(o.id)?.length ?? 0) > 0);
+  const rootEntries = root ? emphasis.get(root.id) : undefined;
+  const questionEmphasis = ofPart(rootEntries, "question");
+  const replyEmphasis = ofPart(rootEntries, "reply");
+  const questionDimmed = dimming && questionEmphasis.length === 0;
+  const replyDimmed = dimming && replyEmphasis.length === 0;
+
+  const chrome = (o: Span, body: React.ReactNode, dimmed = false) => (
+    <SpanBlock key={o.id} o={o} focused={focusId === o.id} body={body} dimmed={dimmed} note={contextNote} />
   );
 
   return (
@@ -78,13 +109,26 @@ export function ConversationView({
       {showPrior && <PriorContext messages={plan.prior} />}
 
       {/* The question the turn is answering. */}
-      {root && question.length > 0 && chrome(root, <ChatItems items={question} marks={marks} />)}
+      {root &&
+        question.length > 0 &&
+        chrome(
+          root,
+          <ChatItems items={question} marks={marks} emphasis={questionEmphasis} dimmed={questionDimmed} />,
+          questionDimmed,
+        )}
 
       {/* The work, in the order it ran: what each model call said, then the tools
           it asked for, batched onto one line. */}
       {batchSteps(steps, tools).map((group, i) =>
         group.kind === "tools" ? (
-          <ToolCallBatch key={`tools-${i}`} steps={group.steps} />
+          <Dimmable
+            key={`tools-${i}`}
+            // A tool call has no bubble to draw a mark on, so an entry on its span only keeps it undimmed.
+            dimmed={dimming && !group.steps.some((step) => ofPart(emphasis.get(step.key), "step").length > 0)}
+            note={contextNote}
+          >
+            <ToolCallBatch steps={group.steps} />
+          </Dimmable>
         ) : (
           (() => {
             const o = group.span;
@@ -92,13 +136,23 @@ export function ConversationView({
             // an outlined empty box is worse than an absent one.
             const items = spanItems(plan.bySpan.get(o.id));
             if (items.length === 0) return null;
-            return chrome(o, <ChatItems items={items} failed={o.status === "error"} />);
+            const stepEmphasis = ofPart(emphasis.get(o.id), "step");
+            const dimmed = dimming && stepEmphasis.length === 0;
+            return chrome(
+              o,
+              <ChatItems items={items} failed={o.status === "error"} emphasis={stepEmphasis} dimmed={dimmed} />,
+              dimmed,
+            );
           })()
         ),
       )}
 
       {/* The answer, last, where the reader expects it. */}
-      {root && reply.length > 0 && <ChatItems items={reply} failed={root.status === "error"} />}
+      {root && reply.length > 0 && (
+        <Dimmable dimmed={replyDimmed} note={contextNote}>
+          <ChatItems items={reply} failed={root.status === "error"} emphasis={replyEmphasis} dimmed={replyDimmed} />
+        </Dimmable>
+      )}
     </div>
   );
 }
@@ -141,15 +195,39 @@ export function batchSteps(steps: Span[], tools: ToolPlan): StepGroup[] {
  * between two sentences is span bookkeeping, not dialogue; it belongs to the trace summary above and
  * to Tree and Timeline, which exist to read spans. The anchor stays so a link can still scroll here.
  */
-function SpanBlock({ o, focused, body }: { o: Span; focused: boolean; body: React.ReactNode }) {
+function SpanBlock({
+  o,
+  focused,
+  body,
+  dimmed,
+  note,
+}: {
+  o: Span;
+  focused: boolean;
+  body: React.ReactNode;
+  dimmed: boolean;
+  note?: string;
+}) {
   return (
     <div
       id={`obs-${o.id}`}
       className={cn("flex flex-col gap-2", focused && "rounded-card")}
       style={{ ...(focused ? { outline: "1px solid var(--color-border-strong)", padding: 12, margin: -12 } : null) }}
     >
-      {body}
+      <Dimmable dimmed={dimmed} note={note}>
+        {body}
+      </Dimmable>
+    </div>
+  );
+}
 
+/** A part of the turn, faded when the caller marked other parts and not this one, with its note under it. */
+function Dimmable({ dimmed, note, children }: { dimmed: boolean; note?: string; children: React.ReactNode }) {
+  if (!dimmed) return <>{children}</>;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="opacity-60">{children}</div>
+      {note && <p className="m-0 text-label text-subtle">{note}</p>}
     </div>
   );
 }
@@ -483,12 +561,21 @@ export function SessionConversationView({
   spansByTrace,
   focusId,
   marksByTrace = NO_MARKS,
+  emphasis = NO_EMPHASIS,
+  dim = true,
+  contextNote,
 }: {
   traces: TraceListItem[];
   spansByTrace: SpansByTrace;
   focusId: string | null;
   /** The classifiers that flagged each trace's turn, by trace id. */
   marksByTrace?: Map<string, string[]>;
+  /** The parts a caller marks, by span id, across every trace drawn. */
+  emphasis?: EmphasisBySpan;
+  /** Whether a marked trace dims its parts with no entry; a trace with no entry is never dimmed. */
+  dim?: boolean;
+  /** A line drawn under each dimmed part, saying why it is dimmed. */
+  contextNote?: string;
 }) {
   if (traces.length === 0) {
     return (
@@ -507,6 +594,9 @@ export function SessionConversationView({
             focusId={focusId}
             marks={marksByTrace.get(t.id) ?? []}
             showPrior={i === 0}
+            emphasis={emphasis}
+            dim={dim}
+            contextNote={contextNote}
           />
         </div>
       ))}

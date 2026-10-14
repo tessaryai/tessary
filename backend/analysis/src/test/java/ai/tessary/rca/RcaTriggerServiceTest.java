@@ -13,6 +13,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.finding.FakeFindingAdapter;
+import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingRepository;
 import java.time.Instant;
@@ -31,7 +33,8 @@ class RcaTriggerServiceTest {
     private final RcaJobRepository jobs = mock(RcaJobRepository.class);
     private final RcaReportRepository reports = mock(RcaReportRepository.class);
     private final RcaReportService reportReads = mock(RcaReportService.class);
-    private final RcaTriggerService trigger = new RcaTriggerService(findings, jobs, reports, reportReads);
+    private final RcaTriggerService trigger =
+            new RcaTriggerService(findings, jobs, reports, reportReads, FindingAdapters.of(List.of()));
 
     @Test
     void eachClassifierGetsItsReportKind() {
@@ -82,6 +85,105 @@ class RcaTriggerServiceTest {
                         eq(0.021),
                         anyDouble(),
                         eq(RcaReportRow.Engine.AGENTIC));
+    }
+
+    /**
+     * A finding an adapter owns gets the owned-causes report, whatever its classifier key would give. The bug is an
+     * owned finding's report filed as a metric movement, whose header reads a severity nobody asserted.
+     */
+    @Test
+    void aFindingAnAdapterOwnsGetsTheOwnedCausesKind() {
+        ownedFindingTriggered();
+
+        verify(reports)
+                .insertPendingIfAbsent(
+                        eq("proj"),
+                        eq("job_1"),
+                        eq("fnd_o"),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        eq("owned-x"),
+                        eq(RcaReportRow.ReportKind.OWNED_CAUSES),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(Instant.class),
+                        anyDouble(),
+                        anyDouble(),
+                        anyDouble(),
+                        anyString());
+    }
+
+    /**
+     * An owned-causes report's header reads the finding's current and baseline rates off its payload, as a
+     * frustration report's does. The bug is a header of the asserted severity over zero.
+     */
+    @Test
+    void theOwnedCausesHeaderReadsTheRatesOffThePayload() {
+        ownedFindingTriggered();
+
+        verify(reports)
+                .insertPendingIfAbsent(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(Instant.class),
+                        eq(0.09),
+                        eq(0.02),
+                        eq(0.09 - 0.02),
+                        anyString());
+    }
+
+    /** Triggers RCA on an {@code owned-x} finding that asserted a 0.9 severity, with an adapter that owns the key. */
+    private void ownedFindingTriggered() {
+        when(findings.findClaim("proj", "fnd_o"))
+                .thenReturn(Optional.of(new FindingClaim(
+                        "fnd_o",
+                        "proj",
+                        "owned-x",
+                        "clf_o:support.answer",
+                        "classifier",
+                        "clf_o",
+                        "Owned",
+                        "support.answer",
+                        "2026-05-04T00:00:00Z",
+                        "2026-05-05T00:00:00Z",
+                        null,
+                        null,
+                        0.9,
+                        40,
+                        "{\"cause_kind\":\"owned_rate\",\"baseline_rate\":0.02,\"current_rate\":0.09}",
+                        null,
+                        "2026-05-04T01:00:00Z")));
+        when(jobs.createOrGet(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(Instant.class),
+                        any(),
+                        isNull()))
+                .thenReturn("job_1");
+
+        new RcaTriggerService(
+                        findings,
+                        jobs,
+                        reports,
+                        reportReads,
+                        FindingAdapters.of(List.of(FakeFindingAdapter.owning("owned-x", null, null, null))))
+                .trigger("proj", "fnd_o", "user_1", null);
     }
 
     /**

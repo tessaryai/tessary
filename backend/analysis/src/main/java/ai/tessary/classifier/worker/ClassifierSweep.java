@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
+import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import java.util.Set;
 
@@ -24,11 +25,14 @@ import java.util.Set;
  *       @Component}s collected by {@link ClassifierSweepRegistry}; no open class names a concrete
  *       sweep, and an implementation may ship from any jar on the runtime classpath. See {@code
  *       devdocs/reference/classifier-extension-interface.md}.
- *   <li>Sweeps key on the open {@link BuiltInDetector.Kind} constants, which stay constant. {@code
+ *   <li>Sweeps key on the open {@link BuiltInDetector.Kind} constants, which stay constant, or on a
+ *       kind of their own that no catalog module declares. {@code
  *       BuiltInClassifierCatalog.builtIns()} is never filtered by what is registered here: {@code
  *       ClassifierService.retireDroppedBuiltIns} keys on catalog membership and retirement is
  *       irreversible, so a classifier dropping out of the catalog because its jar is absent would
- *       permanently disable every customer row that classifier ever wrote.
+ *       permanently disable every customer row that classifier ever wrote. A kind no module declares
+ *       runs at window grain when a sweep claims it; a kind that also has a {@link BuiltInDetector}
+ *       fails the context at startup.
  *   <li>An unregistered kind is inert, not an error. The worker logs one warning and completes the
  *       job: it does not throw, does not dead-letter, and above all does not fall through to
  *       another sweep, since an unrecognized kind silently routed to the wrong sweep would keep a
@@ -37,13 +41,17 @@ import java.util.Set;
  *       classifier row and nothing else, no repositories, no catalog, no worker. Widening it later
  *       is cheap; narrowing it once out-of-tree classifiers depend on it is not.
  * </ol>
+ *
+ * <p>A sweep may refuse to turn on a row it cannot run; it must never refuse turning one off.
  */
 public interface ClassifierSweep {
 
     /**
-     * The {@link BuiltInDetector.Kind} values this sweep claims. A kind claimed by two beans fails
-     * the context at startup rather than picking one; an empty set registers nothing and can never
-     * be dispatched; see {@link ClassifierSweepRegistry}.
+     * The detector kinds this sweep claims: {@link BuiltInDetector.Kind} values, or kinds no catalog
+     * module declares, which the worker then runs at window grain. A kind claimed by two beans fails
+     * the context at startup rather than picking one, and so does a kind that also has a {@link
+     * BuiltInDetector}; an empty set registers nothing and can never be dispatched; see {@link
+     * ClassifierSweepRegistry}.
      *
      * <p>A {@code Set} rather than a single kind because one sweep legitimately serves a family:
      * {@code MetricDriftSweep} runs both {@code duration_drift} and {@code cost_drift} from one bean
@@ -57,4 +65,25 @@ public interface ClassifierSweep {
      * that returns is treated as a clean pass.
      */
     SweepOutcome sweep(SweepContext ctx);
+
+    /**
+     * Refuse to turn {@code classifier} on by throwing a {@code TessaryException} whose code says why, for a row
+     * this sweep could not run. {@code ClassifierService#setEnabled} asks before it writes, and only when turning
+     * a row on; turning one off is never refused. The default accepts every row.
+     */
+    default void checkEnable(ClassifierRow classifier) {
+        // A sweep that can run every row it is handed has nothing to refuse.
+    }
+
+    /**
+     * Forget what this sweep judged and learned for {@code classifier}, for a person's reset: the rows of its own
+     * tables that the reset does not know, such as assessments that stop a judged unit being judged again, and the
+     * state it fitted. {@code ClassifierReset} calls it inside the reset's transaction, after the job restart has
+     * locked the sweep job and before the cursor goes back to the start, so the next pass judges every kept trace
+     * again. Detections in a registered {@code DetectionTable} and unruled findings are cleared by the reset itself.
+     * Returns the rows deleted; the default keeps nothing of its own and deletes nothing.
+     */
+    default int reset(ClassifierRow classifier) {
+        return 0;
+    }
 }

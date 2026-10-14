@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+/*
+ * Run inside a session container as the agent's user: `node proc-scan <pid> <needle>`. Prints one
+ * JSON line saying whether <needle> is in the process's environment or in any of its writable
+ * memory, and the error code of each /proc file it could not open. No extension, so node --test
+ * skips it.
+ */
+const fs = require('node:fs');
+
+const [pid, needle] = process.argv.slice(2);
+const want = Buffer.from(needle);
+const errors = {};
+let found = null;
+try {
+  if (fs.readFileSync(`/proc/${pid}/environ`).includes(want)) found = 'environ';
+} catch (e) {
+  errors.environ = e.code;
+}
+let maps = '';
+try {
+  maps = fs.readFileSync(`/proc/${pid}/maps`, 'utf8');
+} catch (e) {
+  errors.maps = e.code;
+}
+let fd = null;
+try {
+  fd = fs.openSync(`/proc/${pid}/mem`, 'r');
+} catch (e) {
+  errors.mem = e.code;
+}
+if (fd !== null) {
+  for (const line of maps.split('\n')) {
+    const m = /^([0-9a-f]+)-([0-9a-f]+) rw-p/.exec(line);
+    if (!m) continue;
+    const from = BigInt(`0x${m[1]}`);
+    const size = Number(BigInt(`0x${m[2]}`) - from);
+    if (size > 256 * 1024 * 1024) continue;
+    const buf = Buffer.alloc(size);
+    try {
+      fs.readSync(fd, buf, 0, size, from);
+    } catch {
+      continue;
+    }
+    if (buf.includes(want)) {
+      found = found || 'mem';
+      break;
+    }
+  }
+}
+process.stdout.write(`${JSON.stringify({ found, errors })}\n`);

@@ -14,8 +14,9 @@
 #
 #   docker build -f sandbox-runner/agent-sandbox/Dockerfile -t <tag> .
 #
-# No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per invocation
-# (see runScriptInDocker), never a long-lived process.
+# No CMD/ENTRYPOINT: the docker driver runs `node <script>.js /work/input.json` per lane invocation
+# (see runScriptInDocker), or a long-lived `/usr/local/bin/node-sealed session.js /work/session.json`
+# for an agent session (see the node-sealed RUN below).
 #
 # BASE IMAGE: node:24-alpine3.24, the SAME as template.ts (E2B), kept in lockstep with it.
 # Why 24 and not 22: 22 has been maintenance-only since 2025-10-21 and is EOL 2027-04-30; 24 runs
@@ -101,6 +102,12 @@ RUN set -e; \
     [ -x "$(command -v opencode)" ] && opencode --version >/dev/null; \
     npm cache clean --force
 
+# An execute-only copy of node for session.js. A process started from a binary its user cannot read
+# is not dumpable, so the agent's processes, which run as the same user, cannot read its memory
+# (the MCP tokens the relay holds) or its environment (SESSION_SECRET) through /proc. The plain
+# node stays for the agent. Costs one layer the size of the node binary. Mirrored by template.ts.
+RUN cp /usr/local/bin/node /usr/local/bin/node-sealed && chmod 0111 /usr/local/bin/node-sealed
+
 ENV HOME=/home/user
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
@@ -125,14 +132,15 @@ WORKDIR /home/user
 RUN npm install @opencode-ai/sdk@1.18.30 undici@^6.28.0 \
     && npm cache clean --force
 
-# Shared OpenCode runner required by rca.js/triage.js/authoring.js — must be baked beside them or
-# their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same way, by
-# agent-stream.js itself, on the system-prompt (triage, authoring) path only.
+# Shared OpenCode runner required by rca.js/triage.js/run.js/session.js — must be baked beside
+# them or their `require('./agent-stream')` is a runtime crash. mcp-relay.js is required the same
+# way, by agent-stream.js on the system-prompt (triage.js, run.js) path and by session.js.
 COPY --chown=node:node sandbox-runner/agent-sandbox/agent-stream.js /home/user/agent-stream.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/mcp-relay.js /home/user/mcp-relay.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/rca.js /home/user/rca.js
 COPY --chown=node:node sandbox-runner/agent-sandbox/triage.js /home/user/triage.js
-COPY --chown=node:node sandbox-runner/agent-sandbox/authoring.js /home/user/authoring.js
+COPY --chown=node:node sandbox-runner/agent-sandbox/run.js /home/user/run.js
+COPY --chown=node:node sandbox-runner/agent-sandbox/session.js /home/user/session.js
 
 # The image's version identity: same convention and same "dev" fallback as backend/Dockerfile,
 # so the release workflow's OCI

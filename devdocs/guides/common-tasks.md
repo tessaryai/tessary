@@ -98,8 +98,8 @@ port and its read-side siblings, and that seam has its own document:
 A classifier that spends the org's own provider key per item has a second shape, and
 `classifier/frustration/` is the example: a `PagedDetector` supplied through a `DetectorSupplier`,
 seeded with `defaultEnabled = false`, pausing through `ClassifierPause` (surfaced as the row's
-`readiness`), and lifted by `ProviderCredentialListener` when a key is saved. It must also meet the
-five conditions [`principles.md`](../reference/principles.md) records for a per-event model call.
+`readiness`), and lifted by `ProviderCredentialListener` when a key is saved. It must also meet every
+condition of one of the per-event model calls [`principles.md`](../reference/principles.md) records.
 
 A classifier scored by a model the self-hoster runs outside Tessary's containers has a third shape,
 and `classifier/detector/groundedness/` is the example: a `BuiltInDetector` supplied through a

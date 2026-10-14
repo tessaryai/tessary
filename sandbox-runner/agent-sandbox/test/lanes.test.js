@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * rca.js, triage.js and authoring.js as the launcher runs them: a real process over a real
+ * rca.js, triage.js and run.js as the launcher runs them: a real process over a real
  * input.json, with test/fixtures/fake-opencode on PATH as `opencode`. lane-exit.test.js covers how
  * triage.js exits; this covers what the lanes do before and around runAgent: the optional clone and
- * its quarantine, the dossier and its traversal guard, the failure envelope, authoring's permission
+ * its quarantine, the dossier and its traversal guard, the failure envelope, run.js's permission
  * split and prose answer, and the exit guard that ends a run a leaked handle would otherwise keep
  * alive.
  */
@@ -119,9 +119,9 @@ test('a failed RCA run still writes its spend for the launcher to book', async (
   assert.equal(envelope.usage.input_tokens, 20, 'both attempts\' input is counted');
 });
 
-test('authoring.js checks out the requested commit, quarantines agent config, and may edit everywhere but the repo', async () => {
+test('run.js checks out the requested commit, quarantines agent config, and may edit everywhere but the repo', async () => {
   const repo = makeRepo();
-  const { result, workDir, configs } = await runLane('authoring.js', {
+  const { result, workDir, configs } = await runLane('run.js', {
     clone_url: `file://${repo.dir}`,
     head_sha: repo.first,
     files: { 'brief.md': 'find timeouts' },
@@ -142,16 +142,16 @@ test('authoring.js checks out the requested commit, quarantines agent config, an
   assert.equal(configs[0].agent['tessary-triage'].prompt, 'You write classifiers.', 'the caller\'s system prompt replaces the default');
 });
 
-test('authoring.js without a clone_url still runs, with no repo', async () => {
-  const { result, workDir } = await runLane('authoring.js', { files: { 'brief.md': 'x' }, system_prompt: 'sys' });
+test('run.js without a clone_url still runs, with no repo', async () => {
+  const { result, workDir } = await runLane('run.js', { files: { 'brief.md': 'x' }, system_prompt: 'sys' });
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(path.join(workDir, 'repo')), false);
 });
 
-test('authoring.js without a json_schema accepts a prose answer as the result', async () => {
+test('run.js without a json_schema accepts a prose answer as the result', async () => {
   const { result } = await runLane(
-    'authoring.js',
+    'run.js',
     { files: {}, system_prompt: 'sys', json_schema: undefined },
     { reply: 'The call site retries three times before giving up.' },
   );
@@ -162,7 +162,7 @@ test('authoring.js without a json_schema accepts a prose answer as the result', 
   assert.equal(envelope.structured_output, undefined, 'prose carries no structured half');
 });
 
-for (const script of ['rca.js', 'triage.js', 'authoring.js']) {
+for (const script of ['rca.js', 'triage.js', 'run.js']) {
   test(`${script} refuses a dossier path that escapes its directory, before any agent starts`, async () => {
     const { result, workDir, configs } = await runLane(script, { files: { '../escaped.md': 'x' } });
 
@@ -174,7 +174,7 @@ for (const script of ['rca.js', 'triage.js', 'authoring.js']) {
 }
 
 describe('the exit guard', { concurrency: true }, () => {
-  for (const script of ['rca.js', 'triage.js', 'authoring.js']) {
+  for (const script of ['rca.js', 'triage.js', 'run.js']) {
     test(`${script} ends itself 5s after main() when a leaked handle holds the process open`, async () => {
       const { result } = await runLane(script, { files: {} }, { env: { NODE_OPTIONS: `--require ${LEAK}` } });
 

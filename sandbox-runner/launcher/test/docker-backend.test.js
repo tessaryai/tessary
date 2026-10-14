@@ -162,6 +162,7 @@ test('docker backend: container-create carries the required hardening flags', as
     assert.equal(hostConfig.Mounts[0].Target, '/work');
     assert.ok(hostConfig.Mounts[0].VolumeOptions.Subpath, 'the per-request subdirectory is named');
     assert.equal(create.Labels['tessary.sandbox'], '1');
+    assert.equal(create.Labels['tessary.sandbox.work'], hostConfig.Mounts[0].VolumeOptions.Subpath, 'the reaper finds the work dir of a container it reaps');
   } finally {
     child.kill();
     daemon.server.close();

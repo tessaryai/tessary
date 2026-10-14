@@ -2,8 +2,10 @@
 package ai.tessary.classifier.finding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -28,18 +30,26 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.tracing.Tracer;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.task.SyncTaskExecutor;
 
 /**
@@ -311,6 +321,316 @@ class BehaviorTriageSourceTest {
         verifyNoInteractions(jobs);
     }
 
+    /** The six built-in keys this source escalates for, in their declared order: the query's wire. */
+    private static final List<String> BUILT_IN_KEYS = List.of(
+            BuiltInDetector.Kind.DURATION_DRIFT,
+            BuiltInDetector.Kind.COST_DRIFT,
+            BuiltInDetector.Kind.TOOL_ERROR,
+            BuiltInDetector.Kind.SECRET_LEAK,
+            BuiltInDetector.Kind.MALFORMED_OUTPUT,
+            BuiltInDetector.Kind.GROUNDEDNESS);
+
+    private static final String CUSTOM_KEY = "custom-x";
+
+    /** A finding an adapter owning {@link #CUSTOM_KEY} filed, citing three witnesses. */
+    private static FindingRow custom(String id) {
+        return FindingRowBuilder.of(CUSTOM_KEY)
+                .id(id)
+                .projectId(PROJECT)
+                .callSiteId("cs-1")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .evidenceCounts("{\"witness\":3,\"member\":40}")
+                .build();
+    }
+
+    /** An owned finding is escalated like a built-in's. The bug is an owned finding read as not-owned (a 404). */
+    @Test
+    void anOwnedFindingIsAnalyzed() {
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
+                .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
+
+        var view = source(FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
+                .analyze(PROJECT, "f1")
+                .orElseThrow();
+
+        assertEquals("job-1", view.jobId());
+        assertEquals(TriageLane.EVIDENCE_ONLY.wire(), view.lane());
+        verify(jobs).enqueue(eq(PROJECT), eq("f1"), anyString());
+        verify(findings).markEscalated(eq(PROJECT), eq("f1"), anyString());
+    }
+
+    /** With no adapter a custom finding is not escalated. The bug is the open edition escalating a key it does not
+     *  rule on. */
+    @Test
+    void anUnownedCustomFindingIsNotAnalyzed() {
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+
+        assertEquals(Optional.empty(), source().analyze(PROJECT, "f1"));
+        verifyNoInteractions(jobs);
+    }
+
+    /**
+     * The escalation query takes the built-in keys plus each candidate key an adapter owns, and no other. The bugs
+     * are an owned key missing from the query and an un-owned key added to it.
+     */
+    @Test
+    void ownedKeysJoinTheEscalationQuery() {
+        when(findings.escalationCandidatesByKey(PROJECT, BUILT_IN_KEYS, 30))
+                .thenReturn(List.of(
+                        custom("f1").claim(),
+                        FindingRowBuilder.of("user-regex-1")
+                                .id("f2")
+                                .projectId(PROJECT)
+                                .build()
+                                .claim()));
+
+        source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
+                .listAutoEscalatable(PROJECT, 30, 50);
+
+        List<String> expected = new java.util.ArrayList<>(BUILT_IN_KEYS);
+        expected.add(CUSTOM_KEY);
+        verify(findings).listAutoEscalatable(PROJECT, expected, 30, 50);
+    }
+
+    /**
+     * The adapter step of escalation says what it read and what the adapters own. The bug is an adapter whose findings
+     * never escalate with no line that shows which step dropped them.
+     */
+    @Test
+    void theAdapterEscalationStepLogsWhatItReadAndOwned() {
+        when(findings.escalationCandidatesByKey(PROJECT, BUILT_IN_KEYS, 30))
+                .thenReturn(List.of(
+                        custom("f1").claim(),
+                        FindingRowBuilder.of("user-regex-1")
+                                .id("f2")
+                                .projectId(PROJECT)
+                                .build()
+                                .claim()));
+
+        List<Map<String, Object>> events = logged(
+                BehaviorTriageSource.class,
+                "finding.adapter.escalation",
+                () -> source(FindingAdapters.of(
+                                List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
+                        .listAutoEscalatable(PROJECT, 30, 50));
+
+        assertEquals(1, events.size(), "one line per escalation pass");
+        Map<String, Object> fields = new HashMap<>(events.get(0));
+        assertEquals(
+                Long.class, Objects.requireNonNull(fields.remove("durationMs")).getClass());
+        assertEquals(
+                Map.of("event", "finding.adapter.escalation", "project", PROJECT, "candidates", 2, "owned", 1), fields);
+    }
+
+    /** With no adapter the escalation query is the six built-in keys and no candidate read runs. The bug is the open
+     *  edition paying an extra query or widening the list. */
+    @Test
+    void withNoAdapterTheEscalationQueryIsUnchanged() {
+        source().listAutoEscalatable(PROJECT, 30, 50);
+
+        verify(findings).listAutoEscalatable(PROJECT, BUILT_IN_KEYS, 30, 50);
+        verify(findings, never()).escalationCandidatesByKey(any(), any(), anyLong());
+    }
+
+    /**
+     * A person's absorb on an owned finding calls the adapter's hook once, with the ruling's own clock, and then
+     * writes the negative ruling; a real deviation calls no hook and opens the case. The bugs are an owned
+     * {@code ext_rate} finding hitting the "no branch claims it" refusal, the hook running on a real deviation,
+     * and the hook running twice.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"expected", "not_expected"})
+    void absorbingAnOwnedFindingCallsTheHookOnceThenRules(String action) {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        boolean absorb = "expected".equals(action);
+
+        source(FindingAdapters.of(List.of(adapter))).resolve(PROJECT, "f1", action, "u1");
+
+        ArgumentCaptor<String> now = ArgumentCaptor.forClass(String.class);
+        verify(findings)
+                .recordHumanRuling(
+                        eq(PROJECT),
+                        eq("f1"),
+                        eq(absorb ? "negative" : "positive"),
+                        eq(absorb ? "A person ruled this legitimate." : "A person ruled this a real deviation."),
+                        now.capture());
+        if (absorb) {
+            assertEquals(List.of(new FakeFindingAdapter.Absorbed("f1", "u1", now.getValue())), adapter.absorbedCalls());
+            verify(caseOpener, never()).ensureCaseFor(any(), any(), any());
+        } else {
+            assertEquals(List.of(), adapter.absorbedCalls());
+            verify(caseOpener).ensureCaseFor(PROJECT, "f1", "u1");
+        }
+    }
+
+    /** A hook that throws refuses the absorb before the ruling is written. The bug is a ruling written while the
+     *  detector state did not move. */
+    @Test
+    void aThrowingHookRefusesTheAbsorb() {
+        IllegalStateException failure = new IllegalStateException("state write failed");
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> source(FindingAdapters.of(List.of(FakeFindingAdapter.failingToAbsorb(CUSTOM_KEY, failure))))
+                        .resolve(PROJECT, "f1", "expected", "u1"));
+
+        assertSame(failure, thrown);
+        verify(findings, never()).recordHumanRuling(any(), any(), any(), any(), any());
+    }
+
+    /** Re-pinning an owned finding calls its hook and moves no built-in state. The bug is a case absorb on a custom
+     *  case that moves nothing. */
+    @Test
+    void repinningAnOwnedFindingCallsTheHook() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repin(PROJECT, "f1", "u1");
+
+        assertEquals(1, adapter.absorbedCalls().size());
+        assertEquals("f1", adapter.absorbedCalls().get(0).findingId());
+        assertEquals("u1", adapter.absorbedCalls().get(0).userId());
+        verifyNoInteractions(toolErrorStates, toolErrorReferences, baselines, groundednessRates);
+    }
+
+    /** Absorbing a case of owned findings calls the hook once, on the newest finding. The bugs are a hook skipped on a
+     *  case and a hook run once per finding. */
+    @Test
+    void absorbingAnOwnedCaseCallsTheHookOnTheNewestFindingOnce() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(custom("f2")));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repinCase(PROJECT, List.of(custom("f2"), custom("f1")), "u1");
+
+        assertEquals(
+                List.of("f2"),
+                adapter.absorbedCalls().stream()
+                        .map(FakeFindingAdapter.Absorbed::findingId)
+                        .toList());
+    }
+
+    @Test
+    void absorbingAnOwnedCaseWithABuiltInCauseKindCallsTheHook() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+        FindingRow newest = FindingRowBuilder.of(CUSTOM_KEY)
+                .id("f2")
+                .projectId(PROJECT)
+                .callSiteId("cs-1")
+                .payload("{\"cause_kind\":\"rate_shift\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(newest));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+
+        source(FindingAdapters.of(List.of(adapter))).repinCase(PROJECT, List.of(newest, custom("f1")), "u1");
+
+        assertEquals(
+                List.of("f2"),
+                adapter.absorbedCalls().stream()
+                        .map(FakeFindingAdapter.Absorbed::findingId)
+                        .toList(),
+                "an owned case whose newest finding says rate_shift is folded as a tool-error case and never reaches"
+                        + " its adapter");
+    }
+
+    /**
+     * With an adapter registered that owns none of the built-in keys, a built-in case absorb still folds every spell
+     * and calls no hook. The bug is the owner check read as "an adapter exists", which re-pins the newest finding alone
+     * and leaves the earlier spells alarming.
+     */
+    @Test
+    void withAnAdapterRegisteredABuiltInCaseStillFoldsEverySpell() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+
+        source(FindingAdapters.of(List.of(adapter)))
+                .repinCase(PROJECT, List.of(toolError("f2", 300, 30), toolError("f1", 300, 20)), "u1");
+
+        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(50L), eq("u1"), anyString());
+        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
+        assertEquals(List.of(), adapter.absorbedCalls());
+    }
+
+    /**
+     * With an adapter registered that owns none of them, a built-in finding's absorb moves its own detector state:
+     * the tool-error reference, the drift baseline, the groundedness state. The bug is a built-in finding handed to
+     * the adapter, or refused, once the owner check runs first.
+     */
+    @Test
+    void withAnAdapterRegisteredABuiltInFindingIsAbsorbedByItsOwnBranch() {
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
+        BehaviorTriageSource source = source(FindingAdapters.of(List.of(adapter)));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(toolError("f1", 600, 60)));
+        FindingRow shift = FindingRowBuilder.of(BuiltInDetector.Kind.DURATION_DRIFT)
+                .id("f2")
+                .projectId(PROJECT)
+                .subject(FindingRow.SubjectKind.METRIC_BASELINE, "mbl-1")
+                .payload("{\"cause_kind\":\"distribution_shift\"}")
+                .build();
+        when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(shift));
+        when(baselines.findById(PROJECT, "mbl-1")).thenReturn(Optional.of(baselineWithNoClosedDay()));
+        FindingRow grounded = FindingRowBuilder.of(BuiltInDetector.Kind.GROUNDEDNESS)
+                .id("f3")
+                .projectId(PROJECT)
+                .callSiteId("rag-answer")
+                .payload("{\"cause_kind\":\"groundedness_rate\",\"native_cause_key\":\"rag-answer\"}")
+                .build();
+        when(findings.findById(PROJECT, "f3")).thenReturn(Optional.of(grounded));
+        when(groundednessRates.states()).thenReturn(groundednessStates);
+
+        source.repin(PROJECT, "f1", "u1");
+        source.repin(PROJECT, "f2", "u1");
+        source.resolve(PROJECT, "f3", "expected", "u1");
+
+        verify(toolErrorReferences).pin(eq(PROJECT), eq(BUCKET), eq(600L), eq(60L), eq("u1"), anyString());
+        verify(toolErrorStates).reset(eq(PROJECT), eq(BUCKET), eq("u1"), eq("Absorbed."), anyString());
+        verify(baselines)
+                .repin(
+                        eq("mbl-1"),
+                        eq("{\"sketch\":1}"),
+                        isNull(),
+                        isNull(),
+                        isNull(),
+                        anyString(),
+                        isNull(),
+                        anyString());
+        verify(groundednessStates)
+                .resetAndRelearn(eq(PROJECT), eq("rag-answer"), eq("u1"), eq("Absorbed."), anyString());
+        verify(findings)
+                .recordHumanRuling(
+                        eq(PROJECT), eq("f3"), eq("negative"), eq("A person ruled this legitimate."), anyString());
+        assertEquals(List.of(), adapter.absorbedCalls());
+    }
+
+    /** With an adapter registered that does not own it, a built-in finding is still escalated. */
+    @Test
+    void withAnAdapterRegisteredABuiltInFindingIsAnalyzed() {
+        FindingRow finding = FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
+                .id("f1")
+                .projectId(PROJECT)
+                .evidenceCounts("{\"witness\":3}")
+                .build();
+        when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(finding));
+        when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
+        when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
+                .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
+
+        var view = source(FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
+                .analyze(PROJECT, "f1")
+                .orElseThrow();
+
+        assertEquals("job-1", view.jobId());
+    }
+
     private static FindingRow toolError(String id, long nCur, long failures) {
         return FindingRowBuilder.of(BuiltInDetector.Kind.TOOL_ERROR)
                 .id(id)
@@ -377,9 +697,13 @@ class BehaviorTriageSourceTest {
                 new TriageLauncherBreaker(new ClassifierProperties()));
     }
 
+    private BehaviorTriageSource source() {
+        return source(FindingAdapters.of(List.of()));
+    }
+
     /** Unreached collaborators are null, so a new dependency fails loudly. */
     @SuppressWarnings("NullAway")
-    private BehaviorTriageSource source() {
+    private BehaviorTriageSource source(FindingAdapters adapters) {
         return new BehaviorTriageSource(
                 findings,
                 null,
@@ -398,6 +722,28 @@ class BehaviorTriageSourceTest {
                 null,
                 null,
                 groundednessRates,
-                null);
+                null,
+                adapters);
+    }
+
+    /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */
+    private static List<Map<String, Object>> logged(Class<?> source, String name, Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(source);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (ILoggingEvent e : appender.list) {
+            if (e.getKeyValuePairs() == null) continue;
+            Map<String, Object> fields = new HashMap<>();
+            e.getKeyValuePairs().forEach(kv -> fields.put(kv.key, kv.value));
+            if (name.equals(fields.get("event"))) events.add(fields);
+        }
+        return events;
     }
 }

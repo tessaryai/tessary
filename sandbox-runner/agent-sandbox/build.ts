@@ -55,7 +55,8 @@ const RECIPE_INPUTS = [
   'mcp-relay.js',
   'rca.js',
   'triage.js',
-  'authoring.js',
+  'run.js',
+  'session.js',
 ];
 
 /**
@@ -186,16 +187,19 @@ async function verify(version: string) {
   try {
     // Each of these is a distinct failure this release must not ship, not a smoke test for its own
     // sake: bash missing (the SDK cannot exec at all), the opencode prune having deleted the
-    // variant on PATH, and a script that never got copied.
+    // variant on PATH, a script that never got copied, and a session node the agent's user can
+    // read (session.js would then be dumpable, and its MCP tokens readable through /proc).
     const checks: Array<[string, string]> = [
       ['bash is the exec shell', 'echo "$BASH_VERSION" | grep -q .'],
       ['opencode runs', 'opencode --version'],
       ['jq runs', 'jq --version'],
       [
         'agent scripts are baked',
-        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/authoring.js'
-          + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js',
+        'test -f /home/user/rca.js && test -f /home/user/triage.js && test -f /home/user/run.js'
+          + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
+          + ' && test -f /home/user/session.js',
       ],
+      ['the session node is execute-only', 'test -x /usr/local/bin/node-sealed && ! test -r /usr/local/bin/node-sealed && /usr/local/bin/node-sealed -e 0'],
     ];
     const failed: string[] = [];
     for (const [label, cmd] of checks) {

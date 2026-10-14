@@ -332,7 +332,7 @@ test('systemPrompt: selects the custom triage agent and routes MCP through a loo
 
   const mcpCfg = config.mcp && config.mcp['tessary-evals'];
   assert.ok(mcpCfg, 'MCP is configured');
-  assert.match(mcpCfg.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/, 'points at the loopback relay, not the real endpoint');
+  assert.match(mcpCfg.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/tessary-evals$/, 'points at the loopback relay, not the real endpoint');
   assert.equal(mcpCfg.headers, undefined, 'no bearer token in opencode config — the relay holds it, not us');
   assert.equal(mcpCfg.oauth, false);
 
@@ -447,7 +447,7 @@ test('decision 2: a failed server start still closes the relay, so it cannot han
   );
 
   const relayUrl = serverRecords()[0].config.mcp['tessary-evals'].url;
-  assert.match(relayUrl, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/, 'the relay really did start, on a real loopback port');
+  assert.match(relayUrl, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/tessary-evals$/, 'the relay really did start, on a real loopback port');
   assert.ok(
     await relayRefusesConnections(relayUrl),
     'the relay must be closed once runAgent rejects, not left listening — that listening socket is the hang decision 2 fixes',
@@ -599,4 +599,17 @@ test('a session that never produced a turn fails as no result', async (t) => {
       return true;
     },
   );
+});
+
+test('an OpenCode that exits after it announced itself settles exited', async (t) => {
+  // Bug caught: a session never learns its OpenCode died and keeps answering 202.
+  const { startServer } = require('../agent-stream');
+  clearRecords();
+  const server = await startServer({});
+  t.after(() => server.close());
+
+  process.kill(serverRecords()[0].pid, 'SIGKILL');
+
+  const exit = await Promise.race([server.exited, new Promise((r) => setTimeout(() => r('not settled in 2s'), 2000))]);
+  assert.deepEqual(exit, { code: null, signal: 'SIGKILL' });
 });

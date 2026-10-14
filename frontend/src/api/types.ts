@@ -357,6 +357,12 @@ export type FlaggedAnswer = S["FlaggedAnswerView"];
 export type FlaggedAnswerPage = S["FlaggedAnswerPage"];
 
 /**
+ * The block a finding's owning adapter reports: the flagged rate against its reference, how a trial counts as
+ * flagged, the detector's tuning, and the display text the page shows around them.
+ */
+export type ClassifierDetail = S["ClassifierDetail"];
+
+/**
  * One finding, with the triage fields narrowed to the vocabulary the server writes.
  *
  * `triageVerdict` / `triageAction` are null until a run has recorded a ruling, and a run that never

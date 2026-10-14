@@ -52,6 +52,19 @@ public class FindingRepository {
             + "subject_id, subject_label, call_site_id, onset_at, last_seen_at, title, basis, severity, "
             + "sample_count, payload, evidence_counts, created_at";
 
+    /**
+     * The rows automatic escalation may pick, as {@code AND} clauses over {@code finding f}: open, never escalated,
+     * never ruled, observed over {@code :minCount} samples, and citing a trace. One home for
+     * {@link #listAutoEscalatable} and {@link #escalationCandidatesByKey}, so the two cannot disagree on eligibility.
+     */
+    private static final String AUTO_ESCALATABLE = "   AND f.status = '" + FindingRow.Status.OPEN + "'"
+            + "   AND f.escalated_at IS NULL"
+            + "   AND f.human_verdict_at IS NULL"
+            + "   AND f.triage_verdict IS NULL"
+            + "   AND f.sample_count >= :minCount"
+            + "   AND EXISTS (SELECT 1 FROM finding_evidence e"
+            + "                WHERE e.finding_id = f.id AND e.trace_id IS NOT NULL)";
+
     /** Every finding, ruled or not, still short of a settled negative. */
     private static final String LIVE = "status = 'open'";
 
@@ -199,6 +212,7 @@ public class FindingRepository {
                 FindingRow.SubjectKind.TOOL,
                 CauseKey.toolOf(causeKey),
                 CauseKey.toolOf(causeKey),
+                null,
                 observedCount,
                 callSiteId,
                 onsetAt,
@@ -215,6 +229,8 @@ public class FindingRepository {
      * judgements, under its own classifier, cause kind and subject.
      *
      * @param nativeCauseKey the classifier's own name for the cause, recorded in the payload vocabulary
+     * @param title the finding's headline for a cause {@link FindingTitle} has no sentence for, written on insert
+     *     and on every refresh; null for a cause that has one
      * @param eventAt the window's own EVENT time, mirroring {@link #recordShift}: written into {@code
      *     last_seen_at} on every write, and into {@code onset_at} when there is no onset yet. Malformed
      *     Output has no anchor of its own and passes its sweep's wall clock here unchanged; tool_error
@@ -241,6 +257,7 @@ public class FindingRepository {
             String subjectKind,
             String subjectId,
             String subjectLabel,
+            @Nullable String title,
             long observedCount,
             @Nullable String callSiteId,
             @Nullable String onsetAt,
@@ -251,10 +268,10 @@ public class FindingRepository {
         String payload = mergeVocabulary(evidenceJson, nativeVocabulary(causeKind, "", nativeCauseKey));
         return jdbc.sql("""
             INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                 subject_label, call_site_id, status, onset_at, last_seen_at,
+                                 subject_label, call_site_id, status, onset_at, last_seen_at, title,
                                  sample_count, payload, created_at, updated_at)
             SELECT :id, :pid, :classifier, :causeKey, :subjectKind, :subjectId, :subjectLabel, :callSiteId,
-                   'open', :onsetAt, :eventAt, :count, CAST(:payload AS jsonb), :now, :now
+                   'open', :onsetAt, :eventAt, :title, :count, CAST(:payload AS jsonb), :now, :now
              WHERE EXISTS (SELECT 1 FROM finding
                             WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey
                               AND status = 'open' AND triage_verdict IS NULL)
@@ -269,6 +286,8 @@ public class FindingRepository {
                 updated_at = EXCLUDED.updated_at,
                 -- The conflict target only ever matches an unruled row — see recordShift.
                 payload = EXCLUDED.payload,
+                -- A title with the spell's rates in it follows the spell, as the payload does.
+                title = EXCLUDED.title,
                 -- A row that went unrefreshed past :quietBefore had stopped firing, so this is a new
                 -- spell rather than the same one still running. Text comparison because both sides are
                 -- Instant.toString() — ISO-8601 UTC sorts lexicographically.
@@ -285,6 +304,7 @@ public class FindingRepository {
                 .param("subjectId", subjectId)
                 .param("subjectLabel", subjectLabel)
                 .param("callSiteId", callSiteId)
+                .param("title", title)
                 .param("count", observedCount)
                 .param("payload", payload)
                 .param("onsetAt", onsetAt == null ? eventAt : onsetAt)
@@ -307,6 +327,22 @@ public class FindingRepository {
                         + " WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey"
                         + "   AND status = 'open' AND triage_verdict = '" + FindingRow.TriageVerdict.POSITIVE + "'"
                         + " ORDER BY created_at DESC, id DESC LIMIT 1")
+                .param("pid", projectId)
+                .param("classifier", classifierKey)
+                .param("causeKey", causeKey)
+                .query((rs, n) -> map(rs))
+                .optional();
+    }
+
+    /**
+     * The open, unruled finding of a cause, or empty: the row {@link #recordRecomputedRate}'s conflict target
+     * refreshes. A writer reads what the spell opened with through it; {@link #findOpenByCause} is the ruled
+     * counterpart.
+     */
+    public Optional<FindingRow> findLiveByCause(String projectId, String classifierKey, String causeKey) {
+        return jdbc.sql("SELECT " + COLS + " FROM finding"
+                        + " WHERE project_id = :pid AND classifier_key = :classifier AND cause_key = :causeKey"
+                        + "   AND status = 'open' AND triage_verdict IS NULL")
                 .param("pid", projectId)
                 .param("classifier", classifierKey)
                 .param("causeKey", causeKey)
@@ -738,19 +774,36 @@ public class FindingRepository {
         if (classifierKeys.isEmpty()) return List.of();
         return jdbc.sql("SELECT " + COLS + " FROM finding f"
                         + " WHERE f.project_id = :pid AND f.classifier_key IN (:classifiers)"
-                        + "   AND f.status = '" + FindingRow.Status.OPEN + "'"
-                        + "   AND f.escalated_at IS NULL"
-                        + "   AND f.human_verdict_at IS NULL"
-                        + "   AND f.triage_verdict IS NULL"
-                        + "   AND f.sample_count >= :minCount"
-                        + "   AND EXISTS (SELECT 1 FROM finding_evidence e"
-                        + "                WHERE e.finding_id = f.id AND e.trace_id IS NOT NULL)"
+                        + AUTO_ESCALATABLE
                         + " ORDER BY f.sample_count DESC, f.onset_at ASC LIMIT :limit")
                 .param("pid", projectId)
                 .param("classifiers", classifierKeys)
                 .param("minCount", minSampleCount)
                 .param("limit", limit)
                 .query((rs, n) -> map(rs))
+                .list();
+    }
+
+    /**
+     * One claim per classifier key among the rows {@link #listAutoEscalatable} would admit, for keys outside
+     * {@code excludedKeys}: what each {@link FindingAdapter} is asked whether it owns. One row per key rather than
+     * every row, so an un-owned key with many open findings cannot fill a page before an owned one is seen.
+     *
+     * @param excludedKeys the keys the caller already escalates for; never empty
+     */
+    public List<FindingClaim> escalationCandidatesByKey(
+            String projectId, Collection<String> excludedKeys, long minSampleCount) {
+        if (excludedKeys.isEmpty()) {
+            throw new IllegalArgumentException("escalationCandidatesByKey needs at least one excluded key");
+        }
+        return jdbc.sql("SELECT DISTINCT ON (f.classifier_key) " + CLAIM_COLS + " FROM finding f"
+                        + " WHERE f.project_id = :pid AND f.classifier_key NOT IN (:excluded)"
+                        + AUTO_ESCALATABLE
+                        + " ORDER BY f.classifier_key, f.id")
+                .param("pid", projectId)
+                .param("excluded", excludedKeys)
+                .param("minCount", minSampleCount)
+                .query((rs, n) -> mapClaim(rs))
                 .list();
     }
 

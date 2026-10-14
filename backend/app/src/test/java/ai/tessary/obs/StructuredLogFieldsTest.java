@@ -12,6 +12,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import net.logstash.logback.encoder.LogstashEncoder;
@@ -29,9 +30,13 @@ class StructuredLogFieldsTest {
 
     /** Log through a real logger and render with the production encoder. */
     private static Captured capture(Runnable emit, String loggerName) {
+        return capture(emit, loggerName, Level.INFO);
+    }
+
+    private static Captured capture(Runnable emit, String loggerName, Level level) {
         LoggerContext ctx = (LoggerContext) LoggerFactory.getILoggerFactory();
         ch.qos.logback.classic.Logger logger = ctx.getLogger(loggerName);
-        logger.setLevel(Level.INFO);
+        logger.setLevel(level);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.setContext(ctx);
         appender.start();
@@ -90,6 +95,24 @@ class StructuredLogFieldsTest {
         assertEquals("ingest.batch.failed", captured.event().getMessage());
         assertTrue(captured.json().contains("\"count\":3"));
         assertTrue(captured.json().contains("boom"), "the throwable must still be attached, got: " + captured.json());
+    }
+
+    /** The bug: a DEBUG line whose every field is bounded cannot carry OPS, so turning DEBUG on never ships it. */
+    @Test
+    void aDebugLineCarriesItsMarker() {
+        String name = "test.structuredlog.debug";
+        var captured = capture(
+                () -> StructuredLog.debug(LoggerFactory.getLogger(name), Markers.OPS, "timeline.load")
+                        .field("events", 7)
+                        .log(),
+                name,
+                Level.DEBUG);
+
+        assertEquals(Level.DEBUG, captured.event().getLevel());
+        assertEquals(List.of(Markers.OPS), captured.event().getMarkerList());
+        assertEquals(
+                Map.of("event", "timeline.load", "events", 7),
+                captured.event().getKeyValuePairs().stream().collect(Collectors.toMap(kv -> kv.key, kv -> kv.value)));
     }
 
     /**

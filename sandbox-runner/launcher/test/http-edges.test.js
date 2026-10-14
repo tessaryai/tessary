@@ -9,21 +9,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { spawnLauncher, startLauncher } = require('./fixtures/launcher-harness');
-
-function request(port, method, urlPath, { body, auth } = {}) {
-  return new Promise((resolve, reject) => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (auth) headers.Authorization = auth;
-    const req = http.request({ host: '127.0.0.1', port, path: urlPath, method, headers }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
-    });
-    req.on('error', reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
-  });
-}
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnLauncher, startLauncher, request, tempDir } = require('./fixtures/launcher-harness');
 
 const E2B_ENV = { SANDBOX_BACKEND: 'e2b', E2B_API_KEY: 'fake-e2b-key', SANDBOX_API_KEY: 'testkey' };
 
@@ -79,10 +67,10 @@ test('cuts off a body over the size limit rather than reading it all, and keeps 
   }
 });
 
-test('only POST /rca, /triage and /authoring reach the analyzers; every other route is 404', async () => {
+test('only POST /rca, /triage and /runs reach the analyzers; every other route is 404', async () => {
   const { child, port } = await startLauncher(E2B_ENV);
   try {
-    for (const [method, urlPath] of [['GET', '/rca'], ['POST', '/grade'], ['POST', '/rca/extra'], ['PUT', '/triage'], ['GET', '/authoring'], ['POST', '/authoring/extra']]) {
+    for (const [method, urlPath] of [['GET', '/rca'], ['POST', '/grade'], ['POST', '/rca/extra'], ['PUT', '/triage'], ['GET', '/runs'], ['POST', '/runs/extra']]) {
       assert.deepEqual(
         await request(port, method, urlPath, { auth: 'Bearer testkey' }),
         { status: 404, body: { error: 'not found' } },
@@ -156,4 +144,146 @@ test('a docker backend with no SANDBOX_WORK_VOLUME refuses to boot', async () =>
   const code = await new Promise((resolve) => child.on('exit', resolve));
   assert.equal(code, 1, 'it must exit rather than serve requests that will each fail at mount time');
   assert.match(stderr, /requires SANDBOX_WORK_VOLUME/);
+});
+
+// ---- Launcher sessions: the front door ------------------------------------------------------
+
+const SESSION_START = {
+  lane: 'agent_run',
+  system_prompt: 'You help.',
+  files: {},
+  model: 'global.anthropic.claude-sonnet-4-6',
+  provider: 'BEDROCK',
+  credential: { provider: 'BEDROCK', aws_region: 'us-east-1', aws_access_key: 'a', aws_secret_key: 's' },
+  mcp_servers: [{ name: 'tessary', url: 'https://tessary.example.com/mcp', token: 'tsy_a_tok1' }],
+  idle_timeout_ms: 60000,
+  max_tool_calls_per_message: 40,
+};
+
+const SESSION_ROUTES = [
+  ['POST', '/sessions'],
+  ['POST', '/sessions/x/messages'],
+  ['POST', '/sessions/x/abort'],
+  ['GET', '/sessions/x/events'],
+  ['DELETE', '/sessions/x'],
+];
+
+test('every session route needs the launcher key before its body is read (a session route open to anyone who reaches the launcher)', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    for (const [method, urlPath] of SESSION_ROUTES) {
+      for (const auth of [undefined, 'Bearer wrong']) {
+        assert.deepEqual(
+          await request(port, method, urlPath, { auth, body: method === 'POST' ? SESSION_START : undefined }),
+          { status: 401, body: { error: 'unauthorized' } },
+          `${method} ${urlPath} with ${auth}`,
+        );
+      }
+    }
+  } finally {
+    child.kill();
+  }
+});
+
+test('a session path with another method or segment is 404 (a malformed session path that reaches the session router or a one-shot route)', async () => {
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    for (const [method, urlPath] of [
+      ['GET', '/sessions'], ['DELETE', '/sessions'], ['PUT', '/sessions/x'], ['POST', '/sessions/x'],
+      ['GET', '/sessions/x/messages'], ['POST', '/sessions/x/events'], ['POST', '/sessions/x/other'], ['POST', '/sessions/x/abort/y'],
+    ]) {
+      assert.deepEqual(
+        await request(port, method, urlPath, { auth: 'Bearer testkey' }),
+        { status: 404, body: { error: 'not found' } },
+        `${method} ${urlPath}`,
+      );
+    }
+  } finally {
+    child.kill();
+  }
+});
+
+test('POST /sessions refuses a bad body before any sandbox is spent (a caller error that spends a sandbox and reads as a retryable outage)', async () => {
+  // A docker backend whose socket does not exist: a start that got past validation would fail as
+  // an orchestration error at its first daemon call, never as bad_request.
+  const scratch = tempDir('http-edges-sessions-');
+  const { child, port } = await startLauncher({
+    SANDBOX_BACKEND: 'docker',
+    DOCKER_SOCKET_PATH: path.join(scratch, 'missing.sock'),
+    SANDBOX_WORK_VOLUME: 'vol',
+    LAUNCHER_WORK_DIR: path.join(scratch, 'work'),
+    SANDBOX_API_KEY: 'testkey',
+  });
+  try {
+    const garbled = await rawPost(port, '/sessions', '{"lane": tsy_secret');
+    assert.equal(garbled.status, 502);
+    assert.equal(garbled.body.kind, 'bad_request');
+    assert.equal(garbled.body.detail, 'invalid json body');
+
+    const rows = [
+      [{ lane: undefined }, 'session.js: lane must be a non-empty string'],
+      [{ lane: '' }, 'session.js: lane must be a non-empty string'],
+      [{ credential: undefined }, 'session.js: missing or invalid credential (no credential object on the request'],
+      [{ credential: { provider: 'GEMINI' } }, 'session.js: missing or invalid credential (GEMINI credential is missing api_key'],
+      [{ model: '' }, 'session.js: model must be a non-empty string'],
+      [{ model: 7 }, 'session.js: model must be a non-empty string'],
+      [{ idle_timeout_ms: undefined }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: 0 }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: 1.5 }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ idle_timeout_ms: '60000' }, 'session.js: idle_timeout_ms must be a positive integer'],
+      [{ credential: { provider: 'ANTHROPIC', egress_secret: 'tessary-ai-anthropic' } }, 'session.js: an egress_secret credential needs SANDBOX_BACKEND=e2b (got docker)'],
+      [{ system_prompt: undefined }, 'session.js: system_prompt must be a non-empty string'],
+      [{ system_prompt: '' }, 'session.js: system_prompt must be a non-empty string'],
+      [{ files: [] }, 'session.js: files must map relative paths to strings'],
+      [{ files: { 'a.md': 7 } }, 'session.js: files must map relative paths to strings'],
+      [{ mcp_servers: undefined }, 'session.js: mcp_servers must be an array'],
+      [{ mcp_servers: [{ name: 'Tessary', url: 'http://backend:8080/mcp', token: 't' }] }, 'session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$'],
+      [{ mcp_servers: [{ name: 'x_y', url: 'http://backend:8080/mcp', token: 't' }] }, 'session.js: each mcp_servers name must match ^[a-z][a-z0-9-]{0,31}$'],
+      [{ mcp_servers: [SESSION_START.mcp_servers[0], SESSION_START.mcp_servers[0]] }, 'session.js: mcp_servers name repeated: tessary'],
+      [{ mcp_servers: [{ name: 'tessary', url: 'http://backend:8080/mcp' }] }, 'session.js: mcp_servers tessary needs a url and a token'],
+      [{ max_tool_calls_per_message: undefined }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 0 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 1001 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+      [{ max_tool_calls_per_message: 2.5 }, 'session.js: max_tool_calls_per_message must be an integer from 1 to 1000'],
+    ];
+    for (const [change, detail] of rows) {
+      const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body: { ...SESSION_START, ...change } });
+      assert.equal(res.status, 502, JSON.stringify(change));
+      assert.equal(res.body.kind, 'bad_request', JSON.stringify(change));
+      assert.ok(res.body.detail.startsWith(detail), `${JSON.stringify(change)}: ${res.body.detail}`);
+    }
+  } finally {
+    child.kill();
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('on the e2b backend a session whose MCP server has no url or points at localhost is refused before any sandbox (a session sandbox spent on a callback the microVM can never reach)', async () => {
+  // No fake SDK: the refusal comes before the launcher requires `e2b`, which is not installed here.
+  const { child, port } = await startLauncher(E2B_ENV);
+  try {
+    const publicServer = SESSION_START.mcp_servers[0];
+    for (const url of ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://[::1]:8000', 'http://0.0.0.0:8000', 'http://[::ffff:127.0.0.1]:8000', undefined, 7]) {
+      const body = { ...SESSION_START, mcp_servers: [publicServer, { name: 'notes', url, token: 'tsy_a_tok1' }] };
+      const res = await request(port, 'POST', '/sessions', { auth: 'Bearer testkey', body });
+      assert.equal(res.status, 502, String(url));
+      assert.equal(res.body.kind, 'bad_request', String(url));
+      assert.equal(res.body.detail, 'session.js: mcp_servers[1].url is missing or unreachable from an E2B microVM', String(url));
+    }
+  } finally {
+    child.kill();
+  }
+});
+
+test('a session env value that is not a positive integer refuses to boot (a bad env that makes every session timer fire at once)', async () => {
+  for (const [name, value] of [['SANDBOX_SESSION_CAP', 'abc'], ['SANDBOX_SESSION_BUFFER', '0'], ['SANDBOX_SESSION_MAX_MS', '-5'], ['SANDBOX_SESSION_PORT', '1.5']]) {
+    const child = spawnLauncher({ ...E2B_ENV, [name]: value });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    const killer = setTimeout(() => child.kill(), 3000);
+    const code = await new Promise((resolve) => child.on('exit', resolve));
+    clearTimeout(killer);
+    assert.equal(code, 1, `${name}=${value} must stop the boot, not make every timer fire at once`);
+    assert.match(stderr, new RegExp(`${name} must be a positive integer`));
+  }
 });

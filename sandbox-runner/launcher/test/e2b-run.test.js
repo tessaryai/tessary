@@ -99,7 +99,7 @@ test('a script that exits non-zero answers script_exit with its spend and sandbo
   assert.deepEqual(calls.map((c) => c.op), ['create', 'write', 'run', 'getInfo', 'kill']);
 });
 
-test('POST /authoring runs authoring.js with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
+test('POST /runs runs run.js with the clone fields and system prompt on the VM disk, and the credential off it', async () => {
   const payload = {
     ...PAYLOAD,
     clone_url: 'https://x-access-token:t@github.com/acme/app.git',
@@ -108,10 +108,10 @@ test('POST /authoring runs authoring.js with the clone fields and system prompt 
     files: { 'brief.md': 'find timeouts' },
   };
 
-  const { status, body, calls } = await runOnce('ok', '/authoring', {}, payload);
+  const { status, body, calls } = await runOnce('ok', '/runs', {}, payload);
 
   assert.deepEqual({ status, body }, { status: 200, body: { verdict: 'supported' } });
-  assert.equal(calls[2].cmd, 'node /home/user/authoring.js /home/user/input.json');
+  assert.equal(calls[2].cmd, 'node /home/user/run.js /home/user/input.json');
   const written = JSON.parse(calls[1].content);
   assert.equal(written.clone_url, 'https://x-access-token:t@github.com/acme/app.git');
   assert.equal(written.head_sha, 'abc123');

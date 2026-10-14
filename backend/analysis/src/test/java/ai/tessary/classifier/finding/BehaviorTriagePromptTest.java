@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDetectionWriteRepository;
 import ai.tessary.classifier.catalog.BuiltInDetector;
+import ai.tessary.classifier.catalog.ClassifierMethodCard;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.ObserverProperties;
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -58,8 +60,17 @@ class BehaviorTriagePromptTest {
         return engine(observerProps, mock(ClassifierDetectionWriteRepository.class));
     }
 
+    private static BehaviorTriageEngine engine(ObserverProperties observerProps, FindingAdapters adapters) {
+        return engine(observerProps, mock(ClassifierDetectionWriteRepository.class), adapters);
+    }
+
     private static BehaviorTriageEngine engine(
             ObserverProperties observerProps, ClassifierDetectionWriteRepository detections) {
+        return engine(observerProps, detections, FindingAdapters.of(List.of()));
+    }
+
+    private static BehaviorTriageEngine engine(
+            ObserverProperties observerProps, ClassifierDetectionWriteRepository detections, FindingAdapters adapters) {
         return new BehaviorTriageEngine(
                 List.of(),
                 new ClassifierProperties(),
@@ -68,7 +79,8 @@ class BehaviorTriagePromptTest {
                 mock(ProjectRepository.class),
                 mock(OrgMembershipRepository.class),
                 new ObjectMapper(),
-                detections);
+                detections,
+                adapters);
     }
 
     private static FindingRow finding(
@@ -345,5 +357,91 @@ class BehaviorTriagePromptTest {
 
         assertFalse(prompt.contains("`dossier/method.md`"));
         assertTrue(prompt.contains("This detector has no method card; its rule is whatever its author configured."));
+    }
+
+    /** An engine with one adapter that owns {@code custom-x} and writes {@code # Method x}. */
+    private static BehaviorTriageEngine engineOwningCustomX() {
+        return engine(
+                new ObserverProperties(),
+                FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n", "# Method x\n", null))));
+    }
+
+    /**
+     * An owned finding's dossier is {@code finding.md} plus its adapter's {@code method.md}, and {@code finding.md}
+     * points at it. The bugs are a custom finding triaged with no method and a groundedness-only file leaking in.
+     */
+    @Test
+    void anOwnedFindingShipsItsAdaptersMethod() {
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
+
+        Map<String, String> dossier = engineOwningCustomX().dossier(JOB, row);
+
+        assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
+        assertEquals("# Method x\n", dossier.get("method.md"));
+        assertEquals(
+                List.of("- cause: `ext_rate`. Read the matching section of `dossier/method.md`."),
+                findingMd(engineOwningCustomX(), row)
+                        .lines()
+                        .filter(line -> line.startsWith("- cause: "))
+                        .toList());
+    }
+
+    /**
+     * The triage dossier's {@code method.md} is the owner's triage method, and its RCA method appears in no triage
+     * file. The bug is the RCA method, written for a cause hunt, ruling a finding.
+     */
+    @Test
+    void theTriageDossierCarriesTheOwnersTriageMethod() {
+        FindingRow row = finding("owned-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
+        BehaviorTriageEngine engine = engine(
+                new ObserverProperties(),
+                FindingAdapters.of(List.of(
+                        FakeFindingAdapter.owning("owned-x", "# Triage method\n", "# RCA method\n", "# Evidence\n"))));
+
+        Map<String, String> dossier = engine.dossier(JOB, row);
+
+        assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
+        assertEquals("# Triage method\n", dossier.get("method.md"));
+        assertFalse(Objects.requireNonNull(dossier.get("finding.md")).contains("# RCA method"));
+    }
+
+    /** An owned finding's user message lists {@code method.md}. The bug is the no-card branch taken for it. */
+    @Test
+    void anOwnedFindingsPromptListsTheMethodFile() {
+        FindingRow row = finding("custom-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
+
+        ObserverProperties props = new ObserverProperties();
+        props.getAgentic().setMaxTurns(12);
+        BehaviorTriageEngine engine = engine(
+                props,
+                FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n", "# Method x\n", null))));
+
+        assertEquals(
+                "Rule on finding `" + row.id() + "`.\n\n"
+                        + "The dossier is under `./dossier/`:\n"
+                        + "- `dossier/finding.md`\n"
+                        + "- `dossier/method.md`\n\n"
+                        + "You have 10 turns. Every tool call is a turn. Record your ruling before they run out.\n",
+                engine.buildPrompt(JOB, row));
+    }
+
+    /**
+     * An adapter's {@code method.md} comes after the built-in card for the key, as the extension interface says. The
+     * bug is an adapter that owns a built-in key replacing the card the built-in detector's findings are ruled by.
+     */
+    @Test
+    void theBuiltInCardWinsOverAnAdaptersMethod() {
+        FindingRow row =
+                finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
+        BehaviorTriageEngine engine = engine(
+                new ObserverProperties(),
+                FindingAdapters.of(List.of(FakeFindingAdapter.owning(
+                        BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n", "# Method x\n", null))));
+
+        assertEquals(
+                ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.TOOL_ERROR),
+                engine.dossier(JOB, row).get("method.md"));
     }
 }

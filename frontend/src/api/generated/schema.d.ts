@@ -2655,6 +2655,7 @@ export interface components {
         };
         BehaviorFindingDetailView: {
             armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
+            classifierDetail: components["schemas"]["ClassifierDetail"] | null;
             finding: components["schemas"]["BehaviorFindingView"];
             frustration: components["schemas"]["FrustrationDetail"] | null;
             groundedness: components["schemas"]["GroundednessDetail"] | null;
@@ -2749,6 +2750,7 @@ export interface components {
         CaseDetailView: {
             absorb_available: boolean;
             case: components["schemas"]["CaseView"];
+            classifier_detail: components["schemas"]["ClassifierDetail"] | null;
             detector_available: boolean;
             events: components["schemas"]["CaseEventView"][];
             exemplars: components["schemas"]["CaseExemplarView"][];
@@ -3001,6 +3003,21 @@ export interface components {
             metric_baselines: components["schemas"]["MetricBaselineView"][] | null;
             sweep: components["schemas"]["SweepView"];
         };
+        ClassifierDetail: {
+            /** Format: int64 */
+            arlTarget: number | null;
+            /** Format: int64 */
+            baselineFlagged: number | null;
+            flagLabel: string | null;
+            /** Format: double */
+            flagThreshold: number | null;
+            /** Format: int64 */
+            learningUntil: number | null;
+            /** Format: double */
+            minDecisionInterval: number | null;
+            rate: components["schemas"]["RateDetail"];
+            words: components["schemas"]["Words"];
+        };
         ClassifierEventView: {
             classifier_id: string;
             /** Format: int32 */
@@ -3062,6 +3079,7 @@ export interface components {
             mode: string;
             name: string;
             readiness: string | null;
+            shown_in_trace_views: boolean;
             updated_at: string;
             /** Format: int32 */
             version: number;
@@ -3563,7 +3581,7 @@ export interface components {
             /** @enum {string} */
             group: "agent_vm" | "decision_calls";
             /** @enum {string} */
-            id: "rca" | "triage" | "authoring" | "frustration";
+            id: "rca" | "triage" | "agent_run" | "frustration";
             label: string;
             provider_options: components["schemas"]["ProviderOptionView"][];
         };
@@ -3889,7 +3907,7 @@ export interface components {
         ProjectModelSetting: {
             created_at: string;
             /** @enum {string} */
-            lane: "rca" | "triage" | "authoring" | "frustration";
+            lane: "rca" | "triage" | "agent_run" | "frustration";
             model_key: string;
             project_id: string;
             reasoning_effort: string | null;
@@ -4852,6 +4870,14 @@ export interface components {
             days: number;
             from: string;
             to: string;
+        };
+        Words: {
+            figureNote: string;
+            referenceDetail: string | null;
+            referenceLabel: string;
+            thresholdLine: string | null;
+            unitMany: string;
+            unitOne: string;
         };
     };
     responses: never;

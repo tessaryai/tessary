@@ -22,8 +22,13 @@ import java.util.regex.Pattern;
  *     {@link DetectionTableRegistry#unionSql()} — validated below so only an identifier the
  *     registering module itself chose can ever reach a query string
  * @param grain the {@code subject_kind} literal this classifier's rows carry in the stitched union
+ * @param shownInTraceViews whether the trace and session views mark this classifier's flags and offer it in their
+ *     {@code detected_by} filter
+ * @param clearable whether the table carries {@code cleared_at}, set when a person resolves a flag as a false alarm;
+ *     a cleared row is not a flag. {@link DetectionTableSchemaCheck} refuses boot when the column is missing
  */
-public record DetectionTable(String detectorKind, String table, Grain grain) {
+public record DetectionTable(
+        String detectorKind, String table, Grain grain, boolean shownInTraceViews, boolean clearable) {
 
     private static final Pattern TABLE_NAME = Pattern.compile("^[a-z_][a-z0-9_]*$");
 
