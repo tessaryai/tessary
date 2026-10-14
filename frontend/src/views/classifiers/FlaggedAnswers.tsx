@@ -13,9 +13,9 @@
  * that string. So a mark is a slice at those offsets and nothing else: re-splitting the text into sentences
  * here could disagree with the model's own split and mark a sentence it never flagged.
  *
- * <h2>Not FrustratedConversations</h2>
- * The paging, the filter and the frame are the same as the frustrated sessions list, and the pane is not:
- * that one reads the session's traces, this one draws the flagged-answer payload the finding carries, which
+ * <h2>Not FlaggedList</h2>
+ * The paging, the filter and the frame are the same as the flagged list, and the pane is not:
+ * that one reads the row's traces, this one draws the flagged-answer payload the finding carries, which
  * is what was scored rather than what the trace page would show.
  */
 import { useEffect, useId, useState } from "react";

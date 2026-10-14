@@ -56,8 +56,13 @@ import { RateChart, RatePins } from "../classifiers/rateStory";
 import { ShiftChart, ShiftPins } from "../classifiers/shiftStory";
 import { LeakPins, LeakTimeline } from "../classifiers/secretStory";
 import { HowOutputsBroke, MalformedRate } from "../classifiers/malformedStory";
-import { FrustrationRate } from "../classifiers/frustrationStory";
-import { ConversationFilter, FrustratedConversations } from "../classifiers/FrustratedConversations";
+import {
+  FRUSTRATION_LIST_COPY,
+  FrustrationRate,
+  frustrationLoader,
+  frustrationRows,
+} from "../classifiers/frustrationStory";
+import { ConversationFilter, FlaggedList } from "../classifiers/FlaggedList";
 import { GroundednessRate } from "../classifiers/groundednessStory";
 import { FlaggedAnswers } from "../classifiers/FlaggedAnswers";
 import { Dot, ListChassis, StateDot, detectorLabel, displayCallSite, timeAgo } from "./bits";
@@ -869,6 +874,7 @@ function FrustrationList({
   onFilter: (key: string) => void;
   basePath: string;
 }) {
+  const { api } = useTenant();
   const index = filter === "all" ? -1 : Number(filter);
   const cause = index >= 0 ? causes[index] : undefined;
   const options = [
@@ -883,13 +889,11 @@ function FrustrationList({
         {options.length > 1 && (
           <ConversationFilter options={options} value={cause ? filter : "all"} onChange={onFilter} />
         )}
-        <FrustratedConversations
-          findingId={findingId}
-          first={{
-            rows: frustration.conversations,
-            nextCursor: frustration.conversationsNextCursor,
-            total: frustration.rate.failuresCur,
-          }}
+        <FlaggedList
+          {...FRUSTRATION_LIST_COPY}
+          listKey={findingId}
+          first={frustrationRows(frustration)}
+          loadPage={frustrationLoader(api, findingId)}
           filter={cause && rcaReportId ? { rcaReport: rcaReportId, index } : undefined}
           readAhead={
             rcaReportId

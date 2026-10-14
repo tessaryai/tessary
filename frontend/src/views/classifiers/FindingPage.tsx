@@ -34,8 +34,14 @@ import {
 import { RateChart, RatePins, formatRate, rateToneOf, rateToneTextClass } from "./rateStory";
 import { LeakPins, LeakTimeline, SecretHeader } from "./secretStory";
 import { HowOutputsBroke, MalformedHeader, MalformedRate } from "./malformedStory";
-import { FrustrationHeader, FrustrationRate } from "./frustrationStory";
-import { FrustratedConversations } from "./FrustratedConversations";
+import {
+  FRUSTRATION_LIST_COPY,
+  FrustrationHeader,
+  FrustrationRate,
+  frustrationLoader,
+  frustrationRows,
+} from "./frustrationStory";
+import { FlaggedList } from "./FlaggedList";
 import { GroundednessHeader, GroundednessRate } from "./groundednessStory";
 import { FlaggedAnswers } from "./FlaggedAnswers";
 import { EvidenceTable } from "./EvidenceTable";
@@ -299,13 +305,11 @@ export function FindingPage() {
                   : "Each flagged message with the turns before it"}
               </span>
             </div>
-            <FrustratedConversations
-              findingId={findingId}
-              first={{
-                rows: frustration.conversations,
-                nextCursor: frustration.conversationsNextCursor,
-                total: frustration.rate.failuresCur,
-              }}
+            <FlaggedList
+              {...FRUSTRATION_LIST_COPY}
+              listKey={findingId}
+              first={frustrationRows(frustration)}
+              loadPage={frustrationLoader(api, findingId)}
               basePath={basePath}
             />
           </section>
