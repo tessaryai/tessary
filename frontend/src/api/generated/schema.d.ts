@@ -3079,6 +3079,7 @@ export interface components {
             mode: string;
             name: string;
             readiness: string | null;
+            shown_in_trace_views: boolean;
             updated_at: string;
             /** Format: int32 */
             version: number;

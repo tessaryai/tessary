@@ -111,6 +111,7 @@ function classifier(over: Partial<Classifier> = {}): Classifier {
     description: null,
     mode: "discovery",
     readiness: null,
+    shown_in_trace_views: true,
     version: 1,
     ...over,
   };

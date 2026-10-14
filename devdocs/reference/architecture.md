@@ -291,7 +291,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 | `core` | `web`, `model`, `apidoc`, `ops`, `crypto`, `db`, `config`, `telemetry` (the transport/config/instance-id half — see `surfaces`'s `telemetry` above), `llmspi`, the Liquibase changelog, the schema-column generator |
 | `test-support` | `TestPostgres` + its context initializer, the `ScriptedHttpClient` and `LoopbackHttpStub` HTTP doubles; test scope in `app`, `substrate`, `product` and `analysis` |
 | `contract` | `open/contract` — the checked-in canonical OpenAPI spec |
-| `shared` | `open/{errors,jobqueue,media,obs}`, `detection/` (per-classifier detection-table registry: `DetectionTable`, `DetectionTableRegistry`) |
+| `shared` | `open/{errors,jobqueue,media,obs}`, `detection/` (per-classifier detection-table registry: `DetectionTable`, with the two flags `shownInTraceViews` and `clearable`, and `DetectionTableRegistry`, which hands `TraceDetectionRepository` the shown tables) |
 
 The quality gate — surefire, compiler/NullAway, forbiddenapis, SpotBugs, PMD, Spotless — is declared
 once in the parent's `pluginManagement`; a module activates it with a bare `<plugin>` stub and cannot

@@ -601,6 +601,7 @@ const SECRET_LEAK_CLASSIFIER: components["schemas"]["ClassifierView"] = {
   created_at: T0,
   updated_at: T0,
   readiness: null,
+  shown_in_trace_views: false,
   call_site_ids: null,
 };
 

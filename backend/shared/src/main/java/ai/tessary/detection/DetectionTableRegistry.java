@@ -65,6 +65,24 @@ public class DetectionTableRegistry {
     }
 
     /**
+     * The tables the trace and session views read flags from, one per registered kind that is shown there, sorted by
+     * table name and then kind. Not deduplicated by table: each kind's flags are told apart by its classifier rows'
+     * {@code detector}.
+     */
+    public List<DetectionTable> shownInTraceViews() {
+        return byKind.values().stream()
+                .filter(DetectionTable::shownInTraceViews)
+                .sorted(Comparator.comparing(DetectionTable::table).thenComparing(DetectionTable::detectorKind))
+                .toList();
+    }
+
+    /** True when the trace and session views show the flags of {@code detectorKind}. */
+    public boolean showsInTraceViews(String detectorKind) {
+        DetectionTable t = byKind.get(detectorKind);
+        return t != null && t.shownInTraceViews();
+    }
+
+    /**
      * The stitched union over every registered table, thirteen columns per arm. Callers wrap this
      * in parentheses with an alias, {@code "(" + unionSql() + ") d"}, the same way a view name
      * would be referenced.

@@ -4798,6 +4798,9 @@
               "null"
             ]
           },
+          "shown_in_trace_views" : {
+            "type" : "boolean"
+          },
           "updated_at" : {
             "type" : "string"
           },
@@ -4819,6 +4822,7 @@
           "mode",
           "name",
           "readiness",
+          "shown_in_trace_views",
           "updated_at",
           "version"
         ],
