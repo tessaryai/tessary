@@ -9,8 +9,10 @@ import org.jspecify.annotations.Nullable;
  * Claims the findings a classifier outside the built-in catalog filed in the shared {@code finding} table, so they
  * get what a built-in's findings get: Layer-2 escalation ({@code BehaviorTriageSource.analyze} and
  * {@code listAutoEscalatable}), a {@code method.md} in the triage dossier ({@code BehaviorTriageEngine.methodCard}),
- * a {@code method.md} and an {@code evidence.md} in the RCA dossier ({@code RcaAnalysisService}), and a
- * detector-state write when a person absorbs one ({@code BehaviorTriageSource.resolve} and {@code repin}).
+ * a {@code method.md} and an {@code evidence.md} in the RCA dossier ({@code RcaAnalysisService}), a
+ * {@code classifierDetail} on the finding and case views ({@code BehaviorTriageSource.detail},
+ * {@code CaseService.detail}), and a detector-state write when a person absorbs one
+ * ({@code BehaviorTriageSource.resolve} and {@code repin}).
  *
  * <p>Consumers reach adapters through {@link FindingAdapters} only. The open edition ships none, and then every
  * finding is handled exactly as before.
@@ -40,6 +42,12 @@ public interface FindingAdapter {
      * the fenced payload. The caller cuts the text at the dossier budget and states the cut.
      */
     Optional<String> evidence(FindingClaim finding, EvidenceContext context);
+
+    /**
+     * The numbers and display text the finding and case pages show for an owned finding, or empty when the classifier
+     * reports none. Read on every page load and by {@code get_finding}.
+     */
+    Optional<ClassifierDetail> detail(FindingRow finding);
 
     /**
      * The detector-state half of a person's "Legitimate, absorb" on an owned finding or its case.

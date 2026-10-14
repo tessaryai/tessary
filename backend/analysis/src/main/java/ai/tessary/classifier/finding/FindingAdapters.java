@@ -67,6 +67,11 @@ public final class FindingAdapters {
         return ownerOf(finding).flatMap(adapter -> adapter.rcaMethod(finding));
     }
 
+    /** The owner's page detail for this finding, or empty when no adapter owns it or the owner reports none. */
+    public Optional<ClassifierDetail> detail(FindingRow finding) {
+        return ownerOf(finding.claim()).flatMap(adapter -> adapter.detail(finding));
+    }
+
     /** The owner's RCA {@code evidence.md}, or empty when no adapter owns the finding or the owner has none. */
     public Optional<String> evidence(FindingClaim finding, EvidenceContext context) {
         return ownerOf(finding).flatMap(adapter -> adapter.evidence(finding, context));

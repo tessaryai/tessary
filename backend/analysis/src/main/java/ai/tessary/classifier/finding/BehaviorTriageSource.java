@@ -222,6 +222,7 @@ public class BehaviorTriageSource implements TriageSource {
                 secretLeaks.detail(finding),
                 frustrations.detail(finding),
                 groundednessDetail.detail(finding),
+                adapters.detail(finding).orElse(null),
                 failed));
     }
 

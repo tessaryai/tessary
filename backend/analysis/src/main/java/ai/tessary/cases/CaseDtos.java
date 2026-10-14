@@ -2,6 +2,7 @@
 package ai.tessary.cases;
 
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.GroundednessDetail;
+import ai.tessary.classifier.finding.ClassifierDetail;
 import ai.tessary.classifier.frustration.FrustrationEvidence.FrustrationDetail;
 import ai.tessary.classifier.malformed.MalformedOutputEvidence.MalformedDetail;
 import ai.tessary.classifier.metric.MetricFindingEvidence.ShiftDetail;
@@ -314,6 +315,9 @@ public final class CaseDtos {
             @JsonProperty("secret_leak") @Nullable SecretLeakDetail secretLeak,
             @Nullable FrustrationDetail frustration,
             @Nullable GroundednessDetail groundedness,
+            /** The owning adapter's detail for the case's newest finding; see
+             *  {@link ai.tessary.classifier.finding.FindingAdapters#detail}. */
+            @JsonProperty("classifier_detail") @Nullable ClassifierDetail classifierDetail,
             @JsonProperty("rca_available") boolean rcaAvailable,
             @JsonProperty("absorb_available") boolean absorbAvailable,
             @JsonProperty("detector_available") boolean detectorAvailable) {}

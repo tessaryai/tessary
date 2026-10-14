@@ -21,6 +21,7 @@ public final class FakeFindingAdapter implements FindingAdapter {
     private final @Nullable String triageMethod;
     private final @Nullable String rcaMethod;
     private final @Nullable String evidence;
+    private final @Nullable ClassifierDetail detail;
     private final @Nullable RuntimeException failure;
     private final List<Absorbed> calls = new ArrayList<>();
     private final List<EvidenceContext> evidenceContexts = new ArrayList<>();
@@ -30,11 +31,13 @@ public final class FakeFindingAdapter implements FindingAdapter {
             @Nullable String triageMethod,
             @Nullable String rcaMethod,
             @Nullable String evidence,
+            @Nullable ClassifierDetail detail,
             @Nullable RuntimeException failure) {
         this.ownedKey = ownedKey;
         this.triageMethod = triageMethod;
         this.rcaMethod = rcaMethod;
         this.evidence = evidence;
+        this.detail = detail;
         this.failure = failure;
     }
 
@@ -44,12 +47,17 @@ public final class FakeFindingAdapter implements FindingAdapter {
      */
     public static FakeFindingAdapter owning(
             String ownedKey, @Nullable String triageMethod, @Nullable String rcaMethod, @Nullable String evidence) {
-        return new FakeFindingAdapter(ownedKey, triageMethod, rcaMethod, evidence, null);
+        return new FakeFindingAdapter(ownedKey, triageMethod, rcaMethod, evidence, null, null);
+    }
+
+    /** The same adapter, reporting {@code detail} for every finding it owns. */
+    public FakeFindingAdapter reporting(ClassifierDetail detail) {
+        return new FakeFindingAdapter(ownedKey, triageMethod, rcaMethod, evidence, detail, failure);
     }
 
     /** Owns {@code ownedKey} and throws {@code failure} from every {@code absorbed} call. */
     public static FakeFindingAdapter failingToAbsorb(String ownedKey, RuntimeException failure) {
-        return new FakeFindingAdapter(ownedKey, "# Method\n", "# Method\n", null, failure);
+        return new FakeFindingAdapter(ownedKey, "# Method\n", "# Method\n", null, null, failure);
     }
 
     @Override
@@ -71,6 +79,11 @@ public final class FakeFindingAdapter implements FindingAdapter {
     public Optional<String> evidence(FindingClaim finding, EvidenceContext context) {
         evidenceContexts.add(context);
         return Optional.ofNullable(evidence);
+    }
+
+    @Override
+    public Optional<ClassifierDetail> detail(FindingRow finding) {
+        return Optional.ofNullable(detail);
     }
 
     @Override

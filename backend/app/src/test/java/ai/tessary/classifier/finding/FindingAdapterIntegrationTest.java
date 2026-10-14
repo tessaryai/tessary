@@ -4,10 +4,16 @@ package ai.tessary.classifier.finding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import ai.tessary.cases.CaseDetection;
+import ai.tessary.cases.CaseKey;
+import ai.tessary.cases.CaseRepository;
+import ai.tessary.cases.CaseRow;
+import ai.tessary.cases.CaseService;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.finding.TriageSource.Escalatable;
 import ai.tessary.classifier.finding.dossier.EvidenceContext;
+import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -41,6 +47,17 @@ class FindingAdapterIntegrationTest {
 
     private static final String OWNED_KEY = "custom-x";
     private static final String METHOD = "# Method x\n";
+    private static final ClassifierDetail DETAIL = new ClassifierDetail(
+            new RateDetail(
+                    "cs-1", 0.02, 0.09, 7.0, 400, 120, 11, List.of(), false, List.of(), null, null, null, "up", 6.2,
+                    4.0, 0.3, 0.5),
+            8L,
+            "flagged",
+            0.7,
+            500L,
+            4.0,
+            null,
+            new ClassifierDetail.Words("reply", "replies", "since onset", "learned rate", null, null));
 
     @TestConfiguration
     static class AdapterConfig {
@@ -80,6 +97,11 @@ class FindingAdapterIntegrationTest {
         }
 
         @Override
+        public Optional<ClassifierDetail> detail(FindingRow finding) {
+            return Optional.of(DETAIL);
+        }
+
+        @Override
         public void absorbed(FindingRow finding, @Nullable String userId, String now) {
             String transaction = TransactionSynchronizationManager.isActualTransactionActive()
                     ? TransactionSynchronizationManager.getCurrentTransactionName()
@@ -113,6 +135,12 @@ class FindingAdapterIntegrationTest {
 
     @Autowired
     RecordingAdapter adapter;
+
+    @Autowired
+    CaseRepository cases;
+
+    @Autowired
+    CaseService caseService;
 
     /** The candidate read (one row per key, keys outside the built-in list) and the shared eligibility predicate
      *  admit the owned key's finding and not an un-owned custom key's. */
@@ -189,6 +217,39 @@ class FindingAdapterIntegrationTest {
         FindingRow row = findings.findById(pid, id).orElseThrow();
         assertEquals(FindingRow.TriageVerdict.NEGATIVE, row.triageVerdict());
         assertNotNull(row.humanVerdictAt());
+    }
+
+    /**
+     * A case over an owned finding carries the owner's detail, read from the case's newest finding. The bug is a
+     * case page with the owner's numbers missing while the finding page beside it has them.
+     */
+    @Test
+    @DisplayName("the case view carries the owning adapter's detail")
+    void theCaseViewCarriesTheOwnersDetail() {
+        String pid = project("fa-case-detail");
+        String id = finding(pid, OWNED_KEY, "clf-owned");
+        CaseRow row = cases.open(
+                        pid,
+                        new CaseDetection(
+                                new CaseKey(
+                                        CaseRow.Detector.CLASSIFIER,
+                                        CaseRow.SubjectKind.CLASSIFIER,
+                                        "clf-owned",
+                                        "rate"),
+                                "cs-1",
+                                null,
+                                id,
+                                "the rate rose",
+                                "because",
+                                0.4,
+                                Instant.parse("2026-07-01T10:00:00Z"),
+                                null,
+                                null,
+                                null),
+                        Instant.now())
+                .orElseThrow();
+
+        assertEquals(DETAIL, caseService.detail(pid, row.id()).classifierDetail());
     }
 
     // ---- fixtures ---------------------------------------------------------------------------------

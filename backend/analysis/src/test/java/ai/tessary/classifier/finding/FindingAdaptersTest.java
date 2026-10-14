@@ -107,6 +107,11 @@ class FindingAdaptersTest {
         }
 
         @Override
+        public Optional<ClassifierDetail> detail(FindingRow finding) {
+            return delegate.detail(finding);
+        }
+
+        @Override
         public void absorbed(FindingRow finding, @Nullable String userId, String now) {
             delegate.absorbed(finding, userId, now);
         }

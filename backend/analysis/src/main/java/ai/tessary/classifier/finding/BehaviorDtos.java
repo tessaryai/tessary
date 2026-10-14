@@ -212,11 +212,18 @@ public final class BehaviorDtos {
              * site's learned rate, and the flagged answers the finding cites with the sentences marked in each.
              * DB-backed; see {@link ai.tessary.classifier.detector.groundedness.GroundednessDetailService#detail}.
              */
-            @Nullable GroundednessDetail groundedness) {
+            @Nullable GroundednessDetail groundedness,
+            /**
+             * Set on a finding an adapter owns and reports numbers for: the flagged rate against its reference
+             * and the display text the page shows. Supplied by the owner through
+             * {@link FindingAdapters#detail}, and independent of the cause-kind blocks above.
+             */
+            @Nullable ClassifierDetail classifierDetail) {
 
         /**
-         * The detail view, with the DB-backed blocks the caller read for this finding's cause and its
-         * dead-lettered triage when it has one; see {@link BehaviorFindingView#of(FindingRow, FailedTriage)}.
+         * The detail view, with the DB-backed blocks the caller read for this finding's cause, the owning
+         * adapter's detail, and its dead-lettered triage when it has one; see
+         * {@link BehaviorFindingView#of(FindingRow, FailedTriage)}.
          */
         public static BehaviorFindingDetailView of(
                 FindingRow row,
@@ -224,6 +231,7 @@ public final class BehaviorDtos {
                 @Nullable SecretLeakDetail secretLeak,
                 @Nullable FrustrationDetail frustration,
                 @Nullable GroundednessDetail groundedness,
+                @Nullable ClassifierDetail classifierDetail,
                 @Nullable FailedTriage failed) {
             String evidence = row.payloadJson();
             return new BehaviorFindingDetailView(
@@ -238,7 +246,8 @@ public final class BehaviorDtos {
                             ? ArmedWindowEvidence.detail(evidence)
                             : null,
                     frustration,
-                    groundedness);
+                    groundedness,
+                    classifierDetail);
         }
     }
 
