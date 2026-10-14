@@ -465,6 +465,22 @@ function freePort() {
   });
 }
 
+function portTaken(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', (e) => resolve(e.code === 'EADDRINUSE'));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(false)));
+  });
+}
+
+/**
+ * freePort releases its port before opencode binds it, so another process can take it in between
+ * (parallel test files, or two local-mode runs on one host). opencode 1.18.30 then exits printing
+ * only `ServeError`, so the collision is recognised by finding the port held after the failed start,
+ * not by reading the output.
+ */
+const PORT_ATTEMPTS = 3;
+
 async function startServer(configJson) {
   process.chdir(AGENT_CWD);
   process.env.OPENCODE_DISABLE_AUTOUPDATE = '1';
@@ -475,7 +491,14 @@ async function startServer(configJson) {
   const config = { ...inheritedConfig(), ...configJson };
   const startMs = Date.now();
   try {
-    return await spawnOpencodeServer({ hostname: '127.0.0.1', port: await freePort(), timeout: 120_000, config });
+    for (let attempt = 1; ; attempt++) {
+      const port = await freePort();
+      try {
+        return await spawnOpencodeServer({ hostname: '127.0.0.1', port, timeout: 120_000, config });
+      } catch (e) {
+        if (attempt >= PORT_ATTEMPTS || !(await portTaken(port))) throw e;
+      }
+    }
   } catch (e) {
     const hint = /Timeout waiting/.test(String((e && e.message) || '')) && !/Server output:/.test(e.message)
       ? ' — the process was up but never announced itself, and printed nothing'

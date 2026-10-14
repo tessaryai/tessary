@@ -11,6 +11,9 @@
  *     each prompt body to <pid>-prompts.jsonl
  *   FAKE_OPENCODE_EXIT_BEFORE_READY=1  exit 1 right after recording, never announcing
  *   FAKE_OPENCODE_IGNORE_SIGTERM=1  survive SIGTERM, so only SIGKILL stops it (the bug's shape)
+ *   FAKE_OPENCODE_PORT_TAKEN=<file>  if <file> does not exist, start a detached process that holds
+ *     --port, write its pid to <file>, then try to listen and exit 1 on EADDRINUSE: another process
+ *     took the port between the caller's probe and this bind. The test kills the pid.
  *   FAKE_OPENCODE_REPLY  the assistant's text; unset or empty = an empty completion
  *   FAKE_OPENCODE_SESSION_SCRIPT=<file>  play a scripted session over the event stream instead; see
  *     serveSession below for the script and the switches that go with it
@@ -56,6 +59,26 @@ function serve() {
     process.stderr.write('fake opencode: exiting before ready\n');
     process.exit(1);
   }
+  const takenFile = process.env.FAKE_OPENCODE_PORT_TAKEN;
+  if (takenFile && !fs.existsSync(takenFile)) {
+    const { spawn } = require('node:child_process');
+    const holder = spawn(
+      process.execPath,
+      ['-e', `require('node:net').createServer().listen(${port}, '127.0.0.1', () => process.stdout.write('up\\n'))`],
+      { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    holder.stdout.once('data', () => {
+      fs.writeFileSync(takenFile, String(holder.pid));
+      holder.stdout.destroy();
+      holder.unref();
+      startServing(port);
+    });
+    return;
+  }
+  startServing(port);
+}
+
+function startServing(port) {
   if (process.env.FAKE_OPENCODE_SESSION_SCRIPT) {
     serveSession(port);
     return;
