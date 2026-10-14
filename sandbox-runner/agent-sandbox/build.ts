@@ -154,7 +154,7 @@ async function release(version: string) {
   emit('build_id', info.buildId);
 }
 
-/** The execute-only node session.js runs under (template.ts; launcher/server.js's SESSION_NODE). */
+/** The node session.js runs under (template.ts; launcher/server.js's SESSION_NODE). */
 const SEALED_NODE = '/usr/local/bin/node-sealed';
 
 type CheckResult = { exitCode: number | null; stdout: string; stderr: string; error?: string };
@@ -210,16 +210,11 @@ async function verify(version: string) {
   console.log(`booting ${ref} (templateID=${info.templateID}, public=${info.public})`);
   const sbx = await Sandbox.create(ref, { timeoutMs: 180_000 });
   try {
-    // The user these commands run as is the user the launcher's session.js runs as: neither passes
-    // `user`, so both get the template's default. The session node's checks below mean nothing
-    // without it, so it is printed first.
-    const who = await runCheck(sbx, `id; stat -c '%a %U %G' ${SEALED_NODE}; sudo -n true 2>/dev/null && echo 'passwordless sudo' || echo 'no passwordless sudo'`);
-    console.log(`  identity (exit ${who.exitCode}):\n${indent(who.stdout + who.stderr)}`);
-
     // Each of these is a distinct failure this release must not ship, not a smoke test for its own
     // sake: bash missing (the SDK cannot exec at all), the opencode prune having deleted the
-    // variant on PATH, a script that never got copied, and a session node the agent's user can
-    // read (session.js would then be dumpable, and its MCP tokens readable through /proc).
+    // variant on PATH, a script that never got copied, and a session node that cannot start (every
+    // session start would fail). The session node is NOT checked for being unreadable: on E2B it
+    // cannot be, see template.ts.
     const checks: Array<[string, string]> = [
       ['bash is the exec shell', 'echo "$BASH_VERSION" | grep -q .'],
       ['opencode runs', 'opencode --version'],
@@ -231,7 +226,6 @@ async function verify(version: string) {
           + ' && test -f /home/user/session.js',
       ],
       ['the session node is executable', `test -x ${SEALED_NODE}`],
-      ['the session node is not readable', `! test -r ${SEALED_NODE}`],
       ['the session node starts', `${SEALED_NODE} -e 0`],
     ];
     const failed: string[] = [];

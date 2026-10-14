@@ -7,9 +7,10 @@
  * "Agent sessions".
  *
  * Three invariants. session.json is deleted as soon as it is read, so no MCP token is on disk while
- * the agent runs: the tokens live only in this process's memory, in the relay. This process runs
- * from an execute-only node, so it is not dumpable and the agent's processes, which run as the same
- * user, cannot read its memory or its environment through /proc. SESSION_SECRET leaves process.env
+ * the agent runs: the tokens live only in this process's memory, in the relay. In the Docker agent
+ * image this process runs from an execute-only node, so it is not dumpable and the agent's
+ * processes, which run as the same user, cannot read its memory or its environment through /proc.
+ * The E2B template cannot give that (see its node-sealed step). SESSION_SECRET leaves process.env
  * before `opencode serve` is spawned, so no child inherits it.
  */
 const crypto = require('node:crypto');
