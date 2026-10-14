@@ -145,3 +145,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/0039-agent-run-lane.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/0040-rca-owned-causes-report.sql
+      relativeToChangelogFile: false

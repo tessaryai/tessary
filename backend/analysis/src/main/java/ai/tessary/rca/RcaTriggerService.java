@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.rca;
 
+import ai.tessary.classifier.finding.FindingAdapters;
 import ai.tessary.classifier.finding.FindingClaim;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.open.errors.RcaError;
@@ -31,16 +32,19 @@ public class RcaTriggerService {
     private final RcaJobRepository jobs;
     private final RcaReportRepository reports;
     private final RcaReportService reportReads;
+    private final FindingAdapters adapters;
 
     public RcaTriggerService(
             FindingRepository findings,
             RcaJobRepository jobs,
             RcaReportRepository reports,
-            RcaReportService reportReads) {
+            RcaReportService reportReads,
+            FindingAdapters adapters) {
         this.findings = findings;
         this.jobs = jobs;
         this.reports = reports;
         this.reportReads = reportReads;
+        this.adapters = adapters;
     }
 
     /**
@@ -63,13 +67,14 @@ public class RcaTriggerService {
         Instant from = parse(finding.createdAt(), finding.onsetAt());
         Instant split = parse(finding.onsetAt(), finding.createdAt());
         Instant to = parse(finding.lastSeenAt(), finding.onsetAt());
-        String reportKind = RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
+        String reportKind = adapters.ownerOf(finding).isPresent()
+                ? RcaReportRow.ReportKind.OWNED_CAUSES
+                : RcaReportRow.ReportKind.forClassifier(finding.classifierKey());
         double current;
         double prior;
         if (RcaReportRow.ReportKind.namesCauses(reportKind)) {
-            // A frustration or groundedness finding measured a rate against a learned one, so the header
-            // reads as that rate: frustrated conversations, or traces with a flagged answer, since onset over
-            // the rate the call site learned as normal.
+            // A frustration, groundedness or adapter-owned finding measured a rate against a reference, so the
+            // header reads as that rate: the flagged share since onset over the reference rate.
             current = finding.payloadNumber("current_rate");
             prior = finding.payloadNumber("baseline_rate");
         } else {
