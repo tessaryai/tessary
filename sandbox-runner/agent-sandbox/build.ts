@@ -3,7 +3,7 @@ import 'dotenv/config';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Sandbox, Template, defaultBuildLogger } from 'e2b';
+import { CommandExitError, Sandbox, Template, defaultBuildLogger } from 'e2b';
 import { template } from './template';
 
 /**
@@ -154,6 +154,31 @@ async function release(version: string) {
   emit('build_id', info.buildId);
 }
 
+/** The execute-only node session.js runs under (template.ts; launcher/server.js's SESSION_NODE). */
+const SEALED_NODE = '/usr/local/bin/node-sealed';
+
+type CheckResult = { exitCode: number | null; stdout: string; stderr: string; error?: string };
+
+/**
+ * A non-zero exit THROWS a CommandExitError whose message is only "exit status <n>"; the output
+ * that says why lives on the error's stdout/stderr. Any other error (a severed stream, a timeout)
+ * has no exit code and only its message to show.
+ */
+async function runCheck(sbx: Sandbox, cmd: string): Promise<CheckResult> {
+  try {
+    const r = await sbx.commands.run(cmd, { timeoutMs: 60_000 });
+    return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
+  } catch (e) {
+    if (e instanceof CommandExitError) return { exitCode: e.exitCode, stdout: e.stdout, stderr: e.stderr };
+    return { exitCode: null, stdout: '', stderr: '', error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function indent(text: string): string {
+  const lines = text.trim().slice(0, 2000);
+  return lines ? lines.split('\n').map((l) => `      ${l}`).join('\n') : '      (empty)';
+}
+
 /**
  * THE STEP THAT CAN ACTUALLY GO RED, and the reason it exists is written in template.ts's own
  * header: this SDK hardcodes `cmd: "/bin/bash"`, E2B's runCmd is not root where Docker's RUN is,
@@ -185,6 +210,12 @@ async function verify(version: string) {
   console.log(`booting ${ref} (templateID=${info.templateID}, public=${info.public})`);
   const sbx = await Sandbox.create(ref, { timeoutMs: 180_000 });
   try {
+    // The user these commands run as is the user the launcher's session.js runs as: neither passes
+    // `user`, so both get the template's default. The session node's checks below mean nothing
+    // without it, so it is printed first.
+    const who = await runCheck(sbx, `id; stat -c '%a %U %G' ${SEALED_NODE}; sudo -n true 2>/dev/null && echo 'passwordless sudo' || echo 'no passwordless sudo'`);
+    console.log(`  identity (exit ${who.exitCode}):\n${indent(who.stdout + who.stderr)}`);
+
     // Each of these is a distinct failure this release must not ship, not a smoke test for its own
     // sake: bash missing (the SDK cannot exec at all), the opencode prune having deleted the
     // variant on PATH, a script that never got copied, and a session node the agent's user can
@@ -199,19 +230,19 @@ async function verify(version: string) {
           + ' && test -f /home/user/agent-stream.js && test -f /home/user/mcp-relay.js'
           + ' && test -f /home/user/session.js',
       ],
-      ['the session node is execute-only', 'test -x /usr/local/bin/node-sealed && ! test -r /usr/local/bin/node-sealed && /usr/local/bin/node-sealed -e 0'],
+      ['the session node is executable', `test -x ${SEALED_NODE}`],
+      ['the session node is not readable', `! test -r ${SEALED_NODE}`],
+      ['the session node starts', `${SEALED_NODE} -e 0`],
     ];
     const failed: string[] = [];
     for (const [label, cmd] of checks) {
-      const r = await sbx.commands.run(cmd, { timeoutMs: 60_000 }).catch((e: unknown) => ({
-        exitCode: 1,
-        stderr: e instanceof Error ? e.message : String(e),
-        stdout: '',
-      }));
+      const r = await runCheck(sbx, cmd);
       if (r.exitCode === 0) {
         console.log(`  ok    ${label}`);
       } else {
-        console.error(`  FAIL  ${label}: ${(r.stderr || r.stdout || '').trim().slice(0, 400)}`);
+        console.error(`  FAIL  ${label} (exit ${r.exitCode})`);
+        if (r.error) console.error(`    error: ${r.error}`);
+        console.error(`    stdout:\n${indent(r.stdout)}\n    stderr:\n${indent(r.stderr)}`);
         failed.push(label);
       }
     }
