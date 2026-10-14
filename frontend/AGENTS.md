@@ -62,7 +62,7 @@ Two consequences worth knowing before you reach for a workaround:
   `classifiers/`, `vitals/`, `Settings/`). `graders/`, `review/`, `datasets/`,
   `runs/`, `synth/` and `reposync/` were deleted along with the whole Calibrate nav group; their routes are
   `<Navigate>` redirects to `../triage` at the bottom of `App.tsx`. `views/traceLinker.ts` builds
-  trace and span hrefs; `views/classifiers/useListPaging.ts` (infinite scroll across filter switches)
+  trace, span and classifier hrefs; `views/classifiers/useListPaging.ts` (infinite scroll across filter switches)
   and `useSkeletonFlag.ts` (delayed, held list skeleton) serve the classifier lists. Surface-specific shared widgets go in `views/components/`
   (`PayloadViewer`, `ConnectRepositoryDialog`, `SourceConnect`, …). Generic primitives belong in
   `src/ui/`, not here.
