@@ -494,26 +494,58 @@ export function groupTools(items: ChatItem[]): GroupedItem[] {
   return out;
 }
 
-function Items({ items, failed, marks = [] }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
+/**
+ * One part of a turn a caller marks: the person's question, the reply, or a step between them. `judged` is
+ * the part a classifier ruled on; `matched` is a part it read as context for that ruling. The label is drawn
+ * under the part.
+ */
+export type Emphasis = { part: "question" | "reply" | "step"; kind: "judged" | "matched"; label: string };
+
+const NO_EMPHASIS: Emphasis[] = [];
+
+/** The last message in the run that `pick` accepts, or -1. */
+function lastMessage(grouped: GroupedItem[], pick: (g: MessageItem) => boolean): number {
+  for (let i = grouped.length - 1; i >= 0; i--) {
+    const g = grouped[i];
+    if (g.kind === "message" && pick(g)) return i;
+  }
+  return -1;
+}
+
+function Items({
+  items,
+  failed,
+  marks = [],
+  emphasis = NO_EMPHASIS,
+  dimmed = false,
+}: {
+  items: ChatItem[];
+  failed?: boolean;
+  marks?: string[];
+  emphasis?: Emphasis[];
+  dimmed?: boolean;
+}) {
   const grouped = groupTools(items);
   // The marks belong to the person's words: the last human message of the run, not the whole run.
-  let markedAt = -1;
-  if (marks.length > 0) {
-    for (let i = grouped.length - 1; i >= 0; i--) {
-      const g = grouped[i];
-      if (g.kind === "message" && isHumanSpeech(g.message)) {
-        markedAt = i;
-        break;
-      }
-    }
-  }
+  const markedAt = marks.length > 0 ? lastMessage(grouped, (g) => isHumanSpeech(g.message)) : -1;
+  // A question's emphasis lands where its marks would; a reply's or a step's on the run's last message.
+  const question = emphasis.some((e) => e.part === "question");
+  const emphasisAt =
+    emphasis.length > 0 ? lastMessage(grouped, (g) => !question || isHumanSpeech(g.message)) : -1;
   return (
     <div className="flex flex-col gap-2">
       {grouped.map((group, i) =>
         group.kind === "tools" ? (
           <ToolCallBatch key={`t${i}`} steps={group.steps} />
         ) : (
-          <Turn key={`m${i}`} item={group} failed={failed} marks={i === markedAt ? marks : []} />
+          <Turn
+            key={`m${i}`}
+            item={group}
+            failed={failed}
+            marks={i === markedAt ? marks : []}
+            emphasis={i === emphasisAt ? emphasis : NO_EMPHASIS}
+            dimmed={dimmed}
+          />
         ),
       )}
     </div>
@@ -553,21 +585,44 @@ export function PriorContext({ messages }: { messages: ChatMessage[] }) {
  * <p>`marks` names the classifiers that flagged the person's message in this run. It is drawn on that
  * message only, outlined with the classifiers' names under it. It is not `failed`: nothing broke, the
  * user's words were judged.
+ *
+ * <p>`emphasis` is what a caller marks on this run, drawn on one message with its labels under it; `dimmed`
+ * mutes the run's text, for a part the caller says was not read.
  */
-export function ChatItems({ items, failed, marks }: { items: ChatItem[]; failed?: boolean; marks?: string[] }) {
-  return <Items items={items} failed={failed} marks={marks} />;
+export function ChatItems({
+  items,
+  failed,
+  marks,
+  emphasis,
+  dimmed,
+}: {
+  items: ChatItem[];
+  failed?: boolean;
+  marks?: string[];
+  emphasis?: Emphasis[];
+  dimmed?: boolean;
+}) {
+  return <Items items={items} failed={failed} marks={marks} emphasis={emphasis} dimmed={dimmed} />;
 }
 
 function Turn({
   item,
   failed,
   marks,
+  emphasis,
+  dimmed,
 }: {
   item: Extract<ChatItem, { kind: "message" }>;
   failed?: boolean;
   marks: string[];
+  emphasis: Emphasis[];
+  dimmed: boolean;
 }) {
   const { label, side } = classify(item.message);
+  const flags = [...marks, ...emphasis.filter((e) => e.kind === "judged").map((e) => e.label)];
+  const matched = emphasis.filter((e) => e.kind === "matched").map((e) => e.label);
+  const edge = flags.length > 0 ? "judged" : matched.length > 0 ? "matched" : undefined;
+  const align = side === "right" ? "self-end" : "self-start";
 
   return (
     <div className="flex flex-col gap-0.75">
@@ -578,7 +633,7 @@ function Turn({
           {label}
         </span>
       )}
-      <Bubble side={side} failed={failed} marked={marks.length > 0}>
+      <Bubble side={side} failed={failed} edge={edge} dimmed={dimmed}>
         <Clamped>
           <div className="flex flex-col gap-2">
             {item.text.length > 0 && <Markdown>{item.text}</Markdown>}
@@ -586,9 +641,12 @@ function Turn({
           </div>
         </Clamped>
       </Bubble>
-      {marks.length > 0 && (
-        <DetectionMarker names={marks} className={side === "right" ? "self-end" : "self-start"} />
-      )}
+      {flags.length > 0 && <DetectionMarker names={flags} className={align} />}
+      {matched.map((m) => (
+        <span key={m} className={cn("text-label text-muted", align)}>
+          {m}
+        </span>
+      ))}
     </div>
   );
 }
@@ -687,25 +745,32 @@ function Clamped({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * One message. A `judged` edge is the flagged one, outlined in error red and found by `data-flagged`; a
+ * `matched` edge is dashed, a part read as context. `dimmed` mutes the text of a part nobody read.
+ */
 function Bubble({
   side,
   failed,
-  marked,
+  edge,
+  dimmed,
   children,
 }: {
   side: "left" | "right";
   failed?: boolean;
-  marked?: boolean;
+  edge?: "judged" | "matched";
+  dimmed?: boolean;
   children: React.ReactNode;
 }) {
   const right = side === "right";
   return (
     <div className={cn("flex", right ? "justify-end" : "justify-start")}>
       <div
-        data-flagged={marked ? "true" : undefined}
+        data-flagged={edge === "judged" ? "true" : undefined}
         className={cn(
           "chat-bubble min-w-0 text-body py-2.5 px-3.5",
-          right ? "bg-raised text-fg" : "bg-bg text-fg",
+          right ? "bg-raised" : "bg-bg",
+          dimmed ? "text-muted" : "text-fg",
           !right && "border border-border",
         )}
         style={
@@ -718,7 +783,8 @@ function Bubble({
             // like a grey band was laid over it.
             "--bubble-bg": right ? "var(--color-raised)" : "var(--color-bg)",
             ...(failed ? { borderColor: "var(--color-error)" } : null),
-            ...(marked ? { border: "1px solid var(--color-error)" } : null),
+            ...(edge === "judged" ? { border: "1px solid var(--color-error)" } : null),
+            ...(edge === "matched" ? { border: "1px dashed var(--color-border-strong)" } : null),
           } as React.CSSProperties
         }
       >
