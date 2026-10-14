@@ -88,11 +88,11 @@ export const template = Template()
     'set -e; D=/usr/local/lib/node_modules/opencode-ai; INO="$(stat -c %i "$D/bin/opencode.exe")"; [ -n "$INO" ] || exit 1; for p in "$D"/node_modules/opencode-*; do [ -d "$p" ] || continue; [ "$(stat -c %i "$p/bin/opencode" 2>/dev/null)" = "$INO" ] || rm -rf "$p"; done; opencode --version >/dev/null; npm cache clean --force',
     { user: 'root' },
   )
-  // An execute-only copy of node for session.js. A process started from a binary its user cannot
-  // read is not dumpable, so the agent's processes, which run as the same user, cannot read its
-  // memory (the MCP tokens the relay holds) or its environment (SESSION_SECRET) through /proc.
-  // The plain node stays for the agent. Mirrored in the sibling Dockerfile.
-  .runCmd('cp /usr/local/bin/node /usr/local/bin/node-sealed && chmod 0111 /usr/local/bin/node-sealed', { user: 'root' })
+  // The node the launcher runs session.js under on both backends. NOT execute-only here, unlike the
+  // sibling Dockerfile's: E2B's build does not keep mode 0111 (the published template showed 777),
+  // and the sandbox user has passwordless sudo, so the agent could read session.js's memory anyway.
+  // On E2B the session's MCP tokens are guarded only by the microVM holding that one session.
+  .runCmd('cp /usr/local/bin/node /usr/local/bin/node-sealed', { user: 'root' })
   // Modules the in-VM scripts require from /home/user — @opencode-ai/sdk drives that server.
   //
   // DELIBERATELY npm, though the repo is otherwise on pnpm — do not "fix" this. There is no

@@ -40,11 +40,13 @@ as the Docker backend's agent image.
   `POST /abort`, `GET /events` and `GET /healthz` to the launcher behind a per-session secret. It
   maps OpenCode's event stream to `text`, `tool_start`, `tool_end`, `message_end`, `error` and
   `closed` events. The contract is in [`sandbox-runner/README.md`](../README.md#agent-sessions-sessionjs).
-  The launcher runs it with `/usr/local/bin/node-sealed`, an execute-only copy of `node` both
-  recipes make: a process started from a binary its user cannot read is not dumpable, so the
-  agent, which runs as the same user, cannot read the relay's MCP tokens out of its memory or
-  `SESSION_SECRET` out of its environment through `/proc`. `test/session-image.test.js` checks this
-  in a built image (skipped unless `SESSION_IMAGE_UNDER_TEST` names one).
+  The launcher runs it with `/usr/local/bin/node-sealed`, a copy of `node` both recipes make. In
+  the Docker image the copy is execute-only: a process started from a binary its user cannot read
+  is not dumpable, so the agent, which runs as the same user, cannot read the relay's MCP tokens out
+  of its memory or `SESSION_SECRET` out of its environment through `/proc`.
+  `test/session-image.test.js` checks this in a built image (skipped unless
+  `SESSION_IMAGE_UNDER_TEST` names one). The E2B template has no such protection: E2B's build does
+  not keep the mode, and the sandbox user has passwordless `sudo`.
 - `build.ts` — the ONLY thing in this repo that talks to E2B: builds, verifies and tags the
   template. Published in our project as **`tessary-agent-sandbox`**, and **public**, so everyone
   else reaches it as **`tessary/tessary-agent-sandbox`** — which is what the launcher's

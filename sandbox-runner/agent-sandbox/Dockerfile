@@ -105,7 +105,8 @@ RUN set -e; \
 # An execute-only copy of node for session.js. A process started from a binary its user cannot read
 # is not dumpable, so the agent's processes, which run as the same user, cannot read its memory
 # (the MCP tokens the relay holds) or its environment (SESSION_SECRET) through /proc. The plain
-# node stays for the agent. Costs one layer the size of the node binary. Mirrored by template.ts.
+# node stays for the agent. Costs one layer the size of the node binary. template.ts makes the same
+# path without the protection, which E2B cannot keep; see its comment.
 RUN cp /usr/local/bin/node /usr/local/bin/node-sealed && chmod 0111 /usr/local/bin/node-sealed
 
 ENV HOME=/home/user

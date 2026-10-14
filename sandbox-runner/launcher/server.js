@@ -344,8 +344,9 @@ const SESSION_TOMBSTONE_MS = 300_000;
 const SESSION_STOP_SECONDS = 5;
 const SESSION_RECONNECT_MS = 250;
 const SESSION_SCRIPT = 'session.js';
-// The agent image's execute-only node (agent-sandbox/Dockerfile and template.ts): session.js run
-// from it is not dumpable, so the agent cannot read its MCP tokens or secret through /proc.
+// The node both agent recipes make for session.js. In the Docker image it is execute-only, so
+// session.js is not dumpable and the agent cannot read its MCP tokens or secret through /proc. The
+// E2B template cannot give that (agent-sandbox/template.ts).
 const SESSION_NODE = '/usr/local/bin/node-sealed';
 const SANDBOX_LABEL_SESSION = 'tessary.sandbox.session';
 const SESSION_TEXT_MAX_BYTES = 1 << 20;
