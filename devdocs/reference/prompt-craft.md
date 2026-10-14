@@ -2,8 +2,8 @@
 
 Every prompt the platform sends to a model lives as markdown under
 `prompt-craft/<purpose>/`, in the resources of the module that owns it. One directory per purpose.
-The one exception is the `dossier/method.md` of a classifier outside the catalog, which its
-`FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)).
+The one exception is the `dossier/method.md` and RCA `evidence.md` of a classifier outside the catalog,
+which its `FindingAdapter` supplies ([below](#method-text-from-a-findingadapter)).
 
 | module · purpose | who reads it | what it is for |
 |---|---|---|
@@ -27,10 +27,12 @@ A method file states facts about the instrument only. It never lists causes, exa
 ### Method text from a `FindingAdapter`
 
 A classifier outside the catalog has no file here. When a `FindingAdapter` owns its finding
-([classifier-extension-interface.md](classifier-extension-interface.md) §2), `FindingAdapter.method`
-gives the text of `dossier/method.md`, one text for triage and RCA. `BehaviorTriageEngine.methodCard`
-uses it when the key has no built-in triage card, and `RcaAnalysisService.dossierFiles` uses it when
-the key has no `rca/methods/` file; a built-in file always wins. The triage task and the RCA prompt
+([classifier-extension-interface.md](classifier-extension-interface.md) §2), it gives one text per
+dossier file. `BehaviorTriageEngine.methodCard` uses `triageMethod` when the key has no built-in
+triage card, and `RcaAnalysisService.dossierFiles` uses `rcaMethod` when the key has no `rca/methods/`
+file; a built-in file always wins. `evidence` gives the RCA `evidence.md`, handed the evidence counts
+and the enumeration page the shape assemblers list; when it answers, the text is cut at the dossier
+budget and replaces the shape assembler and the fenced payload. The triage task and the RCA prompt
 then name `method.md` as they do for a built-in classifier. The text does not come from
 `prompt-craft/`, so `PromptResourceParityTest` does not pin it: the module that ships the adapter
 owns its tests.

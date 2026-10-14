@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -362,7 +363,8 @@ class BehaviorTriagePromptTest {
     private static BehaviorTriageEngine engineOwningCustomX() {
         return engine(
                 new ObserverProperties(),
-                FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n"))));
+                FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n", "# Method x\n", null))));
     }
 
     /**
@@ -385,6 +387,25 @@ class BehaviorTriagePromptTest {
                         .toList());
     }
 
+    /**
+     * The triage dossier's {@code method.md} is the owner's triage method, and its RCA method appears in no triage
+     * file. The bug is the RCA method, written for a cause hunt, ruling a finding.
+     */
+    @Test
+    void theTriageDossierCarriesTheOwnersTriageMethod() {
+        FindingRow row = finding("owned-x", "cls-1:cs-1", "cs-1", "{\"cause_kind\":\"ext_rate\"}", null);
+        BehaviorTriageEngine engine = engine(
+                new ObserverProperties(),
+                FindingAdapters.of(List.of(
+                        FakeFindingAdapter.owning("owned-x", "# Triage method\n", "# RCA method\n", "# Evidence\n"))));
+
+        Map<String, String> dossier = engine.dossier(JOB, row);
+
+        assertEquals(Set.of("finding.md", "method.md"), dossier.keySet());
+        assertEquals("# Triage method\n", dossier.get("method.md"));
+        assertFalse(Objects.requireNonNull(dossier.get("finding.md")).contains("# RCA method"));
+    }
+
     /** An owned finding's user message lists {@code method.md}. The bug is the no-card branch taken for it. */
     @Test
     void anOwnedFindingsPromptListsTheMethodFile() {
@@ -392,8 +413,10 @@ class BehaviorTriagePromptTest {
 
         ObserverProperties props = new ObserverProperties();
         props.getAgentic().setMaxTurns(12);
-        BehaviorTriageEngine engine =
-                engine(props, FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n"))));
+        BehaviorTriageEngine engine = engine(
+                props,
+                FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n", "# Method x\n", null))));
 
         assertEquals(
                 "Rule on finding `" + row.id() + "`.\n\n"
@@ -414,8 +437,8 @@ class BehaviorTriagePromptTest {
                 finding(BuiltInDetector.Kind.TOOL_ERROR, "tool_error_rate:tool:search_docs:up", null, null, null);
         BehaviorTriageEngine engine = engine(
                 new ObserverProperties(),
-                FindingAdapters.of(
-                        List.of(FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n"))));
+                FindingAdapters.of(List.of(FakeFindingAdapter.owning(
+                        BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n", "# Method x\n", null))));
 
         assertEquals(
                 ClassifierMethodCard.forClassifier(BuiltInDetector.Kind.TOOL_ERROR),

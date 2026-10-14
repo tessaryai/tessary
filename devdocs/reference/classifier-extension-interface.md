@@ -49,13 +49,13 @@ decides what an out-of-tree jar can actually contribute — see §8.
 | `BuiltInDetector` | `classifier/catalog/` | observation, turn | in-tree manifest, **or** Spring `ObjectProvider<DetectorSupplier>` (generic, unguarded, see below) | Score one span (or a batch of them). Pure: no database, no clock, no writes. |
 | `ClassifierSweep` | `classifier/worker/` | trace, window | Spring, `ObjectProvider` | Run one leased pass over a larger unit and write findings. Stateful. |
 | `TriageSource` | `classifier/finding/` | — | Spring, `List` | Serve this classifier's findings into the shared read surface and triage queue. `@Order`-ranked. |
-| `FindingAdapter` | `classifier/finding/` | — | Spring, `ObjectProvider`, folded by `FindingAdapters` (two owners of one finding fail at lookup, and the failure is not isolated: §6) | Claim the findings a classifier outside the catalog filed: their triage eligibility, the `method.md` text for triage and RCA (read from the `FindingClaim`, so the RCA firewall holds), and the detector-state half of a person's absorb (`absorbed`, whose transaction depends on the caller: see below the table). |
+| `FindingAdapter` | `classifier/finding/` | — | Spring, `ObjectProvider`, folded by `FindingAdapters` (two owners of one finding fail at lookup, and the failure is not isolated: §6) | Claim the findings a classifier outside the catalog filed: their triage eligibility, the triage `method.md`, the RCA `method.md` and the RCA `evidence.md` (read from the `FindingClaim`, so the RCA firewall holds), and the detector-state half of a person's absorb (`absorbed`, whose transaction depends on the caller: see below the table). |
 | `DetectionTable` | `detection/` (`backend/shared`) | span, trace | Spring, `ObjectProvider`, folded by `DetectionTableRegistry` (`toUnmodifiableMap`, duplicate kind fails boot) | Name the table this classifier's fired detections land in and the grain (`span`/`trace`) its rows carry. Replaces the old `classifier_detection_v` view's hard-coded six-table list; a kind with no registered table takes one `writesDetections`-gated WARN from `ClassifierWorker` and scores nothing rather than throwing. |
 
 `FindingAdapter`'s consumers are `BehaviorTriageSource` (`analyze` and `listAutoEscalatable` for
 eligibility, `resolve` and `repin` for the absorb hook), `BehaviorTriageEngine.methodCard` and
-`RcaAnalysisService.dossierFiles` (the `method.md` text, after the built-in card or RCA method for the
-key). An owned finding is ruled by its adapter whatever its cause kind; a case of owned findings calls
+`RcaAnalysisService.dossierFiles` (the `method.md` texts, after the built-in card or RCA method for the
+key, and the RCA `evidence.md`, before the shape assemblers). An owned finding is ruled by its adapter whatever its cause kind; a case of owned findings calls
 the hook once, on its newest finding.
 
 `absorbed` has two callers with different transactions. On one finding (`FindingService.resolve`) it

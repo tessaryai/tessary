@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorResolutionRequest;
 import ai.tessary.classifier.finding.TriageSource.Escalatable;
+import ai.tessary.classifier.finding.dossier.EvidenceContext;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
@@ -64,8 +65,18 @@ class FindingAdapterIntegrationTest {
         }
 
         @Override
-        public Optional<String> method(FindingClaim finding) {
+        public Optional<String> triageMethod(FindingClaim finding) {
             return Optional.of(METHOD);
+        }
+
+        @Override
+        public Optional<String> rcaMethod(FindingClaim finding) {
+            return Optional.of(METHOD);
+        }
+
+        @Override
+        public Optional<String> evidence(FindingClaim finding, EvidenceContext context) {
+            return Optional.empty();
         }
 
         @Override

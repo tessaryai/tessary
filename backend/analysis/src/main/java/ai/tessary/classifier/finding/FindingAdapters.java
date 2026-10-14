@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.finding;
 
+import ai.tessary.classifier.finding.dossier.EvidenceContext;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.ObjectProvider;
@@ -40,7 +41,7 @@ public final class FindingAdapters {
 
     /**
      * The one adapter that owns this finding, or empty when none does. Two owners fail loud: which classifier's
-     * method and absorb hook a finding gets must not depend on classpath order.
+     * dossier files and absorb hook a finding gets must not depend on classpath order.
      */
     public Optional<FindingAdapter> ownerOf(FindingClaim finding) {
         FindingAdapter owner = null;
@@ -56,8 +57,18 @@ public final class FindingAdapters {
         return Optional.ofNullable(owner);
     }
 
-    /** The owner's {@code method.md} text, or empty when no adapter owns the finding or the owner has none. */
-    public Optional<String> method(FindingClaim finding) {
-        return ownerOf(finding).flatMap(adapter -> adapter.method(finding));
+    /** The owner's triage {@code method.md}, or empty when no adapter owns the finding or the owner has none. */
+    public Optional<String> triageMethod(FindingClaim finding) {
+        return ownerOf(finding).flatMap(adapter -> adapter.triageMethod(finding));
+    }
+
+    /** The owner's RCA {@code method.md}, or empty when no adapter owns the finding or the owner has none. */
+    public Optional<String> rcaMethod(FindingClaim finding) {
+        return ownerOf(finding).flatMap(adapter -> adapter.rcaMethod(finding));
+    }
+
+    /** The owner's RCA {@code evidence.md}, or empty when no adapter owns the finding or the owner has none. */
+    public Optional<String> evidence(FindingClaim finding, EvidenceContext context) {
+        return ownerOf(finding).flatMap(adapter -> adapter.evidence(finding, context));
     }
 }

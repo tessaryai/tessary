@@ -351,7 +351,8 @@ class BehaviorTriageSourceTest {
         when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
                 .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
 
-        var view = source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+        var view = source(FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
                 .analyze(PROJECT, "f1")
                 .orElseThrow();
 
@@ -386,7 +387,7 @@ class BehaviorTriageSourceTest {
                                 .build()
                                 .claim()));
 
-        source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+        source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
                 .listAutoEscalatable(PROJECT, 30, 50);
 
         List<String> expected = new java.util.ArrayList<>(BUILT_IN_KEYS);
@@ -412,7 +413,8 @@ class BehaviorTriageSourceTest {
         List<Map<String, Object>> events = logged(
                 BehaviorTriageSource.class,
                 "finding.adapter.escalation",
-                () -> source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+                () -> source(FindingAdapters.of(
+                                List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
                         .listAutoEscalatable(PROJECT, 30, 50));
 
         assertEquals(1, events.size(), "one line per escalation pass");
@@ -442,7 +444,7 @@ class BehaviorTriageSourceTest {
     @ParameterizedTest
     @ValueSource(strings = {"expected", "not_expected"})
     void absorbingAnOwnedFindingCallsTheHookOnceThenRules(String action) {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
         boolean absorb = "expected".equals(action);
@@ -487,7 +489,7 @@ class BehaviorTriageSourceTest {
      *  case that moves nothing. */
     @Test
     void repinningAnOwnedFindingCallsTheHook() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(custom("f1")));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
 
@@ -503,7 +505,7 @@ class BehaviorTriageSourceTest {
      *  case and a hook run once per finding. */
     @Test
     void absorbingAnOwnedCaseCallsTheHookOnTheNewestFindingOnce() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
         when(findings.findById(PROJECT, "f2")).thenReturn(Optional.of(custom("f2")));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
 
@@ -518,7 +520,7 @@ class BehaviorTriageSourceTest {
 
     @Test
     void absorbingAnOwnedCaseWithABuiltInCauseKindCallsTheHook() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
         FindingRow newest = FindingRowBuilder.of(CUSTOM_KEY)
                 .id("f2")
                 .projectId(PROJECT)
@@ -546,7 +548,7 @@ class BehaviorTriageSourceTest {
      */
     @Test
     void withAnAdapterRegisteredABuiltInCaseStillFoldsEverySpell() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
 
         source(FindingAdapters.of(List.of(adapter)))
                 .repinCase(PROJECT, List.of(toolError("f2", 300, 30), toolError("f1", 300, 20)), "u1");
@@ -563,7 +565,7 @@ class BehaviorTriageSourceTest {
      */
     @Test
     void withAnAdapterRegisteredABuiltInFindingIsAbsorbedByItsOwnBranch() {
-        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n");
+        FakeFindingAdapter adapter = FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null);
         BehaviorTriageSource source = source(FindingAdapters.of(List.of(adapter)));
         when(classifiers.unavailableDetectorKinds(PROJECT)).thenReturn(Set.of());
         when(findings.findById(PROJECT, "f1")).thenReturn(Optional.of(toolError("f1", 600, 60)));
@@ -621,7 +623,8 @@ class BehaviorTriageSourceTest {
         when(jobs.enqueue(eq(PROJECT), eq("f1"), anyString()))
                 .thenReturn(new BehaviorTriageJobRepository.EnqueueOutcome("job-1", "queued"));
 
-        var view = source(FindingAdapters.of(List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n"))))
+        var view = source(FindingAdapters.of(
+                        List.of(FakeFindingAdapter.owning(CUSTOM_KEY, "# Method x\n", "# Method x\n", null))))
                 .analyze(PROJECT, "f1")
                 .orElseThrow();
 

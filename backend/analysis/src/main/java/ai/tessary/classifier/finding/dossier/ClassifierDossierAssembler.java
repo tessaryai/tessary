@@ -93,8 +93,16 @@ public final class ClassifierDossierAssembler {
             return Optional.empty();
         }
 
-        String enumeration = EvidenceEnumeration.section(evidence, projectId, findingId, evidenceCounts);
-        return Optional.of(budget(body + "\n" + enumeration));
+        return Optional.of(budget(body + "\n" + enumeration(evidence, projectId, findingId, evidenceCounts)));
+    }
+
+    /**
+     * The evidence enumeration section alone: every evidence row when the set is small, else a declared bounded
+     * selection with the population by role. Public so an adapter's {@code evidence.md} lists the same page.
+     */
+    public static String enumeration(
+            FindingEvidenceRepository evidence, String projectId, String findingId, EvidenceCounts evidenceCounts) {
+        return EvidenceEnumeration.section(evidence, projectId, findingId, evidenceCounts);
     }
 
     /**
@@ -103,7 +111,7 @@ public final class ClassifierDossierAssembler {
      * note with the real character counts — a silently clipped file is exactly the undeclared-sample
      * failure this format exists to end, just moved from "which trace ids" to "how much of the dossier".
      */
-    static String budget(String full) {
+    public static String budget(String full) {
         if (full.length() <= CHAR_BUDGET) return full;
         int cut = full.lastIndexOf('\n', CHAR_BUDGET);
         if (cut < 0) cut = CHAR_BUDGET;

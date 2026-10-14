@@ -443,12 +443,12 @@ public class BehaviorTriageEngine {
     // ---- the user message ------------------------------------------------------------------------
 
     /**
-     * The method card for this finding: the built-in card for its classifier key, else the {@code method.md} of the
+     * The method card for this finding: the built-in card for its classifier key, else the triage method of the
      * adapter that owns it. Absent for a user-authored classifier no adapter owns.
      */
     public Optional<String> methodCard(FindingRow finding) {
         String card = ClassifierMethodCard.forClassifier(finding.classifierKey());
-        return card != null ? Optional.of(card) : adapters.method(finding.claim());
+        return card != null ? Optional.of(card) : adapters.triageMethod(finding.claim());
     }
 
     /**

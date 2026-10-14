@@ -15,9 +15,13 @@ import ai.tessary.classifier.finding.FindingEvidenceRepository;
 import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
+import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler;
+import ai.tessary.classifier.finding.dossier.ClassifierDossierAssembler.EvidenceCounts;
+import ai.tessary.classifier.finding.dossier.EvidenceContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,6 +73,10 @@ class RcaAnalysisServiceTest {
     private static final FindingClaim CLAIM = claim("custom-x");
 
     private static FindingClaim claim(String classifierKey) {
+        return claim(classifierKey, "{\"version_id\":\"v1\"}", "{\"witness\":1}");
+    }
+
+    private static FindingClaim claim(String classifierKey, String payloadJson, String evidenceCountsJson) {
         return new FindingClaim(
                 "f1",
                 PROJECT,
@@ -84,8 +92,8 @@ class RcaAnalysisServiceTest {
                 null,
                 null,
                 40,
-                "{\"version_id\":\"v1\"}",
-                "{\"witness\":1}",
+                payloadJson,
+                evidenceCountsJson,
                 "2026-10-01T00:00:00Z");
     }
 
@@ -101,37 +109,103 @@ class RcaAnalysisServiceTest {
     @Mock
     AgenticRcaEngine agenticEngine;
 
+    private static final FindingEvidenceRow WITNESS_ROW = new FindingEvidenceRow(
+            "ev-1", PROJECT, "f1", "s1", "t1", "sp1", FindingEvidenceRow.Role.WITNESS, null, "2026-10-01T00:00:00Z");
+
     @BeforeEach
     void stubTheSubject() {
         when(reports.findByJobId(PROJECT, "job-1")).thenReturn(Optional.of(REPORT));
         when(findings.caseSiblingIds(PROJECT, "f1")).thenReturn(List.of());
         when(findings.findClaim(PROJECT, "f1")).thenReturn(Optional.of(CLAIM));
-        when(evidence.listByFinding(PROJECT, "f1"))
-                .thenReturn(List.of(new FindingEvidenceRow(
-                        "ev-1",
-                        PROJECT,
-                        "f1",
-                        "s1",
-                        "t1",
-                        "sp1",
-                        FindingEvidenceRow.Role.WITNESS,
-                        null,
-                        "2026-10-01T00:00:00Z")));
+        when(evidence.listByFinding(PROJECT, "f1")).thenReturn(List.of(WITNESS_ROW));
         when(agenticEngine.run(eq(JOB), eq(REPORT), any(), any(), any()))
                 .thenReturn(new AgenticRcaEngine.Result(
                         RcaReportRow.Verdict.NO_CAUSE_FOUND, "nothing found", List.of(), List.of(), null, false));
     }
 
-    /** An owned finding's RCA dossier carries its adapter's {@code method.md}. */
+    /**
+     * An owned finding's RCA dossier carries its adapter's RCA method, not its triage method. The bug is the triage
+     * method, written for a ruling, handed to the RCA agent.
+     */
     @Test
-    void anOwnedFindingsRcaDossierCarriesItsAdaptersMethod() {
-        Map<String, String> dossier =
-                dossierOf(FindingAdapters.of(List.of(FakeFindingAdapter.owning("custom-x", "# Method x\n"))));
+    void anOwnedFindingsRcaDossierCarriesItsAdaptersRcaMethod() {
+        when(evidence.claimFirst(PROJECT, "f1", ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP))
+                .thenReturn(new FindingEvidenceRepository.Head(List.of(WITNESS_ROW), false));
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(
+                List.of(FakeFindingAdapter.owning("custom-x", "# Triage method\n", "# RCA method\n", null))));
 
         assertEquals(
                 Set.of("findings/1-f1/finding.md", "findings/1-f1/evidence.md", "method.md", "tools.md"),
                 dossier.keySet());
-        assertEquals("# Method x\n", dossier.get("method.md"));
+        assertEquals("# RCA method\n", dossier.get("method.md"));
+    }
+
+    /**
+     * An owner that writes the evidence file replaces the fenced payload, and it is handed the counts and the same
+     * enumeration page the shape assemblers list. The bugs are the raw JSON shipped beside or instead of the owner's
+     * file, and an owner handed an empty context.
+     */
+    @Test
+    void anOwnersEvidenceFileReplacesTheFencedPayload() {
+        when(evidence.claimFirst(PROJECT, "f1", ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP))
+                .thenReturn(new FindingEvidenceRepository.Head(List.of(WITNESS_ROW), false));
+        FakeFindingAdapter owner = FakeFindingAdapter.owning("custom-x", null, null, "# Owner evidence\n");
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of(owner)));
+
+        assertEquals("# Owner evidence\n", dossier.get("findings/1-f1/evidence.md"));
+        assertEquals(
+                List.of(new EvidenceContext(
+                        new EvidenceCounts(0, 0, 0, 1, 0),
+                        "## Evidence enumeration\n\n"
+                                + "Complete enumeration — every evidence row this finding recorded (1 total),"
+                                + " `witness` first, then `baseline`, then the rest:\n\n"
+                                + "- `witness` session=`s1` trace=`t1` span=`sp1`\n")),
+                owner.evidenceContexts());
+    }
+
+    /**
+     * An owner's evidence file longer than the dossier budget is cut at the last whole line inside it, and the cut is
+     * stated. The bug is an unbounded adapter text, or one clipped with no note.
+     */
+    @Test
+    void anOwnersEvidenceFileIsCutAtTheBudgetWithTheCutStated() {
+        when(findings.findClaim(PROJECT, "f1")).thenReturn(Optional.of(claim("custom-x", "{}", "{}")));
+        String line = "x".repeat(99) + "\n";
+        FakeFindingAdapter owner = FakeFindingAdapter.owning("custom-x", null, null, line.repeat(2_000));
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of(owner)));
+
+        // The budget is 120,000 characters; the last newline at or before it ends line 1,200, at index 119,999.
+        assertEquals(
+                line.repeat(1_200).substring(0, 119_999)
+                        + "\n\n[dossier truncated: 119,999 of 200,000 characters shown — the claim, statistics and"
+                        + " population totals above this point are complete; only the tail of the enumeration list"
+                        + " was cut. Page the remainder via get_finding_evidence.]\n",
+                dossier.get("findings/1-f1/evidence.md"));
+    }
+
+    /**
+     * A finding no adapter owns keeps its shape assembler while an adapter for another key is registered. The bug is
+     * an owner's evidence hook consulted for every finding, or a frustration finding falling to the fenced JSON.
+     */
+    @Test
+    void aFindingNoAdapterOwnsKeepsTheShapeAssembler() {
+        when(findings.findClaim(PROJECT, "f1"))
+                .thenReturn(Optional.of(
+                        claim(BuiltInDetector.Kind.FRUSTRATION, "{\"cause_kind\":\"frustration_rate\"}", "{}")));
+        FakeFindingAdapter other = FakeFindingAdapter.owning("custom-x", null, null, "# Owner evidence\n");
+
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of(other)));
+
+        assertEquals(
+                "# Frustration evidence",
+                Objects.requireNonNull(dossier.get("findings/1-f1/evidence.md"))
+                        .lines()
+                        .findFirst()
+                        .orElseThrow());
+        assertEquals(List.of(), other.evidenceContexts());
     }
 
     /** With no adapter a custom finding's RCA dossier has no {@code method.md}. */
@@ -148,10 +222,11 @@ class RcaAnalysisServiceTest {
      */
     @Test
     void theBuiltInRcaMethodWinsOverAnAdaptersMethod() {
-        when(findings.findClaim(PROJECT, "f1")).thenReturn(Optional.of(claim(BuiltInDetector.Kind.TOOL_ERROR)));
+        when(findings.findClaim(PROJECT, "f1"))
+                .thenReturn(Optional.of(claim(BuiltInDetector.Kind.TOOL_ERROR, "{\"version_id\":\"v1\"}", "{}")));
 
-        Map<String, String> dossier = dossierOf(FindingAdapters.of(
-                List.of(FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n"))));
+        Map<String, String> dossier = dossierOf(FindingAdapters.of(List.of(
+                FakeFindingAdapter.owning(BuiltInDetector.Kind.TOOL_ERROR, "# Method x\n", "# Method x\n", null))));
 
         assertEquals(AgenticRcaEngine.method(BuiltInDetector.Kind.TOOL_ERROR), dossier.get("method.md"));
     }
