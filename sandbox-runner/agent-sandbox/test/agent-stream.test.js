@@ -613,3 +613,34 @@ test('an OpenCode that exits after it announced itself settles exited', async (t
   const exit = await Promise.race([server.exited, new Promise((r) => setTimeout(() => r('not settled in 2s'), 2000))]);
   assert.deepEqual(exit, { code: null, signal: 'SIGKILL' });
 });
+
+test('a port another process takes before OpenCode binds it starts OpenCode on a new port (a run failed by a parallel start)', async (t) => {
+  const { startServer } = require('../agent-stream');
+  const takenFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-stream-test-taken-')), 'holder.pid');
+  process.env.FAKE_OPENCODE_PORT_TAKEN = takenFile;
+  t.after(() => {
+    delete process.env.FAKE_OPENCODE_PORT_TAKEN;
+    if (fs.existsSync(takenFile)) process.kill(Number(fs.readFileSync(takenFile, 'utf8')), 'SIGKILL');
+  });
+  clearRecords();
+
+  const server = await startServer({});
+  t.after(() => server.close());
+
+  const ports = serverRecords().map((r) => r.args.find((a) => a.startsWith('--port=')));
+  assert.equal(ports.length, 2, 'one start that lost its port, then one that served');
+  assert.notEqual(ports[0], ports[1]);
+  assert.equal(server.url, `http://127.0.0.1:${ports[1].slice('--port='.length)}`);
+});
+
+test('an OpenCode that exits before it announces, on a port nobody else holds, is started once (a broken start retried as a port collision)', async (t) => {
+  const { startServer } = require('../agent-stream');
+  process.env.FAKE_OPENCODE_EXIT_BEFORE_READY = '1';
+  t.after(() => {
+    delete process.env.FAKE_OPENCODE_EXIT_BEFORE_READY;
+  });
+  clearRecords();
+
+  await assert.rejects(startServer({}), /opencode server did not start.*Server exited with code 1/s);
+  assert.equal(serverRecords().length, 1);
+});
