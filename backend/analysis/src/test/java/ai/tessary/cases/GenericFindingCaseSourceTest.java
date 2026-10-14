@@ -92,4 +92,20 @@ class GenericFindingCaseSourceTest {
                 new CaseKey(CaseRow.Detector.CLASSIFIER, CaseRow.SubjectKind.CLASSIFIER, "cls-1:cs-1", key),
                 source.shape(finding).key());
     }
+
+    /**
+     * A finding whose cause has no sentence of its own opens a case named by the title its writer stored, as a
+     * frustration case carries its finding's sentence. The bug is such a case headed by its bare cause key.
+     */
+    @Test
+    void aStoredTitleNamesTheCase() {
+        var finding = FindingRowBuilder.of("ext-x")
+                .causeKey("cls-1:cs-1")
+                .title("Flagged replies rose from 2.0% to 9.0%")
+                .payload("{\"cause_kind\":\"ext_rate\",\"native_cause_key\":\"cls-1:cs-1\"}")
+                .build();
+
+        assertEquals(
+                "Flagged replies rose from 2.0% to 9.0%", source.shape(finding).title());
+    }
 }

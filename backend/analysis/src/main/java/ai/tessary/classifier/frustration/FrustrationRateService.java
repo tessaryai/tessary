@@ -240,6 +240,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
                     FindingRow.SubjectKind.CLASSIFIER,
                     signal.id(),
                     signal.name(),
+                    null,
                     d.callsSinceOnset(),
                     callSite,
                     d.onsetAt(),

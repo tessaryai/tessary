@@ -918,6 +918,7 @@ public class SampleProjectSeedListener {
                 FindingRow.SubjectKind.CLASSIFIER,
                 classifier.id(),
                 classifier.name(),
+                null,
                 d.failuresSinceOnset(),
                 stat.callSiteId(),
                 d.onsetAt(),
