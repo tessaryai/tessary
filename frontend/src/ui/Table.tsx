@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { HTMLAttributes, ReactNode, ThHTMLAttributes, TdHTMLAttributes } from "react";
+import type { HTMLAttributes, ReactNode, Ref, ThHTMLAttributes, TdHTMLAttributes } from "react";
 import { cn, hasTypeSize } from "./cn";
 
 export function Table({ className, children, ...rest }: HTMLAttributes<HTMLTableElement>) {
@@ -26,8 +26,20 @@ export function THead({ children, className }: { children: ReactNode; className?
   );
 }
 
-export function TBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <tbody className={cn("divide-y divide-border", className)}>{children}</tbody>;
+export function TBody({
+  children,
+  className,
+  ref,
+}: {
+  children: ReactNode;
+  className?: string;
+  ref?: Ref<HTMLTableSectionElement>;
+}) {
+  return (
+    <tbody ref={ref} className={cn("divide-y divide-border", className)}>
+      {children}
+    </tbody>
+  );
 }
 
 export function TR({ interactive, className, children, ...rest }: HTMLAttributes<HTMLTableRowElement> & { interactive?: boolean }) {

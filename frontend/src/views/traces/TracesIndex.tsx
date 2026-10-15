@@ -65,6 +65,7 @@ import {
 import { ANY_DETECTION, DetectionMarker } from "./detection-marker";
 import { useSessionsIndex, sessionName, sessionDurationMs, type SessionListItem } from "./session-index-data";
 import { TraceRail } from "./TraceRail";
+import { useRowWindow } from "./useRowWindow";
 import { SessionRail } from "./SessionRail";
 
 const CELL_PAD = { paddingInline: 12, paddingBlock: 9 } as const;
@@ -442,25 +443,27 @@ function TracesList() {
               {groupBySession && <TH className="bg-surface" style={STICKY_TH_STYLE} aria-hidden="true" />}
             </TR>
           </THead>
-          <TBody>
-            {groupBySession
-              ? sessionRows.map((s) => {
-                  const isOpen = expanded.has(s.id);
-                  return (
-                    <SessionGroupRows
-                      key={s.id}
-                      session={s}
-                      columns={columns}
-                      expanded={isOpen}
-                      onToggle={() => toggleExpanded(s.id)}
-                      onOpenSession={() => openSession(s)}
-                      onOpenTrace={openTraceById}
-                      filters={filters}
-                    />
-                  );
-                })
-              : rows.map((row) => <TraceRow key={row.id} row={row} columns={columns} onOpen={onOpenRow} />)}
-          </TBody>
+          {groupBySession ? (
+            <TBody>
+              {sessionRows.map((s) => {
+                const isOpen = expanded.has(s.id);
+                return (
+                  <SessionGroupRows
+                    key={s.id}
+                    session={s}
+                    columns={columns}
+                    expanded={isOpen}
+                    onToggle={() => toggleExpanded(s.id)}
+                    onOpenSession={() => openSession(s)}
+                    onOpenTrace={openTraceById}
+                    filters={filters}
+                  />
+                );
+              })}
+            </TBody>
+          ) : (
+            <TraceRows rows={rows} columns={columns} onOpen={onOpenRow} />
+          )}
         </Table>
       )}
 
@@ -831,6 +834,36 @@ function Detected({ names }: { names: string[] }) {
   );
 }
 
+/** The flat list's body, windowed once it is long: see {@link useRowWindow}. */
+function TraceRows({
+  rows,
+  columns,
+  onOpen,
+}: {
+  rows: TraceListItem[];
+  columns: ColumnDef[];
+  onOpen: (row: TraceListItem) => void;
+}) {
+  const { bodyRef, win } = useRowWindow(rows.length);
+  return (
+    <TBody ref={bodyRef}>
+      {win.top > 0 && <SpacerRow height={win.top} span={columns.length} />}
+      {rows.slice(win.start, win.end).map((row) => (
+        <TraceRow key={row.id} row={row} columns={columns} onOpen={onOpen} />
+      ))}
+      {win.bottom > 0 && <SpacerRow height={win.bottom} span={columns.length} />}
+    </TBody>
+  );
+}
+
+function SpacerRow({ height, span }: { height: number; span: number }) {
+  return (
+    <tr aria-hidden="true">
+      <td colSpan={span} style={{ height, padding: 0 }} />
+    </tr>
+  );
+}
+
 const TraceRow = memo(function TraceRow({
   row,
   columns,
@@ -842,6 +875,7 @@ const TraceRow = memo(function TraceRow({
 }) {
   return (
     <TR
+      data-row
       interactive
       tabIndex={0}
       onClick={() => onOpen(row)}
