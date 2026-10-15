@@ -95,9 +95,7 @@ def main() -> int:
                     own_jars.append(stem)
                     if open_modules and stem not in open_modules:
                         findings.append(f"jar {path}: an ai.tessary jar that is not an open reactor module ({stem})")
-                # Entry rules match as substrings of "/" + entry and jar rules run over entry base
-                # names, so a fat jar's inner classes and nested jars are as visible as the
-                # extracted layout backend/Dockerfile produces today.
+                # Entry rules match substrings of "/" + entry and jar rules match base names, so nested jars are visible.
                 for kind, pattern, why in rules:
                     if kind == "entry":
                         hit = next((n for n in names if "/" + pattern in "/" + n), None)

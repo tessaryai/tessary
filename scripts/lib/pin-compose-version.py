@@ -29,11 +29,7 @@ import re
 import sys
 
 FLOATING = "${TESSARY_VERSION:-latest}"
-# Three `image:` keys (backend, frontend, sandbox-runner) plus TWO env values on sandbox-runner —
-# AGENT_IMAGE and E2B_ANALYZER_TEMPLATE. Neither is a compose `image:` key, but both are still a
-# pull instruction the artifact hands a remote install (D10's own reasoning), and they are the two
-# recipes for the one agent runtime: whichever SANDBOX_BACKEND an install picks, the reference it
-# follows has to name this release.
+# Three `image:` keys plus AGENT_IMAGE and E2B_ANALYZER_TEMPLATE, the two recipes for the agent runtime.
 EXPECTED_SITES = 5
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.\-]+)?$")
 
@@ -69,8 +65,7 @@ def main() -> int:
         print(f"pin-compose-version: {src} still carries {FLOATING} after the substitution", file=sys.stderr)
         return 1
 
-    # The substitution is the ONLY difference, line for line. A line-based edit is only safe if it
-    # can say so; this is that statement, checked rather than asserted.
+    # The substitution must be the only difference, line for line; checked, not assumed.
     changed = [
         (a, b)
         for a, b in zip(text.splitlines(), pinned.splitlines())

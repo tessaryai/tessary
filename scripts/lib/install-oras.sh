@@ -1,21 +1,8 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
-# Put a verified `oras` on PATH for scripts/publish-compose-artifact.sh.
-#
-# WHY A TOOL INSTALL LIVES IN THIS REPOSITORY AT ALL. The compose artifact is pushed with oras
-# rather than `docker compose publish` (see publish-compose-artifact.sh's header for the reasons),
-# and oras is not on a GitHub runner by default. Installing it through a third-party action would
-# mean trusting that action's whole surface to place a binary; this fetches the release the oras
-# project publishes and refuses to run it unless it hashes to the value pinned below.
-#
-# THE PIN IS THE POINT. VERSION and the two checksums move together, by hand, and a mismatch is
-# fatal rather than a warning — an unverified binary that is about to be handed registry
-# credentials is not something to continue past. Checksums come from the project's own
-# `oras_<version>_checksums.txt`, which is GPG-signed alongside every release asset.
-#
-#   bash scripts/lib/install-oras.sh <dir>    install into <dir>, print the path
-#
-# Idempotent: an already-installed binary of the right version in <dir> is left alone.
+# |# SPDX-License-Identifier: Apache-2.0
+# Puts a verified `oras` on PATH for scripts/publish-compose-artifact.sh. VERSION and both checksums
+# (from the project's GPG-signed checksums file) move together by hand; a mismatch is fatal, since the
+# binary is handed registry credentials. Idempotent.   bash scripts/lib/install-oras.sh <dir>
 set -euo pipefail
 P=install-oras
 

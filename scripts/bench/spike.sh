@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
-# Burst absorption. Holds a safe baseline rate, then applies a spike of a given multiple for a given
-# number of seconds, and records the second the first 503 appeared (if any).
-#
-# The model this is testing: the spool absorbs (spike_rate - drain_rate) x seconds worth of spans
-# until the 64 MiB byte budget hits the 0.8 refuse fraction. So a short violent spike is survivable
-# and a long mild one is not, and the crossover is what the number below has to state.
-#
-#   bash spike.sh <label> <baseline-spans-per-s> <multiplier> <spike-seconds> [more multipliers...]
+# |# SPDX-License-Identifier: Apache-2.0
+# Burst absorption: a baseline rate, then a spike, recording the second of the first 503. The spool absorbs
+# (spike - drain) x seconds until the 64 MiB budget reaches the 0.8 refuse fraction.
+# bash spike.sh <label> <baseline-spans-per-s> <multiplier> <spike-seconds> [more multipliers...]
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 

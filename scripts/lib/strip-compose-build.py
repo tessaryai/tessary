@@ -37,8 +37,7 @@ def strip_build_blocks(text: str) -> str:
     for line in lines:
         if skip_indent is not None:
             if line.strip() == "":
-                # A blank line inside a block is only inside it if something deeper follows; treat
-                # it as a terminator, which is safe because a blank line is never load-bearing YAML.
+                # A blank line ends the block; blank lines are never load-bearing YAML.
                 skip_indent = None
             else:
                 indent = len(line) - len(line.lstrip(" "))

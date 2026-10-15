@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
-# What the backend container is actually using, separated into the parts that matter.
-#
-# Why not just read `docker stats`: that number is the cgroup's memory.current, which folds the page
-# cache in with the process, and it says nothing about whether the JVM's own committed memory fits
-# under the limit. -XX:MaxRAMPercentage=75 puts a 1.5 GiB heap inside a 2 GiB cgroup, and the
-# remaining 512 MiB has to cover metaspace, thread stacks, the code cache, GC structures and every
-# direct byte buffer the OTLP path allocates. Only NMT splits those out, and the shipped image is a
-# JRE with no jcmd, so jcmd comes from a sidecar JDK sharing the backend's PID namespace and /tmp.
-#
-#   bash mem-probe.sh <tag>
+# |# SPDX-License-Identifier: Apache-2.0
+# What the backend container uses, split by NMT into heap, metaspace, stacks, code cache and direct
+# buffers; `docker stats` folds in page cache. The image has no jcmd, so it runs from a sidecar JDK.
+# bash mem-probe.sh <tag>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 TAG="${1:-probe}"

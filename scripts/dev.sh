@@ -1,56 +1,21 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
-# Launch the Docker dev stack inside a tmux session with one tab per service.
-#
-# Layout (4 tabbed windows in the same session):
-#   [0] shell      interactive shell with cheat-sheet (you land here)
-#   [1] backend    backend logs
-#   [2] frontend   frontend logs
-#   [3] caddy      caddy logs
-#
-# Open http://localhost (or http://localhost:$TESSARY_DEV_PORT) once Spring Boot has booted (watch window 1
-# for "Started TessaryApplication"). The status bar at the bottom of tmux
-# shows all four window names; the active one is highlighted.
-#
-# Session-local no-prefix shortcuts (defined in .tmux.conf at the repo root;
-# they only fire inside the tessary-dev session and fall back to normal key
-# behavior everywhere else):
-#   0 / 1 / 2 / 3   jump to window 0/1/2/3
-#   Tab / S-Tab     next / previous window
-#   r then f/b/c    restart frontend / backend / caddy
-#   C-e             stop the stack (task dev:stop)
-# These bare keys shadow literal typing inside this session only; outside
-# tmux they work as normal.
-#
-# Standard tmux moves (prefix is C-b):
-#   C-b , rename window   C-b d detach   C-b [ scrollback (q to exit)
-#
-# Mouse mode is enabled: click a window name in the bottom status bar to
-# switch windows, and drag-select to copy to the system clipboard.
-#
-# Re-attach later:    tmux attach -t tessary-dev
-# Stop the stack:     C-e   (or `task dev:stop` from any shell)
+# |# SPDX-License-Identifier: Apache-2.0
+# The Docker dev stack in a tmux session: windows shell, backend, frontend, caddy. Open
+# http://localhost once the backend logs "Started TessaryApplication". Session-local keys are in
+# .tmux.conf. Re-attach: tmux attach -t tessary-dev. Stop: C-e or `task dev:stop`.
 
 set -euo pipefail
 
 SESSION="tessary-dev"
-# TESSARY_PROFILING=1 (set by `task dev:profiling`) layers the continuous-profiling
-# overlay on top: a local Pyroscope container plus a -javaagent on the backend.
-# Unset, the compose invocation is byte-identical to what it has always been, so
-# the normal dev loop cannot regress from this.
-# Must use the SAME test as the jar fetch below (= "1"), not ${TESSARY_PROFILING:+...}:
-# `:+` expands on any non-empty value, so TESSARY_PROFILING=0 would mount the overlay
-# (attaching -javaagent) while the fetch guard skipped the download, so the backend JVM
-# then dies on a missing agent jar.
+# TESSARY_PROFILING=1 adds the profiling overlay. Same `= "1"` test as the jar fetch below: `:+` would
+# mount the overlay for TESSARY_PROFILING=0 while the fetch skipped, and the JVM would die on the missing jar.
 PROFILING_COMPOSE=""
 if [ "${TESSARY_PROFILING:-0}" = "1" ]; then PROFILING_COMPOSE=" -f docker-compose.profiling.yml"; fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# The `-f` set comes from the one derivation in scripts/lib/dev-compose.sh. Built after the `cd`
-# on purpose: its file paths are relative. The profiling overlay stays last, so it still wins on
-# conflicts.
+# After the `cd`, since the paths are relative. The profiling overlay stays last so it wins.
 COMPOSE="$(bash "$REPO_ROOT/scripts/lib/dev-compose.sh")${PROFILING_COMPOSE}"
 
 if ! command -v tmux >/dev/null 2>&1; then
@@ -63,40 +28,29 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-# Run from inside the session this script is about to replace, the `kill-session` below kills the
-# shell running it: the stack comes up and the new session never does, with no message. Refuse
-# before anything starts instead.
+# Run from inside the session it replaces, `kill-session` would kill this shell silently; refuse instead.
 if [ -n "${TMUX:-}" ] && [ "$(tmux display-message -p '#S' 2>/dev/null)" = "$SESSION" ]; then
     echo "error: you are inside the $SESSION tmux session, which task dev replaces." >&2
     echo "       Detach first with C-b d, then run task dev again." >&2
     exit 1
 fi
 
-# The decisions this stack needs (where agents run, whether sign-in is enforced), asked once as
-# multiple choice and remembered in .local/dev-choices.env. Resolved and exported BEFORE
-# `$COMPOSE up`, which is when compose interpolates them.
-# shellcheck source=lib/dev-choices.sh
+# Asked once and saved in .local/dev-choices.env; exported before `$COMPOSE up` interpolates.
+# |# shellcheck source=lib/dev-choices.sh
 . "$REPO_ROOT/scripts/lib/dev-choices.sh"
 dev_choices_resolve
 dev_choices_summary
 dev_choices_export_sandbox_env
 
-# Continuous profiling (TESSARY_PROFILING=1 → task dev:profiling, or set it yourself in front of
-# any dev task). The agent jar is fetched HERE rather than in the Taskfile so profiling composes
-# with every mode instead of only the one task that happened to carry the download
-# step. Idempotent: re-running is a no-op once the jar exists.
-#
-# Version must match the agent pinned in backend/Dockerfile and the io.pyroscope:agent dependency
-# in backend/shared/pom.xml. The labels API is shared static state between the javaagent and the
-# app, so a skew makes the tessary_pool label silently vanish with no error.
+# Fetched here so profiling composes with every dev mode; idempotent. The version must match backend/Dockerfile
+# and io.pyroscope:agent in backend/shared/pom.xml, or the tessary_pool label silently vanishes.
 if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
     PYROSCOPE_AGENT_VERSION="2.8.0"
     PROFILER_DIR="$REPO_ROOT/.local/pyroscope"
     if [ ! -f "$PROFILER_DIR/pyroscope.jar" ]; then
         echo "fetching pyroscope agent v${PYROSCOPE_AGENT_VERSION}..."
         mkdir -p "$PROFILER_DIR"
-        # Download to a temp path and move into place only on success, so an interrupted or failed
-        # fetch can't leave a truncated jar that the JVM then refuses to load on every later boot.
+        # Temp path then move, so a failed fetch never leaves a truncated jar.
         if ! curl -fsSL -o "$PROFILER_DIR/pyroscope.jar.tmp" \
             "https://github.com/grafana/pyroscope-java/releases/download/v${PYROSCOPE_AGENT_VERSION}/pyroscope.jar"; then
             rm -f "$PROFILER_DIR/pyroscope.jar.tmp"
@@ -105,18 +59,12 @@ if [ "${TESSARY_PROFILING:-0}" = "1" ]; then
         fi
         mv "$PROFILER_DIR/pyroscope.jar.tmp" "$PROFILER_DIR/pyroscope.jar"
     fi
-    # Alloy is opt-in by default (`profiles: ["observability"]` in docker-compose.dev.yml), but
-    # profiling needs it up regardless: it's the relay to the local Pyroscope container (see
-    # docker-compose.profiling.yml), so an explicit TESSARY_PROFILING=1 forces the profile on. Append
-    # rather than overwrite: a caller who already set COMPOSE_PROFILES (e.g. `launcher`) keeps it.
+    # Profiling needs Alloy as the relay to Pyroscope, so force the `observability` profile, keeping any others.
     case ",${COMPOSE_PROFILES:-}," in
         *,observability,*) ;;
         *) export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}observability" ;;
     esac
-    # Bringing Alloy up is necessary but not sufficient: the base application.yaml defaults both
-    # OTLP export flags to false, so without these the backend never creates an exporter and no
-    # spans/logs reach the container we just started. Export rather than overwrite so a caller
-    # who explicitly set either flag off keeps that choice.
+    # application.yaml defaults both OTLP export flags to false; default them on without overriding a caller.
     export MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED="${MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED:-true}"
     export MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED="${MANAGEMENT_LOGGING_EXPORT_OTLP_ENABLED:-true}"
     echo "profiling ON — flame graphs at http://localhost:4040 once the backend has served some traffic."
@@ -125,10 +73,8 @@ fi
 echo "starting dev stack (this builds images on first run; subsequent runs hit the cache)..."
 $COMPOSE up -d --build
 
-# Pre-render the cheat-sheet to a file. We avoid a multi-line heredoc inside
-# `tmux send-keys` because it sometimes causes the receiving shell to enter
-# heredoc-continuation mode and echo `heredoc>` on every line. A single-line
-# `cat $file` is robust regardless of paste timing.
+# A pre-rendered file rather than a heredoc through `tmux send-keys`, which can leave the shell in
+# heredoc-continuation mode.
 CHEATSHEET="$REPO_ROOT/.cache/dev-cheatsheet.txt"
 mkdir -p "$(dirname "$CHEATSHEET")"
 cat > "$CHEATSHEET" <<EOF
@@ -165,40 +111,26 @@ Stop:
 Detach: C-b d   Re-attach: tmux attach -t $SESSION
 EOF
 
-# Wipe any prior session so windows are fresh.
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
-# Create windows in the order shell → backend → frontend → caddy so they map
-# to indices 0/1/2/3. Force base-index 0 on this session so the numbering is
-# deterministic regardless of the user's global tmux config (many users set
-# base-index 1 in ~/.tmux.conf). Targeting by name is still used everywhere
-# else so renames or future re-orderings don't break send-keys calls.
-#
-# Window 0: interactive shell with a cheat-sheet (you land here).
+# base-index 0 so indices are deterministic whatever the user's tmux config; windows are targeted by name.
 tmux new-session -d -s "$SESSION" -n "shell"
 tmux set-option        -t "$SESSION" base-index 0
 tmux set-window-option -t "$SESSION" pane-base-index 0
 tmux send-keys -t "$SESSION:shell" "clear && cat \"$CHEATSHEET\"" C-m
 
-# Window 1: backend logs.
 tmux new-window -t "$SESSION" -n "backend"
 tmux send-keys  -t "$SESSION:backend" "$COMPOSE logs -f --no-log-prefix backend" C-m
 
-# Window 2: frontend logs.
 tmux new-window -t "$SESSION" -n "frontend"
 tmux send-keys  -t "$SESSION:frontend" "$COMPOSE logs -f --no-log-prefix frontend" C-m
 
-# Window 3: caddy logs.
 tmux new-window -t "$SESSION" -n "caddy"
 tmux send-keys  -t "$SESSION:caddy" "$COMPOSE logs -f --no-log-prefix caddy" C-m
 
-# Session-local no-prefix bindings live in the project's .tmux.conf (repo root):
-# bare 0-3 / Tab window jumps, the r-chord restart, C-e stop, and mouse-drag
-# clipboard copy. Each is gated by if-shell on session_name so the bare keys
-# don't leak into other tmux sessions on the same server.
+# Bindings are gated on session_name so bare keys do not leak into other sessions.
 tmux source-file "$REPO_ROOT/.tmux.conf"
 
-# Land the user on the shell window.
 tmux select-window -t "$SESSION:shell"
 
 tmux attach -t "$SESSION"

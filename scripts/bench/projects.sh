@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: Apache-2.0
-# Mint N projects in one org and write one write-scoped token per line to tokens.txt.
-#
-# The in-process spool partitions by project, so a single-project load test measures a single drainer
-# no matter how many are configured. This is what gives the drain something to parallelise.
-#
-#   bash projects.sh 8
+# |# SPDX-License-Identifier: Apache-2.0
+# Mint N projects and write one write-scoped token per line to tokens.txt. The spool partitions by
+# project, so one project measures one drainer.
+# bash projects.sh 8
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 N="${1:-8}"

@@ -1,19 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
-// One OpenTelemetry span, sent to a running Tessary with nothing installed.
-//
-// Runs on the Node the sandbox-runner image already carries, so a reader with only Docker and the
-// running stack can emit their first span without an SDK, a collector or a package manager:
-//
-//   docker compose exec -T sandbox-runner node - <token> < scripts/emit-span.js
-//
-// The token is the value after `Bearer` in the connect gate's Header field. The span is a chat call
-// tagged with `tessary.call_site.id`, which is what opens the gate; the OTLP/HTTP protobuf body is
-// encoded by hand below because the ingest endpoint speaks protobuf only and this file may depend
-// on nothing outside Node's standard library.
-//
-//   argv: <token> [endpoint] [call-site id]
-//   endpoint defaults to the frontend's plain-HTTP site on the compose network, the same path a
-//   browser reaches; call-site id defaults to "first-span".
+// |// SPDX-License-Identifier: Apache-2.0
+// One OpenTelemetry span with nothing installed, using the sandbox-runner image's Node:
+// docker compose exec -T sandbox-runner node - <token> < scripts/emit-span.js
+// argv: <token> [endpoint] [call-site id]. Protobuf is hand-encoded: ingest speaks protobuf only.
 "use strict";
 const http = require("node:http");
 const https = require("node:https");

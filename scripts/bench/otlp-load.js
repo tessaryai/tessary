@@ -1,15 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
-// Open-loop OTLP/HTTP load generator for the ingest front door.
-//
-// Open-loop on purpose: a closed-loop generator (N workers, each waiting for its response) slows
-// itself down exactly when the server slows down, so it can never observe a rejection rate at a
-// stated offered load. This one fires at a fixed arrival rate regardless of what comes back, which
-// is the only way "what does it take without rejecting" has a denominator.
-//
-// Protobuf is hand-encoded (same approach as scripts/emit-span.js) so this depends on nothing.
-//
-//   node otlp-load.js --url http://localhost/v1/traces --token tsy_... \
-//     --rate 400 --spans-per-request 40 --payload-bytes 2048 --duration 120 --out run.jsonl
+// |// SPDX-License-Identifier: Apache-2.0
+// Open-loop OTLP/HTTP load generator: fires at a fixed arrival rate whatever comes back, so a rejection
+// rate has a denominator. Protobuf is hand-encoded so this depends on nothing.
+// node otlp-load.js --url http://localhost/v1/traces --token tsy_... \
+// --rate 400 --spans-per-request 40 --payload-bytes 2048 --duration 120 --out run.jsonl
 "use strict";
 const http = require("node:http");
 const https = require("node:https");
@@ -23,8 +16,7 @@ function arg(name, def) {
 
 const URL_ = arg("url", "http://localhost/v1/traces");
 const TOKEN = arg("token");
-// A list of tokens, one per line, round-robined per request. Several projects is the only way to see
-// what a per-project-partitioned drain does: one project is pinned to one drainer by construction.
+// One token per line, round-robined: one project is pinned to one drainer.
 const TOKENS_FILE = arg("tokens");
 const TOKENS = TOKENS_FILE
   ? require("node:fs").readFileSync(TOKENS_FILE, "utf8").split("\n").map((t) => t.trim()).filter(Boolean)
@@ -72,10 +64,9 @@ const kv = (key, value) => Buffer.concat([
   bytesField(2, typeof value === "number" ? varintField(3, value) : stringField(1, String(value))),
 ]);
 
-// ---------------------------------------------------------------- payload
-// A gen_ai.input.messages / gen_ai.output.messages pair of the requested size. The mapper reads
-// these as BOTH the messages JSON and the flat input/output text, so the spool's byte accounting
-// sees each of them twice — which is what a real chat span does too.
+// |// ---------------------------------------------------------------- payload
+// The mapper reads these as both messages JSON and flat text, so the spool counts their bytes twice, as
+// for a real chat span.
 const FILLER = "the quick brown fox jumps over the lazy dog. ";
 function messagesJson(role, bytes) {
   let body = "";
@@ -85,8 +76,7 @@ function messagesJson(role, bytes) {
 const INPUT_MSG = messagesJson("user", PAYLOAD_BYTES);
 const OUTPUT_MSG = messagesJson("assistant", PAYLOAD_BYTES);
 
-// Ids must be unique or the idempotent write path skips the insert with ON CONFLICT DO NOTHING and
-// the measurement reports a no-op as throughput. Counter-based, with a per-process random prefix.
+// Unique ids, or ON CONFLICT DO NOTHING turns the write into a no-op counted as throughput.
 const ID_PREFIX = crypto.randomBytes(8);
 let idCounter = 0n;
 function id(n) {
@@ -181,8 +171,7 @@ function send(spans) {
   req.end(body);
 }
 
-// Fixed arrival rate, driven off a 20 ms tick with fractional carry so a rate that is not a whole
-// number of requests per tick still averages out rather than rounding to zero.
+// A 20 ms tick with fractional carry, so a rate below one request per tick still averages out.
 const TICK_MS = 20;
 let carry = 0;
 function currentRate() {
@@ -205,7 +194,6 @@ function pct(sorted, p) {
 
 function finish() {
   clearInterval(timer);
-  // Let the last responses land before summarizing.
   setTimeout(() => {
     const rows = [...buckets.values()].sort((a, b) => a.sec - b.sec).filter((r) => r.sec >= WARMUP);
     const agg = { label: LABEL, offered_rate: RATE, spans_per_request: SPANS_PER_REQ, payload_bytes: PAYLOAD_BYTES,
