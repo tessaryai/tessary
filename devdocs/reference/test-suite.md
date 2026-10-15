@@ -179,8 +179,7 @@ that module's own tests, so code the `app` module's `@SpringBootTest` suite runs
 in the module that owns it. The aggregate report at `backend/app/target/site/jacoco-aggregate/`
 merges every module's exec data against every open module's classes; read that one for a module's
 real number. Refresh them locally
-with `task backend:coverage` (equivalent to `task backend:check` — same reactor — kept as its own target so refreshing coverage mid-extraction doesn't need to wait on
-CI's cadence). CI additionally uploads the reports as a build artifact
+with `task backend:check`. CI additionally uploads the reports as a build artifact
 (`backend-jacoco-coverage`), from `check.yml`'s single job, so it lands on every pull request rather
 than on the old weekly cron. `if: always()`, so a red run still leaves a baseline.
 

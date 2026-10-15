@@ -93,46 +93,36 @@ tasks:
   rb:
     aliases: [restart:backend]
     desc: Restart backend container (fast — no image rebuild).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:backend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate backend"
-      - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
+    cmds: [{ task: _restart, vars: { SVC: backend } }]
 
   rf:
     aliases: [restart:frontend]
     desc: Restart frontend container (fast — no image rebuild; Vite HMR resumes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:frontend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate frontend"
-      - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
+    cmds: [{ task: _restart, vars: { SVC: frontend } }]
 
   rc:
     aliases: [restart:caddy]
     desc: Restart Caddy reverse proxy (picks up Caddyfile changes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:caddy C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --no-deps --force-recreate caddy"
-      - tmux send-keys -t {{.SESSION}}:caddy "{{.DC_DEV}} logs -f --no-log-prefix caddy" Enter
+    cmds: [{ task: _restart, vars: { SVC: caddy } }]
 
   rb:full:
     desc: Rebuild backend image (use when pom.xml / backend Dockerfile changes).
-    cmds:
-      - tmux send-keys -t {{.SESSION}}:backend C-c
-      - sleep 1
-      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps backend"
-      - tmux send-keys -t {{.SESSION}}:backend "{{.DC_DEV}} logs -f --no-log-prefix backend" Enter
+    cmds: [{ task: _restart, vars: { SVC: backend, BUILD: '--build' } }]
 
   rf:full:
     desc: Rebuild frontend image + reinstall deps (use when package.json / frontend Dockerfile changes).
     cmds:
-      - tmux send-keys -t {{.SESSION}}:frontend C-c
-      - sleep 1
       - docker volume rm -f tessary_frontend-node-modules 2>/dev/null || true
-      - "{{.DC_DEV_UP}} up -d --build --force-recreate --no-deps frontend"
-      - tmux send-keys -t {{.SESSION}}:frontend "{{.DC_DEV}} logs -f --no-log-prefix frontend" Enter
+      - task: _restart
+        vars: { SVC: frontend, BUILD: '--build' }
+
+  _restart:
+    internal: true
+    cmds:
+      - tmux send-keys -t {{.SESSION}}:{{.SVC}} C-c
+      - sleep 1
+      - '{{.DC_DEV_UP}} up -d {{.BUILD | default ""}} --no-deps --force-recreate {{.SVC}}'
+      - tmux send-keys -t {{.SESSION}}:{{.SVC}} "{{.DC_DEV}} logs -f --no-log-prefix {{.SVC}}" Enter
 
   logs:
     desc: 'Tail logs for a single dev service. Usage: task logs -- backend'
@@ -197,14 +187,6 @@ tasks:
     desc: "Regenerate the checked-in canonical OpenAPI spec (backend/contract/src/main/resources/openapi/tessary-api.json) from the controllers via springdoc. Run after any controller/DTO change that shifts the wire contract, then commit the regenerated spec (OpenApiSpecDriftTest fails backend:check until you do)."
     cmds:
       - mvn -f backend/pom.xml -pl app -am -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest=OpenApiSpecDriftTest -Dtessary.openapi.regenerate=true test
-
-  backend:coverage:
-    desc: "Refresh the JaCoCo coverage baseline for the 11 backend modules. Runs the IDENTICAL command as backend:check — same reactor, same full Spotless/forbidden-apis/SpotBugs/PMD/Error Prone/NullAway/test gate — it is not a lighter or coverage-only path, and a lint or static-analysis failure anywhere in the reactor aborts it before jacoco:report runs, same as it would for backend:check. It exists only as a separately-named entry point for refreshing coverage locally; CI's check.yml uploads the same reports on every pull request. Only the coverage NUMBER is non-gating — no threshold is enforced on it anywhere. Needs Docker: `app` is the one module in this list with Testcontainers-backed @SpringBootTest coverage to record. Per-module reports land at backend/<module>/target/site/jacoco/index.html; the cross-module aggregate, which credits the app module's @SpringBootTest runs to the module that owns the code, lands at backend/app/target/site/jacoco-aggregate/index.html."
-    cmds:
-      # Through the script, not a bare mvn invocation: the JDK-major-25 guard has to run before
-      # Maven starts, or a mismatch surfaces as an opaque PMD/compiler crash deep in the reactor
-      # instead of a clear message.
-      - bash scripts/check-backend.sh
 
   check:license-headers:
     desc: "SPDX header presence over the tree. Pass --fix to insert missing headers in place: task check:license-headers -- --fix. Shared with CI via scripts/check-license-headers.sh."
@@ -317,30 +299,8 @@ tasks:
       - bash scripts/check-vendored-plugin.sh
 
   # ---- combined ----
-  # The project gate. CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh`
-  # on `pull_request:`, which is this same manifest, so local green => CI green on the same script.
-  # Merge-blocking is still not possible: branch protection is plan-gated on this repo.
-  # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. There
-  # are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh:
-  #   contract:check        -> scripts/check-contract-consistency.sh (vendored contract drift)
-  #   contract:plugin       -> scripts/check-vendored-plugin.sh (validator rules + freshness)
-  #   backend:check         -> scripts/check-backend.sh  (mvn -B -T 2 verify)
-  #   frontend:check        -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the route
-  #                            render smoke test] + pnpm run build)
-  #   caddy:validate        -> scripts/check-caddy.sh    (caddy validate + spec route coverage)
-  #   check:license-headers -> scripts/check-license-headers.sh (SPDX header presence)
-  #   migrations:populated (not in `check`) -> scripts/check-migrations-populated.sh
-  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) does not run every
-  # scripts/check-*.sh. The ones it skips each carry an EXCLUDED manifest row, so the
-  # completeness assertion covers them: check-migrations-populated.sh (wants a populated
-  # Postgres), check-vendored-plugin.sh (network), check-open-artifacts.sh (Docker and minutes;
-  # release.yml), and check-dependency-audit.sh and check-notice-coverage.sh (manual/on-demand
-  # only, no real credential in any check). scripts/check.sh's manifest is where each gate's disposition is
-  # declared, and the manifest is asserted complete against the scripts on disk before anything
-  # runs.
-  # (A first-party OTLP-producer SDK previously lived under sdk/ with its own on-demand gate; it was
-  # removed to be rebuilt from scratch when needed. The platform consumes standard OTLP attributes from
-  # any producer, so nothing in `check` depends on it.)
+  # The project gate. CI's check.yml runs the same scripts/check.sh, whose manifest declares every
+  # scripts/check-*.sh as run or excluded and is asserted complete before anything runs.
   check:
     desc: 'The project gate, mirroring CI. No argument runs everything. An argument narrows it to a comma-separated list of slices, where a slice is a backend product area or `frontend`: task check -- rca,metering / task check -- frontend. Nothing enforces this locally — CI is the gate — so run the slices your change touches before pushing.'
     # silent: Task would otherwise echo the invocation above the gate's own output. The logic lives
