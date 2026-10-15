@@ -45,7 +45,7 @@
          find-sec-bugs (added with the plugin itself). Its first full run over this tree
          produced 343 findings and zero real bugs; what follows is that triage, kept in the two
          shapes this file's header asks for. Re-run the triage with:
-           mvn -DskipTests -Dpmd.skip=true -Dspotbugs.failOnError=false -fae verify
+           mvn -DskipTests -Dspotbugs.failOnError=false -fae verify
          =================================================================================== -->
 
     <!-- Informational detectors that fire on shape, not on a defect. SPRING_ENDPOINT marks every

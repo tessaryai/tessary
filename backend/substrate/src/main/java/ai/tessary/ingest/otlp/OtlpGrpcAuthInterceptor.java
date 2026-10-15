@@ -36,10 +36,7 @@ public class OtlpGrpcAuthInterceptor implements ServerInterceptor {
         this.bearerAuth = bearerAuth;
     }
 
-    // ReqT/RespT are the SPI's own type-parameter names, so the PMD naming rule is suppressed rather than renaming
-    // them.
     @Override
-    @SuppressWarnings("PMD.TypeParameterNamingConventions")
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
         @Nullable String authorization = headers.get(AUTHORIZATION);

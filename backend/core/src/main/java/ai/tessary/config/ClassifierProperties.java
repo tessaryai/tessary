@@ -7,7 +7,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /** Defaults live here in code; no yaml entries needed. Strictly off the ingest hot path. */
 @ConfigurationProperties(prefix = "tessary.classifier")
 public record ClassifierProperties(
-
         @DefaultValue("200") int batchSize,
 
         /**

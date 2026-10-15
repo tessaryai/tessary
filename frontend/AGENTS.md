@@ -140,8 +140,8 @@ When to add one: root [`AGENTS.md`](../AGENTS.md#tests). The backend rules on ex
 
 - **Test what the user sees.** `render`, query with `getByRole` / `getByLabelText`, act with `fireEvent`.
   No component internals, no `container.querySelector`, no whole-tree snapshots.
-- **Mock at the API seam only** (`useTenant` / `projectApi`, as the existing tests do). Never mock our
-  other hooks or child components.
+- **Mock at the API seam only**: `src/test/api.ts` auto-mocks `useTenant` / `projectApi`; opt in with
+  `vi.mock("<rel>/tenant/TenantContext", () => import("<rel>/test/api"))`. Never mock our other hooks or child components.
 - **Fixtures must be able to fail the test.** A "no secret in the DOM" test needs a secret in the fixture;
   a page test needs real data, not a 404.
 - **Absence needs a settled query.** `await` something rendered from the same response, then assert

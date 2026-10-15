@@ -418,7 +418,7 @@ public class FindingEvidenceRepository {
     }
 
     private static SpanRef mapSpan(ResultSet rs) throws SQLException {
-        Array modelsArray = rs.getArray("models"); // NOPMD - CloseResource: freed below; Array has no close()
+        Array modelsArray = rs.getArray("models"); // freed below; Array has no close()
         List<String> models;
         if (modelsArray == null) {
             models = List.of();

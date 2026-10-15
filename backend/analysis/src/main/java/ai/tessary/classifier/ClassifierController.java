@@ -13,7 +13,6 @@ import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
-import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.detection.DetectionTableRegistry;
 import ai.tessary.tenant.rbac.Permission;

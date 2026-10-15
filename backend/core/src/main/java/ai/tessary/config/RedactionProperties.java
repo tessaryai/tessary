@@ -10,7 +10,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "tessary.redaction")
 public record RedactionProperties(
-
         @DefaultValue("true") boolean enabled,
 
         /**

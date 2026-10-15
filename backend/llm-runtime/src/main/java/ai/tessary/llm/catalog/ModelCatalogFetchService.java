@@ -96,9 +96,9 @@ public class ModelCatalogFetchService {
     }
 
     private static Map<ModelProvider, ProviderModelLister> defaultListers(ObjectMapper mapper, Duration fetchTimeout) {
-        // Never closed: shared by every lister for the service's lifetime, which PMD's CloseResource cannot trace.
+        // Never closed: shared by every lister for the service's lifetime.
         // connectTimeout is a fixed 5s; the fetch-timeout property bounds each request, not the TCP handshake.
-        HttpClient http = // NOPMD - CloseResource: intentionally long-lived, see comment above
+        HttpClient http =
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         Map<ModelProvider, ProviderModelLister> m = new EnumMap<>(ModelProvider.class);
         m.put(ModelProvider.OPENAI, new OpenAiCompatModelLister(http, mapper, "OpenAI", fetchTimeout));

@@ -43,4 +43,4 @@ EXPOSE 8080
 # So: install app's whole dependency chain into the (cached) local repo first, then run the app
 # module alone against .m2. `-pl app -am` on `install` is safe; only `run` is the problem.
 # A library-source change needs a container restart to reinstall; app hot-reloads via devtools.
-CMD ["sh", "-c", "mvn -B -q -pl app -am install -DskipTests -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true && mvn -B -pl app spring-boot:run"]
+CMD ["sh", "-c", "mvn -B -q -pl app -am install -DskipTests -Dspotless.check.skip=true -Dspotbugs.skip=true && mvn -B -pl app spring-boot:run"]

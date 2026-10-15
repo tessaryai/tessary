@@ -171,12 +171,12 @@ public class ClassifierRepository {
                 callSiteIds(rs.getArray("call_site_ids")));
     }
 
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = every call site; empty is refused
+    // null = every call site; empty is refused
     private static String @Nullable [] toArray(@Nullable List<String> callSiteIds) {
         return callSiteIds == null ? null : callSiteIds.toArray(String[]::new);
     }
 
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = every call site; empty is refused
+    // null = every call site; empty is refused
     private static @Nullable List<String> callSiteIds(@Nullable Array array) throws SQLException {
         return array == null ? null : List.of((String[]) array.getArray());
     }

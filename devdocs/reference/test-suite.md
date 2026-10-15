@@ -50,7 +50,7 @@ it runs via `task contract:plugin`. See
 [`contract/tests/README.md`](../../contract/tests/README.md).
 
 **A narrowed backend slice is not full `mvn verify`.** It runs spotless + test-compile + the
-package's tests. Static analysis bound to the `verify` phase (SpotBugs, PMD, forbidden-apis),
+package's tests. Static analysis bound to the `verify` phase (SpotBugs, forbidden-apis),
 module-hygiene
 (`scripts/check-module-hygiene.sh`), the classifier-pipeline vocabulary gate
 (`scripts/check-pipeline-vocabulary.sh`), the classifier-quality doc gate

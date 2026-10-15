@@ -40,7 +40,7 @@ services:
       - -c
       - >-
         mvn -B -q -pl app -am install -DskipTests
-        -Dspotless.check.skip=true -Dpmd.skip=true -Dspotbugs.skip=true &&
+        -Dspotless.check.skip=true -Dspotbugs.skip=true &&
         mvn -B -pl app spring-boot:run
         -Dspring-boot.run.jvmArguments=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     expose:
@@ -130,7 +130,7 @@ services:
       - ./backend/analysis/pom.xml:/app/analysis/pom.xml:ro
       - ./backend/surfaces/pom.xml:/app/surfaces/pom.xml:ro
       - ./backend/app/pom.xml:/app/app/pom.xml:ro
-      # Build inputs the prod Dockerfile copies (PMD/SpotBugs config, the schema-column generator, JDK 25
+      # Build inputs the prod Dockerfile copies (SpotBugs config, the schema-column generator, JDK 25
       # --add-exports for Error Prone), mounted so the in-container build matches.
       - ./backend/config:/app/config:ro
       - ./backend/core/tools:/app/core/tools:ro

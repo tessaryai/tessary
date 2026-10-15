@@ -319,7 +319,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
                     .durationMs(start)
                     .log();
             log.debug("encoder.classify parse failure detail head={} host={}", head, host, e);
-            throw new IllegalStateException("launcher /classify parse failure"); // NOPMD PreserveStackTrace
+            throw new IllegalStateException("launcher /classify parse failure");
         } catch (IOException e) {
             throw transportFailure(e, head, mode, count, bytes, chunk, chunks, host, start);
         }

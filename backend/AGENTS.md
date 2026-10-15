@@ -116,7 +116,7 @@ The conventions above are **machine-enforced** — `mvn -B verify` (and CI) hard
 - **Spotless** (palantir-java-format) — `task backend:format` fixes formatting in place.
 - **ArchUnit** (`app/src/test/.../arch/ArchitectureRulesTest`) — the package-by-feature rules as JUnit tests (controllers-in-features, `web/`-plumbing-only, `model/`-pure-data, error codes in `open/errors/`, loggers `private static final`, `JdbcClient`-only-in-`*Repository`), plus the `ErrorCatalog.REGISTERED` parity check. **Add a rule when you add a convention.**
 - **forbidden-apis** — bans default-charset/locale APIs (pass `Locale.ROOT`), `System.out/err`, `java.util.logging`.
-- **SpotBugs** + **PMD** (`backend/config/`) — fix real findings, don't add silent suppressions.
+- **SpotBugs** (`backend/config/`) — fix real findings, don't add silent suppressions.
 - **Error Prone + NullAway** — compile-time; NullAway package set is the `AnnotatedPackages` arg in the parent `backend/pom.xml` (widen one package at a time as packages get JSpecify `@Nullable`).
 - **OpenAPI drift**: any controller/DTO change that shifts the wire contract requires `task contract:openapi` to regenerate the checked-in spec — `OpenApiSpecDriftTest` fails `backend:check` until you do.
 
@@ -134,7 +134,7 @@ Two tiers. Keep them clean — don't mix. When to add or change a test: root [`A
 
 **A distinct `@SpringBootTest(properties = …)` or unique `@DynamicPropertySource` fingerprint is a distinct Spring context, and each one costs a fresh database plus a full Liquibase run (~15s).** Reuse the shared fingerprint unless the properties are the point of the test — that single decision dominates how long the suite takes. Cost model: [`../devdocs/reference/test-suite.md`](../devdocs/reference/test-suite.md).
 
-MockMvc in Boot 4: build manually (`MockMvcBuilders.webAppContextSetup(wac)`) and **explicitly add filters** (`addFilters(authFilter)`) — Boot 4 dropped `@AutoConfigureMockMvc`.
+A Spring test class is a record whose components are the beans it needs (`app/src/test/resources/junit-platform.properties` sets `spring.test.constructor.autowire.mode=all`); keep a class only when it holds mutable state (`@MockitoBean`, `@TempDir`, fields set in `@BeforeEach`). MockMvc comes from `testsupport/MockMvcConfig`, which carries `AuthFilter` — Boot 4 dropped `@AutoConfigureMockMvc`.
 
 ### Writing the test
 

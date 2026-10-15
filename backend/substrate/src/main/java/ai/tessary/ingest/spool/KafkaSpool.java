@@ -58,7 +58,6 @@ import org.slf4j.LoggerFactory;
  */
 // CloseResource: the consumer handed around below lives as long as the spool and is closed by close()
 // or by the owning thread on reset; the locals are references to it, not resources of their own.
-@SuppressWarnings("PMD.CloseResource")
 public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaSpool.class);

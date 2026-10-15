@@ -179,7 +179,7 @@ tests are the ones that need no Spring context, which is also the vast majority 
 
 ## How the boundary is held
 
-The quality gates — surefire, compiler/NullAway, forbiddenapis, SpotBugs, PMD, Spotless — are declared
+The quality gates — surefire, compiler/NullAway, forbiddenapis, SpotBugs, Spotless — are declared
 once in the parent `pluginManagement`. A new module activates them with a bare `<plugin>` stub and
 cannot silently opt out of them.
 

@@ -288,8 +288,7 @@ public class JevDecisionClient implements DecisionClient {
             return node;
         } catch (IOException e) {
             // No throwable attached: a parse error echoes the body, which can carry customer text.
-            throw new TessaryException( // NOPMD - PreserveStackTrace: see above
-                    DecisionError.MALFORMED_ANSWER, target.provider(), "body is not JSON");
+            throw new TessaryException(DecisionError.MALFORMED_ANSWER, target.provider(), "body is not JSON");
         }
     }
 

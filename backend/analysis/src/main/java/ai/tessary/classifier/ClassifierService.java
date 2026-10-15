@@ -5,7 +5,6 @@ import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
 import ai.tessary.classifier.catalog.BuiltInClassifierCatalog.BuiltIn;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.catalog.ClassifierModelModule;
-import ai.tessary.classifier.catalog.ClassifierSeedListener;
 import ai.tessary.classifier.metric.MetricBaselineRepository;
 import ai.tessary.classifier.metric.MetricBaselineRow;
 import ai.tessary.classifier.metric.MetricControl;

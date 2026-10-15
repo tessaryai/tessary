@@ -293,7 +293,7 @@ bannedDependencies rule keeps them free of any app/commercial dependency).
 | `contract` | `open/contract` — the checked-in canonical OpenAPI spec |
 | `shared` | `open/{errors,jobqueue,media,obs}`, `detection/` (per-classifier detection-table registry: `DetectionTable`, with the two flags `shownInTraceViews` and `clearable`, and `DetectionTableRegistry`, which hands `TraceDetectionRepository` the shown tables) |
 
-The quality gate — surefire, compiler/NullAway, forbiddenapis, SpotBugs, PMD, Spotless — is declared
+The quality gate — surefire, compiler/NullAway, forbiddenapis, SpotBugs, Spotless — is declared
 once in the parent's `pluginManagement`; a module activates it with a bare `<plugin>` stub and cannot
 silently opt out. [`../modules.md`](../modules.md) carries the layering rationale.
 

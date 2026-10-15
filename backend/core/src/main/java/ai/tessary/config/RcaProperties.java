@@ -10,7 +10,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "tessary.rca")
 public record RcaProperties(
-
         @DefaultValue("5") int batchSize,
 
         /**

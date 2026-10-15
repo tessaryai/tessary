@@ -311,7 +311,7 @@ public class TracesController {
         return numeric == null ? null : new BigDecimal(numeric);
     }
 
-    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null = no bag → the field is omitted
+    // null = no bag → the field is omitted
     private static @Nullable Map<String, Object> attributesMap(@Nullable JsonNode attrs) {
         if (attrs == null || !attrs.isObject() || attrs.isEmpty()) return null;
         return MAPPER.convertValue(attrs, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
