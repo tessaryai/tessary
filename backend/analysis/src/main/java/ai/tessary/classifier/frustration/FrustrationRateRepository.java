@@ -170,9 +170,6 @@ public class FrustrationRateRepository {
             boolean cleared,
             @Nullable String message) {}
 
-    /** A human reset on one call site's state row, for the Tuning view. */
-    public record Reset(String resetAt, @Nullable String note) {}
-
     private final JdbcClient jdbc;
     private final ClassifierDetectionWriteRepository detections;
     private final ToolErrorStateRepository states;
@@ -438,21 +435,5 @@ public class FrustrationRateRepository {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    /** Each call site's last human reset, by call site. */
-    public Map<String, Reset> resets(String projectId) {
-        Map<String, Reset> out = new HashMap<>();
-        jdbc.sql("""
-                        SELECT call_site_id, reset_at, reset_note
-                          FROM frustration_state
-                         WHERE project_id = :pid AND reset_at IS NOT NULL
-                        """)
-                .param("pid", projectId)
-                .query((rs, n) -> Map.entry(
-                        rs.getString("call_site_id"), new Reset(rs.getString("reset_at"), rs.getString("reset_note"))))
-                .list()
-                .forEach(e -> out.put(e.getKey(), e.getValue()));
-        return out;
     }
 }

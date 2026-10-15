@@ -68,38 +68,6 @@ public class SubstrateReadRepository implements CallSiteSchemaReads, CallSiteSha
         this.jdbc = jdbc;
     }
 
-    /** A per-tool failure rate over a project's {@code tool_call}s: {@code failed/total} by name. */
-    public record ToolErrorRate(@Nullable String toolName, long totalCalls, long failedCalls, double failureRate) {}
-
-    /**
-     * Per-tool failure rates over all of a project's {@code tool_call}s: grouped by tool {@code
-     * name}, {@code failed = COUNT(error)}, {@code total = COUNT(*)}, {@code rate = failed/total}. A
-     * live aggregation, not a persisted grain, so it stays consistent with the raw structure.
-     * Ordered worst-rate-first.
-     *
-     * <p>Perf: {@code GROUP BY name} is a project-scoped scan; a {@code (project_id, name)} index is
-     * a follow-up if this endpoint is ever polled by a dashboard.
-     */
-    public List<ToolErrorRate> toolErrorRatesByName(String projectId) {
-        return jdbc.sql("""
-                SELECT name                                   AS tool_name,
-                       COUNT(*)                               AS total_calls,
-                       COUNT(error_type)                      AS failed_calls
-                FROM tool_call
-                WHERE project_id = :pid
-                GROUP BY name
-                ORDER BY (COUNT(error_type)::float8 / COUNT(*)) DESC, name ASC
-                """)
-                .param("pid", projectId)
-                .query((rs, n) -> {
-                    long total = rs.getLong("total_calls");
-                    long failed = rs.getLong("failed_calls");
-                    double rate = total == 0 ? 0.0 : (double) failed / total;
-                    return new ToolErrorRate(rs.getString("tool_name"), total, failed, rate);
-                })
-                .list();
-    }
-
     /**
      * Count of substrate spans for a project: the "has a live trace landed?" signal the onboarding
      * flow polls. An onboarding liveness check, not a general query surface; the filtered/aggregated

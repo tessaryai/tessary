@@ -103,24 +103,6 @@ class ClassifierPrecisionModeIntegrationTest {
                         .anyMatch(
                                 e -> weakTurn.equals(e.subjectId()) && Detection.Confidence.LOW.equals(e.confidence())),
                 "the weak-phrase turn is the LOW-confidence hit discovery adds over tracking");
-
-        ClassifierService.ClassifierMetrics m = service.metrics(pid, frustration.id());
-        assertEquals(2, m.discoveryFired(), "discovery fired count");
-        assertEquals(1, m.trackingFired(), "tracking fired count");
-        assertEquals(1, m.lowConfidence(), "the recall delta discovery buys over tracking");
-
-        // Flipping the mode loses no history. Toward DISCOVERY, since the signal seeds at TRACKING.
-        ClassifierRow widened = service.setMode(pid, frustration.id(), ClassifierRow.Mode.DISCOVERY);
-        assertEquals(ClassifierRow.Mode.DISCOVERY, widened.mode());
-        assertEquals(
-                frustration.version(),
-                widened.version(),
-                "setting the mode does not bump the definition version (it is an operating point, not an edit)");
-        assertEquals(
-                2,
-                service.eventsForClassifier(pid, frustration.id(), ClassifierRow.Mode.DISCOVERY, 100)
-                        .size(),
-                "history is intact after the mode flip — discovery still sees both bands");
     }
 
     /** One turn: its own trace with a root llm span. */

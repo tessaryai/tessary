@@ -22,6 +22,4 @@ public final class SourceDtos {
                     row.id(), row.provider(), row.name(), row.baseUrl(), row.createdAt(), row.updatedAt());
         }
     }
-
-    public record DeleteResponse(boolean deleted) {}
 }

@@ -139,8 +139,7 @@ public final class RegexDetector implements BuiltInDetector {
 
     /**
      * The keys this detector owns. {@code ignoreUnknown} is load-bearing, not politeness: a classifier's
-     * {@code config_json} is shared with features that key off the same blob (the pre-deploy loop
-     * reads {@code surfaces} from it), and the platform mapper is a bare {@code new ObjectMapper()}
+     * {@code config_json} can carry keys other features own, and the platform mapper is a bare {@code new ObjectMapper()}
      * with {@code FAIL_ON_UNKNOWN_PROPERTIES} left ON. Without this, one foreign key made {@link
      * #parse} throw, the catch returned null, and the detector had no phrases — so the signal silently
      * matched nothing, with no error anywhere.

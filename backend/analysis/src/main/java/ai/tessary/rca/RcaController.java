@@ -11,12 +11,10 @@ import ai.tessary.plan.RequiresCapability;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import ai.tessary.tenant.Ids;
 import ai.tessary.web.ApiResponse;
-import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -34,8 +32,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/rca")
 public class RcaController {
-
-    private static final int DEFAULT_LIMIT = 50;
 
     private final RcaReportRepository reports;
     private final RcaReportService reportReads;
@@ -75,16 +71,6 @@ public class RcaController {
         String findingId = reports.findingIdOf(projectId, existing.jobId())
                 .orElseThrow(() -> new TessaryException(RcaError.SUBJECT_NOT_FOUND, existing.subjectId()));
         return ApiResponse.ok(trigger.trigger(projectId, findingId, ctx.userId(), Ids.ulid()));
-    }
-
-    @GetMapping
-    public ApiResponse<List<RcaReportView>> list(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @RequestParam(defaultValue = "" + DEFAULT_LIMIT) int limit) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(reportReads.list(r.project().id(), limit));
     }
 
     @GetMapping("/{id}")

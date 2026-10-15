@@ -527,22 +527,6 @@ public class ClassifierService {
     }
 
     /**
-     * Set the classifier's operating point: {@code discovery} (high recall) or {@code tracking}
-     * (high precision). One definition, two modes: the mode filters detections at read time, so
-     * switching it never loses history and the differing precision/recall stays surfaceable per mode.
-     */
-    public ClassifierRow setMode(String projectId, String id, String mode) {
-        if (!ClassifierRow.Mode.DISCOVERY.equals(mode) && !ClassifierRow.Mode.TRACKING.equals(mode)) {
-            throw new TessaryException(ClassifierError.INVALID_MODE, mode);
-        }
-        get(projectId, id); // tenant + existence + capability guard, before the write
-        if (signals.setMode(projectId, id, mode) == 0) {
-            throw new TessaryException(ClassifierError.NOT_FOUND, id);
-        }
-        return get(projectId, id);
-    }
-
-    /**
      * Limit the classifier to {@code callSiteIds}, or run it on every call site again with {@code null}. Each id must
      * be one {@link SubstrateReadRepository#knownCallSiteIds} lists.
      *
@@ -687,21 +671,6 @@ public class ClassifierService {
         return signal;
     }
 
-    public List<ClassifierDtos.ClassifierEventView> events(String projectId, int limit) {
-        return detections.listByProject(projectId, limit);
-    }
-
-    /**
-     * Per-tool tool-call failure rates for the project: the rate-bearing surface, computed live
-     * over {@code tool_call} (failed/total grouped by tool name), worst-first. The
-     * {@code classifierId} is a tenant + existence guard (the rates are a project-wide property
-     * of the raw structured data, so the same numbers back any project's {@code tool_error} signal).
-     */
-    public List<SubstrateReadRepository.ToolErrorRate> toolErrorRates(String projectId, String classifierId) {
-        get(projectId, classifierId); // tenant + existence guard
-        return substrate.toolErrorRatesByName(projectId);
-    }
-
     /**
      * Detections for a signal at an operating point: {@code tracking} surfaces only the precise
      * HIGH-confidence subset; {@code discovery} (or {@code null}) surfaces the full high-recall set.
@@ -714,26 +683,6 @@ public class ClassifierService {
         boolean trackingOnly = ClassifierRow.Mode.TRACKING.equals(mode);
         return detections.listByClassifierKey(projectId, signal.classifierKey(), trackingOnly, limit);
     }
-
-    /**
-     * The per-mode detection breakdown for a signal, computed live over the detections for this
-     * classifier's key. {@code discovery} fires {@code high + low} (recall); {@code tracking}
-     * fires {@code high} only (precision, unbanded NULL reads as high). The {@code low} delta is
-     * the recall the weak band buys.
-     */
-    public ClassifierMetrics metrics(String projectId, String classifierId) {
-        ClassifierRow signal = get(projectId, classifierId); // tenant + existence guard
-        ClassifierDetectionRepository.ModeCounts c = detections.modeCounts(projectId, signal.classifierKey());
-        return new ClassifierMetrics(signal.id(), signal.mode(), c.high() + c.low(), c.high(), c.low());
-    }
-
-    /**
-     * Per-mode detection counts for one signal. {@code discoveryFired} = every detection;
-     * {@code trackingFired} = the HIGH-confidence subset a tracking signal would surface. The gap
-     * ({@code lowConfidence}) is the false-positive-tolerant recall discovery adds over tracking.
-     */
-    public record ClassifierMetrics(
-            String classifierId, String mode, long discoveryFired, long trackingFired, long lowConfidence) {}
 
     /**
      * Per-classifier daily detected-trace volume over the trailing {@code days} window (clamped

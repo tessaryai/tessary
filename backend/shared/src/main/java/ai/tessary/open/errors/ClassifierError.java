@@ -5,7 +5,6 @@ import org.springframework.http.HttpStatus;
 
 public enum ClassifierError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "No classifier '%s'"),
-    INVALID_MODE(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid classifier mode: %s (expected 'discovery' or 'tracking')"),
     FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "No behaviour-drift finding '%s'"),
     // A ruling freezes the finding by construction (ux_finding_live drops it once triage_verdict is
     // set), so a verb reaching here found zero rows: something else — another triage run, or a
@@ -17,9 +16,6 @@ public enum ClassifierError implements ErrorCode {
     NOT_METRIC_DRIFT(
             HttpStatus.UNPROCESSABLE_ENTITY,
             "Classifier '%s' has no window/threshold tuning — only cost_drift and duration_drift do"),
-    NOT_FRUSTRATION(
-            HttpStatus.UNPROCESSABLE_ENTITY,
-            "Classifier '%s' has no frustration rate tuning — only the frustration classifier does"),
     UNKNOWN_CALL_SITE(HttpStatus.UNPROCESSABLE_ENTITY, "This project has no call site '%s'"),
     // Tool error buckets by tool across call sites, so a call-site scope would change what each bucket
     // measures rather than only which traffic reaches it. Refused until that is designed, never ignored.

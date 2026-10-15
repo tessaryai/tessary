@@ -5,7 +5,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
@@ -15,7 +14,6 @@ import ai.tessary.classifier.malformed.MalformedOutputEvidence;
 import ai.tessary.tenant.rbac.Permission;
 import ai.tessary.web.ApiResponse;
 import jakarta.validation.Valid;
-import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,8 +32,6 @@ public class FindingController {
 
     /** Page ceiling. Generous for a table, and still a bound: the sets behind it reach 27k rows. */
     private static final int MAX_EVIDENCE_PAGE = 200;
-
-    private static final int DEFAULT_EVENT_LIMIT = 100;
 
     private final FindingService service;
     private final TenantPathResolver resolver;
@@ -194,15 +190,5 @@ public class FindingController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_MANAGE, "run Layer-2 analysis on a finding");
         return ApiResponse.ok(service.analyze(r.project().id(), id, lane));
-    }
-
-    @GetMapping("/baseline-events")
-    public ApiResponse<List<BehaviorBaselineEventView>> baselineEvents(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @RequestParam(name = "limit", defaultValue = "" + DEFAULT_EVENT_LIMIT) int limit) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.baselineEvents(r.project().id(), limit));
     }
 }

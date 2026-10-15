@@ -8,7 +8,6 @@ import ai.tessary.classifier.detector.groundedness.GroundednessDetailService;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence;
 import ai.tessary.classifier.detector.groundedness.GroundednessRateRepository;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorAnalysisView;
-import ai.tessary.classifier.finding.BehaviorDtos.BehaviorBaselineEventView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingDetailView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingView;
 import ai.tessary.classifier.finding.BehaviorDtos.BehaviorFindingsView;
@@ -62,8 +61,6 @@ public class FindingService {
     private final FindingEvidenceRepository evidence;
     /** The flag layer, asked whether this org still has the classifier a finding came from. */
     private final ClassifierService classifiers;
-
-    private final BehaviorBaselineEventRepository events;
     /**
      * The finding stores a press or a page can land on, in registration order (the shared table first).
      * Each one owns its own reads, its own enqueue and its own writes; this class only routes.
@@ -81,7 +78,6 @@ public class FindingService {
             FindingRepository findings,
             FindingEvidenceRepository evidence,
             ClassifierService classifiers,
-            BehaviorBaselineEventRepository events,
             List<TriageSource> triageSources,
             MalformedOutputDetailService malformedOutputs,
             FrustrationDetailService frustrations,
@@ -89,7 +85,6 @@ public class FindingService {
         this.findings = findings;
         this.evidence = evidence;
         this.classifiers = classifiers;
-        this.events = events;
         this.triageSources = triageSources;
         this.malformedOutputs = malformedOutputs;
         this.frustrations = frustrations;
@@ -308,12 +303,6 @@ public class FindingService {
             if (view.isPresent()) return view.get();
         }
         throw new TessaryException(ClassifierError.FINDING_NOT_FOUND, findingId);
-    }
-
-    public List<BehaviorBaselineEventView> baselineEvents(String projectId, int limit) {
-        return events.listByProject(projectId, Math.clamp(limit, 1, 500)).stream()
-                .map(BehaviorBaselineEventView::of)
-                .toList();
     }
 
     /**

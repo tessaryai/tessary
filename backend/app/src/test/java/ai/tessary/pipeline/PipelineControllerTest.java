@@ -19,8 +19,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * The pipeline read the SPA renders from, and the reload button that is kept as a 200 no-op. The bugs:
- * serving another project's pipeline, and an envelope the frontend's parser no longer accepts.
+ * The pipeline read the SPA renders from. The bugs: serving another project's pipeline, and an envelope the
+ * frontend's parser no longer accepts.
  */
 @SpringBootTest
 class PipelineControllerTest {
@@ -35,20 +35,17 @@ class PipelineControllerTest {
     PipelineController controller;
 
     @Test
-    void getAndReloadServeTheProjectsOwnPipelineInTheStableEnvelope() {
+    void getServesTheProjectsOwnPipelineInTheStableEnvelope() {
         var fix = TenantFixture.bootstrap(tenants, "pipeline-read");
         pipelines.upsert(fix.project().id(), pipelineWith("cs_answer"));
         TenantContext owner = new TenantContext(fix.user().id(), fix.user().email(), null, null, null, null);
 
         PipelineEnvelope got = requireNonNull(
                 controller.get(owner, fix.org().slug(), fix.project().slug()).data());
-        PipelineEnvelope reloaded = requireNonNull(
-                controller.reload(owner, fix.org().slug(), fix.project().slug()).data());
 
         Pipeline stored = pipelines.getPipeline(fix.project().id());
         assertEquals(
                 new PipelineEnvelope(true, "db://project/" + fix.project().id(), List.of(), List.of(), stored), got);
-        assertEquals(got, reloaded, "reload is a no-op read, since the database is the source of truth");
         assertEquals(
                 List.of("cs_answer"),
                 got.pipeline().callSites().stream().map(CallSite::id).toList());

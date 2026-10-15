@@ -2,7 +2,6 @@
 package ai.tessary.classifier;
 
 import ai.tessary.classifier.metric.MetricDriftConfig;
-import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
@@ -97,25 +96,6 @@ public final class ClassifierDtos {
     /** Toggle the enable/disable lifecycle of a classifier definition. */
     public record SetEnabledRequest(@NotNull Boolean enabled) {}
 
-    /**
-     * A per-tool failure rate: for one tool {@code name}, its total/failed call counts and the
-     * derived {@code failure_rate} ({@code failed/total}, 0–1). A live aggregation over {@code tool_call},
-     * not a stored grain. {@code tool_name} is null for calls whose tool name was not recorded.
-     */
-    public record ToolErrorRateView(
-            @JsonProperty("tool_name") @Nullable String toolName,
-            @JsonProperty("total_calls") long totalCalls,
-            @JsonProperty("failed_calls") long failedCalls,
-            @JsonProperty("failure_rate") double failureRate) {
-
-        public static ToolErrorRateView of(SubstrateReadRepository.ToolErrorRate r) {
-            return new ToolErrorRateView(r.toolName(), r.totalCalls(), r.failedCalls(), r.failureRate());
-        }
-    }
-
-    /** Set the operating point of a classifier: {@code discovery} (high recall) | {@code tracking} (precise). */
-    public record SetModeRequest(@NotNull String mode) {}
-
     /** Limit a classifier to some call sites, or {@code null} to run it on every call site again. Never empty. */
     public record SetCallSitesRequest(
             @JsonProperty("call_site_ids") @Nullable @Size(min = 1)
@@ -144,26 +124,6 @@ public final class ClassifierDtos {
             }
             return new ClassifierHealthView(
                     classifierId, job.status(), job.attempts(), maxAttempts, job.lastError(), job.updatedAt(), null);
-        }
-    }
-
-    /**
-     * The per-mode detection breakdown for a classifier — the differing precision/recall surfaced
-     * per operating point. {@code discovery_fired} counts every detection (high recall);
-     * {@code tracking_fired} counts the HIGH-confidence subset a tracking classifier surfaces (precision).
-     * The gap is {@code low_confidence}. No precision/recall ratio is reported: the built-ins have no human-label
-     * store, so a ratio would be a fabricated number — the count breakdown is the honest surfacing.
-     */
-    public record ClassifierMetricsView(
-            @JsonProperty("classifier_id") String classifierId,
-            String mode,
-            @JsonProperty("discovery_fired") long discoveryFired,
-            @JsonProperty("tracking_fired") long trackingFired,
-            @JsonProperty("low_confidence") long lowConfidence) {
-
-        public static ClassifierMetricsView of(ClassifierService.ClassifierMetrics m) {
-            return new ClassifierMetricsView(
-                    m.classifierId(), m.mode(), m.discoveryFired(), m.trackingFired(), m.lowConfidence());
         }
     }
 
@@ -253,56 +213,6 @@ public final class ClassifierDtos {
             @JsonProperty("last_scored_at") @Nullable String lastScoredAt,
             @JsonProperty("last_caught_up_at") @Nullable String lastCaughtUpAt,
             @JsonProperty("setup_ref") String setupRef) {}
-
-    /**
-     * The Frustration classifier's operating point and, per call site, what its rate test has learned and where
-     * its accumulator stands. Read-only: the dials are the classifier's config blob, and everything per call site
-     * is derived by the replay.
-     *
-     * @param unassignedConversations sessions in the replay window scored with no call site, before call sites
-     *     were picked; they are never judged, and are counted so the gap is visible
-     */
-    public record FrustrationTuningView(
-            double threshold,
-            @JsonProperty("arl_target") long arlTarget,
-            @JsonProperty("min_decision_interval") double minDecisionInterval,
-            @JsonProperty("shift_multiple") double shiftMultiple,
-            @JsonProperty("shift_floor") double shiftFloor,
-            @JsonProperty("min_baseline_conversations") int minBaselineConversations,
-            @JsonProperty("scorer_version") String scorerVersion,
-            @JsonProperty("unassigned_conversations") long unassignedConversations,
-            @JsonProperty("call_sites") List<FrustrationCallSiteView> callSites) {}
-
-    /**
-     * One call site under the Frustration rate test.
-     *
-     * @param state {@code learning} until the reference holds {@code min_baseline_conversations}, then
-     *     {@code in_control} or {@code alarming}
-     * @param learnedConversations conversations the reference holds so far: {@code n} of {@code learning n/200}
-     * @param baselineRate the learned rate, Jeffreys-smoothed; null while learning
-     * @param decisionInterval {@code h(p0)}; null while learning
-     * @param statistic the up accumulator {@code S} at the end of the last replay
-     */
-    public record FrustrationCallSiteView(
-            @JsonProperty("call_site_id") String callSiteId,
-            String state,
-            @JsonProperty("learned_conversations") long learnedConversations,
-
-            @JsonProperty("baseline_conversations") @Nullable
-            Long baselineConversations,
-
-            @JsonProperty("baseline_frustrated") @Nullable Long baselineFrustrated,
-            @JsonProperty("baseline_rate") @Nullable Double baselineRate,
-            @JsonProperty("decision_interval") @Nullable Double decisionInterval,
-            double statistic,
-            @JsonProperty("onset_at") @Nullable String onsetAt,
-            @JsonProperty("reset_at") @Nullable String resetAt,
-            @JsonProperty("reset_note") @Nullable String resetNote) {
-
-        public static final String LEARNING = "learning";
-        public static final String IN_CONTROL = "in_control";
-        public static final String ALARMING = "alarming";
-    }
 
     /**
      * Request body for {@code PUT .../classifiers/{id}/tuning}. Every field is clamped server-side.

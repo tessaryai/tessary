@@ -5,7 +5,6 @@ import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.rca.RcaDtos.RcaReportView;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
@@ -16,9 +15,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class RcaReportService {
-
-    /** Bound on {@link #list} so a caller can never ask for an unbounded scan. */
-    public static final int MAX_LIMIT = 200;
 
     private final RcaReportRepository reports;
     private final ObjectMapper mapper;
@@ -45,12 +41,5 @@ public class RcaReportService {
         return reports.findByJobId(projectId, jobId)
                 .map(row -> RcaReportView.of(row, mapper))
                 .orElseThrow(() -> new TessaryException(CommonError.NOT_FOUND, jobId));
-    }
-
-    /** The project's reports, newest first. */
-    public List<RcaReportView> list(String projectId, int limit) {
-        return reports.listByProject(projectId, Math.clamp(limit, 1, MAX_LIMIT)).stream()
-                .map(row -> RcaReportView.of(row, mapper))
-                .toList();
     }
 }

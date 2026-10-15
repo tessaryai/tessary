@@ -39,11 +39,6 @@ public class SourceService {
         return sources.findAllForProject(projectId);
     }
 
-    public SourceRow get(String projectId, String id) {
-        return sources.findById(projectId, id)
-                .orElseThrow(() -> new TessaryException(IngestError.SOURCE_NOT_FOUND, id));
-    }
-
     public SourceRow create(String projectId, CreateSourceRequest req) {
         if (!SUPPORTED.contains(req.provider())) {
             throw new TessaryException(IngestError.UNSUPPORTED_PROVIDER, req.provider());
@@ -89,11 +84,5 @@ public class SourceService {
                     sources.insert(row);
                     return row;
                 });
-    }
-
-    public void delete(String projectId, String id) {
-        if (!sources.deleteById(projectId, id)) {
-            throw new TessaryException(IngestError.SOURCE_NOT_FOUND, id);
-        }
     }
 }

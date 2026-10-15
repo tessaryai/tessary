@@ -146,11 +146,11 @@ class RcaControllerTest {
                         .data()
                         .id());
         assertEquals(
-                1,
-                controller
-                        .list(ctx, fix.org().slug(), fix.project().slug(), 50)
-                        .data()
-                        .size());
+                1L,
+                jdbc.sql("SELECT count(*) FROM rca_report WHERE project_id = :pid")
+                        .param("pid", projectId)
+                        .query(Long.class)
+                        .single());
     }
 
     /** An unknown case is a case 404, and a finding id resolving to nothing an RCA 404; never an enqueued job. */

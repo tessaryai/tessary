@@ -44,7 +44,7 @@ class SourceControllerTest {
     }
 
     @Test
-    void aSourceIsReadAndDeletedOnlyThroughItsOwnProject() {
+    void aSourceIsListedOnlyInItsOwnProject() {
         Tenant mine = tenant("sources-mine");
         Tenant theirs = tenant("sources-theirs");
         var req = new CreateSourceRequest("fake", "staging", "https://example.test", Map.of());
@@ -59,21 +59,9 @@ class SourceControllerTest {
                         created.createdAt(),
                         created.createdAt()),
                 created);
-        assertEquals(
-                created,
-                ok(controller.get(mine.ctx(), mine.org(), mine.proj(), created.id())),
-                "reads back every field it was written with");
         assertEquals(List.of(created), ok(controller.list(mine.ctx(), mine.org(), mine.proj())));
 
         assertEquals(List.of(), ok(controller.list(theirs.ctx(), theirs.org(), theirs.proj())));
-        assertEquals(
-                IngestError.SOURCE_NOT_FOUND,
-                error(() -> controller.get(theirs.ctx(), theirs.org(), theirs.proj(), created.id())),
-                "another project cannot read the source by its id");
-        assertEquals(
-                IngestError.SOURCE_NOT_FOUND,
-                error(() -> controller.delete(theirs.ctx(), theirs.org(), theirs.proj(), created.id())),
-                "nor delete it");
 
         assertEquals(
                 IngestError.DUPLICATE_NAME, error(() -> controller.create(mine.ctx(), mine.org(), mine.proj(), req)));
@@ -84,18 +72,6 @@ class SourceControllerTest {
                         mine.org(),
                         mine.proj(),
                         new CreateSourceRequest("s3", "bucket", "https://example.test", Map.of()))));
-
-        assertEquals(
-                true,
-                ok(controller.delete(mine.ctx(), mine.org(), mine.proj(), created.id()))
-                        .deleted());
-        assertEquals(
-                IngestError.SOURCE_NOT_FOUND,
-                error(() -> controller.get(mine.ctx(), mine.org(), mine.proj(), created.id())));
-        assertEquals(
-                IngestError.SOURCE_NOT_FOUND,
-                error(() -> controller.delete(mine.ctx(), mine.org(), mine.proj(), created.id())),
-                "a second delete reports the source gone rather than succeeding again");
     }
 
     @Test

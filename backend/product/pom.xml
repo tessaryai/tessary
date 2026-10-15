@@ -13,8 +13,8 @@
 
     <artifactId>product</artifactId>
     <description>
-        What a customer configures: the ingest pipeline definition, the pre-deploy gate, and the plan
-        and capability model.
+        What a customer configures: the ingest pipeline definition and the plan and capability
+        model.
 
         These are the nouns a user edits in the UI. They sit on the substrate because defining a call
         site means pointing at traces that already exist, and below analysis because a pipeline is

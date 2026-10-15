@@ -4,11 +4,8 @@ package ai.tessary.classifier.frustration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.classifier.ClassifierDtos.FrustrationCallSiteView;
-import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
@@ -16,7 +13,6 @@ import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorRate;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.classifier.toolerror.ToolErrorTrend.Spell;
-import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.tenant.Ids;
 import ai.tessary.testsupport.ClassifierRows;
@@ -34,8 +30,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The rate test against Postgres: the replay aggregate over {@code frustration_assessment} and the uncleared
- * flags, the state row it leaves in {@code frustration_state}, a tuning change resetting it, and the Tuning view
- * reading it back.
+ * flags, the state row it leaves in {@code frustration_state}, and a tuning change resetting it.
  */
 @SpringBootTest
 class FrustrationRateReplayIntegrationTest {
@@ -48,9 +43,6 @@ class FrustrationRateReplayIntegrationTest {
 
     @Autowired
     FrustrationRateService service;
-
-    @Autowired
-    FrustrationTuning tuning;
 
     @Autowired
     ClassifierRepository classifiers;
@@ -111,7 +103,7 @@ class FrustrationRateReplayIntegrationTest {
     }
 
     @Test
-    void aRiseAlarmsTheStateRowIsSavedAndTheTuningViewReadsIt() {
+    void aRiseAlarmsAndTheStateRowIsSaved() {
         String pid = fixture.project("fr-rise", Capability.FRUSTRATION);
         ClassifierRow signal = fixture.builtIn(pid, "frustration");
         Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
@@ -133,28 +125,6 @@ class FrustrationRateReplayIntegrationTest {
         assertEquals(390, baseline.calls(), "still learning: every hour so far is in the reference");
         assertEquals(
                 FrustrationConfig.of(new ObjectMapper(), signal.configJson()).stateEpoch(), chat.stateEpoch());
-
-        FrustrationTuningView view = tuning.view(pid, signal);
-        assertEquals(0.40, view.threshold());
-        assertEquals(10_000L, view.arlTarget());
-        assertEquals(4.0, view.minDecisionInterval());
-        assertEquals(100, view.minBaselineConversations());
-        assertEquals(VERSION, view.scorerVersion());
-        assertEquals(1, view.unassignedConversations());
-        assertEquals(2, view.callSites().size());
-        FrustrationCallSiteView alarming = view.callSites().get(0);
-        assertEquals("cs-chat", alarming.callSiteId());
-        assertEquals(FrustrationCallSiteView.ALARMING, alarming.state());
-        assertEquals(390L, alarming.baselineConversations());
-        assertNotNull(alarming.baselineRate());
-        assertNotNull(alarming.decisionInterval());
-        assertTrue(alarming.statistic() >= alarming.decisionInterval());
-        assertNotNull(alarming.onsetAt());
-        FrustrationCallSiteView learning = view.callSites().get(1);
-        assertEquals("cs-quiet", learning.callSiteId());
-        assertEquals(FrustrationCallSiteView.LEARNING, learning.state());
-        assertEquals(20, learning.learnedConversations());
-        assertNull(learning.baselineRate());
     }
 
     @Test
@@ -179,27 +149,12 @@ class FrustrationRateReplayIntegrationTest {
                 FrustrationConfig.of(new ObjectMapper(), "{\"arl_target\":20000}")
                         .stateEpoch(),
                 state.stateEpoch());
-        FrustrationCallSiteView view = tuning.view(pid, retuned).callSites().get(0);
-        assertEquals(FrustrationCallSiteView.LEARNING, view.state());
-        assertEquals(0, view.learnedConversations(), "every hour so far is before the reset");
-        assertEquals(FrustrationRateService.TUNING_CHANGED, view.resetNote());
 
         service.refresh(pid, retuned, Instant.now());
         assertEquals(
                 at.toString(),
                 state(pid, "cs-chat").resetAt(),
                 "a second pass under the same tuning does not move the fence");
-    }
-
-    @Test
-    void theTuningViewRefusesAnyOtherClassifier() {
-        String pid = fixture.project("fr-other", Capability.FRUSTRATION);
-        classifierService.seedBuiltIns(pid);
-        ClassifierRow other = classifierService.list(pid).stream()
-                .filter(c -> !"frustration".equals(c.classifierKey()))
-                .findFirst()
-                .orElseThrow();
-        assertThrows(TessaryException.class, () -> tuning.view(pid, other));
     }
 
     // ---- fixtures

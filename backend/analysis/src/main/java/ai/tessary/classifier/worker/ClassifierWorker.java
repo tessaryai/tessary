@@ -17,8 +17,6 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
-import ai.tessary.gate.PreDeployCheckService;
-import ai.tessary.gate.PreDeployCheckService.ClassifierDiscovery;
 import ai.tessary.open.obs.LogContext;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.open.obs.RepeatedFailureLogger;
@@ -102,7 +100,6 @@ public class ClassifierWorker {
     private final ClassifierArming arming;
     private final SubstrateReadRepository substrate;
     private final BuiltInClassifierCatalog catalog;
-    private final PreDeployCheckService preDeployChecks;
     /**
      * Every classifier sweep on this classpath, by the detector kind it claims. The worker doesn't
      * know which classifiers exist; a classifier attaches by being on the classpath.
@@ -130,7 +127,6 @@ public class ClassifierWorker {
             ClassifierArming arming,
             SubstrateReadRepository substrate,
             BuiltInClassifierCatalog catalog,
-            PreDeployCheckService preDeployChecks,
             ClassifierSweepRegistry sweeps,
             SweepRouting routing,
             ObjectProvider<ClassifierCatchUp> catchUps,
@@ -144,7 +140,6 @@ public class ClassifierWorker {
         this.arming = arming;
         this.substrate = substrate;
         this.catalog = catalog;
-        this.preDeployChecks = preDeployChecks;
         this.sweeps = sweeps;
         this.routing = routing;
         this.catchUps = catchUps;
@@ -546,10 +541,6 @@ public class ClassifierWorker {
         int fired = 0;
         boolean leaseLost = false;
         boolean atHead = false;
-        // The first genuinely-new detection of this sweep, captured to drive the pre-deploy
-        // registration exactly once per sweep, never per-event, so the trigger stays cheap even
-        // when a whole drain fires.
-        NewDetection firstNew = null;
         while (true) {
             Page page = sweepPage(job, signal, grain, detector, detectorConfig, cursorAt, cursorId, pageSize);
             if (page == null) {
@@ -570,7 +561,6 @@ public class ClassifierWorker {
                 break;
             }
             fired += page.fired();
-            if (firstNew == null) firstNew = page.firstNew();
             cursorAt = page.cursorAt();
             cursorId = page.cursorId();
             boolean more = drain
@@ -626,11 +616,6 @@ public class ClassifierWorker {
                     .log();
         }
         logSweepComplete(job, signal, grain, SweepRouting.Route.CATALOG, scanned, fired, pages, start);
-        // A genuinely-new production signal discovery closes the loop to the edge: register a
-        // routed, surface-scoped pre-deploy check so a future PR touching those surfaces is checked
-        // pre-merge. Fired once per sweep off `firstNew`, not per-event, behind
-        // tessary.predeploy.enabled, fail-soft.
-        registerPreDeployCheck(job.projectId(), signal, firstNew);
     }
 
     /**
@@ -669,7 +654,6 @@ public class ClassifierWorker {
             int windowSize,
             int scored,
             int fired,
-            @Nullable NewDetection firstNew,
             List<FindingEvidenceRepository.Ref> firedRefs,
             String cursorAt,
             String cursorId,
@@ -720,7 +704,6 @@ public class ClassifierWorker {
         }
 
         int fired = 0;
-        NewDetection firstNew = null;
         // What this page flagged, in sweep order, as evidence refs, handed to the arming gate so a
         // finding it opens is already pointing at the spans that opened it.
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>();
@@ -746,9 +729,7 @@ public class ClassifierWorker {
             // READ-time filter, so flipping mode never loses history. Idempotent via the table's
             // own subject index, so a genuinely-new firing is the one that inserts.
             SubstrateObservation o = obs.get(i);
-            NewDetection nd = writeDetection(job.projectId(), signal, o, d);
-            if (nd != null) {
-                if (firstNew == null) firstNew = nd;
+            if (writeDetection(job.projectId(), signal, o, d)) {
                 fired++;
                 firedRefs.add(FindingEvidenceRepository.Ref.span(o.traceId(), o.observationId()));
             }
@@ -766,7 +747,6 @@ public class ClassifierWorker {
                 window.size(),
                 obs.size(),
                 fired,
-                firstNew,
                 firedRefs,
                 last.createdAt(),
                 SubstrateReadRepository.handle(last.traceId(), last.observationId()),
@@ -809,10 +789,8 @@ public class ClassifierWorker {
                     .log();
         }
         boolean advance = action == PageAction.PERSIST || action == PageAction.SKIP || action == PageAction.PASS;
-        NewDetection firstNew = null;
         List<FindingEvidenceRepository.Ref> firedRefs = new ArrayList<>(newlyFired.size());
         for (PagedDetector.FiredTurn f : newlyFired) {
-            if (firstNew == null) firstNew = new NewDetection(f.detectionId(), f.severity());
             SubstrateObservation o = f.turn();
             firedRefs.add(FindingEvidenceRepository.Ref.trace(o.traceId()));
         }
@@ -820,7 +798,6 @@ public class ClassifierWorker {
                 window.size(),
                 obs.size(),
                 newlyFired.size(),
-                firstNew,
                 firedRefs,
                 last.createdAt(),
                 cursorId,
@@ -881,14 +858,12 @@ public class ClassifierWorker {
      * <p>Fail-soft: a persistence failure degrades to a logged warning so one bad detection never
      * fails the sweep or blocks the cursor.
      *
-     * @return the new detection, or null when this classifier had already spoken about this subject
+     * @return whether the detection was new, false when this classifier had already spoken about this subject
      */
-    private @Nullable NewDetection writeDetection(
-            String projectId, ClassifierRow signal, SubstrateObservation o, Detection d) {
-        String detectionId = Ids.ulid();
+    private boolean writeDetection(String projectId, ClassifierRow signal, SubstrateObservation o, Detection d) {
         try {
-            boolean inserted = detections.insert(
-                    detectionId,
+            return detections.insert(
+                    Ids.ulid(),
                     signal.detector(),
                     projectId,
                     signal.id(),
@@ -900,8 +875,6 @@ public class ClassifierWorker {
                     d.severity(),
                     d.confidence(),
                     d.evidenceJson());
-            // First-write-wins: a genuinely-new detection is the one that inserted.
-            return inserted ? new NewDetection(detectionId, d.severity()) : null;
         } catch (RuntimeException e) {
             StructuredLog.warn(log, Markers.OPS, "signal.detection.failed")
                     .field("project", projectId)
@@ -910,32 +883,7 @@ public class ClassifierWorker {
                     .field("span", o.observationId())
                     .field("error", e.getMessage())
                     .log();
-            return null;
-        }
-    }
-
-    /** A newly-inserted signal detection: its stable detection id + coarse severity. */
-    private record NewDetection(
-            String detectionId, @Nullable String severity) {}
-
-    /**
-     * Close the production → pre-deploy loop: on a genuinely-new discovery, register a routed
-     * pre-deploy check for the classifier's implicated surfaces. No-op when nothing new fired this sweep or
-     * the loop is disabled. Maps the {@link ClassifierRow} to the {@code ci}-package input record at the call
-     * site so the {@code signal → ci} dependency stays one-way. Fail-soft: a failure here is logged and
-     * never fails the sweep or blocks the cursor (the discovery itself already landed).
-     */
-    private void registerPreDeployCheck(String projectId, ClassifierRow signal, @Nullable NewDetection firstNew) {
-        if (firstNew == null || !preDeployChecks.isEnabled()) return;
-        try {
-            preDeployChecks.registerForSignal(ClassifierDiscovery.of(
-                    projectId, signal.id(), signal.classifierKey(), signal.configJson(), firstNew.severity()));
-        } catch (RuntimeException e) {
-            StructuredLog.warn(log, Markers.OPS, "signal.predeploy-registration.failed")
-                    .field("project", projectId)
-                    .field("signal", signal.classifierKey())
-                    .field("error", e.getMessage())
-                    .log();
+            return false;
         }
     }
 

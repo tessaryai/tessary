@@ -6,18 +6,13 @@ import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.classifier.ClassifierDtos.ClassifierDailyVolumeView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
-import ai.tessary.classifier.ClassifierDtos.ClassifierMetricsView;
 import ai.tessary.classifier.ClassifierDtos.ClassifierView;
-import ai.tessary.classifier.ClassifierDtos.FrustrationTuningView;
 import ai.tessary.classifier.ClassifierDtos.GroundednessStatusView;
 import ai.tessary.classifier.ClassifierDtos.SetCallSitesRequest;
 import ai.tessary.classifier.ClassifierDtos.SetEnabledRequest;
-import ai.tessary.classifier.ClassifierDtos.SetModeRequest;
 import ai.tessary.classifier.ClassifierDtos.SetTuningRequest;
-import ai.tessary.classifier.ClassifierDtos.ToolErrorRateView;
 import ai.tessary.classifier.ClassifierDtos.TuningView;
 import ai.tessary.classifier.detector.groundedness.GroundednessStatus;
-import ai.tessary.classifier.frustration.FrustrationTuning;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.detection.DetectionTableRegistry;
@@ -44,11 +39,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers")
 public class ClassifierController {
 
-    private static final int DEFAULT_EVENT_LIMIT = 200;
-
     private final ClassifierService service;
     private final ClassifierReset reset;
-    private final FrustrationTuning frustrationTuning;
     private final GroundednessStatus groundednessStatus;
     private final TenantPathResolver resolver;
     private final DetectionTableRegistry detectionTables;
@@ -56,13 +48,11 @@ public class ClassifierController {
     public ClassifierController(
             ClassifierService service,
             ClassifierReset reset,
-            FrustrationTuning frustrationTuning,
             GroundednessStatus groundednessStatus,
             TenantPathResolver resolver,
             DetectionTableRegistry detectionTables) {
         this.service = service;
         this.reset = reset;
-        this.frustrationTuning = frustrationTuning;
         this.groundednessStatus = groundednessStatus;
         this.resolver = resolver;
         this.detectionTables = detectionTables;
@@ -139,24 +129,7 @@ public class ClassifierController {
         return ApiResponse.ok(view(r.project().id(), row));
     }
 
-    /**
-     * Set the classifier's operating point: {@code discovery} (high recall) or {@code tracking}
-     * (high precision). One definition, two modes — mirrors {@link #setEnabled}.
-     */
-    @PutMapping("/{id}/mode")
-    public ApiResponse<ClassifierView> setMode(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id,
-            @Valid @RequestBody SetModeRequest req) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        r.require(Permission.ORG_MANAGE, "change a classifier's operating mode");
-        ClassifierRow row = service.setMode(r.project().id(), id, req.mode());
-        return ApiResponse.ok(view(r.project().id(), row));
-    }
-
-    /** Limit the classifier to some call sites, or run it on every call site again; mirrors {@link #setMode}. */
+    /** Limit the classifier to some call sites, or run it on every call site again. */
     @PutMapping("/{id}/call-sites")
     public ApiResponse<ClassifierView> setCallSites(
             TenantContext ctx,
@@ -212,22 +185,6 @@ public class ClassifierController {
     }
 
     /**
-     * The Frustration classifier's rate-test operating point and, per call site, the learned rate of frustrated
-     * conversations, the alarm threshold it implies, the accumulator and the last reset. Read-only. 422s for any
-     * other classifier.
-     */
-    @GetMapping("/{id}/frustration-tuning")
-    public ApiResponse<FrustrationTuningView> getFrustrationTuning(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        String projectId = r.project().id();
-        return ApiResponse.ok(frustrationTuning.view(projectId, service.get(projectId, id)));
-    }
-
-    /**
      * Whether the groundedness model is scoring: the row's state, the instance's mode, the last health
      * check, and the git ref its setup prompts link to. Read-only. 422s for any other classifier.
      */
@@ -240,13 +197,6 @@ public class ClassifierController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         String projectId = r.project().id();
         return ApiResponse.ok(groundednessStatus.view(projectId, service.get(projectId, id)));
-    }
-
-    @GetMapping("/events")
-    public ApiResponse<List<ClassifierEventView>> events(
-            TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.events(r.project().id(), DEFAULT_EVENT_LIMIT));
     }
 
     /**
@@ -265,45 +215,6 @@ public class ClassifierController {
             @RequestParam(name = "limit", defaultValue = "200") int limit) {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         return ApiResponse.ok(service.eventsForClassifier(r.project().id(), id, mode, limit));
-    }
-
-    /**
-     * Per-tool failure rates for the project's tool calls: {@code failed/total} grouped by tool name,
-     * worst-first. A live derived read over {@code tool_call}; the signal {@code id} scopes/guards the
-     * request.
-     *
-     * <p>This was the rate-bearing surface for the {@code tool_error} built-in, which no longer exists.
-     * It survives because it never depended on that classifier — it reads the
-     * raw {@code tool_call} rows directly — but the project-wide tool-error rate a user sees now comes
-     * from the {@code vitals} slice, which windows it, scopes it per call site and compares it against
-     * a baseline. Treat this as the unwindowed all-time cut, not the product surface.
-     */
-    @GetMapping("/{id}/tool-error-rates")
-    public ApiResponse<List<ToolErrorRateView>> toolErrorRates(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(service.toolErrorRates(r.project().id(), id).stream()
-                .map(ToolErrorRateView::of)
-                .toList());
-    }
-
-    /**
-     * The per-mode precision/recall surfacing: how many detections
-     * discovery fires (high recall) vs how many tracking fires (high precision), plus the
-     * low-confidence delta between them. Computed from the one persisted corpus — no re-sweep.
-     */
-    @GetMapping("/{id}/metrics")
-    public ApiResponse<ClassifierMetricsView> metrics(
-            TenantContext ctx,
-            @PathVariable String orgSlug,
-            @PathVariable String projectSlug,
-            @PathVariable String id) {
-        var r = resolver.requireProject(ctx, orgSlug, projectSlug);
-        return ApiResponse.ok(
-                ClassifierMetricsView.of(service.metrics(r.project().id(), id)));
     }
 
     /**

@@ -5,7 +5,6 @@ import ai.tessary.tenant.Ids;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -49,21 +48,6 @@ public class ProjectVersionRepository {
                         "project_version vanished after upsert: " + projectId + "@" + commitSha));
     }
 
-    /**
-     * Resolve a version by its row id — the value FK columns like {@code verdict.project_version_id}
-     * and {@code session.project_version_id} store. Project-scoped so a
-     * cross-tenant id never resolves another project's commit.
-     */
-    public Optional<ProjectVersionRow> findById(String projectId, String id) {
-        return jdbc.sql(String.format(Locale.ROOT, """
-            SELECT %s FROM project_version WHERE project_id = :pid AND id = :id
-            """, COLS))
-                .param("pid", projectId)
-                .param("id", id)
-                .query((rs, n) -> map(rs))
-                .optional();
-    }
-
     public Optional<ProjectVersionRow> findByCommit(String projectId, String commitSha) {
         return jdbc.sql(String.format(Locale.ROOT, """
             SELECT %s FROM project_version WHERE project_id = :pid AND commit_sha = :sha
@@ -72,15 +56,6 @@ public class ProjectVersionRepository {
                 .param("sha", commitSha)
                 .query((rs, n) -> map(rs))
                 .optional();
-    }
-
-    public List<ProjectVersionRow> listTimeline(String projectId) {
-        return jdbc.sql(String.format(Locale.ROOT, """
-            SELECT %s FROM project_version WHERE project_id = :pid ORDER BY created_at DESC
-            """, COLS))
-                .param("pid", projectId)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     /** Set one aspect column. {@code column} is a fixed enum supplied by the service, never user input. */

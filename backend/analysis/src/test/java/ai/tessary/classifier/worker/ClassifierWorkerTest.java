@@ -35,7 +35,6 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
-import ai.tessary.gate.PreDeployCheckService;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -102,9 +101,6 @@ class ClassifierWorkerTest {
 
     @Mock
     BuiltInClassifierCatalog catalog;
-
-    @Mock
-    PreDeployCheckService preDeployChecks;
 
     @Mock
     ClassifierArming arming;
@@ -275,7 +271,7 @@ class ClassifierWorkerTest {
     }
 
     /**
-     * After scoring, everything is fail-soft: a failed detection write, arming gate, pre-deploy registration, or
+     * After scoring, everything is fail-soft: a failed detection write, arming gate, or
      * catch-up costs only itself. None may stop the cursor, or the page is re-scored forever.
      */
     @Test
@@ -322,8 +318,6 @@ class ClassifierWorkerTest {
         org.mockito.Mockito.doThrow(new IllegalStateException("arming"))
                 .when(arming)
                 .evaluate(any(), eq(PROJECT), any(), any());
-        when(preDeployChecks.isEnabled()).thenReturn(true);
-        when(preDeployChecks.registerForSignal(any())).thenThrow(new IllegalStateException("ci"));
         org.mockito.Mockito.doThrow(new IllegalStateException("rollup"))
                 .when(catchUp)
                 .caughtUp(any(), any(), any());
@@ -830,7 +824,6 @@ class ClassifierWorkerTest {
                 arming,
                 substrate,
                 catalog,
-                preDeployChecks,
                 sweeps,
                 new SweepRouting(catalog, sweeps),
                 TestObjectProvider.of(catchUp),

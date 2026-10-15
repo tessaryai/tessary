@@ -30,16 +30,6 @@ public class SourceRepository {
                 .list();
     }
 
-    public Optional<SourceRow> findById(String projectId, String id) {
-        return jdbc.sql(String.format(Locale.ROOT, """
-            SELECT %s FROM ingestion_source WHERE project_id = :pid AND id = :id
-            """, COLS))
-                .param("pid", projectId)
-                .param("id", id)
-                .query((rs, n) -> map(rs))
-                .optional();
-    }
-
     public Optional<SourceRow> findByName(String projectId, String name) {
         return jdbc.sql(String.format(Locale.ROOT, """
             SELECT %s FROM ingestion_source WHERE project_id = :pid AND name = :name
@@ -64,14 +54,6 @@ public class SourceRepository {
                 .param("createdAt", row.createdAt())
                 .param("updatedAt", row.updatedAt())
                 .update();
-    }
-
-    public boolean deleteById(String projectId, String id) {
-        return jdbc.sql("DELETE FROM ingestion_source WHERE project_id = :pid AND id = :id")
-                        .param("pid", projectId)
-                        .param("id", id)
-                        .update()
-                > 0;
     }
 
     private static SourceRow map(java.sql.ResultSet rs) throws java.sql.SQLException {

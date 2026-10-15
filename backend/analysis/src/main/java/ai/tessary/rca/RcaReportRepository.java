@@ -170,18 +170,6 @@ public class RcaReportRepository {
                 .optional();
     }
 
-    /** The project's most recent reports, newest first, bounded by {@code limit}. */
-    public List<RcaReportRow> listByProject(String projectId, int limit) {
-        return jdbc.sql("SELECT " + COLS + " " + FROM + """
-                         WHERE r.project_id = :pid
-                         ORDER BY r.created_at DESC LIMIT :limit
-                        """)
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
-    }
-
     /** Stamp the analysis outcome — the one write a report ever receives after its shell insert. */
     public void complete(
             String jobId,

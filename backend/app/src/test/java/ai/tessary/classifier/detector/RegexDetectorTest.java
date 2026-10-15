@@ -75,7 +75,7 @@ class RegexDetectorTest {
 
     @Test
     void configKeysOwnedByOtherFeaturesDoNotDisableTheDetector() {
-        // `config_json` is shared across features (the pre-deploy loop reads `surfaces`), and the mapper fails on
+        // `config_json` can carry keys other features own, and the mapper fails on
         // unknown properties: before ConfigShape ignored them, one foreign key made the detector silently match
         // nothing.
         RegexDetector detector = detector(ClassifierField.BOTH, false);

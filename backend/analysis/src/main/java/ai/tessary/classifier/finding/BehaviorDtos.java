@@ -454,21 +454,6 @@ public final class BehaviorDtos {
         }
     }
 
-    /** One entry of the baseline changelog. */
-    public record BehaviorBaselineEventView(
-            String id,
-            String event,
-            @Nullable String workflowKey,
-            @Nullable String gramKey,
-            String occurredAt,
-            @Nullable String detail) {
-
-        public static BehaviorBaselineEventView of(BehaviorBaselineEventRow row) {
-            return new BehaviorBaselineEventView(
-                    row.id(), row.event(), row.workflowKey(), row.gramKey(), row.occurredAt(), row.detailJson());
-        }
-    }
-
     /**
      * The correction. Exactly three outcomes exist and the third is silence. The critical property
      * is that the default is right: an unengaged customer's noise decays on its own.

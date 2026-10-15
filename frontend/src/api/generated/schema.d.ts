@@ -596,22 +596,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_events"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/health": {
         parameters: {
             query?: never;
@@ -724,22 +708,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/frustration-tuning": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_getFrustrationTuning"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/groundedness-status": {
         parameters: {
             query?: never;
@@ -749,38 +717,6 @@ export interface paths {
         };
         get: operations["ClassifierController_getGroundednessStatus"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_metrics"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/mode": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put: operations["ClassifierController_setMode"];
         post?: never;
         delete?: never;
         options?: never;
@@ -798,22 +734,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["ClassifierController_reset"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/tool-error-rates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ClassifierController_toolErrorRates"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -860,22 +780,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["FindingController_findings"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/findings/baseline-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["FindingController_baselineEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1236,86 +1140,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/pipeline/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["PipelineController_reload"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/predeploy-checks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["PreDeployCheckController_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/predeploy-checks/{id}/dismiss": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["PreDeployCheckController_dismiss"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/predeploy-checks/{id}/reinstate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["PreDeployCheckController_reinstate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/rca": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["RcaController_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/rca/{id}": {
         parameters: {
             query?: never;
@@ -1508,22 +1332,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/sources/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["SourceController_get"];
-        put?: never;
-        post?: never;
-        delete: operations["SourceController_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs/{orgSlug}/projects/{projectSlug}/substrate/status": {
         parameters: {
             query?: never;
@@ -1598,54 +1406,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["OrganizationController_unarchiveProject"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ProjectVersionController_timeline"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/versions/lineage/{nodeKind}/{nodeId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ProjectVersionController_lineage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{orgSlug}/projects/{projectSlug}/versions/{commitSha}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["ProjectVersionController_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2188,10 +1948,6 @@ export interface components {
             data?: components["schemas"]["ClassifierDebugView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
-        ApiResponseClassifierMetricsView: {
-            data?: components["schemas"]["ClassifierMetricsView"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
         ApiResponseClassifierView: {
             data?: components["schemas"]["ClassifierView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2228,10 +1984,6 @@ export interface components {
             data?: components["schemas"]["FrustratedSessionPage"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
-        ApiResponseFrustrationTuningView: {
-            data?: components["schemas"]["FrustrationTuningView"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
         ApiResponseGitIntegrationView: {
             data?: components["schemas"]["GitIntegrationView"] | null;
             meta: components["schemas"]["ResponseMeta"];
@@ -2266,10 +2018,6 @@ export interface components {
         };
         ApiResponseListAuditLog: {
             data?: components["schemas"]["AuditLog"][] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseListBehaviorBaselineEventView: {
-            data?: components["schemas"]["BehaviorBaselineEventView"][] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseListChannelView: {
@@ -2310,20 +2058,8 @@ export interface components {
             data?: components["schemas"]["OverrideView"][] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
-        ApiResponseListPreDeployCheckView: {
-            data?: components["schemas"]["PreDeployCheckView"][] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
         ApiResponseListProject: {
             data?: components["schemas"]["Project"][] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseListProjectVersionView: {
-            data?: components["schemas"]["ProjectVersionView"][] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseListRcaReportView: {
-            data?: components["schemas"]["RcaReportView"][] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseListSourceResponse: {
@@ -2332,10 +2068,6 @@ export interface components {
         };
         ApiResponseListString: {
             data?: string[] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseListToolErrorRateView: {
-            data?: components["schemas"]["ToolErrorRateView"][] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseLlmUsageSeriesView: {
@@ -2396,10 +2128,6 @@ export interface components {
         };
         ApiResponseProject: {
             data?: components["schemas"]["Project"] | null;
-            meta: components["schemas"]["ResponseMeta"];
-        };
-        ApiResponseProjectVersionView: {
-            data?: components["schemas"]["ProjectVersionView"] | null;
             meta: components["schemas"]["ResponseMeta"];
         };
         ApiResponseRcaReportView: {
@@ -2644,14 +2372,6 @@ export interface components {
             jobId: string;
             jobStatus: string;
             lane: string;
-        };
-        BehaviorBaselineEventView: {
-            detail: string | null;
-            event: string;
-            gramKey: string | null;
-            id: string;
-            occurredAt: string;
-            workflowKey: string | null;
         };
         BehaviorFindingDetailView: {
             armedWindow: components["schemas"]["ArmedWindowDetail"] | null;
@@ -3056,16 +2776,6 @@ export interface components {
             status: string;
             waiting_reason: string | null;
         };
-        ClassifierMetricsView: {
-            classifier_id: string;
-            /** Format: int64 */
-            discovery_fired: number;
-            /** Format: int64 */
-            low_confidence: number;
-            mode: string;
-            /** Format: int64 */
-            tracking_fired: number;
-        };
         ClassifierView: {
             built_in: boolean;
             call_site_ids: string[] | null;
@@ -3399,25 +3109,6 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
-        FrustrationCallSiteView: {
-            /** Format: int64 */
-            baseline_conversations: number | null;
-            /** Format: int64 */
-            baseline_frustrated: number | null;
-            /** Format: double */
-            baseline_rate: number | null;
-            call_site_id: string;
-            /** Format: double */
-            decision_interval: number | null;
-            /** Format: int64 */
-            learned_conversations: number;
-            onset_at: string | null;
-            reset_at: string | null;
-            reset_note: string | null;
-            state: string;
-            /** Format: double */
-            statistic: number;
-        };
         FrustrationDetail: {
             /** Format: int64 */
             arlTarget: number;
@@ -3431,24 +3122,6 @@ export interface components {
             minDecisionInterval: number;
             rate: components["schemas"]["RateDetail"];
             scorerVersion: string | null;
-        };
-        FrustrationTuningView: {
-            /** Format: int64 */
-            arl_target: number;
-            call_sites: components["schemas"]["FrustrationCallSiteView"][];
-            /** Format: int32 */
-            min_baseline_conversations: number;
-            /** Format: double */
-            min_decision_interval: number;
-            scorer_version: string;
-            /** Format: double */
-            shift_floor: number;
-            /** Format: double */
-            shift_multiple: number;
-            /** Format: double */
-            threshold: number;
-            /** Format: int64 */
-            unassigned_conversations: number;
         };
         GitIntegrationView: {
             defaultBranch: string;
@@ -3853,16 +3526,6 @@ export interface components {
             status: string;
             token: string | null;
         };
-        PreDeployCheckView: {
-            classifier_id: string;
-            created_at: string;
-            failure_mode_id: string | null;
-            id: string;
-            intensity: string;
-            status: string;
-            surface: string;
-            updated_at: string;
-        };
         PreviewRequest: {
             pattern?: string | null;
             replacement?: string | null;
@@ -3914,17 +3577,6 @@ export interface components {
             /** @enum {string} */
             service_tier: "standard" | "flex" | "priority" | "batch";
             updated_at: string;
-        };
-        ProjectVersionView: {
-            benchmarkStatus: string;
-            commitSha: string;
-            createdAt: string;
-            datasetsStatus: string;
-            gradersStatus: string;
-            materializedReason: string;
-            parentSha: string;
-            summary: string;
-            updatedAt: string;
         };
         ProviderOptionView: {
             default_model_key: string;
@@ -4420,9 +4072,6 @@ export interface components {
             /** @enum {string} */
             service_tier?: "standard" | "flex" | "priority" | "batch";
         };
-        SetModeRequest: {
-            mode: string;
-        };
         SetOverrideRequest: {
             enabled?: boolean;
         };
@@ -4640,15 +4289,6 @@ export interface components {
             result: string | null;
             /** Format: int32 */
             retries: number | null;
-        };
-        ToolErrorRateView: {
-            /** Format: int64 */
-            failed_calls: number;
-            /** Format: double */
-            failure_rate: number;
-            tool_name: string | null;
-            /** Format: int64 */
-            total_calls: number;
         };
         ToolOption: {
             callers: string[];
@@ -6177,31 +5817,6 @@ export interface operations {
             };
         };
     };
-    ClassifierController_events: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListClassifierEventView"];
-                };
-            };
-        };
-    };
     ClassifierController_health: {
         parameters: {
             query: {
@@ -6393,32 +6008,6 @@ export interface operations {
             };
         };
     };
-    ClassifierController_getFrustrationTuning: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseFrustrationTuningView"];
-                };
-            };
-        };
-    };
     ClassifierController_getGroundednessStatus: {
         parameters: {
             query: {
@@ -6445,62 +6034,6 @@ export interface operations {
             };
         };
     };
-    ClassifierController_metrics: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseClassifierMetricsView"];
-                };
-            };
-        };
-    };
-    ClassifierController_setMode: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetModeRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseClassifierView"];
-                };
-            };
-        };
-    };
     ClassifierController_reset: {
         parameters: {
             query: {
@@ -6523,32 +6056,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseClassifierView"];
-                };
-            };
-        };
-    };
-    ClassifierController_toolErrorRates: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListToolErrorRateView"];
                 };
             };
         };
@@ -6659,32 +6166,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBehaviorFindingsView"];
-                };
-            };
-        };
-    };
-    FindingController_baselineEvents: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListBehaviorBaselineEventView"];
                 };
             };
         };
@@ -7365,134 +6846,6 @@ export interface operations {
             };
         };
     };
-    PipelineController_reload: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponsePipelineEnvelope"];
-                };
-            };
-        };
-    };
-    PreDeployCheckController_list: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListPreDeployCheckView"];
-                };
-            };
-        };
-    };
-    PreDeployCheckController_dismiss: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
-    PreDeployCheckController_reinstate: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
-    RcaController_list: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListRcaReportView"];
-                };
-            };
-        };
-    };
     RcaController_get: {
         parameters: {
             query: {
@@ -7946,58 +7299,6 @@ export interface operations {
             };
         };
     };
-    SourceController_get: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseSourceResponse"];
-                };
-            };
-        };
-    };
-    SourceController_delete: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseDeleteResponse"];
-                };
-            };
-        };
-    };
     SubstrateController_status: {
         parameters: {
             query: {
@@ -8133,84 +7434,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProject"];
-                };
-            };
-        };
-    };
-    ProjectVersionController_timeline: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseListProjectVersionView"];
-                };
-            };
-        };
-    };
-    ProjectVersionController_lineage: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                nodeKind: string;
-                nodeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseProjectVersionView"];
-                };
-            };
-        };
-    };
-    ProjectVersionController_get: {
-        parameters: {
-            query: {
-                ctx: components["schemas"]["TenantContext"];
-            };
-            header?: never;
-            path: {
-                orgSlug: string;
-                projectSlug: string;
-                commitSha: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseProjectVersionView"];
                 };
             };
         };

@@ -14,7 +14,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.classifier.ClassifierDtos.ClassifierHealthView;
@@ -60,9 +59,6 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
@@ -307,31 +303,14 @@ class ClassifierServiceTest {
     }
 
     /** Catches a zero-row write being reported as a success, handing back a row the write never touched. */
-    @ParameterizedTest
-    @ValueSource(strings = {"enabled", "mode"})
-    void aWriteThatMatchesNoRowIsNotFound(String write) {
+    @Test
+    void aWriteThatMatchesNoRowIsNotFound() {
         when(signals.findById(PID, "sig-a")).thenReturn(Optional.of(row()));
-        Executable call;
-        if ("enabled".equals(write)) {
-            when(signals.setEnabled(PID, "sig-a", false)).thenReturn(0);
-            call = () -> service.setEnabled(PID, "sig-a", false);
-        } else {
-            when(signals.setMode(PID, "sig-a", ClassifierRow.Mode.TRACKING)).thenReturn(0);
-            call = () -> service.setMode(PID, "sig-a", ClassifierRow.Mode.TRACKING);
-        }
+        when(signals.setEnabled(PID, "sig-a", false)).thenReturn(0);
 
-        TessaryException e = assertThrows(TessaryException.class, call);
+        TessaryException e = assertThrows(TessaryException.class, () -> service.setEnabled(PID, "sig-a", false));
 
         assertEquals(ClassifierError.NOT_FOUND, e.error());
-    }
-
-    /** Catches an unknown operating point being written (and read back) as if it were a mode. */
-    @Test
-    void anUnknownModeIsRefusedBeforeAnythingIsReadOrWritten() {
-        TessaryException e = assertThrows(TessaryException.class, () -> service.setMode(PID, "sig-a", "aggressive"));
-
-        assertEquals(ClassifierError.INVALID_MODE, e.error());
-        verifyNoInteractions(signals);
     }
 
     /**

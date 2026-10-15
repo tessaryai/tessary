@@ -19,13 +19,13 @@ can only import what sits below it. Full rationale in [`devdocs/modules.md`](../
   `product/plan/CapabilityService`.
 - `substrate/` — `storage`, `ingest`, `redaction`, `retention`, `pricing`, `sources`, `traces`,
   `git`, `usage`, `vitals`.
-- `product/` — `pipeline`, `gate`, `plan`.
+- `product/` — `pipeline`, `plan`.
 - `llm-runtime/` — `llm`, `sandbox` (agent-span telemetry only). The ONLY module that
   declares a provider SDK.
 - `analysis/` — `classifier`, `rca`, `cases`, `alert`, `onboarding`, `prompt`.
 - There is no `evaluation/`. It held judge, run, compile, synth, regrade, experiment, review and
   annotation, and all of them were deleted; the reactor is eleven modules.
-- `surfaces/` — `query`, `search`, `mcp`, `ci`, `metering`, `billing`, `telemetry`.
+- `surfaces/` — `query`, `search`, `mcp`, `metering`, `billing`, `telemetry`.
 - `app/` — `TessaryApplication`, `application.yaml`, and every `@SpringBootTest` integration test
   (they need the `@SpringBootConfiguration` only this module has).
 

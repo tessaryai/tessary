@@ -37,8 +37,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>Insert-if-absent, first-write-wins.</b> {@code ON CONFLICT DO NOTHING} against the per-table
  * unique subject index, so a re-sweep over the same window writes nothing and
  * {@link #insert} reports {@code false}: a genuinely new detection is the one that inserted. That is the
- * same contract the old online-verdict upsert had, and the arming counter and the pre-deploy
- * registration both still key on it.
+ * same contract the old online-verdict upsert had, and the arming counter keys on it.
  */
 @Repository
 public class ClassifierDetectionWriteRepository {

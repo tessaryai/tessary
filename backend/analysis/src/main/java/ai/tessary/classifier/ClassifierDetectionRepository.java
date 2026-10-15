@@ -32,7 +32,6 @@ public class ClassifierDetectionRepository {
 
     private final JdbcClient jdbc;
     private final String select;
-    private final String modeCountsSql;
     private final String dailyCountsSql;
 
     public ClassifierDetectionRepository(JdbcClient jdbc, DetectionTableRegistry detectionTables) {
@@ -48,10 +47,6 @@ public class ClassifierDetectionRepository {
                 + "FROM " + relation + " "
                 + "JOIN classifier s ON s.project_id = d.project_id AND s.classifier_key = d.classifier_id "
                 + "LEFT JOIN trace t ON t.project_id = d.project_id AND t.id = d.subject_trace_id ";
-        this.modeCountsSql = "SELECT\n"
-                + "  COUNT(*) FILTER (WHERE confidence = 'low')                        AS low_count,\n"
-                + "  COUNT(*) FILTER (WHERE confidence = 'high' OR confidence IS NULL) AS high_count\n"
-                + "FROM " + relation + " WHERE project_id = :pid AND classifier_id = :classifierKey";
         this.dailyCountsSql = "SELECT s.id AS classifier_id,\n"
                 + "       (d.subject_started_at AT TIME ZONE 'UTC')::date AS day,\n"
                 + "       COUNT(DISTINCT d.subject_trace_id) AS traces\n"
@@ -60,17 +55,6 @@ public class ClassifierDetectionRepository {
                 + "WHERE d.project_id = :pid AND d.subject_started_at >= :from\n"
                 + "GROUP BY s.id, day\n"
                 + "ORDER BY day ASC";
-    }
-
-    /** All detections for a project, newest event-time first. */
-    public List<ClassifierDtos.ClassifierEventView> listByProject(String projectId, int limit) {
-        return jdbc.sql(select
-                        + "WHERE d.project_id = :pid ORDER BY d.subject_started_at DESC NULLS LAST, d.created_at DESC"
-                        + " LIMIT :limit")
-                .param("pid", projectId)
-                .param("limit", limit)
-                .query((rs, n) -> map(rs))
-                .list();
     }
 
     /**
@@ -88,18 +72,6 @@ public class ClassifierDetectionRepository {
                 .query((rs, n) -> map(rs))
                 .list();
     }
-
-    /** High/low confidence-band counts for one classifier's detections: the discovery-vs-tracking breakdown. */
-    public ModeCounts modeCounts(String projectId, String classifierKey) {
-        return jdbc.sql(modeCountsSql)
-                .param("pid", projectId)
-                .param("classifierKey", classifierKey)
-                .query((rs, n) -> new ModeCounts(rs.getLong("high_count"), rs.getLong("low_count")))
-                .single();
-    }
-
-    /** High/low detection counts for a classifier's key. */
-    public record ModeCounts(long high, long low) {}
 
     /**
      * Per-classifier, per-UTC-day distinct-trace detection counts since {@code from}, oldest day

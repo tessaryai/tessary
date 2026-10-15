@@ -82,20 +82,6 @@ public class ClassifierRepository {
     }
 
     /**
-     * Set the operating point: {@code discovery} (high recall) or {@code tracking} (high
-     * precision). Tenant-controlled like {@code enabled}; does NOT bump {@code version}. Returns rows
-     * affected (0 = not found).
-     */
-    public int setMode(String projectId, String id, String mode) {
-        return jdbc.sql("UPDATE classifier SET mode = :mode, updated_at = :now WHERE project_id = :pid AND id = :id")
-                .param("mode", mode)
-                .param("now", Instant.now().toString())
-                .param("pid", projectId)
-                .param("id", id)
-                .update();
-    }
-
-    /**
      * Set the call sites the classifier runs on, {@code null} for every call site. Tenant-controlled like
      * {@code mode}; does NOT bump {@code version}. Returns rows affected (0 = not found).
      */
