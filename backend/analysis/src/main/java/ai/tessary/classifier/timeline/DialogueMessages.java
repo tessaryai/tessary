@@ -13,22 +13,20 @@ import java.util.StringJoiner;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Reads the role-tagged messages of a stored {@code input} or {@code output} column, and finds the messages that are
- * new in a call. The one home of the rule both the frustration thread and the session timeline use: the new messages
- * of an input are those after its last assistant message that has text or a tool call, so a call site that sends the
- * whole chat on every call gives each message once.
+ * Reads the role-tagged messages of a stored column. The one home of the "new messages" rule for the frustration thread
+ * and the session timeline: those after the last assistant message with text or a tool call.
  */
 public final class DialogueMessages {
 
     // Part types the structured form reads as the user-visible text of a message.
     private static final Set<String> TEXT_PART_TYPES = Set.of("", "text", "input_text", "output_text");
-    // Tool parts leave no text; a tool call only marks where an assistant turn ended.
+    // A tool call only marks where an assistant turn ended.
     private static final Set<String> TOOL_CALL_PART_TYPES = Set.of("tool_call", "tool_use", "function_call");
     private static final Set<String> TOOL_RESULT_PART_TYPES =
             Set.of("tool_result", "tool_call_response", "function_call_output");
-    // Model reasoning is never shown to the user, so it is not part of a message's text.
+    // Model reasoning is never shown to the user.
     private static final Set<String> HIDDEN_PART_TYPES = Set.of("reasoning", "thinking", "redacted_thinking");
-    // A redacted_thinking part carries only an encrypted blob, so it adds no reasoning text.
+    // redacted_thinking carries only an encrypted blob.
     private static final Set<String> REASONING_TEXT_PART_TYPES = Set.of("reasoning", "thinking");
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -36,16 +34,10 @@ public final class DialogueMessages {
     private DialogueMessages() {}
 
     /**
-     * One message of a stored column.
-     *
-     * @param text text parts joined with a space, media parts as their {@link ContentExtractor#partPlaceholder}
-     *     placeholders; tool parts and reasoning dropped
-     * @param hasText whether a real text part (not only a media placeholder) is in {@code text}
-     * @param endsInToolCall an assistant message whose last part is a tool call
-     * @param dialogue the message has text or a tool call; a message with only a tool result is not dialogue
-     * @param toolCalls the raw tool-call nodes, part nodes first and then OpenAI {@code tool_calls[]} entries
-     * @param reasoning the texts of the reasoning parts joined with a newline, or null when there are none
-     * @param source the message node as stored, or a {@code {"role","content"}} node for a non-envelope column
+     * @param text text parts joined with a space, media as {@link ContentExtractor#partPlaceholder} placeholders @param
+     * hasText whether a real text part, not only a placeholder, is present @param dialogue false for a message with
+     * only a tool result @param toolCalls part nodes first, then OpenAI {@code tool_calls[]} @param source the stored
+     * node, or a synthesized {@code {"role","content"}} node for a non-envelope column
      */
     public record DialogueMessage(
             String role,
@@ -62,11 +54,7 @@ public final class DialogueMessages {
         }
     }
 
-    /**
-     * Every role-tagged message of a stored column, in order, whatever its role. A plain-string or non-envelope
-     * column is one text message under {@code fallbackRole}, as {@link ContentExtractor#columnMessages} reads it; an
-     * empty one is no message.
-     */
+    /** A non-envelope column is one message under {@code fallbackRole}; an empty one is none. */
     public static List<DialogueMessage> read(@Nullable String raw, String fallbackRole) {
         if (raw == null || raw.isBlank()) return List.of();
         JsonNode node;
@@ -82,11 +70,7 @@ public final class DialogueMessages {
         return envelope(node);
     }
 
-    /**
-     * The messages of a column that holds what a person and an agent said: a message envelope, or a plain string, which
-     * is one text message under {@code fallbackRole}. Any other JSON value, such as a framework's call arguments or
-     * return object, holds no message.
-     */
+    /** Any JSON value other than an envelope or string, such as call arguments, holds no message. */
     public static List<DialogueMessage> readDialogue(@Nullable String raw, String fallbackRole) {
         if (raw == null || raw.isBlank()) return List.of();
         JsonNode node;
@@ -130,7 +114,6 @@ public final class DialogueMessages {
         return List.copyOf(out);
     }
 
-    /** The messages after the last user message that has text or a tool call: what an output adds to a chat it holds. */
     public static List<DialogueMessage> afterLastUser(List<DialogueMessage> messages) {
         int afterLastUser = 0;
         for (int i = 0; i < messages.size(); i++) {
@@ -140,7 +123,6 @@ public final class DialogueMessages {
         return messages.subList(afterLastUser, messages.size());
     }
 
-    /** The messages after the last assistant message that has text or a tool call: what is new in this call. */
     public static List<DialogueMessage> afterLastAssistant(List<DialogueMessage> messages) {
         int afterLastReply = 0;
         for (int i = 0; i < messages.size(); i++) {
@@ -156,7 +138,6 @@ public final class DialogueMessages {
         return List.of(new DialogueMessage(role, text, true, false, true, List.of(), null, source));
     }
 
-    /** Walks one message's content in order, collecting its text, tool calls and reasoning. */
     private static final class PartWalk {
         private final StringJoiner text = new StringJoiner(" ");
         private final StringJoiner reasoning = new StringJoiner("\n");

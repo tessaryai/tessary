@@ -11,17 +11,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * CRUD + scan for the unified {@code alert_rule} table. The REST layer uses {@link #findById} /
- * {@link #listByProject} / {@link #insert} / {@link #update} / {@link #setEnabled} / {@link #snooze} /
- * {@link #delete}; the worker uses {@link #listEnabledRollups} + {@link #markRollupRan} and
- * {@link #listEnabled}. Replaces {@code SignalAlertRepository} +
- * {@code ProjectAlertConfigRepository}.
- *
- * <p>There is no threshold claim any more. A {@code FOR UPDATE SKIP LOCKED} claim of due threshold rules
- * stood here to spread the per-classifier window evaluation across N backends; that evaluation moved into
- * the classifier's own sweep ({@code ClassifierArming}), so no worker reads threshold rows and the claim
- * went with the path it served. The rows themselves stay, disabled, as the record of what the numbers
- * used to do (migration {@code 0089}).
+ * CRUD and scans for {@code alert_rule}. No threshold claim: threshold evaluation moved into {@code ClassifierArming},
+ * and threshold rows stay disabled as a record (migration {@code 0089}).
  */
 @Repository
 public class AlertRuleRepository {
@@ -45,7 +36,6 @@ public class AlertRuleRepository {
                 .optional();
     }
 
-    /** The one threshold rule for a classifier, or empty. */
     public Optional<AlertRuleRow> findThresholdBySignal(String projectId, String classifierId) {
         return jdbc.sql("SELECT " + COLS + " FROM alert_rule "
                         + "WHERE project_id = :pid AND classifier_id = :sid AND rule_type = 'threshold'")
@@ -55,7 +45,6 @@ public class AlertRuleRepository {
                 .optional();
     }
 
-    /** The one roll-up rule of a given kind (digest|brief) for a project, or empty. */
     public Optional<AlertRuleRow> findRollup(String projectId, String ruleType) {
         return jdbc.sql("SELECT " + COLS + " FROM alert_rule " + "WHERE project_id = :pid AND rule_type = :rt")
                 .param("pid", projectId)
@@ -107,8 +96,8 @@ public class AlertRuleRepository {
     }
 
     /**
-     * Update the configurable fields of a rule by id, preserving {@code created_at} and the lifecycle
-     * anchors ({@code last_*_at}). {@code enabled}/{@code snoozed_until} are managed by their own methods.
+     * Preserves {@code created_at} and the lifecycle anchors; {@code enabled}/{@code snoozed_until} have their own
+     * methods.
      */
     public void update(AlertRuleRow row) {
         jdbc.sql("""
@@ -136,7 +125,7 @@ public class AlertRuleRepository {
                 .update();
     }
 
-    /** Flip the hard enabled flag. Returns rows affected (0 = not found). */
+    /** Returns rows affected (0 = not found). */
     public int setEnabled(String projectId, String id, boolean enabled) {
         return jdbc.sql("UPDATE alert_rule SET enabled = :en, updated_at = :now WHERE project_id = :pid AND id = :id")
                 .param("en", enabled)
@@ -146,7 +135,7 @@ public class AlertRuleRepository {
                 .update();
     }
 
-    /** Soft-mute until an ISO instant (null clears). Returns rows affected (0 = not found). */
+    /** Null clears. Returns rows affected (0 = not found). */
     public int snooze(String projectId, String id, @Nullable String snoozedUntil) {
         return jdbc.sql("UPDATE alert_rule SET snoozed_until = :until, updated_at = :now "
                         + "WHERE project_id = :pid AND id = :id")
@@ -165,7 +154,6 @@ public class AlertRuleRepository {
                 > 0;
     }
 
-    /** Enabled per-project roll-up rules (digest|brief) — the worker's per-heartbeat scan. */
     public List<AlertRuleRow> listEnabledRollups() {
         return jdbc.sql("SELECT " + COLS + " FROM alert_rule "
                         + "WHERE enabled = TRUE AND rule_type IN ('digest','brief') ORDER BY project_id")
@@ -174,12 +162,8 @@ public class AlertRuleRepository {
     }
 
     /**
-     * Enabled rules of one type, in project order — the case-opened scan.
-     *
-     * <p>No {@code FOR UPDATE SKIP LOCKED} claim, and that is safe for a positive reason rather than
-     * being an oversight: two backends evaluating the same case-opened rule in
-     * the same second both build the same firings, and the idempotent {@code (alert_rule_id, case_id)}
-     * insert means exactly one of them publishes. A claim would buy nothing but a lease to expire.
+     * No claim needed: two backends build the same firings, and the idempotent {@code (alert_rule_id, case_id)} insert
+     * lets exactly one publish.
      */
     public List<AlertRuleRow> listEnabled(String ruleType) {
         return jdbc.sql("SELECT " + COLS + " FROM alert_rule "
@@ -190,9 +174,8 @@ public class AlertRuleRepository {
     }
 
     /**
-     * Advance a rule's {@code last_evaluated_at} anchor. For a case-opened rule this is set to the
-     * {@code opened_at} of the last case delivered rather than to the wall clock, so a tick that hit its
-     * per-tick cap resumes from the right place instead of skipping the remainder.
+     * For a case-opened rule, set to the last delivered case's {@code opened_at} rather than the wall clock, so a
+     * capped tick resumes correctly.
      */
     public void markEvaluated(String id, String at) {
         jdbc.sql("UPDATE alert_rule SET last_evaluated_at = :at, updated_at = :now WHERE id = :id")
@@ -202,7 +185,6 @@ public class AlertRuleRepository {
                 .update();
     }
 
-    /** Advance the relevant roll-up cron anchor after a roll-up ran for a rule. */
     public void markRollupRan(String id, String ruleType, String at) {
         String column = AlertRuleRow.RuleType.DIGEST.equals(ruleType) ? "last_digest_at" : "last_brief_at";
         jdbc.sql("UPDATE alert_rule SET " + column + " = :at, updated_at = :at WHERE id = :id")
