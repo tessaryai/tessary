@@ -17,6 +17,8 @@ permissions:
 jobs:
   refresh:
     name: Refresh vendored price files
+    # tessary-paid gets the refreshed book through its sync from this repo, so it never refreshes its own copy.
+    if: github.repository == 'tessaryai/tessary'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
