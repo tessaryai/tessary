@@ -9,7 +9,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -18,13 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * tenant-scoped, and the idempotent upsert collapses a re-observed key to one row.
  */
 @SpringBootTest
-class OpsGovernanceIntegrationTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    RetentionPolicyRepository retentionPolicies;
+record OpsGovernanceIntegrationTest(TenantService tenants, RetentionPolicyRepository retentionPolicies) {
 
     private String project(String slug) {
         return TenantFixture.bootstrap(tenants, slug).project().id();

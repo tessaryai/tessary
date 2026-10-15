@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -20,16 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * stale token works forever". Coverage focuses on the verification surface.
  */
 @SpringBootTest
-class ApiKeyServiceTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService tokens;
-
-    @Autowired
-    ApiKeyRepository repo;
+record ApiKeyServiceTest(TenantService tenants, ApiKeyService tokens, ApiKeyRepository repo) {
 
     @Test
     void issuedToken_verifies_andUpdatesLastUsedAt() {

@@ -21,9 +21,6 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import java.time.Instant;
@@ -32,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -43,43 +39,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * them is scored again, while a flagged conversation the case does not cite stays flagged.
  */
 @SpringBootTest
-class FrustrationResolveIntegrationTest {
-
-    @Autowired
-    FrustrationRateService rates;
-
-    @Autowired
-    CaseService caseService;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    ClassifierDetectionWriteRepository detections;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    RateClassifierFixture fixture;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
+record FrustrationResolveIntegrationTest(
+        SubstrateV2Fixtures fx,
+        FrustrationRateService rates,
+        CaseService caseService,
+        CaseRepository cases,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        ClassifierDetectionWriteRepository detections,
+        JdbcClient jdbc,
+        RateClassifierFixture fixture,
+        SessionRepository sessions) {
 
     @Test
     void fixedRestartsTheCallSiteAndRelearnsWithoutClearingAnything() {
@@ -129,7 +99,7 @@ class FrustrationResolveIntegrationTest {
                 .toList();
         assertEquals(72, cited.size(), "every frustrated session since onset, past the fifty a page shows");
         String conversation = cited.get(0);
-        new SubstrateV2Fixtures(sessions, traces, spans, payloads).trace(pid, "tr-later", conversation, Instant.now());
+        fx.trace(pid, "tr-later", conversation, Instant.now());
         flagOnAnotherCallSite(pid, signal, conversation);
         List<CallSiteTurn> later =
                 List.of(new CallSiteTurn("tr-later", "cs-chat"), new CallSiteTurn("tr-later", "cs-other"));

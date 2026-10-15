@@ -18,7 +18,6 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -28,18 +27,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * SubstrateReadRepository} filters on {@code IS NOT NULL}, which decides whether a classifier sees a schema.
  */
 @SpringBootTest
-class CodeFactPersistenceIntegrationTest {
+record CodeFactPersistenceIntegrationTest(PipelineRepository repo, TenantService tenants, JdbcClient jdbc) {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    @Autowired
-    PipelineRepository repo;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
 
     private String project(String name) {
         return TenantFixture.bootstrap(tenants, name).project().id();

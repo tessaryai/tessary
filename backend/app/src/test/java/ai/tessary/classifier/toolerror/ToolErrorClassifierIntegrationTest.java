@@ -13,9 +13,6 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingService;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -31,10 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -51,7 +46,17 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * ruling confirms it; and absorb pins the new reference so the next recompute stays quiet.
  */
 @SpringBootTest
-class ToolErrorClassifierIntegrationTest {
+record ToolErrorClassifierIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        TraceV2Repository traces,
+        FindingEvidenceRepository evidence,
+        JdbcClient jdbc,
+        ToolErrorRepository repo,
+        ToolErrorService service,
+        ToolErrorReferenceRepository references,
+        FindingRepository findings,
+        FindingService drift) {
 
     private static final String TOOL = "search_docs";
 
@@ -61,49 +66,6 @@ class ToolErrorClassifierIntegrationTest {
     private static final int RISE_HOURS = 4;
 
     private static final int CALLS_PER_HOUR = 20;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    ToolErrorRepository repo;
-
-    @Autowired
-    ToolErrorService service;
-
-    @Autowired
-    ToolErrorReferenceRepository references;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingService drift;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
 
     @Test
     @DisplayName("a result that declares its own error is a failure; the old span-status rule misses it")

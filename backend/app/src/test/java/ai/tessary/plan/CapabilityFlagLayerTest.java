@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -41,28 +40,16 @@ import org.springframework.web.server.ResponseStatusException;
  * </ol>
  */
 @SpringBootTest
-class CapabilityFlagLayerTest {
+record CapabilityFlagLayerTest(
+        TenantService tenants,
+        CapabilityService capabilities,
+        OrgFeatureFlagRepository overrides,
+        DbFeatureFlags flags,
+        CapabilityController controller,
+        OrgMembershipRepository memberships) {
 
     /** What an open build serves before anybody touches it. Mirrors CapabilityService's private set. */
     private static final Set<Capability> OFF_BY_DEFAULT = EnumSet.of(Capability.TRIAGE_AUTOMATIC, Capability.ALERTS);
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityService capabilities;
-
-    @Autowired
-    OrgFeatureFlagRepository overrides;
-
-    @Autowired
-    DbFeatureFlags flags;
-
-    @Autowired
-    CapabilityController controller;
-
-    @Autowired
-    OrgMembershipRepository memberships;
 
     @Test
     void withNoOverrides_everythingIsOnExceptTheOffByDefaultSet() {

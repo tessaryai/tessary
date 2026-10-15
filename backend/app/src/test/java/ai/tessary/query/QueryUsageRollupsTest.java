@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -33,19 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * {@link MeteringService}'s timeseries.
  */
 @SpringBootTest
-class QueryUsageRollupsTest {
-
-    @Autowired
-    QueryController controller;
-
-    @Autowired
-    MetricRollupRepository rollups;
-
-    @Autowired
-    MeteringService metering;
-
-    @Autowired
-    TenantService tenants;
+record QueryUsageRollupsTest(
+        QueryController controller, MetricRollupRepository rollups, MeteringService metering, TenantService tenants) {
 
     private static TenantContext token(String projectId) {
         return new TenantContext("user-1", null, "org-1", projectId, "member", "tok-1");

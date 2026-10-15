@@ -13,10 +13,7 @@ import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
@@ -30,9 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -42,51 +37,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * reads the scope stands on return what they say.
  */
 @SpringBootTest
-class ClassifierCallSiteScopeIntegrationTest {
+record ClassifierCallSiteScopeIntegrationTest(
+        SubstrateV2Fixtures fx,
+        ClassifierService service,
+        ClassifierRepository signals,
+        ClassifierJobRepository jobs,
+        SubstrateReadRepository substrate,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        SpanRepository spans,
+        JdbcClient jdbc) {
 
     private static final String SWEPT_AT = "2026-01-01T00:00:00Z";
     private static final String SWEPT_ID = "trace-before:span-before";
     private static final Instant T0 = Instant.now().minus(2, ChronoUnit.HOURS);
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    SubstrateReadRepository substrate;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
 
     /** A dropped column in the insert or the mapper loses the scope, and the classifier runs everywhere again. */
     @Test

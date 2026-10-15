@@ -18,20 +18,13 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
  * The ingestion-source API: a source belongs to one project, and every read and delete is scoped to it.
  */
 @SpringBootTest
-class SourceControllerTest {
-
-    @Autowired
-    SourceController controller;
-
-    @Autowired
-    TenantService tenants;
+record SourceControllerTest(SourceController controller, TenantService tenants) {
 
     private record Tenant(TenantContext ctx, String org, String proj) {}
 

@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
-import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.classifier.toolerror.ToolErrorRate;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
@@ -24,7 +23,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -33,28 +31,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * flags, the state row it leaves in {@code frustration_state}, and a tuning change resetting it.
  */
 @SpringBootTest
-class FrustrationRateReplayIntegrationTest {
+record FrustrationRateReplayIntegrationTest(
+        FrustrationRateRepository rates,
+        FrustrationRateService service,
+        ClassifierRepository classifiers,
+        JdbcClient jdbc,
+        RateClassifierFixture fixture) {
 
     private static final String VERSION =
             JevFrustrationQuestion.scorerVersion(JevFrustrationQuestion.DEFAULT_THRESHOLD);
-
-    @Autowired
-    FrustrationRateRepository rates;
-
-    @Autowired
-    FrustrationRateService service;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    RateClassifierFixture fixture;
 
     /**
      * A session is a conversation on one call site. Keyed on the conversation alone, conv-a counts once, on cs-a

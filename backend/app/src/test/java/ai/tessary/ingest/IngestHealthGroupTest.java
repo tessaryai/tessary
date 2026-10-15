@@ -7,18 +7,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The staff-only ingest health surface over HTTP: {@code /actuator/health/ingest} answers a
@@ -26,23 +21,11 @@ import org.springframework.web.context.WebApplicationContext;
  * public top-level document still renders no component detail.
  */
 @AuthEnforcedContext
-class IngestHealthGroupTest {
+record IngestHealthGroupTest(MockMvc mvc) {
 
     private static final String STAFF = "staff-984@example.com";
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void theIngestGroupRendersTheSpoolForStaffAndNobodyElse() throws Exception {
@@ -54,7 +37,7 @@ class IngestHealthGroupTest {
 
         Cookie session = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", STAFF, "password", "a-good-password"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", STAFF, "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()

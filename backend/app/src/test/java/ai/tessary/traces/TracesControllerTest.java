@@ -12,8 +12,6 @@ import ai.tessary.auth.TenantContext;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanPayloadRow;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
@@ -28,12 +26,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,43 +42,17 @@ import org.springframework.web.server.ResponseStatusException;
  * v1 ULID) still resolves; and a pre-cutover cursor degrades to page one.
  */
 @SpringBootTest
-class TracesControllerTest {
+record TracesControllerTest(
+        SubstrateV2Fixtures fx,
+        TracesController controller,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        TenantService tenants,
+        JdbcClient jdbc,
+        CapabilityFixture capabilities,
+        ClassifierService classifierService) {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    @Autowired
-    TracesController controller;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
 
     private record Tenant(TenantContext ctx, String org, String proj, String pid) {}
 
@@ -340,7 +310,6 @@ class TracesControllerTest {
     @DisplayName("a trace opens with each tool call and retrieved document on the span that made it")
     void detailHangsEachToolCallAndDocumentOffItsOwnSpan() {
         Tenant t = tenant("traces-api-side-tables");
-        var seeds = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
         Instant t0 = Instant.parse("2026-06-20T12:00:00Z");
         String traceId = SubstrateV2Fixtures.traceId();
         SpanRow root = fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), null, "llm", t0, t0.plusSeconds(3));
@@ -348,8 +317,8 @@ class TracesControllerTest {
                 fx.span(t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "tool", t0.plusSeconds(1), null);
         SpanRow retrieval = fx.span(
                 t.pid(), traceId, SubstrateV2Fixtures.spanId(), root.id(), "retriever", t0.plusSeconds(2), null);
-        seeds.toolCall(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, tool.id()), "search", "Timeout", t0);
-        seeds.retrievedDoc(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, retrieval.id()), "passage", 1, null, t0);
+        fx.toolCall(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, tool.id()), "search", "Timeout", t0);
+        fx.retrievedDoc(t.pid(), new SubstrateV2Fixtures.SpanRef(traceId, retrieval.id()), "passage", 1, null, t0);
         fx.rollup(t.pid(), traceId, t0, null, true);
 
         var detail = ok(controller.detail(t.ctx(), t.org(), t.proj(), traceId));

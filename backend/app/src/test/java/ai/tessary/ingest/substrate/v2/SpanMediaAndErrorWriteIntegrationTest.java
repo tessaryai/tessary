@@ -16,7 +16,6 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -27,16 +26,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * into {@code error_message}.
  */
 @SpringBootTest
-class SpanMediaAndErrorWriteIntegrationTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SpanBatchWriter writer;
-
-    @Autowired
-    JdbcClient jdbc;
+record SpanMediaAndErrorWriteIntegrationTest(TenantService tenants, SpanBatchWriter writer, JdbcClient jdbc) {
 
     @Test
     @DisplayName("the same image in input and output is one reference, not two")

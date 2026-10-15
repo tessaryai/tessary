@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -55,7 +54,15 @@ import org.testcontainers.redpanda.RedpandaContainer;
 // Own context on purpose: it swaps the ingest spool onto a Redpanda container, so its bean graph is not the shared
 // one.
 @TestPropertySource(properties = "test.context-group=kafka-spool")
-class KafkaSpoolIntegrationTest {
+record KafkaSpoolIntegrationTest(
+        SubstrateWriter writer,
+        IngestSpool spool,
+        TenantService tenants,
+        JdbcClient jdbc,
+        ObjectMapper mapper,
+        SpanBatchWriter spans,
+        SubstrateProperties substrateProps,
+        RedactionService redaction) {
     private static final Logger log = LoggerFactory.getLogger(KafkaSpoolIntegrationTest.class);
 
     @Container
@@ -72,30 +79,6 @@ class KafkaSpoolIntegrationTest {
         r.add("tessary.ingest.spool.kafka.partitions", () -> "4");
         r.add("tessary.ingest.spool.kafka.consumers", () -> "2");
     }
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    IngestSpool spool;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    ObjectMapper mapper;
-
-    @Autowired
-    SpanBatchWriter spans;
-
-    @Autowired
-    SubstrateProperties substrateProps;
-
-    @Autowired
-    RedactionService redaction;
 
     private static RawEntry span(String traceId, String id) {
         String now = Instant.now().toString();
@@ -173,7 +156,8 @@ class KafkaSpoolIntegrationTest {
             assertEquals(2 * 251, spans(pids[p]), "project " + p + " landed both runs once each");
         double speedup = (double) one / Math.max(1, four);
         log.info(
-                "cross-project scaling: 2000 spans over 8 projects drained in {} ms with 1 drainer, {} ms with 4, speed-up {}",
+                "cross-project scaling: 2000 spans over 8 projects drained in {} ms with 1 drainer, {} ms with 4,"
+                        + " speed-up {}",
                 one,
                 four,
                 String.format(Locale.ROOT, "%.2f", speedup));

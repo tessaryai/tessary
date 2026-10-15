@@ -24,7 +24,6 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -37,28 +36,18 @@ import org.springframework.boot.test.context.SpringBootTest;
  * OUTPUT_SCHEMA}) on this classpath, so a {@code SHAPE} change rewinds nothing here.
  */
 @SpringBootTest
-class CallSiteFactRewindIntegrationTest {
+record CallSiteFactRewindIntegrationTest(
+        ClassifierService signals,
+        ClassifierJobRepository jobs,
+        PipelineService pipelineService,
+        TenantService tenants,
+        CapabilityFixture capabilities) {
 
     private static final String SCHEMA =
             "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}";
 
     private static final String SWEPT_AT = "2026-01-01T00:00:00Z";
     private static final String SWEPT_ID = "obs-before-synthesis";
-
-    @Autowired
-    ClassifierService signals;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    PipelineService pipelineService;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
 
     /**
      * A project whose built-ins already swept their pre-synthesis history. Frustration is granted before the project

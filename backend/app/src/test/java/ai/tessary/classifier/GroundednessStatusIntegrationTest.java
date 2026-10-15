@@ -26,7 +26,6 @@ import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -37,31 +36,15 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * {@code done} so no background tick claims them mid-test.
  */
 @SpringBootTest
-class GroundednessStatusIntegrationTest {
-
-    @Autowired
-    GroundednessStatus status;
-
-    @Autowired
-    ClassifierRepository rows;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    EncoderFixture encoder;
-
-    @Autowired
-    GroundednessProperties groundedness;
-
-    @Autowired
-    GroundednessAssessmentRepository assessments;
+record GroundednessStatusIntegrationTest(
+        GroundednessStatus status,
+        ClassifierRepository rows,
+        ClassifierJobRepository jobs,
+        TenantService tenants,
+        JdbcClient jdbc,
+        EncoderFixture encoder,
+        GroundednessProperties groundedness,
+        GroundednessAssessmentRepository assessments) {
 
     @AfterEach
     void reset() {

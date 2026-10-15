@@ -28,7 +28,6 @@ import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -39,35 +38,19 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * ladder failing to report the furthest rung once a later one is reached.
  */
 @SpringBootTest
-class OnboardingControllerTest {
+record OnboardingControllerTest(
+        OnboardingController controller,
+        TenantService tenants,
+        ApiKeyService keys,
+        SubstrateWriter writer,
+        ClassifierService classifiers,
+        ClassifierRepository classifierRows,
+        MetricBaselineRepository baselines,
+        JdbcClient jdbc) {
 
     private static final String T0 = "2026-01-01T00:00:00Z";
     private static final String FINDING_ONSET = "2026-01-02T00:00:00Z";
     private static final String CASE_OPENED = "2026-01-03T00:00:00Z";
-
-    @Autowired
-    OnboardingController controller;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService keys;
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierRepository classifierRows;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    JdbcClient jdbc;
 
     @Test
     void theLadderReportsTheFurthestRungAndTheNumbersBehindIt() throws InterruptedException {
@@ -204,11 +187,11 @@ class OnboardingControllerTest {
         String id = Ids.ulid();
         String now = Instant.now().toString();
         jdbc.sql("""
-                        INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
-                                             status, onset_at, last_seen_at, created_at, updated_at)
-                        VALUES (:id, :pid, 'duration_drift', 'turn_duration:cs-armed:up', 'metric_baseline',
-                                'baseline-1', 'open', :onset, :onset, :now, :now)
-                        """)
+            INSERT INTO finding (id, project_id, classifier_key, cause_key, subject_kind, subject_id,
+                                 status, onset_at, last_seen_at, created_at, updated_at)
+            VALUES (:id, :pid, 'duration_drift', 'turn_duration:cs-armed:up', 'metric_baseline',
+                    'baseline-1', 'open', :onset, :onset, :now, :now)
+            """)
                 .param("id", id)
                 .param("pid", pid)
                 .param("onset", FINDING_ONSET)
@@ -220,13 +203,13 @@ class OnboardingControllerTest {
     private void openCase(String pid, String findingId) {
         String caseId = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
-                                               subject_label, metric, state, resolved_at, title,
-                                               basis, severity, onset_at, opened_at, last_seen_at, updated_at)
-                        VALUES (:id, :pid, 1, 'metric_drift', 'metric_baseline', 'baseline-1', 'label',
-                                'turn_duration', 'open', NULL, 'title', 'basis', 0.5, :onset, :opened, :opened,
-                                :opened)
-                        """)
+            INSERT INTO eval_case (id, project_id, seq, detector, subject_kind, subject_id,
+                                   subject_label, metric, state, resolved_at, title,
+                                   basis, severity, onset_at, opened_at, last_seen_at, updated_at)
+            VALUES (:id, :pid, 1, 'metric_drift', 'metric_baseline', 'baseline-1', 'label',
+                    'turn_duration', 'open', NULL, 'title', 'basis', 0.5, :onset, :opened, :opened,
+                    :opened)
+            """)
                 .param("id", caseId)
                 .param("pid", pid)
                 .param("onset", FINDING_ONSET)

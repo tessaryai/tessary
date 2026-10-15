@@ -6,24 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 @SpringBootTest
-class ProjectVersionRepositoryTest {
-
-    @Autowired
-    ProjectVersionRepository repo;
-
-    @Autowired
-    ProjectVersionService service;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ProjectVersionRepositoryTest(
+        ProjectVersionRepository repo, ProjectVersionService service, TenantService tenants, JdbcClient jdbc) {
 
     @Test
     void findOrMaterialize_isIdempotentPerCommit() {

@@ -10,7 +10,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -19,13 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * which leaves a credential the settings page shows as changed but every run still reads the old value.
  */
 @SpringBootTest
-class ProviderCredentialRepositoryTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ProviderCredentialRepository repo;
+record ProviderCredentialRepositoryTest(TenantService tenants, ProviderCredentialRepository repo) {
 
     @Test
     void updateWritesEveryColumnAndAMissingAuthModeStoresApiKey() {

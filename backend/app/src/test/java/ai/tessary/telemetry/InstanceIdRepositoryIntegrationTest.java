@@ -12,19 +12,12 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** The heartbeat's {@code ping_seq} against the real Postgres: it starts at 0, rises by one, and never repeats. */
 @SpringBootTest
-class InstanceIdRepositoryIntegrationTest {
-
-    @Autowired
-    InstanceIdRepository instanceIds;
-
-    @Autowired
-    JdbcClient jdbc;
+record InstanceIdRepositoryIntegrationTest(InstanceIdRepository instanceIds, JdbcClient jdbc) {
 
     /** The schema is cleaned per test class, not per test, and every test here counts from a fresh install. */
     @BeforeEach

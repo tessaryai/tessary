@@ -13,7 +13,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -22,16 +21,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * Rows need a real org and project: {@code metric_rollup} has cascading foreign keys to both.
  */
 @SpringBootTest
-class TelemetryCountsIntegrationTest {
-
-    @Autowired
-    MetricRollupRepository rollups;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
+record TelemetryCountsIntegrationTest(MetricRollupRepository rollups, JdbcClient jdbc, TenantService tenants) {
 
     @BeforeEach
     void emptyRollups() {

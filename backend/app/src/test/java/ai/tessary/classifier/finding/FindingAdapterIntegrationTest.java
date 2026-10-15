@@ -26,7 +26,6 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -43,7 +42,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @SpringBootTest
 @Import(FindingAdapterIntegrationTest.AdapterConfig.class)
-class FindingAdapterIntegrationTest {
+record FindingAdapterIntegrationTest(
+        BehaviorTriageSource source,
+        FindingService findingService,
+        FindingRepository findings,
+        FindingEvidenceRepository findingEvidence,
+        TenantService tenants,
+        RecordingAdapter adapter,
+        CaseRepository cases,
+        CaseService caseService) {
 
     private static final String OWNED_KEY = "custom-x";
     private static final String METHOD = "# Method x\n";
@@ -117,30 +124,6 @@ class FindingAdapterIntegrationTest {
             }
         }
     }
-
-    @Autowired
-    BehaviorTriageSource source;
-
-    @Autowired
-    FindingService findingService;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository findingEvidence;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    RecordingAdapter adapter;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    CaseService caseService;
 
     /** The candidate read (one row per key, keys outside the built-in list) and the shared eligibility predicate
      *  admit the owned key's finding and not an un-owned custom key's. */

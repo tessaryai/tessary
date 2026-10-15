@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -15,13 +14,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * and a second capture replaces the credentials in place rather than failing on the fixed key.
  */
 @SpringBootTest
-class GithubAppConfigRepositoryTest {
-
-    @Autowired
-    GithubAppConfigRepository repo;
-
-    @Autowired
-    JdbcClient jdbc;
+record GithubAppConfigRepositoryTest(GithubAppConfigRepository repo, JdbcClient jdbc) {
 
     private Map<String, Object> row() {
         return jdbc.sql("SELECT id, credentials_enc, created_at FROM github_app_config")

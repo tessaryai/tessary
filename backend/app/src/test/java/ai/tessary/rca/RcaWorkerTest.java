@@ -23,11 +23,8 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.open.errors.RcaError;
 import ai.tessary.open.errors.TessaryException;
-import ai.tessary.pipeline.PipelineService;
 import ai.tessary.rca.RcaDtos.RuledOutCheck;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
@@ -46,7 +43,6 @@ import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
@@ -56,49 +52,19 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * engine failure stamps {@code failed}.
  */
 @RcaParkedSpringBootTest
-class RcaWorkerTest {
-
-    @Autowired
-    RcaWorker worker;
-
-    @Autowired
-    RcaJobRepository jobs;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    RcaReportRepository reports;
-
-    @Autowired
-    PipelineService pipelines;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    AgenticRcaEngine engine;
-
-    @Autowired
-    CaseRepository cases;
+record RcaWorkerTest(
+        SubstrateV2Fixtures fx,
+        RcaWorker worker,
+        RcaJobRepository jobs,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        RcaReportRepository reports,
+        SessionRepository sessions,
+        TraceV2Repository traces,
+        TenantService tenants,
+        JdbcClient jdbc,
+        AgenticRcaEngine engine,
+        CaseRepository cases) {
 
     private static final Instant TO = Instant.parse("2026-07-15T12:00:00Z");
     private static final Instant SPLIT = TO.minus(Duration.ofHours(24));
@@ -615,18 +581,14 @@ class RcaWorkerTest {
 
     private String seedSession(String pid) {
         String sessionId = SubstrateV2Fixtures.sessionId();
-        fx().session(pid, sessionId, FROM);
+        fx.session(pid, sessionId, FROM);
         return sessionId;
     }
 
     /** {@code at} is the trace's started_at, the basis the RCA window buckets by. */
     private String seedTrace(String pid, String sessionId, Instant at) {
         String traceId = SubstrateV2Fixtures.traceId();
-        fx().trace(pid, traceId, sessionId, at);
+        fx.trace(pid, traceId, sessionId, at);
         return traceId;
-    }
-
-    private SubstrateV2Fixtures fx() {
-        return new SubstrateV2Fixtures(sessions, traces, spans, payloads);
     }
 }

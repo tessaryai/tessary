@@ -24,7 +24,6 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -34,22 +33,12 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * evidence set, and the case's mandatory finding pointer.
  */
 @SpringBootTest
-class SharedFindingTableIntegrationTest {
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    FindingService behaviorDrift;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record SharedFindingTableIntegrationTest(
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        FindingService behaviorDrift,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     /** Catches healthy members crowding the failing rows out of the dossier's bounded read. */
     @Test
@@ -201,10 +190,10 @@ class SharedFindingTableIntegrationTest {
         String traceId = "trace-whole-run";
 
         jdbc.sql("""
-                INSERT INTO trace (project_id, id, started_at, event_ts, total_tokens, total_cost,
-                                    unpriced_spans, rolled_up_at, is_settled)
-                VALUES (:pid, :tid, now(), now(), 9000, 1.2345, 2, NULL, false)
-                """).param("pid", p.id()).param("tid", traceId).update();
+            INSERT INTO trace (project_id, id, started_at, event_ts, total_tokens, total_cost,
+                                unpriced_spans, rolled_up_at, is_settled)
+            VALUES (:pid, :tid, now(), now(), 9000, 1.2345, 2, NULL, false)
+            """).param("pid", p.id()).param("tid", traceId).update();
         insertRootSpan(p.id(), traceId, "span-root", null, "invoke_agent root", 4_000L);
         insertLlmSpan(p.id(), traceId, "span-llm-1", "span-root", "claude-opus-5", false);
         insertLlmSpan(p.id(), traceId, "span-llm-2", "span-root", "claude-haiku-5", false);
@@ -247,9 +236,9 @@ class SharedFindingTableIntegrationTest {
         String traceId = "trace-untagged-root";
 
         jdbc.sql("""
-                INSERT INTO trace (project_id, id, started_at, event_ts, call_site_id)
-                VALUES (:pid, :tid, now(), now(), 'policy.answer')
-                """).param("pid", p.id()).param("tid", traceId).update();
+            INSERT INTO trace (project_id, id, started_at, event_ts, call_site_id)
+            VALUES (:pid, :tid, now(), now(), 'policy.answer')
+            """).param("pid", p.id()).param("tid", traceId).update();
         insertRootSpan(p.id(), traceId, "span-handler", null, "POST /chat", 4_000L);
 
         evidence.record(

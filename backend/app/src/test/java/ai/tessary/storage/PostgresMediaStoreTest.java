@@ -10,7 +10,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -20,13 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * one row, and a missing ref reads empty.
  */
 @SpringBootTest
-class PostgresMediaStoreTest {
-
-    @Autowired
-    MediaStore media;
-
-    @Autowired
-    TenantService tenants;
+record PostgresMediaStoreTest(MediaStore media, TenantService tenants) {
 
     @Test
     void put_isContentAddressedDedup() {

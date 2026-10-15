@@ -21,9 +21,6 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.toolerror.ToolErrorRepository.HourlyToolTally;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.testsupport.RateClassifierFixture;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
@@ -37,7 +34,6 @@ import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -47,7 +43,19 @@ import org.springframework.boot.test.context.SpringBootTest;
  * call site files nothing.
  */
 @SpringBootTest
-class GroundednessRateIntegrationTest {
+record GroundednessRateIntegrationTest(
+        SubstrateV2Fixtures fx,
+        GroundednessRateService service,
+        GroundednessRateRepository rateRows,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        CaseRepository cases,
+        CaseOpener caseOpener,
+        CaseService caseService,
+        BehaviorTriageEngine triageEngine,
+        GroundednessAnswerClearer clearer,
+        RateClassifierFixture fixture,
+        TraceV2Repository traces) {
 
     private static final String VERSION = GroundednessDetector.scorerVersion(GroundednessConfig.DEFAULT_THRESHOLD);
 
@@ -55,48 +63,6 @@ class GroundednessRateIntegrationTest {
 
     private static final String EVIDENCE = "{\"head\":\"groundedness\",\"unsupported\":0.99,\"flagged_sentences\":"
             + "[{\"start\":0,\"end\":20,\"unsupported\":0.99}],\"claim\":\"unsupported sentence\"}";
-
-    @Autowired
-    GroundednessRateService service;
-
-    @Autowired
-    GroundednessRateRepository rateRows;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    CaseOpener caseOpener;
-
-    @Autowired
-    CaseService caseService;
-
-    @Autowired
-    BehaviorTriageEngine triageEngine;
-
-    @Autowired
-    GroundednessAnswerClearer clearer;
-
-    @Autowired
-    RateClassifierFixture fixture;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
 
     @Test
     void aRiseFilesOneUnruledFindingWithEveryScoredTraceAsEvidence() {
@@ -199,7 +165,7 @@ class GroundednessRateIntegrationTest {
                 opened.basis());
 
         // Two flagged answers at the call site, one at another.
-        SubstrateV2Fixtures fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
+
         List<FindingEvidenceRow> answers = evidence.listByFinding(pid, finding.id()).stream()
                 .filter(r -> FindingEvidenceRow.Role.WITNESS.equals(r.role()) && r.spanId() != null)
                 .filter(r -> !doubled(r.traceId())) // one answer per trace

@@ -11,7 +11,6 @@ import ai.tessary.auth.TenantPathResolver;
 import ai.tessary.testsupport.TenantFixture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -27,28 +26,14 @@ import org.springframework.web.server.ResponseStatusException;
  * accepts ingest.
  */
 @SpringBootTest
-class ProjectDeleteEndpointTest {
-
-    @Autowired
-    OrganizationController controller;
-
-    @Autowired
-    TenantPathResolver resolver;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    ApiKeyService apiKeyService;
-
-    @Autowired
-    ApiKeyRepository apiKeys;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ProjectDeleteEndpointTest(
+        OrganizationController controller,
+        TenantPathResolver resolver,
+        ProjectRepository projects,
+        ApiKeyService apiKeyService,
+        ApiKeyRepository apiKeys,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     @Test
     @DisplayName("DELETE marks the project, revokes its keys synchronously, and queues one purge")

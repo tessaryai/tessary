@@ -10,7 +10,6 @@ import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,13 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
  * that doesn't resolve to project A.</p>
  */
 @SpringBootTest
-class TenantPathResolverTest {
-
-    @Autowired
-    TenantPathResolver resolver;
-
-    @Autowired
-    TenantService tenants;
+record TenantPathResolverTest(TenantPathResolver resolver, TenantService tenants) {
 
     private TenantContext sessionFor(Principal u) {
         return new TenantContext(u.id(), u.email(), null, null, null, null);

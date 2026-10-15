@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,28 +23,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * {@code thread_id} is only a column.
  */
 @SpringBootTest
-class TraceV2RepositorySessionTracesTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TransactionTemplate transactions;
+record TraceV2RepositorySessionTracesTest(
+        SubstrateV2Fixtures fx,
+        TenantService tenants,
+        TraceV2Repository traces,
+        JdbcClient jdbc,
+        TransactionTemplate transactions) {
 
     private record Seen(
             String id,
@@ -57,7 +40,7 @@ class TraceV2RepositorySessionTracesTest {
 
     @Test
     void listsEverySessionTraceLatestEndFirstWithItsFacts() {
-        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+
         String pid =
                 TenantFixture.bootstrap(tenants, "session-traces").project().id();
         Instant t0 = Instant.now().truncatedTo(ChronoUnit.SECONDS);
@@ -113,7 +96,7 @@ class TraceV2RepositorySessionTracesTest {
 
     @Test
     void anotherProjectsSessionWithTheSameIdIsNotRead() {
-        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+
         String mine = TenantFixture.bootstrap(tenants, "session-traces-mine")
                 .project()
                 .id();
@@ -138,7 +121,7 @@ class TraceV2RepositorySessionTracesTest {
      */
     @Test
     void readsTheEndedTracesAPageAtATime() {
-        var fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+
         String pid = TenantFixture.bootstrap(tenants, "session-traces-pages")
                 .project()
                 .id();

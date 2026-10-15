@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
@@ -19,13 +18,7 @@ import org.springframework.test.context.TestPropertySource;
 @SpringBootTest
 // Own context: a model row written by another class would change the books.
 @TestPropertySource(properties = "test.context-group=pricing-books")
-class ModelResolverIntegrationTest {
-
-    @Autowired
-    ModelResolver resolver;
-
-    @Autowired
-    PriceBookRepository books;
+record ModelResolverIntegrationTest(ModelResolver resolver, PriceBookRepository books) {
 
     @Test
     @DisplayName("an id the snapshot carries verbatim resolves to itself")

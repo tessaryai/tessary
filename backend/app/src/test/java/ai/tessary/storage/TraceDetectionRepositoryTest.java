@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -25,24 +24,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * classifier that lists the traces it flagged.
  */
 @SpringBootTest
-class TraceDetectionRepositoryTest {
+record TraceDetectionRepositoryTest(
+        JdbcClient jdbc,
+        TenantService tenants,
+        ClassifierRepository classifiers,
+        TraceDetectionRepository detections,
+        TraceV2Repository traces) {
 
     private static final String T0 = "2026-08-01T00:00:00Z";
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    TraceDetectionRepository detections;
-
-    @Autowired
-    TraceV2Repository traces;
 
     /**
      * Only a table registered as shown marks a trace, and registering it shown is all it takes. The bug is a reader
@@ -127,18 +116,18 @@ class TraceDetectionRepositoryTest {
 
     private void seedTrace(String pid, String traceId) {
         jdbc.sql("""
-                        INSERT INTO session (project_id, id, started_at, last_activity_at, event_ts)
-                        VALUES (:pid, :sid, CAST(:t0 AS timestamptz), CAST(:t0 AS timestamptz),
-                                CAST(:t0 AS timestamptz))
-                        """)
+            INSERT INTO session (project_id, id, started_at, last_activity_at, event_ts)
+            VALUES (:pid, :sid, CAST(:t0 AS timestamptz), CAST(:t0 AS timestamptz),
+                    CAST(:t0 AS timestamptz))
+            """)
                 .param("pid", pid)
                 .param("sid", "s-" + traceId)
                 .param("t0", T0)
                 .update();
         jdbc.sql("""
-                        INSERT INTO trace (project_id, id, session_id, started_at, event_ts)
-                        VALUES (:pid, :id, :sid, CAST(:t0 AS timestamptz), CAST(:t0 AS timestamptz))
-                        """)
+            INSERT INTO trace (project_id, id, session_id, started_at, event_ts)
+            VALUES (:pid, :id, :sid, CAST(:t0 AS timestamptz), CAST(:t0 AS timestamptz))
+            """)
                 .param("pid", pid)
                 .param("id", traceId)
                 .param("sid", "s-" + traceId)
@@ -148,12 +137,12 @@ class TraceDetectionRepositoryTest {
 
     private void frustrationFlag(String pid, String classifierId, String traceId, @Nullable String clearedAt) {
         jdbc.sql("""
-                        INSERT INTO frustration_detection (id, project_id, classifier_id, classifier_key,
-                            subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
-                            confidence, cleared_at)
-                        VALUES (:id, :pid, :cid, 'frustration', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
-                                'warn', 'high', :clearedAt)
-                        """)
+            INSERT INTO frustration_detection (id, project_id, classifier_id, classifier_key,
+                subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
+                confidence, cleared_at)
+            VALUES (:id, :pid, :cid, 'frustration', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
+                    'warn', 'high', :clearedAt)
+            """)
                 .param("id", pid + "-fd-" + traceId)
                 .param("pid", pid)
                 .param("cid", classifierId)
@@ -167,12 +156,12 @@ class TraceDetectionRepositoryTest {
 
     private void secretLeakFlag(String pid, String classifierId, String traceId) {
         jdbc.sql("""
-                        INSERT INTO secret_leak_detection (id, project_id, classifier_id, classifier_key,
-                            subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
-                            confidence)
-                        VALUES (:id, :pid, :cid, 'secret_leak', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
-                                'critical', 'high')
-                        """)
+            INSERT INTO secret_leak_detection (id, project_id, classifier_id, classifier_key,
+                subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
+                confidence)
+            VALUES (:id, :pid, :cid, 'secret_leak', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
+                    'critical', 'high')
+            """)
                 .param("id", pid + "-sl-" + traceId)
                 .param("pid", pid)
                 .param("cid", classifierId)

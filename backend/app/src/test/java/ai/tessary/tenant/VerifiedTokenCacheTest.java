@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -17,19 +16,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * one names the failure it exists to catch rather than the method it calls.
  */
 @SpringBootTest
-class VerifiedTokenCacheTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService tokens;
-
-    @Autowired
-    VerifiedTokenCache cache;
-
-    @Autowired
-    TokenCacheProperties props;
+record VerifiedTokenCacheTest(
+        TenantService tenants, ApiKeyService tokens, VerifiedTokenCache cache, TokenCacheProperties props) {
 
     /**
      * Project deletion revokes a whole project's keys in one UPDATE, straight at the repository and never

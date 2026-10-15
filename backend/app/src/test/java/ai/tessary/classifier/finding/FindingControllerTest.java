@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -41,25 +40,13 @@ import org.springframework.web.server.ResponseStatusException;
  * model.
  */
 @SpringBootTest
-class FindingControllerTest {
-
-    @Autowired
-    FindingController controller;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    CapabilityFixture capabilities;
+record FindingControllerTest(
+        FindingController controller,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        TenantService tenants,
+        OrgMembershipRepository memberships,
+        CapabilityFixture capabilities) {
 
     /**
      * An unruled finding lists only when every finding is asked for; its pages read through the path's project, and

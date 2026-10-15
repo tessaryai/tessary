@@ -19,7 +19,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -32,22 +31,12 @@ import org.springframework.web.server.ResponseStatusException;
  * is what {@code traces/<id>} routes on.
  */
 @SpringBootTest
-class GlobalSearchServiceIntegrationTest {
-
-    @Autowired
-    GlobalSearchService service;
-
-    @Autowired
-    GlobalSearchRepository repository;
-
-    @Autowired
-    GlobalSearchController controller;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    TenantService tenants;
+record GlobalSearchServiceIntegrationTest(
+        GlobalSearchService service,
+        GlobalSearchRepository repository,
+        GlobalSearchController controller,
+        JdbcClient jdbc,
+        TenantService tenants) {
 
     @Test
     void resultsAreRankedBestFirst() {
@@ -145,15 +134,15 @@ class GlobalSearchServiceIntegrationTest {
         // A project of one payload is cheaper to read through its primary key than through any word index, so the
         // project gets the few hundred payloads a real one has before the plan is asked for.
         jdbc.sql("""
-                        WITH t AS (
-                            INSERT INTO trace (project_id, id, started_at, event_ts)
-                            SELECT :pid, 'bulk-' || g, now(), now() FROM generate_series(1, 500) g RETURNING id),
-                        s AS (
-                            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                            SELECT :pid, id, 'sp', 'llm', 'chat', now(), now() FROM t RETURNING trace_id)
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        SELECT :pid, trace_id, 'sp', 'where is my order', 'it ships today', now() FROM s
-                        """).param("pid", pid).update();
+            WITH t AS (
+                INSERT INTO trace (project_id, id, started_at, event_ts)
+                SELECT :pid, 'bulk-' || g, now(), now() FROM generate_series(1, 500) g RETURNING id),
+            s AS (
+                INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+                SELECT :pid, id, 'sp', 'llm', 'chat', now(), now() FROM t RETURNING trace_id)
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            SELECT :pid, trace_id, 'sp', 'where is my order', 'it ships today', now() FROM s
+            """).param("pid", pid).update();
         jdbc.sql("ANALYZE span_payload").update();
         jdbc.sql("SET LOCAL enable_seqscan = off").update();
         jdbc.sql("SET LOCAL enable_indexscan = off").update();
@@ -184,29 +173,29 @@ class GlobalSearchServiceIntegrationTest {
         String pid = TenantFixture.bootstrap(tenants, "search-broad").project().id();
         int matching = GlobalSearchRepository.PAYLOAD_CANDIDATE_LIMIT + 50;
         jdbc.sql("""
-                        INSERT INTO trace (project_id, id, started_at, event_ts)
-                        SELECT :pid, 'broad-' || g, now(), now() FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO trace (project_id, id, started_at, event_ts)
+            SELECT :pid, 'broad-' || g, now(), now() FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        SELECT :pid, 'broad-' || g, 'broad-' || g, 'llm', 'chat', now(), now()
-                        FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+            SELECT :pid, 'broad-' || g, 'broad-' || g, 'llm', 'chat', now(), now()
+            FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        SELECT :pid, 'broad-' || g, 'broad-' || g,
-                               '[{"role":"user","content":"order ' || g || '"}]', 'ok', now()
-                        FROM generate_series(1, :n) g
-                        """).param("pid", pid).param("n", matching).update();
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            SELECT :pid, 'broad-' || g, 'broad-' || g,
+                   '[{"role":"user","content":"order ' || g || '"}]', 'ok', now()
+            FROM generate_series(1, :n) g
+            """).param("pid", pid).param("n", matching).update();
         jdbc.sql("CREATE SCHEMA rank_probe").update();
         jdbc.sql("""
-                        CREATE FUNCTION rank_probe.ts_rank(v tsvector, q tsquery) RETURNS real VOLATILE LANGUAGE plpgsql AS $$
-                        BEGIN
-                          PERFORM set_config('rank_probe.calls',
-                              (coalesce(nullif(current_setting('rank_probe.calls', true), ''), '0')::int + 1)::text, true);
-                          RETURN pg_catalog.ts_rank(v, q);
-                        END $$
-                        """).update();
+            CREATE FUNCTION rank_probe.ts_rank(v tsvector, q tsquery) RETURNS real VOLATILE LANGUAGE plpgsql AS $$
+            BEGIN
+              PERFORM set_config('rank_probe.calls',
+                  (coalesce(nullif(current_setting('rank_probe.calls', true), ''), '0')::int + 1)::text, true);
+              RETURN pg_catalog.ts_rank(v, q);
+            END $$
+            """).update();
         jdbc.sql("SET LOCAL search_path = rank_probe, pg_catalog, public").update();
 
         List<SearchHit> hits = service.search(pid, "content");
@@ -230,9 +219,9 @@ class GlobalSearchServiceIntegrationTest {
         jdbc.sql("SET LOCAL pg_trgm.word_similarity_threshold = 0.4").update();
 
         String plan = jdbc.sql("""
-                        EXPLAIN (FORMAT TEXT)
-                        SELECT trace_id FROM span WHERE name %> :q
-                        """).param("q", "refn").query((rs, n) -> rs.getString(1)).list().stream()
+            EXPLAIN (FORMAT TEXT)
+            SELECT trace_id FROM span WHERE name %> :q
+            """).param("q", "refn").query((rs, n) -> rs.getString(1)).list().stream()
                 .collect(Collectors.joining("\n"));
 
         assertTrue(
@@ -248,18 +237,18 @@ class GlobalSearchServiceIntegrationTest {
         String now = Instant.now().toString();
         String traceId = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO trace (project_id, id, started_at, event_ts)
-                        VALUES (:pid, :id, :now::timestamptz, :now::timestamptz)
-                        """)
+            INSERT INTO trace (project_id, id, started_at, event_ts)
+            VALUES (:pid, :id, :now::timestamptz, :now::timestamptz)
+            """)
                 .param("pid", projectId)
                 .param("id", traceId)
                 .param("now", now)
                 .update();
         String spanId = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-                        """)
+            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+            VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
+            """)
                 .param("pid", projectId)
                 .param("trace", traceId)
                 .param("id", spanId)
@@ -267,9 +256,9 @@ class GlobalSearchServiceIntegrationTest {
                 .param("now", now)
                 .update();
         jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        VALUES (:pid, :trace, :id, :input, :output, :now::timestamptz)
-                        """)
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            VALUES (:pid, :trace, :id, :input, :output, :now::timestamptz)
+            """)
                 .param("pid", projectId)
                 .param("trace", traceId)
                 .param("id", spanId)
@@ -337,9 +326,9 @@ class GlobalSearchServiceIntegrationTest {
         String now = Instant.now().toString();
         String spanId = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-                        VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-                        """)
+            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
+            VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
+            """)
                 .param("pid", projectId)
                 .param("trace", traceId)
                 .param("id", spanId)
@@ -347,9 +336,9 @@ class GlobalSearchServiceIntegrationTest {
                 .param("now", now)
                 .update();
         jdbc.sql("""
-                        INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-                        VALUES (:pid, :trace, :id, :input, 'ok', :now::timestamptz)
-                        """)
+            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
+            VALUES (:pid, :trace, :id, :input, 'ok', :now::timestamptz)
+            """)
                 .param("pid", projectId)
                 .param("trace", traceId)
                 .param("id", spanId)

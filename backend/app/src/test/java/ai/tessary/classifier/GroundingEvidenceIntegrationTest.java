@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.classifier.detector.GroundingEvidenceReads;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierObservations;
@@ -21,9 +19,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -33,35 +29,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * tool_call} lacks, unnoticed.
  */
 @SpringBootTest
-class GroundingEvidenceIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SubstrateReadRepository substrate;
-
-    @Autowired
-    TenantService tenants;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
-    }
+record GroundingEvidenceIntegrationTest(
+        SubstrateV2Fixtures fx,
+        SessionRepository sessions,
+        TraceV2Repository traces,
+        JdbcClient jdbc,
+        SubstrateReadRepository substrate,
+        TenantService tenants) {
 
     private static String trace() {
         return SubstrateV2Fixtures.traceId();

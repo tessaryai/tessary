@@ -30,7 +30,6 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -39,31 +38,15 @@ import org.springframework.context.ApplicationEventPublisher;
  * the classifier stopped, and either an enable or saving the key it was waiting on lifts it.
  */
 @SpringBootTest
-class FrustrationEnableIntegrationTest {
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ProviderCredentialRepository credentials;
-
-    @Autowired
-    ProjectModelSettings modelSettings;
-
-    @Autowired
-    SecretBox secretBox;
-
-    @Autowired
-    ApplicationEventPublisher events;
+record FrustrationEnableIntegrationTest(
+        ClassifierService classifierService,
+        ClassifierRepository classifiers,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        ProviderCredentialRepository credentials,
+        ProjectModelSettings modelSettings,
+        SecretBox secretBox,
+        ApplicationEventPublisher events) {
 
     @Test
     void aFreshProjectSeedsFrustrationOffAndEnablingWithoutAProviderKeyIsRefused() {

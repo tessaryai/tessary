@@ -14,7 +14,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -24,13 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * shut on a genuinely new spell. The gap in {@code last_seen_at} is the only record of a recovery.
  */
 @SpringBootTest
-class BehaviorFindingOnsetTest {
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    TenantService tenants;
+record BehaviorFindingOnsetTest(FindingRepository findings, TenantService tenants) {
 
     private static final String CAUSE_KEY = ToolErrorEvidence.MEASURE + ":tool:search_docs:up";
     private static final String EVIDENCE = "{\"measure\":\"tool_error_rate\"}";

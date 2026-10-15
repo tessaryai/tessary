@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -46,34 +45,18 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * resolving through this one's path.
  */
 @SpringBootTest
-class ClassifierDebugControllerTest {
+record ClassifierDebugControllerTest(
+        ClassifierDebugController controller,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        ClassifierService classifiers,
+        ClassifierRepository rows,
+        ClassifierJobRepository jobs,
+        MetricBaselineRepository baselines,
+        JdbcClient jdbc) {
 
     private static final String T0 = "2026-01-01T00:00:00Z";
     private static final MetricHistogram.Grid GRID = MetricHistogram.Grid.duration();
-
-    @Autowired
-    ClassifierDebugController controller;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierRepository rows;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    JdbcClient jdbc;
 
     /** Each built-in lands in its execution tier, and only the metric-drift family carries baselines at all. */
     @Test

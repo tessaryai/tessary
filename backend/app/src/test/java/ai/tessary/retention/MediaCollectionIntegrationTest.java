@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -23,19 +22,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * survival assertion has a twin proving the pass reached this project.
  */
 @SpringBootTest
-class MediaCollectionIntegrationTest {
+record MediaCollectionIntegrationTest(RetentionSweeper sweeper, TenantService tenants, JdbcClient jdbc) {
 
     /** {@link RetentionPinIntegrationTest}'s fingerprint: one context and database for both. */
     private static final String OLD = Instant.now().minus(30, ChronoUnit.DAYS).toString();
-
-    @Autowired
-    RetentionSweeper sweeper;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
 
     @Test
     @DisplayName("an image no payload references any more is collected; a referenced one is not")
@@ -121,9 +111,9 @@ class MediaCollectionIntegrationTest {
     private String media(Project p, String digest, String createdAt) {
         String id = Ids.ulid();
         jdbc.sql("""
-                        INSERT INTO media_object (id, project_id, digest, media_type, bytes, size_bytes, created_at)
-                        VALUES (:id, :pid, :digest, 'image/png', :bytes, 4, :createdAt)
-                        """)
+            INSERT INTO media_object (id, project_id, digest, media_type, bytes, size_bytes, created_at)
+            VALUES (:id, :pid, :digest, 'image/png', :bytes, 4, :createdAt)
+            """)
                 .param("id", id)
                 .param("pid", p.id())
                 .param("digest", digest)

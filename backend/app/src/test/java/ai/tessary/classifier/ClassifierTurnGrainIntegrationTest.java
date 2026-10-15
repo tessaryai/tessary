@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.tessary.classifier.ClassifierDtos.ClassifierEventView;
 import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
@@ -25,9 +23,7 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -41,47 +37,19 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  */
 @SpringBootTest
 @Import(StubDecisionClientConfig.class)
-class ClassifierTurnGrainIntegrationTest {
+record ClassifierTurnGrainIntegrationTest(
+        SubstrateV2Fixtures fx,
+        TraceV2Repository traces,
+        SpanRepository spans,
+        ClassifierWorker worker,
+        ClassifierService service,
+        ClassifierRepository signals,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc) {
 
     private static final String FRUSTRATED = "this is frustrating, you're not listening";
     private static final String REPLY = ClassifierConversations.CALL_SITE;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    ClassifierWorker worker;
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     /** Frustration seeds disabled (it spends provider credit), so each test grants it and turns it on. */
     private String bootstrapGranted(String testName) {
@@ -276,8 +244,8 @@ class ClassifierTurnGrainIntegrationTest {
 
     /** The span the classifier flagged in {@code traceId}. */
     private String flaggedSpan(String pid, String traceId) {
-        return jdbc.sql(
-                        "SELECT subject_span_id FROM frustration_detection WHERE project_id = :pid AND subject_trace_id = :trace")
+        return jdbc.sql("SELECT subject_span_id FROM frustration_detection WHERE project_id = :pid AND"
+                        + " subject_trace_id = :trace")
                 .param("pid", pid)
                 .param("trace", traceId)
                 .query(String.class)

@@ -22,7 +22,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -30,28 +29,14 @@ import org.springframework.boot.test.context.SpringBootTest;
  * definition can be enabled and disabled.
  */
 @SpringBootTest
-class ClassifierDefinitionIntegrationTest {
-
-    @Autowired
-    ClassifierService service;
-
-    @Autowired
-    ClassifierController controller;
-
-    @Autowired
-    BuiltInClassifierCatalog catalog;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
+record ClassifierDefinitionIntegrationTest(
+        ClassifierService service,
+        ClassifierController controller,
+        BuiltInClassifierCatalog catalog,
+        ClassifierRepository signals,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        org.springframework.jdbc.core.simple.JdbcClient jdbc) {
 
     @Test
     void seedsBuiltInsOnProjectCreationIdempotently() {

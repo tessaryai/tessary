@@ -17,10 +17,7 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.toolerror.CarriedState;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
@@ -31,9 +28,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -42,62 +37,25 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * per call site, and the finding and state written. The reference minimum is lowered to fifty calls.
  */
 @SpringBootTest
-class MalformedOutputRateIntegrationTest {
+record MalformedOutputRateIntegrationTest(
+        SubstrateV2Fixtures fx,
+        MalformedOutputRateService rates,
+        MalformedOutputRateRepository rateRows,
+        MalformedOutputDetailService detailService,
+        ClassifierService classifiers,
+        ClassifierRepository classifierRows,
+        ClassifierDetectionWriteRepository detections,
+        FindingRepository findings,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc,
+        SpanRepository spans) {
 
     private static final String SCHEMA = "{\"type\":\"object\",\"required\":[\"answer\"]}";
 
     private static final String DETAIL_SCHEMA = "{\"type\":\"object\",\"required\":[\"answer\"],\"properties\":{"
             + "\"answer\":{\"type\":\"string\"},"
             + "\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"sku\":{\"type\":\"string\"}}}}}}";
-
-    @Autowired
-    MalformedOutputRateService rates;
-
-    @Autowired
-    MalformedOutputRateRepository rateRows;
-
-    @Autowired
-    MalformedOutputDetailService detailService;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    ClassifierRepository classifierRows;
-
-    @Autowired
-    ClassifierDetectionWriteRepository detections;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void fixtures() {
-        fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads);
-    }
 
     @Test
     void aCallSiteThatStartsFailingItsSchemaOpensOneFindingWithItsFailuresAsWitnesses() {
@@ -235,9 +193,10 @@ class MalformedOutputRateIntegrationTest {
                 signal,
                 after,
                 "{\"answer\":7,\"items\":[{\"sku\":1},{\"sku\":\"ok\"}]}",
-                "{\"reason\":\"schema_violation\",\"violations\":["
-                        + "{\"field\":\"answer\",\"keyword\":\"type\",\"message\":\"answer: integer found, string expected\"},"
-                        + "{\"field\":\"items[].sku\",\"keyword\":\"type\",\"message\":\"sku: integer found\"}]}");
+                "{\"reason\":\"schema_violation\",\"violations\":[{\"field\":\"answer\",\"keyword\":\"type\",\"message\":\"answer:"
+                        + " integer found, string"
+                        + " expected\"},{\"field\":\"items[].sku\",\"keyword\":\"type\",\"message\":\"sku: integer"
+                        + " found\"}]}");
         // A gen_ai envelope; the document is the answer, missing the required field.
         String envelope = failed(
                 pid,
@@ -258,7 +217,8 @@ class MalformedOutputRateIntegrationTest {
                 signal,
                 after.plus(3, ChronoUnit.MINUTES),
                 null,
-                "{\"reason\":\"schema_violation\",\"violations\":[{\"field\":\"\",\"message\":\"must be an object\"}]}");
+                "{\"reason\":\"schema_violation\",\"violations\":[{\"field\":\"\",\"message\":\"must be an"
+                        + " object\"}]}");
         // The failing field is past the document cap, so nothing on screen is highlighted.
         String huge = failed(
                 pid,

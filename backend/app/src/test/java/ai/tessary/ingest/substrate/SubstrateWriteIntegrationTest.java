@@ -29,7 +29,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -48,21 +47,10 @@ import org.springframework.test.context.TestPropertySource;
 @SpringBootTest(properties = {"tessary.ingest.substrate.rollup-enabled=false"})
 // Own context: it counts JDBC round trips across a burst, which another class's writes would corrupt.
 @TestPropertySource(properties = "test.context-group=substrate-write")
-class SubstrateWriteIntegrationTest {
+record SubstrateWriteIntegrationTest(
+        SubstrateWriter writer, TenantService tenants, JdbcClient jdbc, RedactionService redaction) {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SubstrateWriteIntegrationTest.class);
-
-    @Autowired
-    SubstrateWriter writer;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    RedactionService redaction;
 
     /**
      * Counts JDBC executions (a batch is one round trip) through a proxied DataSource, so the count is what the
@@ -516,7 +504,8 @@ class SubstrateWriteIntegrationTest {
         assertEquals(500, redacted, "every span body of the guarded run was redacted");
         double ratio = (double) guardedMillis / Math.max(1, plainMillis);
         log.info(
-                "redaction cost: 500 spans x {} B bodies drained in {} ms without rules, {} ms with all built-ins, ratio {}",
+                "redaction cost: 500 spans x {} B bodies drained in {} ms without rules, {} ms with all built-ins,"
+                        + " ratio {}",
                 body.length(),
                 plainMillis,
                 guardedMillis,
@@ -539,8 +528,8 @@ class SubstrateWriteIntegrationTest {
     private static String chattyBody() {
         StringBuilder sb = new StringBuilder(4200);
         while (sb.length() < 4000) {
-            sb.append(
-                    "The customer asked whether the order placed last Tuesday could still be changed before it ships, ");
+            sb.append("The customer asked whether the order placed last Tuesday could still be changed before it"
+                    + " ships, ");
             sb.append("and the agent looked up the shipment status and explained the cutoff for changes. ");
         }
         sb.append(" Reach me at jordan.rivera@example.com or +1 415-555-0142 if anything changes.");

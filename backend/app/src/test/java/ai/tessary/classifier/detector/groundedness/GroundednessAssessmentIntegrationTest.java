@@ -9,10 +9,6 @@ import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.detector.groundedness.GroundednessAssessmentRepository.Assessment;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.ClassifierRows;
@@ -20,7 +16,6 @@ import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -31,40 +26,21 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * evidence reads are faked; the table is real.
  */
 @SpringBootTest
-class GroundednessAssessmentIntegrationTest {
+record GroundednessAssessmentIntegrationTest(
+        SubstrateV2Fixtures fx,
+        GroundednessAssessmentRepository assessments,
+        ClassifierRepository rows,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     private static final Instant RAN = Instant.parse("2026-09-01T10:15:00Z");
-
-    @Autowired
-    GroundednessAssessmentRepository assessments;
-
-    @Autowired
-    ClassifierRepository rows;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
 
     @Test
     void anAnswerIsWrittenOncePerScorerAndStampedWithItsSpansStart() {
         Fixture f = fixture("ga-unique");
         String traceId = SubstrateV2Fixtures.traceId();
         String spanId = SubstrateV2Fixtures.spanId();
-        fixtures().span(f.pid(), traceId, spanId, null, "llm", RAN, RAN.plusSeconds(2));
+        fx.span(f.pid(), traceId, spanId, null, "llm", RAN, RAN.plusSeconds(2));
 
         assertTrue(assessments.insert(assessment(f, traceId, spanId, "gnd-a", true)));
         assertFalse(assessments.insert(assessment(f, traceId, spanId, "gnd-a", false)), "the same key again");
@@ -101,10 +77,6 @@ class GroundednessAssessmentIntegrationTest {
                 ClassifierRow.Mode.TRACKING,
                 true);
         return new Fixture(pid, row);
-    }
-
-    private SubstrateV2Fixtures fixtures() {
-        return new SubstrateV2Fixtures(sessions, traces, spans, payloads);
     }
 
     private static Assessment assessment(Fixture f, String traceId, String spanId, String scorer, boolean flagged) {

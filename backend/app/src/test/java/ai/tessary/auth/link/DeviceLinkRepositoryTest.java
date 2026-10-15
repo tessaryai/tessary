@@ -9,7 +9,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -18,16 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * after, which is what keeps a confirm/deny race and a concurrent poll from both winning.
  */
 @SpringBootTest
-class DeviceLinkRepositoryTest {
-
-    @Autowired
-    DeviceLinkRepository repo;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ApiKeyService keys;
+record DeviceLinkRepositoryTest(DeviceLinkRepository repo, TenantService tenants, ApiKeyService keys) {
 
     /**
      * A row with every column populated, pointing at real org, project, user and key rows (the

@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.detector.GroundingEvidenceReads.SpanRef;
 import ai.tessary.classifier.detector.groundedness.GroundednessEvidence.FlaggedSentenceText;
@@ -19,9 +18,6 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Organization;
@@ -42,15 +38,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * {@code GET /findings/{id}/flagged-answers} against a finding the rate test really filed: every flagged answer it
@@ -61,7 +53,19 @@ import org.springframework.web.context.WebApplicationContext;
  * caller's project, and an RCA report on another finding narrows the list to nothing.
  */
 @AuthEnforcedContext
-class GroundednessFlaggedAnswersIntegrationTest {
+record GroundednessFlaggedAnswersIntegrationTest(
+        SubstrateV2Fixtures fx,
+        MockMvc mvc,
+        OrganizationRepository orgs,
+        ProjectRepository projects,
+        CapabilityFixture capabilities,
+        RateClassifierFixture fixture,
+        GroundednessRateService rates,
+        FindingRepository findings,
+        FindingEvidenceRepository evidence,
+        GroundednessDetailService detail,
+        JdbcClient jdbc,
+        TraceV2Repository traces) {
 
     private static final String CALL_SITE = "cs-rag";
     private static final String QUESTION = "When will my refund arrive?";
@@ -70,58 +74,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
     private static final String ANSWER = FIRST + " " + SECOND;
     private static final String DOCUMENT = "Card refunds reach the customer within five to ten business days.";
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    OrganizationRepository orgs;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    RateClassifierFixture fixture;
-
-    @Autowired
-    GroundednessRateService rates;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository evidence;
-
-    @Autowired
-    GroundednessDetailService detail;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void theEndpointPagesEveryFlaggedAnswerAndReadsBackTheStoredOne() throws Exception {
@@ -280,12 +233,12 @@ class GroundednessFlaggedAnswersIntegrationTest {
     private Filed fileFinding(String email) throws Exception {
         MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse();
         Cookie session = Objects.requireNonNull(signup.getCookie("tessary-session"));
-        String orgId = mapper.readTree(signup.getContentAsString())
+        String orgId = MAPPER.readTree(signup.getContentAsString())
                 .path("data")
                 .path("orgId")
                 .asText();
@@ -310,7 +263,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return mapper.readTree(body).path("data");
+        return MAPPER.readTree(body).path("data");
     }
 
     /** A finished groundedness RCA report on {@code findingId} carrying {@code causes}, and its job. */
@@ -331,7 +284,7 @@ class GroundednessFlaggedAnswersIntegrationTest {
                 .param("pid", pid)
                 .param("id", CALL_SITE)
                 .update();
-        SubstrateV2Fixtures fx = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc);
+
         SubstrateV2Fixtures.SpanRef retrieval = fx.spanSeed(pid)
                 .traceId(trace)
                 .spanId(span + "-r")

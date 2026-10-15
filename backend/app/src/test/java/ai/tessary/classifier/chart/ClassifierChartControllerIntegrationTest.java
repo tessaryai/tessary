@@ -8,16 +8,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import ai.tessary.auth.AuthFilter;
 import ai.tessary.classifier.ClassifierRepository;
 import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.ClassifierService;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.plan.Capability;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Organization;
 import ai.tessary.tenant.OrganizationRepository;
@@ -38,69 +33,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * {@code GET /classifiers/chart-scopes} and {@code GET /classifiers/charts} over HTTP: the ranges and scopes they
  * refuse, another project's charts, and one call site's cards and chips.
  */
 @AuthEnforcedContext
-class ClassifierChartControllerIntegrationTest {
+record ClassifierChartControllerIntegrationTest(
+        SubstrateV2Fixtures fx,
+        MockMvc mvc,
+        OrganizationRepository orgs,
+        ProjectRepository projects,
+        CapabilityFixture capabilities,
+        RateClassifierFixture fixture,
+        ClassifierService classifierService,
+        JdbcClient jdbc,
+        ClassifierRepository classifierRows) {
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    OrganizationRepository orgs;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    RateClassifierFixture fixture;
-
-    @Autowired
-    ClassifierService classifierService;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    @Autowired
-    ClassifierRepository classifierRows;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
     void days30_is422InvalidChartDays() throws Exception {
@@ -308,12 +263,12 @@ class ClassifierChartControllerIntegrationTest {
     private Signed signUp(String email) throws Exception {
         MockHttpServletResponse signup = mvc.perform(post("/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", email, "password", "a-good-password"))))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse();
         Cookie session = Objects.requireNonNull(signup.getCookie("tessary-session"));
-        String orgId = mapper.readTree(signup.getContentAsString())
+        String orgId = MAPPER.readTree(signup.getContentAsString())
                 .path("data")
                 .path("orgId")
                 .asText();
@@ -332,7 +287,7 @@ class ClassifierChartControllerIntegrationTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
-        return mapper.readTree(body).path("data");
+        return MAPPER.readTree(body).path("data");
     }
 
     private void assertError(Signed who, String path, int status, String code) throws Exception {
@@ -342,7 +297,7 @@ class ClassifierChartControllerIntegrationTest {
         assertEquals(status, response.getStatus(), path);
         assertEquals(
                 code,
-                mapper.readTree(response.getContentAsString())
+                MAPPER.readTree(response.getContentAsString())
                         .path("meta")
                         .path("error")
                         .path("code")
@@ -367,11 +322,7 @@ class ClassifierChartControllerIntegrationTest {
     }
 
     private void match(String pid, ClassifierRow signal, String callSite, Instant at) {
-        var span = new SubstrateV2Fixtures(sessions, traces, spans, payloads, jdbc)
-                .spanSeed(pid)
-                .callSiteId(callSite)
-                .at(at)
-                .write();
+        var span = fx.spanSeed(pid).callSiteId(callSite).at(at).write();
         jdbc.sql("INSERT INTO user_classifier_detection (id, project_id, classifier_id, classifier_key,"
                         + " subject_trace_id, subject_span_id, confidence, evidence, subject_started_at)"
                         + " VALUES (:id, :pid, :cid, :key, :trace, :span, 'high', CAST('{}' AS jsonb), :at)")

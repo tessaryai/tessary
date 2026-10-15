@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -40,22 +39,12 @@ import org.springframework.web.server.ResponseStatusException;
  * by someone the org does not let spend a strong model's time.
  */
 @RcaParkedSpringBootTest
-class CaseControllerTest {
-
-    @Autowired
-    CaseController controller;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgMembershipRepository memberships;
+record CaseControllerTest(
+        CaseController controller,
+        CaseRepository cases,
+        FindingRepository findings,
+        TenantService tenants,
+        OrgMembershipRepository memberships) {
 
     /**
      * Each case files under its state's bucket: open in the queue, closed in the week's history. A case is read

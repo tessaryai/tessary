@@ -17,7 +17,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -31,22 +30,12 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * for 443 distinct traces.
  */
 @SpringBootTest
-class MetricBaselineRepositoryTest {
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record MetricBaselineRepositoryTest(
+        MetricBaselineRepository baselines,
+        ClassifierRepository signals,
+        ClassifierService classifiers,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     @Test
     @DisplayName("ensure is idempotent: a replayed page returns the live row rather than inserting a second")

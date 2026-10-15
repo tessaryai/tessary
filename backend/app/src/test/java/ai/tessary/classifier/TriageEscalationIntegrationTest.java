@@ -38,7 +38,6 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -54,43 +53,21 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * exemplar-less findings before the limit.
  */
 @SpringBootTest
-class TriageEscalationIntegrationTest {
+record TriageEscalationIntegrationTest(
+        TriageAutoEscalator escalator,
+        FindingService behavior,
+        FindingRepository findings,
+        FindingEvidenceRepository findingEvidence,
+        MetricBaselineRepository baselines,
+        ClassifierRepository signals,
+        ClassifierService classifiers,
+        GitIntegrationRepository integrations,
+        TenantService tenants,
+        CapabilityFixture capabilities,
+        JdbcClient jdbc) {
 
     /** Before anything the fixtures stamp, so a finding written twice reads as one running spell. */
     private static final Duration QUIET_WINDOW = Duration.ofDays(1);
-
-    @Autowired
-    TriageAutoEscalator escalator;
-
-    @Autowired
-    FindingService behavior;
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    FindingEvidenceRepository findingEvidence;
-
-    @Autowired
-    MetricBaselineRepository baselines;
-
-    @Autowired
-    ClassifierRepository signals;
-
-    @Autowired
-    ClassifierService classifiers;
-
-    @Autowired
-    GitIntegrationRepository integrations;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    JdbcClient jdbc;
 
     private static final String BUCKET = "discover-sales-prospects";
 

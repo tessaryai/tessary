@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Component;
 
 /**
  * Seeds v2 substrate rows (session, trace, span, payload) with producer-shaped ids, in FK order.
@@ -31,6 +33,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  *
  * <p>Rollup columns are never seeded: run the worker, or the test asserts against itself.
  */
+@Component
 public final class SubstrateV2Fixtures {
 
     private static final AtomicLong COUNTER = new AtomicLong();
@@ -57,6 +60,7 @@ public final class SubstrateV2Fixtures {
      * The core tables plus {@code tool_call} and {@code retrieved_doc}, which take a raw {@link JdbcClient}: their
      * producer-key columns (0077) have no v2 repository yet.
      */
+    @Autowired
     public SubstrateV2Fixtures(
             SessionRepository sessions,
             TraceV2Repository traces,
@@ -439,9 +443,9 @@ public final class SubstrateV2Fixtures {
      */
     public void ingestedAt(SpanRow span, Instant at) {
         jdbc().sql("""
-                        UPDATE span SET created_at = :at::timestamptz
-                        WHERE project_id = :pid AND trace_id = :tid AND id = :sid
-                        """)
+            UPDATE span SET created_at = :at::timestamptz
+            WHERE project_id = :pid AND trace_id = :tid AND id = :sid
+            """)
                 .param("at", at.toString())
                 .param("pid", span.projectId())
                 .param("tid", span.traceId())
@@ -629,8 +633,8 @@ public final class SubstrateV2Fixtures {
 
     /** Settle a trace as its rollup does: its latest span end recorded, no more spans expected. */
     public void settle(String projectId, String traceId, Instant endedAt) {
-        jdbc().sql(
-                        "UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND id = :tid")
+        jdbc().sql("UPDATE trace SET ended_at = :end::timestamptz, is_settled = true WHERE project_id = :pid AND"
+                        + " id = :tid")
                 .param("end", endedAt.toString())
                 .param("pid", projectId)
                 .param("tid", traceId)
@@ -720,11 +724,11 @@ public final class SubstrateV2Fixtures {
             Instant at) {
         String id = "rd-" + COUNTER.incrementAndGet();
         jdbc().sql("""
-                        INSERT INTO retrieved_doc (id, project_id, content, rank, list_role,
-                                                   trace_id, span_id, created_at, event_ts)
-                        VALUES (:id, :pid, :content, :rank, :role,
-                                :tid, :sid, :at::timestamptz, :at::timestamptz)
-                        """)
+            INSERT INTO retrieved_doc (id, project_id, content, rank, list_role,
+                                       trace_id, span_id, created_at, event_ts)
+            VALUES (:id, :pid, :content, :rank, :role,
+                    :tid, :sid, :at::timestamptz, :at::timestamptz)
+            """)
                 .param("id", id)
                 .param("pid", projectId)
                 .param("content", content)

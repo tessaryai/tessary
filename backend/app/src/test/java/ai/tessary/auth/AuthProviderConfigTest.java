@@ -4,7 +4,6 @@ package ai.tessary.auth;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -15,16 +14,13 @@ import org.springframework.test.context.DynamicPropertySource;
  * notices.
  */
 @SpringBootTest
-class AuthProviderConfigTest {
+record AuthProviderConfigTest(AuthProvider provider) {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("workos.api-key", () -> "sk_test_fake");
         r.add("workos.client-id", () -> "client_fake");
     }
-
-    @Autowired
-    AuthProvider provider;
 
     @Test
     void workosWinsWhenConfigured() {

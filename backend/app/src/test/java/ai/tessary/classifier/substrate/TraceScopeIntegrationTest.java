@@ -3,20 +3,15 @@ package ai.tessary.classifier.substrate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.SubstrateV2Fixtures.SpanRef;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -26,35 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * trace-grain classifier.
  */
 @SpringBootTest
-class TraceScopeIntegrationTest {
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository v2traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    BehaviorSubstrateRepository substrate;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, v2traces, spans, payloads, jdbc);
-    }
+record TraceScopeIntegrationTest(
+        SubstrateV2Fixtures fx, SpanRepository spans, BehaviorSubstrateRepository substrate, TenantService tenants) {
 
     @Test
     @DisplayName("an untagged root takes the call site the turn reached first, not the lowest span id's")

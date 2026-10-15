@@ -7,7 +7,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -18,10 +17,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * a row inserts one.
  */
 @SpringBootTest
-class SubstrateV2DependentPrepTest {
-
-    @Autowired
-    JdbcClient jdbc;
+record SubstrateV2DependentPrepTest(JdbcClient jdbc) {
 
     // The four grain CHECKs went with their tables; a span-grain subject carrying its trace id now has one guard, the
     // next test.

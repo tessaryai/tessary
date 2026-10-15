@@ -15,7 +15,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -29,19 +28,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * change nothing for a worker whose lease was taken, the second merging into the payload.
  */
 @SpringBootTest
-class ClassifierJobRepositoryTest {
+record ClassifierJobRepositoryTest(ClassifierJobRepository jobs, TenantService tenants, JdbcClient jdbc) {
 
     private static final int MAX_ATTEMPTS = 5;
     private static final long LONG_COOLDOWN_SECONDS = 3600;
-
-    @Autowired
-    ClassifierJobRepository jobs;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
 
     private String project(String name) {
         return TenantFixture.bootstrap(tenants, name).project().id();

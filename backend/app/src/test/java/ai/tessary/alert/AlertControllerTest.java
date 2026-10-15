@@ -33,7 +33,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -42,34 +41,16 @@ import org.springframework.boot.test.context.SpringBootTest;
  * reading back differently, and a fired-alert filter leaking another rule's or project's firings.
  */
 @SpringBootTest
-class AlertControllerTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    AlertController controller;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    AlertEventRepository events;
-
-    @Autowired
-    CapabilityFixture capabilities;
-
-    @Autowired
-    AlertRuleRepository ruleRepo;
-
-    @Autowired
-    ai.tessary.auth.TenantPathResolver resolver;
-
-    @Autowired
-    ai.tessary.plan.CapabilityService capabilityService;
-
-    @Autowired
-    com.fasterxml.jackson.databind.ObjectMapper mapper;
+record AlertControllerTest(
+        TenantService tenants,
+        AlertController controller,
+        ClassifierRepository classifiers,
+        AlertEventRepository events,
+        CapabilityFixture capabilities,
+        AlertRuleRepository ruleRepo,
+        ai.tessary.auth.TenantPathResolver resolver,
+        ai.tessary.plan.CapabilityService capabilityService,
+        com.fasterxml.jackson.databind.ObjectMapper mapper) {
 
     /**
      * Recreating the seeded case-opened rule anchors it at creation, and reconfiguring keeps the anchor, enabled

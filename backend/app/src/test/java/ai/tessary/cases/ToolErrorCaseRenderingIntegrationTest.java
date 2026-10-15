@@ -13,10 +13,6 @@ import ai.tessary.classifier.finding.FindingEvidenceRow;
 import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.substrate.BehaviorSubstrateRepository;
-import ai.tessary.storage.SessionRepository;
-import ai.tessary.storage.SpanPayloadRepository;
-import ai.tessary.storage.SpanRepository;
-import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
@@ -25,10 +21,8 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -38,48 +32,18 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * CaseService.detail}.
  */
 @SpringBootTest
-class ToolErrorCaseRenderingIntegrationTest {
+record ToolErrorCaseRenderingIntegrationTest(
+        SubstrateV2Fixtures fx,
+        CaseService service,
+        CaseRepository cases,
+        FindingRepository behaviorFindings,
+        FindingEvidenceRepository findingEvidence,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     /** A repo-grounded ruling's citations, as stored. */
     private static final String CITATIONS = "[{\"path\":\"docs/sop/billing.md#L12\",\"reason\":"
             + "\"the SOP requires the account lookup before any balance is quoted\"}]";
-
-    @Autowired
-    CaseService service;
-
-    @Autowired
-    CaseRepository cases;
-
-    @Autowired
-    FindingRepository behaviorFindings;
-
-    @Autowired
-    FindingEvidenceRepository findingEvidence;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    SessionRepository sessions;
-
-    @Autowired
-    TraceV2Repository v2traces;
-
-    @Autowired
-    SpanRepository spans;
-
-    @Autowired
-    SpanPayloadRepository payloads;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private SubstrateV2Fixtures fx;
-
-    @BeforeEach
-    void setUp() {
-        fx = new SubstrateV2Fixtures(sessions, v2traces, spans, payloads, jdbc);
-    }
 
     @Test
     @DisplayName("the behaviour-table arm is unchanged: ruling, recorded exemplar, absorb offered")

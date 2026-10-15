@@ -10,7 +10,6 @@ import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -19,16 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * {@code created_at}), which would re-page a partner about everything since the rule was made.
  */
 @SpringBootTest
-class AlertRuleRepositoryTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    ClassifierRepository classifiers;
-
-    @Autowired
-    AlertRuleRepository rules;
+record AlertRuleRepositoryTest(TenantService tenants, ClassifierRepository classifiers, AlertRuleRepository rules) {
 
     @Test
     void everyColumnRoundTripsAndAnUpdatePreservesSwitchesAnchorsAndCreation() {

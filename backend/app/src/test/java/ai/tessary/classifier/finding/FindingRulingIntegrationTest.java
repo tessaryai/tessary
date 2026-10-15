@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 /**
@@ -34,16 +33,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * again opens a fresh row rather than mutating the settled one.
  */
 @SpringBootTest
-class FindingRulingIntegrationTest {
-
-    @Autowired
-    FindingRepository findings;
-
-    @Autowired
-    BehaviorTriageSource behaviorTriage;
-
-    @Autowired
-    TenantService tenants;
+record FindingRulingIntegrationTest(
+        FindingRepository findings, BehaviorTriageSource behaviorTriage, TenantService tenants) {
 
     private static final String GRAM = "gram-ruling";
 

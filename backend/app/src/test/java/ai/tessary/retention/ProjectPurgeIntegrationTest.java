@@ -13,7 +13,6 @@ import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,22 +23,12 @@ import org.springframework.transaction.annotation.Transactional;
  * dropping {@code project} last), so a repository-only test would pass while the worker was wrong.
  */
 @SpringBootTest
-class ProjectPurgeIntegrationTest {
-
-    @Autowired
-    ProjectPurgeWorker worker;
-
-    @Autowired
-    ProjectDeleteJobRepository jobs;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    JdbcClient jdbc;
+record ProjectPurgeIntegrationTest(
+        ProjectPurgeWorker worker,
+        ProjectDeleteJobRepository jobs,
+        ProjectRepository projects,
+        TenantService tenants,
+        JdbcClient jdbc) {
 
     @Test
     @DisplayName("a marked project's rows and the project itself are gone; a neighbour project is untouched")
@@ -74,9 +63,9 @@ class ProjectPurgeIntegrationTest {
         traffic(p, 3);
         // A sibling job the purge should take with it.
         jdbc.sql("""
-                        INSERT INTO job (id, project_id, kind, status, attempts, payload, created_at, updated_at)
-                        VALUES (:id, :pid, 'classifier', 'pending', 0, '{}', :now, :now)
-                        """)
+            INSERT INTO job (id, project_id, kind, status, attempts, payload, created_at, updated_at)
+            VALUES (:id, :pid, 'classifier', 'pending', 0, '{}', :now, :now)
+            """)
                 .param("id", "sibling-" + p.id())
                 .param("pid", p.id())
                 .param("now", Instant.now().toString())
@@ -162,10 +151,10 @@ class ProjectPurgeIntegrationTest {
         accept(p);
         // A purge hung mid-run: claimed, lease expired, attempts past any cap.
         jdbc.sql("""
-                        UPDATE job SET status = 'claimed', lease_owner = 'stuck-worker',
-                                       lease_expires_at = :past, attempts = 99
-                         WHERE kind = 'project_delete' AND dedupe_key = :pid
-                        """)
+            UPDATE job SET status = 'claimed', lease_owner = 'stuck-worker',
+                           lease_expires_at = :past, attempts = 99
+             WHERE kind = 'project_delete' AND dedupe_key = :pid
+            """)
                 .param("past", Instant.now().minusSeconds(3600).toString())
                 .param("pid", p.id())
                 .update();

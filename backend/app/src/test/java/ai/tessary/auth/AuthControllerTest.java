@@ -12,13 +12,9 @@ import ai.tessary.testsupport.AuthEnforcedContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * {@code POST /auth/signup} and {@code POST /auth/login} driven through the real
@@ -30,27 +26,12 @@ import org.springframework.web.context.WebApplicationContext;
  * mocked-repository unit coverage.
  */
 @AuthEnforcedContext
-class AuthControllerTest {
+record AuthControllerTest(MockMvc mvc, AuthProvider provider) {
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthProvider provider;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private String body(String email, String password) throws Exception {
-        return mapper.writeValueAsString(Map.of("email", email, "password", password));
+        return MAPPER.writeValueAsString(Map.of("email", email, "password", password));
     }
 
     @Test

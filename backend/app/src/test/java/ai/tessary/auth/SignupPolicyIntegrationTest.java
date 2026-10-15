@@ -22,18 +22,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 /**
  * The sign-up policy end to end through the real {@link PasswordAuthProvider}: an owner
@@ -43,45 +39,22 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @AuthEnforcedContext
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class SignupPolicyIntegrationTest {
+record SignupPolicyIntegrationTest(
+        MockMvc mvc,
+        PrincipalRepository users,
+        OrganizationRepository orgs,
+        OrgMembershipRepository memberships,
+        ProjectRepository projects,
+        AuditLogRepository audits,
+        JdbcClient jdbc) {
 
     private static final String OWNER = "owner-1226@example.com";
     private static final String PASSWORD = "a-good-password";
 
-    @Autowired
-    WebApplicationContext wac;
-
-    @Autowired
-    AuthFilter authFilter;
-
-    @Autowired
-    PrincipalRepository users;
-
-    @Autowired
-    OrganizationRepository orgs;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    ProjectRepository projects;
-
-    @Autowired
-    AuditLogRepository audits;
-
-    @Autowired
-    JdbcClient jdbc;
-
-    private final ObjectMapper mapper = new ObjectMapper();
-    private MockMvc mvc;
-
-    @BeforeEach
-    void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(wac).addFilters(authFilter).build();
-    }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private String credentials(String email) throws Exception {
-        return mapper.writeValueAsString(Map.of("email", email, "password", PASSWORD));
+        return MAPPER.writeValueAsString(Map.of("email", email, "password", PASSWORD));
     }
 
     private MockHttpServletResponse signup(String email) throws Exception {
@@ -123,7 +96,7 @@ class SignupPolicyIntegrationTest {
                         .cookie(owner)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("mode", mode, "domains", domains))))
+                        .content(MAPPER.writeValueAsString(Map.of("mode", mode, "domains", domains))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.mode").value(mode));
     }
@@ -133,7 +106,7 @@ class SignupPolicyIntegrationTest {
                         .cookie(owner)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(mapper.writeValueAsString(Map.of("email", email, "role", "member"))))
+                        .content(MAPPER.writeValueAsString(Map.of("email", email, "role", "member"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("invited"));
     }

@@ -13,7 +13,6 @@ import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,16 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
  * frontend's parser no longer accepts.
  */
 @SpringBootTest
-class PipelineControllerTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    PipelineService pipelines;
-
-    @Autowired
-    PipelineController controller;
+record PipelineControllerTest(TenantService tenants, PipelineService pipelines, PipelineController controller) {
 
     @Test
     void getServesTheProjectsOwnPipelineInTheStableEnvelope() {

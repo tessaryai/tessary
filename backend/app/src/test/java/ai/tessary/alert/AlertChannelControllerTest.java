@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -41,34 +40,16 @@ import org.springframework.web.server.ResponseStatusException;
  * delivery log that cannot be read back.
  */
 @SpringBootTest
-class AlertChannelControllerTest {
-
-    @Autowired
-    TenantService tenants;
-
-    @Autowired
-    OrgMembershipRepository memberships;
-
-    @Autowired
-    AlertChannelController controller;
-
-    @Autowired
-    AlertChannelRepository channels;
-
-    @Autowired
-    AlertRuleRepository rules;
-
-    @Autowired
-    AlertEventRepository events;
-
-    @Autowired
-    DeliveryAttemptRepository attempts;
-
-    @Autowired
-    SecretBox secretBox;
-
-    @Autowired
-    CapabilityFixture capabilities;
+record AlertChannelControllerTest(
+        TenantService tenants,
+        OrgMembershipRepository memberships,
+        AlertChannelController controller,
+        AlertChannelRepository channels,
+        AlertRuleRepository rules,
+        AlertEventRepository events,
+        DeliveryAttemptRepository attempts,
+        SecretBox secretBox,
+        CapabilityFixture capabilities) {
 
     @Test
     void anUpdateKeepsTheStoredSecretUnlessANewConfigIsGiven() {
