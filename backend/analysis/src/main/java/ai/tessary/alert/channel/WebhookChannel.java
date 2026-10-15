@@ -17,20 +17,14 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Component;
 
 /**
- * Generic outbound-webhook channel: a signed POST of the stable {@link AlertPayload}
- * envelope to a user-configured URL. When a {@code secret} is configured, the body is signed with
- * HMAC-SHA256 and the digest sent in {@code X-Evals-Signature-256: sha256=<hex>} (mirroring the
- * inbound {@code x-hub-signature-256} format GitHub webhooks use), so the receiver can verify
- * authenticity. The URL is re-validated against SSRF on every send by {@link ChannelHttp}.
- *
- * <p>Config JSON shape: {@code {"url": "https://…", "secret": "…"?}}.
+ * Signed POST of the {@link AlertPayload} envelope. With a {@code secret}, the body's HMAC-SHA256 goes in
+ * {@code X-Evals-Signature-256: sha256=<hex>}, GitHub's format. Config: {@code {"url", "secret"?}}.
  */
 @Component
 public class WebhookChannel implements AlertChannel {
 
-    // The three X-Evals-* names stay on the old spelling through the tessary rename: they are an
-    // outbound wire contract, and a receiver that verifies the HMAC by header name rejects every
-    // delivery the moment they change. Renaming them needs its own release with a transition window.
+    // The X-Evals-* names are an outbound wire contract: receivers verify the HMAC by header name, so renaming needs
+    // its own release with a transition window.
     public static final String SIGNATURE_HEADER = "X-Evals-Signature-256";
 
     private final ObjectMapper mapper;
@@ -65,7 +59,7 @@ public class WebhookChannel implements AlertChannel {
             Thread.currentThread().interrupt();
             return DeliveryResult.failure(null, "interrupted");
         } catch (Exception e) {
-            // Never echo the exception message — it can carry the resolved internal IP/host.
+            // Never echo the exception message; it can carry the resolved internal IP.
             return DeliveryResult.failure(null, "webhook delivery failed (network/guard)");
         }
     }

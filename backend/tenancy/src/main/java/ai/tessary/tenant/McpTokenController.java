@@ -22,15 +22,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Manage MCP personal access tokens for a project. Gated exactly as the managed API keys on the same
- * table are ({@link ApiKeyController}): {@code ORG_VIEW} to list, {@code ORG_MANAGE} to issue or revoke.
- * A {@code member} still mints their own token to wire up Claude on their machine, which is what this
- * surface is for; a {@code viewer} or a {@code billing} principal cannot. Two separate facts make that
- * matter: the token is minted {@link KeyScope#ADMIN}, which is what lets it reach every REST surface
- * plus {@code /mcp}, and {@code BearerTokenAuthenticator} resolves every bearer key back as role
- * {@code member} regardless of who holds it. Without the permission check below, a caller could
- * therefore mint themselves more role than they were given. The plaintext token is
- * returned exactly once at issue time and never stored.
+ * MCP personal access tokens, gated like {@link ApiKeyController}: {@code ORG_VIEW} lists, {@code ORG_MANAGE} issues or
+ * revokes. The token is minted {@link KeyScope#ADMIN} and {@code BearerTokenAuthenticator} resolves it as
+ * {@code member}, so without the check a viewer could mint themselves more role. The plaintext is returned once and
+ * never stored.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/mcp-tokens")
@@ -54,7 +49,6 @@ public class McpTokenController {
         var r = resolver.requireProject(ctx, orgSlug, projectSlug);
         r.require(Permission.ORG_VIEW, "view MCP tokens");
         List<ApiKey> rows = tokenRepo.findByProject(r.project().id());
-        // Strip hash from the wire view.
         return ApiResponse.ok(rows.stream().map(McpTokenController::toWire).toList());
     }
 

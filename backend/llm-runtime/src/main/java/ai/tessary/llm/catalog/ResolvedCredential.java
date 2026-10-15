@@ -4,18 +4,10 @@ package ai.tessary.llm.catalog;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The decrypted materials a {@link ProviderModelLister} needs to call its provider's own models
- * endpoint — built by {@code ModelCatalogFetchService} from the org's sealed {@code
- * ProviderCredential} row plus {@code SecretBox}, so no lister ever imports the crypto dependency or
- * touches ciphertext directly.
- *
- * <p><b>Deliberately not the same type as {@code AgenticCredentialResolver.Credential}</b>, despite
- * carrying nearly the same fields: that type's {@code resolve()} rejects {@code auth_mode=iam_role}
- * because an E2B microVM cannot assume the operator's ambient AWS identity. Listing runs backend-side,
- * so an IAM-role-authenticated Bedrock/mantle credential is perfectly usable here; {@link #usesIamRole}
- * exists so {@code BedrockModelLister}/{@code BedrockMantleModelLister} can build the ambient
- * {@code DefaultCredentialsProvider} instead of static keys. Reusing the agentic type would have meant either silently dropping
- * that distinction or forking its rejection logic — a new, narrower type was the smaller change.
+ * Decrypted materials a {@link ProviderModelLister} needs, built by {@code ModelCatalogFetchService} so no lister
+ * touches ciphertext. Not {@code AgenticCredentialResolver.Credential}, which rejects {@code iam_role} because an E2B
+ * microVM cannot assume the ambient AWS identity; listing runs backend-side, where {@link #usesIamRole} selects the
+ * ambient provider.
  */
 public record ResolvedCredential(
         @Nullable String apiKey,

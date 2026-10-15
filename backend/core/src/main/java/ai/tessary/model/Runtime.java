@@ -7,16 +7,8 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Pipeline-level runtime configuration (evals plugin v0.2+). Consumed by judge
- * runners and CI integrations to gate behavior; the synthesis pipeline itself
- * just persists it.
- *
- * <p>{@code severityPolicy} maps severity → {@code block | warn | report}.
- * Per-grader {@code block_on_fail} on a {@link Grader} overrides this default.
- *
- * <p>{@code redactionState} is the worst case across all call sites' observed
- * stats — {@code redacted} if any site is fully redacted, else {@code partial}
- * if any is partial, else {@code none}.
+ * Pipeline runtime configuration, persisted for judge runners and CI. {@code severityPolicy} maps severity to
+ * {@code block | warn | report}, overridable per grader. {@code redactionState} is the worst case across call sites.
  */
 public record Runtime(
         @JsonProperty("judge_model") @Nullable String judgeModel,

@@ -6,15 +6,8 @@ import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 
 /**
- * Points every Spring test context at a freshly created database in the JVM-singleton pgvector
- * container {@link TestPostgres}. Registered globally via
- * {@code src/test/resources/META-INF/spring.factories}, so all {@code @SpringBootTest} classes
- * pick it up with no per-test wiring.
- *
- * <p>Each context gets its own database (so cached contexts stay isolated) and Liquibase runs
- * the full changelog against real pgvector Postgres, exactly like dev/prod. The injected
- * properties take precedence over {@code application.yaml}'s {@code ${TESSARY_JDBC_URL:}} default
- * (and any ambient {@code TESSARY_JDBC_URL}), so the suite is deterministic.</p>
+ * Gives every Spring test context its own database in the singleton pgvector container {@link TestPostgres}, registered
+ * via {@code spring.factories}. Overrides {@code TESSARY_JDBC_URL} so the suite is deterministic.
  */
 public class TestcontainersPostgresInitializer
         implements ApplicationContextInitializer<ConfigurableApplicationContext> {

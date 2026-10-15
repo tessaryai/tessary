@@ -4,16 +4,8 @@ package ai.tessary.classifier.finding;
 import java.util.Map;
 
 /**
- * Everything a {@link TriageSource} has to say about one job, in the exact two arguments
- * {@code BehaviorTriageEngine.rule} takes.
- *
- * <p><b>Why the brief and not the ruling.</b> A source could have run the engine itself and returned a
- * verdict; it does not, because everything AROUND the run is shared and must stay shared — the retry
- * backoff, the launcher circuit breaker, the {@code TRIAGE_LAUNCHER_UNAVAILABLE} release-without-attempt
- * path, and the ops log. Duplicating that per store is how two stores start dead-lettering differently.
- * So the source renders the dossier and the source records the ruling; the worker owns the run.
- *
- * @param dossier the files written under {@code dossier/} in the sandbox, by name
- * @param prompt the ruling task, composed for this claim
+ * A {@link TriageSource}'s input to {@code BehaviorTriageEngine.rule}. Sources return a brief, not a ruling, so retry
+ * backoff, the launcher circuit breaker and dead-lettering stay shared in the worker. @param dossier files written
+ * under {@code dossier/}, by name
  */
 public record TriageBrief(Map<String, String> dossier, String prompt) {}

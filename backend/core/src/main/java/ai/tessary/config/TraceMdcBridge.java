@@ -9,16 +9,9 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * Bridges the calling thread's current Micrometer/OTel span (if any) into the SLF4J MDC, under
- * the same {@code traceId}/{@code spanId} keys {@code logback-spring.xml} already ships for HTTP
- * request logs (Micrometer Tracing populates those via the servlet filter's request scope).
- *
- * <p>Spring's built-in {@code @Scheduled} observability wraps every tick in an Observation —
- * visible in Tempo as e.g. {@code task signalWorker.tick} — but unlike an HTTP request thread,
- * that scope never reaches MDC on the scheduler thread, so background-worker logs carry no
- * trace_id today. Each {@code @Scheduled} entry point opens a scope with {@link #bindCurrentTrace()}
- * before doing any work, so downstream logs — and anything dispatched to an executor decorated
- * with {@code MdcTaskDecorator} — pick up the tick's trace/span id and pivot to it in Grafana.
+ * Binds the current Micrometer/OTel span into the MDC under {@code traceId}/{@code spanId}. A {@code @Scheduled} tick's
+ * observation never reaches the MDC on the scheduler thread, so each entry point opens {@link #bindCurrentTrace()} to
+ * give background logs a trace id.
  */
 @Component
 public class TraceMdcBridge {
@@ -29,7 +22,7 @@ public class TraceMdcBridge {
         this.tracer = tracer;
     }
 
-    /** Open an MDC scope bound to the calling thread's current span. No-op when there is none. */
+    /** No-op when there is no current span. */
     public LogContext bindCurrentTrace() {
         Span span = tracer.currentSpan();
         if (span == null || span.isNoop()) {

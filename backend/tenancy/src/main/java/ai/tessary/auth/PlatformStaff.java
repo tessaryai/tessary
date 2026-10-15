@@ -5,15 +5,9 @@ import ai.tessary.config.PlatformStaffProperties;
 import org.springframework.stereotype.Service;
 
 /**
- * The platform-staff gate: a second authority alongside {@link ai.tessary.tenant.rbac.RolePermissions},
- * for the few things that belong to us rather than to the customer. Today that is the non-public
- * {@code /actuator/**} paths, which {@link AuthFilter} opens to a signed-in staff session.
- *
- * <p>Staff identity comes from deployment config ({@link PlatformStaffProperties}), where a customer cannot
- * reach it, and is proven by the sealed session cookie.
- *
- * <p>Bearer/MCP key contexts never qualify. A key carries its creator's identity, so a staff-created key
- * scoped to a customer project would otherwise carry staff authority into that project.
+ * The platform-staff gate, a second authority beside {@link ai.tessary.tenant.rbac.RolePermissions} for non-public
+ * {@code /actuator/**}. Identity comes from deployment config and the sealed session. Bearer keys never qualify: a
+ * staff-created key in a customer project would otherwise carry staff authority there.
  */
 @Service
 public class PlatformStaff {
@@ -24,7 +18,7 @@ public class PlatformStaff {
         this.props = props;
     }
 
-    /** Whether this request is a signed-in platform-staff session (identity only, no org standing implied). */
+    /** Identity only; no org standing implied. */
     public boolean isStaff(TenantContext ctx) {
         return !ctx.isMcpToken() && props.isStaffEmail(ctx.userEmail());
     }

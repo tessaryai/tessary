@@ -6,14 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Wire records for the JSON-RPC 2.0 envelope MCP uses.
- *
- * <p>We accept either a numeric id, string id, or null id. Jackson maps it as a raw
- * {@link JsonNode} so we can echo it back verbatim in the response — the client
- * uses byte-identical id matching.</p>
- *
- * <p>Notifications are requests with a null id; we never produce notifications
- * from the server today, but we tolerate them on the inbound path (just no reply).</p>
+ * JSON-RPC 2.0 wire records for MCP. The id is kept as a raw {@link JsonNode} so it echoes back verbatim, since clients
+ * match ids byte for byte. Inbound notifications (null id) get no reply.
  */
 public final class JsonRpc {
 
@@ -44,7 +38,6 @@ public final class JsonRpc {
     public record ErrorBody(
             int code, @Nullable String message, @Nullable Object data) {}
 
-    // Canonical JSON-RPC 2.0 error codes
     public static final int PARSE_ERROR = -32700;
     public static final int INVALID_REQUEST = -32600;
     public static final int METHOD_NOT_FOUND = -32601;

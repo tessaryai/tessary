@@ -7,17 +7,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the {@link AuthProvider} bean: WorkOS when configured (BYO, opt-in), {@link
- * PasswordAuthProvider} otherwise. The password provider is the default and must win whenever
- * WorkOS isn't set up.
- *
- * <p>This is a single branching {@code @Bean} method rather than two beans behind
- * {@code @ConditionalOnMissingBean}, because the choice has to track {@link
- * WorkOsProperties#isEnabled()} exactly, blank-vs-unset included, and {@code @ConditionalOnProperty}
- * only approximates that predicate (Spring's "property is present and non-'false'" semantics
- * aren't "both api-key and client-id are non-blank"). Branching on the same method the other
- * WorkOS-vs-not check in this package calls ({@link PublicOriginGuard}) keeps the two in agreement
- * by construction. {@link AuthProviderConfigTest} pins the bean selection directly.
+ * WorkOS when configured, else {@link PasswordAuthProvider}. One branching {@code @Bean} rather than conditional beans,
+ * because the choice must track {@link WorkOsProperties#isEnabled()} exactly (blank vs unset included) and agree with
+ * {@link PublicOriginGuard}.
  */
 @Configuration(proxyBeanMethods = false)
 public class AuthProviderConfig {

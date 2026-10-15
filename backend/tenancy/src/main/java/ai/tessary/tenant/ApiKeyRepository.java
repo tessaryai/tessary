@@ -81,15 +81,9 @@ public class ApiKeyRepository {
     }
 
     /**
-     * Revoke every live key of a project at once; returns how many were still live. One indexed UPDATE
-     * ({@code api_key.project_id} is indexed), which is what lets the delete endpoint do this
-     * synchronously rather than leaving it to the purge worker.
-     *
-     * <p>This is the whole access story for a project being deleted, and it is deliberately the part
-     * that does NOT run in the background. Ingest, MCP tokens and device links all authenticate through
-     * an {@code api_key} row, so revoking here means nothing new lands in a project on its way out —
-     * whereas a revocation queued behind the purge would leave a window, minutes wide, in which the
-     * deleted project is still accepting writes.
+     * Returns how many were still live. Runs synchronously on project delete, not in the purge worker: ingest, MCP
+     * tokens and device links all authenticate through {@code api_key}, so a queued revocation would leave a deleted
+     * project accepting writes.
      */
     public int revokeAllForProject(String projectId, String when) {
         return jdbc.sql("UPDATE api_key SET revoked_at = :when WHERE project_id = :pid AND revoked_at IS NULL")

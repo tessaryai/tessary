@@ -14,15 +14,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a call site whose share of traces with a flagged answer survived triage into a case, from the CUSUM
- * {@link GroundednessRateService} replays through tool_error's engine.
- *
- * <p><b>Same gate as malformed output</b>: {@link CaseOpener} only calls {@link #shape} once triage has ruled the
- * finding's claim sound or a human has pressed <em>Real deviation</em>. The model's flags include false alarms,
- * so a rise in them is a claim worth auditing before it pages anyone.
- *
- * <p>One case per call site, the finding's own scope ({@code CauseKey.groundedness}). Its severity is the squash
- * the other rate detectors on the same engine use, so their cases rank on one scale.
+ * Shapes a call site whose flagged-answer share survived triage into a case, from the CUSUM
+ * {@link GroundednessRateService} replays through tool_error's engine. Gated on triage or a human because the model's
+ * flags include false alarms. Severity uses the shared rate squash so cases rank on one scale.
  */
 @Component
 public class GroundednessCaseSource implements CaseSource {
@@ -43,7 +37,7 @@ public class GroundednessCaseSource implements CaseSource {
                 callSite,
                 finding.callSiteId(),
                 finding.id(),
-                // The same sentence the Classifiers page renders on the finding this came from.
+                // The same sentence the Classifiers page renders.
                 FindingTitle.of(finding),
                 basis(finding, read),
                 GroundednessEvidence.severity(finding),
@@ -53,7 +47,7 @@ public class GroundednessCaseSource implements CaseSource {
                 read.deltaPp());
     }
 
-    /** The numbers the title leaves out, labelled as flagged: the flags include the model's false alarms. */
+    /** Labelled as flagged, since flags include false alarms. */
     private static String basis(FindingRow finding, RateDetail read) {
         return String.format(
                 Locale.ROOT,

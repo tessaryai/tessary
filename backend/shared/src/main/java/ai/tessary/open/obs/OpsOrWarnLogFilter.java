@@ -9,15 +9,9 @@ import java.util.List;
 import org.slf4j.Marker;
 
 /**
- * Appender-level filter that admits an event if it is WARN+ <em>or</em> carries
- * the {@link Markers#OPS} marker, and denies everything else. Attached to the
- * OTEL appender (production profile) so safe operational INFO reaches Loki while
- * the bulk of INFO stays local.
- *
- * <p>Logback's built-in {@code MarkerFilter} is a global {@code TurboFilter},
- * not an appender filter, and {@code EvaluatorFilter} needs Janino — hence this
- * small explicit filter. Joran instantiates it reflectively from XML, which the
- * JVM resolves through the normal class loader.
+ * Admits WARN+ or {@link Markers#OPS} events, so operational INFO reaches Loki from the OTEL appender while bulk INFO
+ * stays local. Logback's {@code MarkerFilter} is a turbo filter, not an appender filter, and {@code EvaluatorFilter}
+ * needs Janino.
  */
 public final class OpsOrWarnLogFilter extends Filter<ILoggingEvent> {
 

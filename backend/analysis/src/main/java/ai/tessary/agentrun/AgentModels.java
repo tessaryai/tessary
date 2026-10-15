@@ -12,9 +12,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * The model an agent lane runs for a project, its models.dev rates and the provider whose credential
- * runs it: the project's resolved agentic model, else the observer's model on Bedrock. One answer for
- * a one-shot run and a session, so both bill and qualify the model the same way.
+ * The model an agent lane runs, its models.dev rates and its provider: the project's agentic model, else the observer's
+ * on Bedrock. One answer so one-shot runs and sessions bill the same way.
  */
 @Component
 public class AgentModels {
@@ -34,7 +33,7 @@ public class AgentModels {
                 modelSettings.resolveAgenticModel(projectId, lane);
         String model = resolved.map(ProjectModelSettings.ResolvedAgenticModel::modelId)
                 .orElseGet(() -> observerProps.getAgentic().getModel());
-        // The deployment default is a Bedrock inference-profile id, so its rates are looked up on Bedrock.
+        // The deployment default is a Bedrock inference-profile id.
         String modelsDevId = resolved.isPresent()
                 ? resolved.get().modelsDevId()
                 : ModelCatalog.modelsDevId(ModelProvider.BEDROCK, model).orElse(null);
@@ -45,11 +44,7 @@ public class AgentModels {
     }
 
     /**
-     * The lane's model for one project.
-     *
-     * @param model the id the agent runs and the ledger stores
-     * @param modelCost null when models.dev does not price it
-     * @param provider the provider whose credential runs the model
+     * @param model the id the agent runs and the ledger stores @param modelCost null when models.dev does not price it
      */
     public record Choice(String model, ModelsDevRates.@Nullable ModelCost modelCost, ModelProvider provider) {}
 }

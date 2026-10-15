@@ -21,15 +21,13 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * "How outputs broke": the declared schema, annotated with how many outputs have failed each field
- * since the finding's onset, and the one failing output a reader is looking at. The only DB-backed
- * half of {@link MalformedOutputEvidence} — the schema and the failure counts have no home in the
- * finding's own payload, unlike a tool-error or metric-drift blob.
+ * "How outputs broke": the schema annotated with per-field failure counts since onset, and the failing output being
+ * read. The DB-backed half of {@link MalformedOutputEvidence}.
  */
 @Service
 public class MalformedOutputDetailService {
 
-    /** A document past this many characters is truncated — a reader is judging a shape, not auditing bytes. */
+    /** A reader is judging a shape, not auditing bytes. */
     private static final int MAX_DOCUMENT_CHARS = 20_000;
 
     private final CallSiteSchemaReads schemas;
@@ -66,10 +64,7 @@ public class MalformedOutputDetailService {
                 counts.getOrDefault(MalformedOutputRateRepository.FIELD_OTHER, 0L));
     }
 
-    /**
-     * One field's failing outputs since onset, newest first: what the finding page renders on the right
-     * once a reader selects a row of the schema tree.
-     */
+    /** Newest first. */
     public MalformedOutputEvidence.FailingOutputPage failingOutputs(
             FindingRow finding, String field, int limit, @Nullable String cursor) {
         String callSiteId = finding.callSiteId();
@@ -105,7 +100,7 @@ public class MalformedOutputDetailService {
         return List.copyOf(out);
     }
 
-    /** Every trace a WITNESS ref names, in the order the classifier wrote them, deduplicated. */
+    /** In the classifier's order, deduplicated. */
     private List<String> witnessTraceIds(FindingRow finding) {
         List<String> out = new ArrayList<>();
         for (FindingEvidenceRow row : evidence.listByFinding(finding.projectId(), finding.id())) {

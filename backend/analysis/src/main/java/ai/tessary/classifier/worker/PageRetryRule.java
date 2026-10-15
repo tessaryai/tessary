@@ -5,22 +5,15 @@ import ai.tessary.classifier.catalog.PagedDetector.PageAction;
 import ai.tessary.classifier.catalog.PagedDetector.ScoredPage;
 
 /**
- * What the worker does with a page a {@link ai.tessary.classifier.catalog.PagedDetector} scored.
- *
- * <p>A page on which more than half of the sent turns failed because the provider was unavailable is
- * not written: its cursor is held and the whole page is sent again next tick, so an outage does not
- * record a page as mostly unscored. After {@code maxPageRetries} holds the page is skipped instead, so an
- * outage costs at most that many re-sends of one page rather than stalling the sweep. A page at or under
- * half is written as it stands: the turns that failed are not recorded, like an ineligible turn.
+ * A page where over half the sent turns failed on provider unavailability is not written: its cursor is held and the
+ * page re-sent next tick, until {@code maxPageRetries} holds, after which it is skipped so an outage cannot stall the
+ * sweep. At or under half, the page is written and failed turns are treated as ineligible.
  */
 final class PageRetryRule {
 
     private PageRetryRule() {}
 
-    /**
-     * @param pageRetries how many times this page has already been held
-     * @param maxPageRetries how many holds are allowed before the page is skipped
-     */
+    /** @param pageRetries holds of this page so far */
     static PageAction decide(ScoredPage page, int pageRetries, int maxPageRetries) {
         return switch (page.status()) {
             case PAUSED -> PageAction.PASS;
