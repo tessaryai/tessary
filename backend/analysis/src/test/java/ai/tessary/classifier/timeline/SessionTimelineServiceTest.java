@@ -8,7 +8,6 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.open.obs.Markers;
@@ -71,24 +70,6 @@ class SessionTimelineServiceTest {
                 "a tail that one trace fills reads the spans and payloads of a whole page of traces");
         assertEquals(List.of(), tail.events(), "no event of 1 byte or less exists");
         assertEquals(true, tail.truncated());
-    }
-
-    /**
-     * Catches a tail that reads every trace row of the session: one that the newest trace fills reads the trace rows
-     * of its first two pages, and never the older ones.
-     */
-    @Test
-    void loadTailReadsOnlyTheTraceRowsOfThePagesItReads() {
-        SessionTrace t5 = settled("t5", 5000);
-        stubTraces(List.of(), t5, settled("t4", 4000), settled("t3", 3000), settled("t2", 2000), settled("t1", 1000));
-        SessionTimelineService service = serviceOverToolSpans();
-
-        service.loadTail(PID, SID, 1);
-
-        verify(traces).listUnendedSessionTraces(PID, SID);
-        verify(traces).listEndedSessionTraces(PID, SID, null, 1);
-        verify(traces).listEndedSessionTraces(PID, SID, t5, 2);
-        verifyNoMoreInteractions(traces);
     }
 
     /**

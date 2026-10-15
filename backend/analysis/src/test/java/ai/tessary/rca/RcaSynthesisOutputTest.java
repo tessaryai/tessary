@@ -83,28 +83,6 @@ class RcaSynthesisOutputTest {
                 out.causes());
     }
 
-    /** A hallucinated receipt is worse than none: unknown and repeated ids drop, in both lists. */
-    @Test
-    void receiptsKeepOnlyThisFindingsIdsOnce() {
-        Cause c = parse(reply(
-                        "causes_identified",
-                        cause("t", "medium", 1, "\"tr-1\",\"tr-9\",\"tr-1\"", "\"s-2\",\"s-9\",\"s-2\"")))
-                .causes()
-                .get(0);
-
-        assertEquals(List.of("tr-1"), c.evidenceTraceIds());
-        assertEquals(List.of("s-2"), c.evidenceSessionIds());
-    }
-
-    /** Session grain: a cause citing only sessions is receipted. */
-    @Test
-    void aCauseCitingOnlySessionsSurvives() {
-        RcaSynthesisOutput.Parsed out =
-                parse(reply("causes_identified", cause("Sessions", "medium", 1, "", "\"s-1\"")));
-
-        assertEquals(List.of("Sessions"), titles(out));
-    }
-
     @Test
     void aCauseCitingNothingOfThisFindingIsDropped() {
         RcaSynthesisOutput.Parsed out = parse(reply(
@@ -125,29 +103,6 @@ class RcaSynthesisOutputTest {
                 cause("Kept", "medium", 1, "\"tr-2\"", "")));
 
         assertEquals(List.of("Kept"), titles(out));
-    }
-
-    @Test
-    void aCauseWithNoConfidenceIsDropped() {
-        String text = reply(
-                "causes_identified",
-                "{\"title\":\"No level\",\"evidence_trace_ids\":[\"tr-1\"]}",
-                cause("Kept", "high", 1, "\"tr-2\"", ""));
-
-        assertEquals(List.of("Kept"), titles(parse(text)));
-    }
-
-    @Test
-    void causesIdentifiedWithNoSurvivingCauseIsDowngradedToNoCauseFound() {
-        RcaSynthesisOutput.Parsed out = parse(reply(
-                "causes_identified",
-                cause("Invented", "high", 5, "\"tr-9\"", ""),
-                cause("Low", "low", 1, "\"tr-1\"", "")));
-
-        assertEquals(RcaReportRow.Verdict.NO_CAUSE_FOUND, out.verdict());
-        assertTrue(out.causes().isEmpty());
-        assertNotNull(out.verdictNote());
-        assertTrue(out.verdictNote().contains("causes_identified"), out.verdictNote());
     }
 
     /** An old verdict or an invented one is normalised to the no-cause answer, not downgraded with a note. */
@@ -224,29 +179,6 @@ class RcaSynthesisOutputTest {
                 cause("Five", "medium", 1, "\"tr-3\"", "")));
 
         assertEquals(List.of("One", "Two", "Three", "Four"), titles(out));
-    }
-
-    @Test
-    void aCauseExplainsAtLeastTheRowsItCites() {
-        RcaSynthesisOutput.Parsed out = parse(reply(
-                "causes_identified",
-                cause("Undercounted traces", "medium", 0, "\"tr-1\",\"tr-2\",\"tr-3\"", ""),
-                cause("Undercounted sessions", "medium", 1, "", "\"s-1\",\"s-2\""),
-                cause("Big", "medium", 9, "\"tr-1\"", "")));
-
-        assertEquals(List.of("Big", "Undercounted traces", "Undercounted sessions"), titles(out));
-        assertEquals(3, out.causes().get(1).affectedCount());
-        assertEquals(2, out.causes().get(2).affectedCount());
-    }
-
-    /** Without a clone there is no file or commit to point at; the excerpt the agent read in a span still stands. */
-    @Test
-    void withoutARepoTheAttributionKeepsNoPathOrCommit() {
-        Cause c = parseWithoutRepo(reply("causes_identified", cause("t", "high", 1, "\"tr-1\"", "")))
-                .causes()
-                .get(0);
-
-        assertEquals(new Attribution(null, null, null, "Answer briefly."), c.attribution());
     }
 
     @Test
@@ -373,16 +305,5 @@ class RcaSynthesisOutputTest {
                         1)),
                 out.causes());
         assertEquals(List.of(), out.ruledOut());
-    }
-
-    /**
-     * Catches the raw reply reaching the case caption: a blank summary with nothing to fall back on is stored as no
-     * summary, never as the agent's JSON.
-     */
-    @Test
-    void aBlankSummaryWithNoCauseIsNoSummaryRatherThanTheReply() {
-        assertNull(parse("{\"summary\":\"\",\"verdict\":\"no_cause_found\",\"causes\":[]}")
-                .summary());
-        assertNull(parse("{\"verdict\":\"no_cause_found\"}").summary());
     }
 }

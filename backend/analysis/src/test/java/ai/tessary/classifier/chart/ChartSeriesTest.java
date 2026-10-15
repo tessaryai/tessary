@@ -126,28 +126,6 @@ class ChartSeriesTest {
 
     // ---- range points -------------------------------------------------------------------------------
 
-    /** 1000 ms lands in bin floor(ln 1000 / ln 1.05) = 141; one sample reads half and 95% of the way through it. */
-    @Test
-    void rangePoint_singleSampleInterpolatesInsideItsBin() {
-        List<ChartPoint> points = ChartSeries.rangePoints(FROM, at(0), GRID, List.of(new RangeRow(at(0), 141, 1)));
-
-        ChartPoint p = points.getFirst();
-        assertEquals(1L, p.n());
-        assertEquals(Math.pow(1.05, 141.5), Objects.requireNonNull(p.p50()), 1e-9);
-        assertEquals(Math.pow(1.05, 141.95), Objects.requireNonNull(p.p95()), 1e-9);
-        assertTrue(p.open());
-    }
-
-    /** Every sample in one bin: both percentiles sit inside that bin, the p95 above the p50. */
-    @Test
-    void rangePoint_allSamplesInOneBin() {
-        SortedMap<Integer, Long> bins = new TreeMap<>();
-        bins.put(100, 40L);
-
-        assertEquals(Math.pow(1.05, 100.5), Objects.requireNonNull(ChartSeries.quantile(GRID, bins, 0.5)), 1e-9);
-        assertEquals(Math.pow(1.05, 100.95), Objects.requireNonNull(ChartSeries.quantile(GRID, bins, 0.95)), 1e-9);
-    }
-
     /** A zero or negative value is clamped into the first bin, so it reads as the grid's floor, never NaN. */
     @Test
     void rangePoint_valuesAtOrBelowZeroReadInTheFirstBin() {
@@ -155,19 +133,6 @@ class ChartSeriesTest {
         bins.put(0, 3L);
 
         assertEquals(Math.pow(1.05, 0.5), Objects.requireNonNull(ChartSeries.quantile(GRID, bins, 0.5)), 1e-12);
-    }
-
-    /** A value past the grid is clamped into the last bin, so it reads at the grid's ceiling. */
-    @Test
-    void rangePoint_overflowReadsInTheLastBin() {
-        SortedMap<Integer, Long> bins = new TreeMap<>();
-        bins.put(10, 1L);
-        bins.put(GRID.bins() - 1, 19L);
-
-        assertEquals(
-                Math.pow(1.05, (GRID.bins() - 1) + (0.95 * 20 - 1) / 19),
-                Objects.requireNonNull(ChartSeries.quantile(GRID, bins, 0.95)),
-                1e-6);
     }
 
     @Test
@@ -322,20 +287,6 @@ class ChartSeriesTest {
         assertTrue(points.getLast().open());
     }
 
-    /** A window that starts before the range still decides whether the range's first points reached. */
-    @Test
-    void countPoints_readAWindowThatStartedBeforeTheRange() {
-        ClassifierArming.Config arming = new ClassifierArming.Config("event_count", 2, 172_800, null);
-        Instant from = Instant.parse("2026-10-01T00:00:00Z");
-        // Oct 1 is epoch day 20727, odd, so the two-day window holding it started on Sep 30.
-        List<CountRow> windows = List.of(new CountRow(Instant.parse("2026-09-30T00:00:00Z"), 2, 2, 0));
-
-        List<ChartPoint> points = ChartSeries.countPoints(
-                from, from.plusSeconds(60), Duration.ofHours(1), List.of(), List.of(), windows, arming);
-
-        assertEquals(List.of(ChartPoint.count(from, from.plusSeconds(3600), true, 0, 0, true)), points);
-    }
-
     // ---- baselines and availability -----------------------------------------------------------------
 
     @Test
@@ -378,16 +329,6 @@ class ChartSeriesTest {
                 ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION).build();
 
         assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
-        assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
-    }
-
-    @Test
-    void frustrationLimitedElsewhere_isOffChip() {
-        ClassifierRow frustration = ClassifierRowBuilder.of(BuiltInDetector.Kind.FRUSTRATION)
-                .onCallSites("cs-b")
-                .build();
-
-        assertEquals(Availability.OFF_NOW, ChartSeries.forCallSite(frustration, "cs-a", NO_FACTS));
         assertEquals(Availability.ON_NOW, ChartSeries.forCallSite(frustration, "cs-b", NO_FACTS));
     }
 

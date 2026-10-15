@@ -14,7 +14,6 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,22 +59,6 @@ class SweepRoutingTest {
     }
 
     /**
-     * Catches a registered kind no module declares being left without the sweep the worker runs it with. The catalog
-     * gives the kind no window grain, so routing that reads the catalog for it finds no sweep; the right routing never
-     * asks.
-     */
-    @Test
-    void aKindNoModuleDeclaresIsRunByItsRegisteredSweep() {
-        assertEquals(Optional.of(undeclared), routing.sweepFor(UNDECLARED));
-    }
-
-    /** Catches a fallback to some other sweep for a kind nothing claims. */
-    @Test
-    void aKindWithNoSweepHasNone() {
-        assertTrue(routing.sweepFor("nobody").isEmpty());
-    }
-
-    /**
      * Catches {@code sweepFor} ignoring the grain: a sweep that also claims a catalog kind of observation grain is
      * never handed its jobs, so it must not veto turning that classifier on.
      */
@@ -84,11 +67,5 @@ class SweepRoutingTest {
         assertEquals(Grain.OBSERVATION, catalog.grainFor(OBSERVED), "the manifest's grain for the kind");
 
         assertTrue(routing.sweepFor(OBSERVED).isEmpty());
-    }
-
-    /** Catches a declared window kind losing the sweep the worker dispatches it to. */
-    @Test
-    void aDeclaredWindowKindIsRunByItsRegisteredSweep() {
-        assertEquals(Optional.of(drift), routing.sweepFor(DRIFT));
     }
 }

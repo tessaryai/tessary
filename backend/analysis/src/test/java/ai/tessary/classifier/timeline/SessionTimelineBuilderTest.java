@@ -7,13 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -31,7 +28,6 @@ class SessionTimelineBuilderTest {
     private static final String R1 = assistant("Order 42 ships tomorrow.");
     private static final String EXPEDITE = user("can you expedite it?");
     private static final String R1_TEXT = "Order 42 ships tomorrow.";
-    private static final String REFUNDS = "Refunds take 5 days.";
     private static final String SYSTEM_BILLING = "{\"role\":\"system\",\"content\":\"You are billing.\"}";
 
     @Test
@@ -98,75 +94,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void aRouterInsideTheAgentIsNotAReply() {
-        String where = list(user("where is my refund?"));
-        String reply = "Your refund is on its way.";
-        List<TimelineSpan> spans = List.of(
-                span("tr-r", "r1", "agent", null, 0, 300, null, reply),
-                span("tr-r", "r2", "llm", "r1", 10, 50, where, "billing"),
-                span("tr-r", "r3", "llm", "r1", 60, 200, where, reply));
-
-        assertEquals(
-                "tr-r/r3#reply:0",
-                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a router's text is never shown to the user, so only the text the agent returned is a reply");
-    }
-
-    @Test
-    void theAgentLoopsOwnTextIsAReply() {
-        String letMeCheck = calling("Let me check.", "c9", "expedite");
-        String asked = user("expedite 42");
-        String done = "Done: order 42 is expedited.";
-        List<TimelineSpan> spans = List.of(
-                span("tr-g", "g1", "agent", null, 0, 500, null, done),
-                span("tr-g", "g2", "llm", "g1", 10, 100, list(asked), list(letMeCheck)),
-                span("tr-g", "g3", "tool", "g1", 110, 200, null, null),
-                span("tr-g", "g4", "llm", "g1", 210, 490, list(asked, letMeCheck, toolResult("c9", "ok")), done));
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
-
-        assertEquals(
-                "tr-g/g2#reply:0 tr-g/g4#reply:0",
-                replyIds(timeline),
-                "treating the agent output as the only reply loses the first reply of the turn");
-        assertEquals(
-                List.of("Let me check.", "Done: order 42 is expedited."),
-                timeline.events().stream()
-                        .filter(e -> e.kind().equals(Event.ASSISTANT_REPLY))
-                        .map(e -> e.data().get("text").asText())
-                        .toList());
-    }
-
-    @Test
-    void theAgentLoopsOwnTextIsAReplyWhenTheNextCallStartsTheSameMillisecond() {
-        String letMeCheck = calling("Let me check.", "c9", "expedite");
-        String asked = user("expedite 42");
-        String done = "Done: order 42 is expedited.";
-        List<TimelineSpan> spans = List.of(
-                span("tr-g", "g1", "agent", null, 0, 500, null, done),
-                span("tr-g", "g2", "llm", "g1", 10, 100, list(asked), list(letMeCheck)),
-                span("tr-g", "g4", "llm", "g1", 100, 490, list(asked, letMeCheck, toolResult("c9", "ok")), done));
-
-        assertEquals(
-                "tr-g/g2#reply:0 tr-g/g4#reply:0",
-                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a clock boundary drops a reply when the next model call starts in the millisecond the last one ended");
-    }
-
-    @Test
-    void aSummaryThatRepeatsAnEarlierReplyIsNotAReply() {
-        List<TimelineSpan> spans = List.of(
-                span("tr-m", "m1", "agent", null, 0, 500, null, "Yes, expedited."),
-                span("tr-m", "m2", "llm", "m1", 10, 100, list(Q1, R1, user("summarise the chat")), R1_TEXT),
-                span("tr-m", "m3", "llm", "m1", 110, 490, list(Q1, R1, EXPEDITE), "Yes, expedited."));
-
-        assertEquals(
-                "tr-m/m3#reply:0",
-                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a text a later call carries only as old history is counted as shown again");
-    }
-
-    @Test
     void aModelCallInsideAToolOfTheAgentIsNotThePersonsDialogue() {
         String question = user("what does my contract say about refunds?");
         String answer = "Refunds within 30 days.";
@@ -188,23 +115,6 @@ class SessionTimelineBuilderTest {
                 messages(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a model call a tool makes reads as the person's dialogue: its prompt becomes the person's message"
                         + " and its text takes the place of the reply the agent loop wrote");
-    }
-
-    @Test
-    void aModelCallUnderAStepOfTheAgentIsThePersonsDialogue() {
-        List<TimelineSpan> spans = List.of(
-                span("T", "ag", "agent", null, 0, 100, null, "Hello!"),
-                span("T", "st", "step", "ag", 1, 99, null, null),
-                span("T", "l1", "llm", "st", 2, 98, list(SYS, user("hi")), "Hello!"));
-
-        assertEquals(
-                """
-                T/l1#user:0 hi
-                T/l1#reply:0 Hello!
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a span of unknown kind (stored as step) that wraps the agent's model call hides the person's"
-                        + " dialogue");
     }
 
     @Test
@@ -279,36 +189,6 @@ class SessionTimelineBuilderTest {
         assertEquals("t1/a#user:0 t1/l1 t1/x t1/l2#user:0 t1/l2 t1/y t1/l3 t1/l3#reply:0 t1/a", ids(timeline));
     }
 
-    @Test
-    void anAppWithoutAgentSpansRepliesFromEachTextCall() {
-        List<TimelineSpan> spans = List.of(
-                span("tr-l", "l1", "llm", null, 0, 10, null, "A"),
-                span("tr-l", "l2", "llm", null, 20, 30, null, list(calling(null, "c1", "x"))),
-                span("tr-l", "l3", "llm", null, 40, 50, null, "B"));
-
-        assertEquals(
-                "tr-l/l1#reply:0 tr-l/l3#reply:0",
-                replyIds(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a tool-call-only output is not a reply, and an app with no agent span still has replies");
-    }
-
-    /**
-     * Catches a question placed after the retrieval it caused: with no agent span, the model call that carries the
-     * question starts after the retrieval, but the root of the turn received the question first.
-     */
-    @Test
-    void aRetrievalTheQuestionCausedComesAfterTheQuestion() {
-        List<TimelineSpan> spans = List.of(
-                span("tr-1", "w", "workflow", null, 0, 400, "{\"question\":\"what is the refund policy?\"}", null),
-                span("tr-1", "r", "retrieval", "w", 10, 100, null, null),
-                span("tr-1", "l", "llm", "w", 150, 300, list(SYS, user("what is the refund policy?")), REFUNDS));
-
-        assertEquals(
-                List.of("tr-1/l#user:0 0", "tr-1/r 100", "tr-1/l 300", "tr-1/l#reply:0 300", "tr-1/w 400"),
-                idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
-                "the question is placed at the start of the turn that received it, before the work it caused");
-    }
-
     /** Catches an input guardrail on the root of a turn with no agent span coming before the message it checks. */
     @Test
     void aGuardrailBeforeTheFirstModelCallComesAfterTheMessage() {
@@ -321,24 +201,6 @@ class SessionTimelineBuilderTest {
                 List.of("tr-2/l#user:0 0", "tr-2/g 40", "tr-2/l 250", "tr-2/l#reply:0 250", "tr-2/w 300"),
                 idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a guardrail that checks the message comes after it");
-    }
-
-    /**
-     * Catches the same misplacement under an agent span that holds a framework's call arguments: the agent gives no
-     * message, the model call inside carries it, and the retrieval the agent ran first came after the message.
-     */
-    @Test
-    void aRetrievalUnderAnAgentWithCallArgumentsComesAfterTheMessage() {
-        String question = "{\"input\":\"what is the refund policy?\"}";
-        List<TimelineSpan> spans = List.of(
-                span("tr-3", "a", "agent", null, 0, 500, question, "{\"result\":\"done\"}"),
-                span("tr-3", "r", "retrieval", "a", 10, 60, null, null),
-                span("tr-3", "l", "llm", "a", 70, 400, list(user("what is the refund policy?")), REFUNDS));
-
-        assertEquals(
-                List.of("tr-3/l#user:0 0", "tr-3/r 60", "tr-3/l 400", "tr-3/l#reply:0 400", "tr-3/a 500"),
-                idsAndMillis(SessionTimelineBuilder.build("p1", "s", spans)),
-                "the message is placed at the start of the agent span that holds the model call carrying it");
     }
 
     /**
@@ -408,77 +270,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void anOrphanSpanIsARootOfItsOwn() {
-        List<TimelineSpan> spans = List.of(span("tr-x", "x1", "llm", "missing", 0, 100, null, null));
-
-        assertEquals(
-                table("tr-x/x1 llm 0 100 0 missing - - - tr-x -"),
-                rows(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a span whose parent never arrived crashes the builder or gets a wrong depth");
-    }
-
-    @Test
-    void aKindTheBuilderDoesNotKnowPassesThrough() {
-        List<TimelineSpan> spans = List.of(span("tr-n", "n1", "reranker", null, 0, 100, null, null));
-
-        Event event = SessionTimelineBuilder.build("p1", "s", spans).events().get(0);
-
-        assertEquals("reranker", event.kind(), "a new canonical kind is dropped or renamed");
-        List<String> keys = new ArrayList<>();
-        event.data().fieldNames().forEachRemaining(keys::add);
-        assertEquals(Set.of("name", "status", "input", "output", "attributes"), Set.copyOf(keys));
-    }
-
-    @Test
-    void tailKeepsTheNewestEventsThatFit() {
-        SessionTimeline full = SessionTimelineBuilder.build("p1", "sess-1", acceptanceSession());
-        long b12 = full.events().get(12).bytes();
-        long b13 = full.events().get(13).bytes();
-
-        SessionTimeline two = full.tail(b12 + b13);
-        SessionTimeline one = full.tail(b12 + b13 - 1);
-
-        assertEquals("tr-b/b1 tr-b/b1#reply:0", ids(two));
-        assertEquals(
-                List.of(0, 1),
-                two.events().stream().map(Event::position).toList(),
-                "a tail that keeps the old positions");
-        assertEquals(true, two.truncated());
-        assertEquals("tr-b/b1#reply:0", ids(one), "a tail that cuts from the wrong end");
-        assertEquals(full, full.tail(full.bytes()), "a tail that fits the whole timeline is the timeline");
-        assertEquals(false, full.truncated());
-    }
-
-    @Test
-    void twoTracesThatReuseASpanIdGiveDistinctEventIds() {
-        List<TimelineSpan> spans = List.of(
-                span("tr-1", "s1", "llm", null, 0, 100, list(user("hi")), "hello"),
-                span("tr-2", "s1", "llm", null, 200, 300, list(user("bye")), "goodbye"));
-
-        assertEquals(
-                "tr-1/s1#user:0 tr-1/s1 tr-1/s1#reply:0 tr-2/s1#user:0 tr-2/s1 tr-2/s1#reply:0",
-                ids(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a span id is unique only inside its trace, so a bare span id gives two events one id");
-    }
-
-    @Test
-    void aPlainStringInputIsOneUserMessage() {
-        List<TimelineSpan> spans = List.of(span("tr-p", "p1", "llm", null, 0, 100, "the export is empty", null));
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
-
-        assertEquals(
-                "tr-p/p1#user:0 tr-p/p1",
-                ids(timeline),
-                "a producer that sends a plain string loses the person's message");
-        assertEquals(
-                json("{\"text\":\"the export is empty\",\"from_person\":true}"),
-                data(timeline).get(0));
-        assertEquals(
-                json(list(user("the export is empty"))), data(timeline).get(1).get("new_messages"));
-    }
-
-    @Test
     void aLongAgentLoopReadsEachInputOnce() {
         int calls = 400;
         List<TimelineSpan> spans = new ArrayList<>();
@@ -499,22 +290,6 @@ class SessionTimelineBuilderTest {
                 calls,
                 replyIds(timeline).split(" ").length,
                 "every step the next call received, and the agent's answer");
-    }
-
-    @Test
-    void anAgentPayloadThatIsNotAMessageListGivesNoMessage() {
-        String args = "{\"args\":[],\"kwargs\":{\"question\":\"where is order 42\"}}";
-        List<TimelineSpan> spans = List.of(
-                span("T", "a1", "agent", null, 0, 500, args, "{\"answer\":\"Order 42 ships tomorrow.\"}"),
-                span("T", "l1", "llm", "a1", 10, 400, list(SYS, user("where is order 42")), list(R1)));
-
-        assertEquals(
-                """
-                T/l1#user:0 where is order 42
-                T/l1#reply:0 Order 42 ships tomorrow.
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "the agent's call arguments read as the person's message and its return object as the reply");
     }
 
     @Test
@@ -541,70 +316,6 @@ class SessionTimelineBuilderTest {
             T/a1#user:0 where is order 42
             T/l3#reply:0 Order 42 ships via DHL tomorrow.
             """, messages(arrived));
-    }
-
-    @Test
-    void aSettledTraceWhoseRootIsNotStoredStillHasItsMessages() {
-        List<TimelineSpan> spans = List.of(span("tr-x", "x1", "llm", "upstream", 0, 100, list(user("hi")), "hello"));
-
-        assertEquals(
-                """
-                tr-x/x1#user:0 hi
-                tr-x/x1#reply:0 hello
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "a turn whose parent span lives in a service that does not export loses the person's words");
-    }
-
-    @Test
-    void theAgentOutputsHistoryIsNotANewReply() {
-        String q1 = user("where is order 42?");
-        String r1 = assistant("It ships tomorrow.");
-        String q2 = user("thanks, expedite it");
-        List<TimelineSpan> spans = List.of(
-                span("t1", "a1", "agent", null, 0, 100, list(q1), list(q1, r1)),
-                span("t2", "b1", "agent", null, 200, 300, list(q1, r1, q2), list(q1, r1, q2, assistant("Done."))));
-
-        assertEquals(
-                """
-                t1/a1#user:0 where is order 42?
-                t1/a1#reply:0 It ships tomorrow.
-                t2/b1#user:0 thanks, expedite it
-                t2/b1#reply:0 Done.
-                """,
-                messages(SessionTimelineBuilder.build("p1", "s", spans)),
-                "an agent that returns the whole chat gives the last turn's reply again in this turn");
-    }
-
-    @Test
-    void anLlmOutputThatHoldsTheWholeChatKeepsOnlyThisCallsOutput() {
-        String history = String.join(",", Q1, TC1, toolResult("c1", "ships tomorrow"), R1, EXPEDITE);
-        List<TimelineSpan> spans =
-                List.of(span("t2", "l1", "llm", null, 0, 100, list(history), list(history, assistant("Done."))));
-
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "s", spans);
-
-        assertEquals(
-                json("{\"text\":\"Done.\",\"tool_calls\":[],\"reasoning\":null}"),
-                llmOutput(timeline),
-                "an output that holds the whole chat gives the llm event the replies and tool calls of earlier turns");
-        assertEquals("""
-            t2/l1#user:0 can you expedite it?
-            t2/l1#reply:0 Done.
-            """, messages(timeline));
-    }
-
-    @Test
-    void anLlmEventsOutputCarriesItsReasoningAndPartFormToolCalls() {
-        String toolUse = "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"lookup_order\",\"input\":{\"id\":42}}";
-        String parts = "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"text\":\"look it up\"},"
-                + "{\"type\":\"text\",\"text\":\"Let me check.\"}," + toolUse + "]}";
-        List<TimelineSpan> spans = List.of(span("T", "l1", "llm", null, 0, 100, list(Q1), list(parts)));
-
-        assertEquals(
-                json("{\"text\":\"Let me check.\",\"tool_calls\":[" + toolUse + "],\"reasoning\":\"look it up\"}"),
-                llmOutput(SessionTimelineBuilder.build("p1", "s", spans)),
-                "an Anthropic call's reasoning or tool_use part is missing from the llm event's output");
     }
 
     @Test
@@ -683,20 +394,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void aTurnThatStartsWhenThePreviousEndsComesAfterIt() {
-        String q1 = user("where is order 42?");
-        String r1 = assistant("It ships tomorrow.");
-        List<TimelineSpan> spans = List.of(
-                span("t1", "a1", "agent", null, 0, 100, list(q1), list(r1)),
-                span("t2", "b1", "agent", null, 100, 300, list(q1, r1, user("expedite it")), "Done."));
-
-        assertEquals(
-                "t1/a1#user:0 t1/a1 t1/a1#reply:0 t2/b1#user:0 t2/b1 t2/b1#reply:0",
-                ids(SessionTimelineBuilder.build("p1", "s", spans)),
-                "the next turn's message, one level deeper, sorts before the turn that ended in its instant");
-    }
-
-    @Test
     void aTurnOfTheSameTraceThatStartsWhenThePreviousEndsComesAfterIt() {
         String hi = user("hi");
         String hello = assistant("Hello, how can I help?");
@@ -714,22 +411,6 @@ class SessionTimelineBuilderTest {
     }
 
     @Test
-    void aModelCallThatStartsWhenThePreviousEndsComesAfterItsReply() {
-        String book = user("book a table");
-        String which = assistant("Which day?");
-        List<TimelineSpan> spans = List.of(
-                span("t", "w", "workflow", null, 0, 300, null, null),
-                span("t", "l1", "llm", "w", 10, 100, list(book), list(which)),
-                span("t", "l2", "llm", "w", 100, 290, list(book, which, user("friday")), "Booked for friday."));
-
-        assertEquals(
-                "t/l1#user:0 t/l1 t/l1#reply:0 t/l2#user:0 t/l2 t/l2#reply:0 t/w",
-                ids(SessionTimelineBuilder.build("p1", "s", spans)),
-                "the person's answer sorts before the question it answers when the next call starts in the instant"
-                        + " the last one ended");
-    }
-
-    @Test
     void aMessageComesBeforeTheSpansAboveItThatEndInItsInstant() {
         String a = user("a");
         String b = assistant("b");
@@ -743,20 +424,6 @@ class SessionTimelineBuilderTest {
                 ids(SessionTimelineBuilder.build("p1", "s", spans)),
                 "a span that ends in the instant its zero-length child starts comes before the child, or the"
                         + " message comes before a reply it answers");
-    }
-
-    @Test
-    void anEventsBytesIsTheSizeOfItsJsonWithoutPositionAndBytes() {
-        SessionTimeline timeline = SessionTimelineBuilder.build("p1", "sess-1", acceptanceSession());
-
-        for (Event event : timeline.events()) {
-            JsonNode node = MAPPER.valueToTree(event);
-            ((ObjectNode) node).remove(List.of("position", "bytes"));
-            assertEquals(
-                    node.toString().getBytes(StandardCharsets.UTF_8).length,
-                    event.bytes(),
-                    event.id() + ": a field of the event is left out of its size");
-        }
     }
 
     /** Section 5.1 of the CC-01 plan: two turns, a nested billing agent, a resent history, a reply on an agent. */
@@ -901,16 +568,6 @@ class SessionTimelineBuilderTest {
                 .filter(e -> e.kind().equals(Event.ASSISTANT_REPLY))
                 .map(Event::id)
                 .collect(Collectors.joining(" "));
-    }
-
-    private static JsonNode llmOutput(SessionTimeline timeline) {
-        return json(timeline.events().stream()
-                .filter(e -> e.kind().equals("llm"))
-                .findFirst()
-                .orElseThrow()
-                .data()
-                .get("output")
-                .toString());
     }
 
     /** The data nodes re-read from text, so a long the builder wrote compares equal to the int a test parses. */

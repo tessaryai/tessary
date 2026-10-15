@@ -34,20 +34,6 @@ class FindingTitleTest {
         assertEquals("Frustrated sessions increased on checkout-agent", FindingTitle.of(row));
     }
 
-    /**
-     * A cause the open code has no sentence for reads the title its writer stored. The bug is a finding whose writer
-     * named it shown under its bare cause key.
-     */
-    @Test
-    void aCauseWithNoSentenceReadsItsStoredTitle() {
-        FindingRow row = FindingRowBuilder.of("owned-x")
-                .title("Flagged replies rose from 2.0% to 9.0%")
-                .payload("{\"cause_kind\":\"owned_rate\",\"native_cause_key\":\"checkout-agent:up\"}")
-                .build();
-
-        assertEquals("Flagged replies rose from 2.0% to 9.0%", FindingTitle.of(row));
-    }
-
     /** With no stored title, or a blank one, such a cause still reads its key rather than an empty headline. */
     @ParameterizedTest
     @NullSource

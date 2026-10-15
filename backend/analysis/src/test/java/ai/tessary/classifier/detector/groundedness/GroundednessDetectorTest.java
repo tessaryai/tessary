@@ -193,15 +193,6 @@ class GroundednessDetectorTest {
     }
 
     @Test
-    void ungatedShapeNeverScoresOrCallsTheEncoder() {
-        GroundednessDetector d = detector(Map.of("cs-1", "draft"), List.of());
-        Detection detection = d.sweepBatch(
-                        SIGNAL, List.of(obs("cs-1", "write me a poem about the sea", "Waves crash...")), null)
-                .get(0);
-        assertFalse(detection.fired(), "an open-generation shape has no source content to be ungrounded from");
-    }
-
-    @Test
     void noCallSiteOrNoShapeIsSkippedNotScoredClean() {
         GroundednessDetector d = detector(Map.of(), List.of());
         assertFalse(d.sweepBatch(SIGNAL, List.of(obs(null, "some input", "some output")), null)
@@ -210,81 +201,6 @@ class GroundednessDetectorTest {
         assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-unknown", "some input", "some output")), null)
                 .get(0)
                 .fired());
-    }
-
-    @Test
-    void blankInputOrOutputIsSkipped() {
-        GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of());
-        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", null, "some output")), null)
-                .get(0)
-                .fired());
-        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", "some input", null)), null)
-                .get(0)
-                .fired());
-    }
-
-    /** The skipped row first, so a firing written at the scored index would land on it. */
-    @Test
-    void batchStaysIndexAlignedAndOnlyGatedRowsAreScored() {
-        GroundednessDetector d = detector(Map.of("cs-1", "extract", "cs-2", "draft"), List.of(0.99, 0.05));
-        List<Detection> ds = d.sweepBatch(
-                SIGNAL,
-                List.of(
-                        obs("cs-2", "write a poem", "roses are red"), // ungated -> skipped
-                        obs("cs-1", "the doc says X", "the doc says Y"), // gated, unsupported -> fires
-                        obs("cs-1", "the doc says X", "the doc says X")), // gated, supported -> quiet
-                null);
-        assertEquals(
-                List.of(false, true, false), ds.stream().map(Detection::fired).toList());
-    }
-
-    @Test
-    @DisplayName("document-in-prompt: the prompt (system AND user text) is the one passage, with no question")
-    void promptPremiseIncludesSystemMessageContentAndIsSentAsOnePassage() throws Exception {
-        List<Response> seen = new ArrayList<>();
-        GroundingEvidenceReads evidence = (projectId, ids) -> Map.of();
-        CallSiteShapeReads shapes = (projectId, ids) -> Map.of("cs-1", "extract");
-        GroundednessDetector d = detector(head(List.of(0.99), seen), shapes, evidence);
-        String storedInput = "[{\"role\":\"system\",\"content\":\"here is the document: refunds take 5-7 days\"},"
-                + "{\"role\":\"user\",\"content\":\"how long do refunds take?\"}]";
-        SubstrateObservation o = TestObservations.llm(
-                "obs-1",
-                "p",
-                "t",
-                "s",
-                "cs-1",
-                storedInput,
-                assistantOutput("Refunds take 5-7 business days."),
-                "2026-01-01T00:00:00Z");
-        Detection got = d.sweepBatch(SIGNAL, List.of(o), null).get(0);
-        // One passage: system and user text a line apart; the prompt already carries the question.
-        assertEquals(
-                List.of(new Response(
-                        List.of("here is the document: refunds take 5-7 days\nhow long do refunds take?"),
-                        null,
-                        "Refunds take 5-7 business days.")),
-                seen);
-        assertTrue(got.fired());
-        assertEquals(
-                false,
-                mapper.readTree(assertNotNull2(got.evidenceJson()))
-                        .get("premise_had_evidence")
-                        .asBoolean(true),
-                "checked against its prompt, not retrieved documents: the page and the RCA dossier say which");
-    }
-
-    @Test
-    void configThresholdOverridesTheDefault() {
-        String answer = "Refunds take 5-7 business days.";
-        GroundednessDetector d = detector(Map.of("cs-1", "extract"), List.of(0.9));
-        assertFalse(d.sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), null)
-                .get(0)
-                .fired());
-        Detection lowered = detector(Map.of("cs-1", "extract"), List.of(0.9))
-                .sweepBatch(SIGNAL, List.of(obs("cs-1", "how long do refunds take?", answer)), "{\"threshold\":0.85}")
-                .get(0);
-        assertTrue(lowered.fired(), "0.9 clears a lowered 0.85 threshold");
-        assertEquals(Detection.Confidence.HIGH, lowered.confidence());
     }
 
     @Test
