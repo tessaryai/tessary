@@ -2,6 +2,9 @@
 package ai.tessary.cases;
 
 import ai.tessary.classifier.finding.FindingRow;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A detector's adapter into the case object. Implementations answer one question — "what does a case
@@ -29,4 +32,18 @@ public interface CaseSource {
      * confidence — so this method reads the finding's own numbers and never re-checks that gate itself.
      */
     CaseDetection shape(FindingRow finding);
+
+    /**
+     * The finding's onset, or null when it is blank or not an instant (Postgres's own timestamp rendering): the case
+     * then opens unbracketed. Never substituted with now, since a case's onset is stamped once at open.
+     */
+    static @Nullable Instant onset(FindingRow finding) {
+        String onset = finding.onsetAt();
+        if (onset.isBlank()) return null;
+        try {
+            return Instant.parse(onset);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
 }

@@ -103,14 +103,14 @@ public record CaseRow(
         /**
          * A call site whose share of conversations frustrated with the agent rose above the rate it learned.
          * No triage gate: each spell's finding is ruled positive when it is filed, and opens or joins this case
-         * in the same transaction. See {@link FrustrationCaseSource}.
+         * in the same transaction. See {@link RateCaseSource}.
          */
         public static final String FRUSTRATION = "frustration";
 
         /**
          * A call site whose share of traces with a flagged answer rose above the rate it learned. Same gate
          * as {@link #MALFORMED_OUTPUT}: triage rules on the finding, and only a ruling of {@code positive},
-         * or a human pressing <em>Real deviation</em>, reaches Triage. See {@link GroundednessCaseSource}.
+         * or a human pressing <em>Real deviation</em>, reaches Triage. See {@link RateCaseSource}.
          */
         public static final String GROUNDEDNESS = "groundedness";
     }

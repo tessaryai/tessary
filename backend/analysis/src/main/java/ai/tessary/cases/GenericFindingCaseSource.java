@@ -4,20 +4,17 @@ package ai.tessary.cases;
 import ai.tessary.classifier.catalog.BuiltInDetector;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.Set;
-import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a qualifying finding into a case for every classifier the six dedicated sources
- * ({@link MetricDriftSource}, {@link ToolErrorCaseSource}, {@link MalformedOutputCaseSource},
- * {@link SecretLeakCaseSource}, {@link FrustrationCaseSource}, {@link GroundednessCaseSource}) don't own:
+ * Shapes a qualifying finding into a case for every classifier the dedicated sources
+ * ({@link MetricDriftSource}, {@link ToolErrorCaseSource}, {@link SecretLeakCaseSource}, {@link RateCaseSource})
+ * don't own:
  * any per-span classifier an org authors and arms itself. Before decision 1 such a classifier's only
  * route to a case was a human's <em>Real deviation</em> on a finding {@code ClassifierArming} filed.
  *
- * <p>Unlike the other six this source carries no evidence blob of its own shape to read numbers back
+ * <p>Unlike the dedicated sources this source carries no evidence blob of its own shape to read numbers back
  * from — its findings span whatever the classifier itself measured (N detections in a window) — so the case
  * it shapes states the fact plainly rather than a fitted before/after pair. {@link #gateSentence} still
  * records which authority ruled, matching every other source's own account of itself.
@@ -25,7 +22,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class GenericFindingCaseSource implements CaseSource {
 
-    /** The classifiers the six dedicated sources already own; this source claims everything else. */
+    /** The classifiers the dedicated sources already own; this source claims everything else. */
     private static final Set<String> DEDICATED = Set.of(
             BuiltInDetector.Kind.DURATION_DRIFT,
             BuiltInDetector.Kind.COST_DRIFT,
@@ -59,7 +56,7 @@ public class GenericFindingCaseSource implements CaseSource {
                 FindingTitle.of(finding),
                 basis(finding),
                 severity(finding),
-                onset(finding),
+                CaseSource.onset(finding),
                 null,
                 null,
                 null);
@@ -87,15 +84,5 @@ public class GenericFindingCaseSource implements CaseSource {
     private static double severity(FindingRow finding) {
         Double asserted = finding.severity();
         return asserted == null ? UNKNOWN_SEVERITY : Math.clamp(asserted, 0.0, 1.0);
-    }
-
-    private static @Nullable Instant onset(FindingRow finding) {
-        String onset = finding.onsetAt();
-        if (onset == null || onset.isBlank()) return null;
-        try {
-            return Instant.parse(onset);
-        } catch (DateTimeParseException e) {
-            return null;
-        }
     }
 }

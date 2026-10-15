@@ -9,9 +9,7 @@ import ai.tessary.classifier.secretleak.SecretLeakEvidence;
 import ai.tessary.classifier.secretleak.SecretLeakEvidence.SecretLeakDetail;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
-import java.time.Instant;
 import java.util.Locale;
-import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
@@ -76,7 +74,7 @@ public class SecretLeakCaseSource implements CaseSource {
                 // happening now, not a shift to characterize, and it outranks every other detector's
                 // ranked-list ordering by design.
                 1.0,
-                onset(finding),
+                CaseSource.onset(finding),
                 (double) read.leakCount(),
                 null,
                 null);
@@ -90,13 +88,5 @@ public class SecretLeakCaseSource implements CaseSource {
                 read.leakCount(),
                 read.leakCount() == 1 ? "" : "s",
                 read.rule());
-    }
-
-    private static @Nullable Instant onset(FindingRow finding) {
-        try {
-            return Instant.parse(finding.onsetAt());
-        } catch (Exception e) {
-            return null;
-        }
     }
 }

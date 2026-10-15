@@ -7,7 +7,6 @@ import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.Read;
 import ai.tessary.classifier.toolerror.ToolErrorService;
-import java.time.Instant;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -59,9 +58,7 @@ public class ToolErrorCaseSource implements CaseSource {
                 FindingTitle.of(finding),
                 basis(finding, read),
                 severity(read),
-                // Passed through including when null, never substituted with now: a case's onset is
-                // stamped once at open and never moves, so an invented timestamp here would misdate it.
-                onset(finding),
+                CaseSource.onset(finding),
                 read == null ? null : read.curRate(),
                 read == null ? null : read.refRate(),
                 read == null ? null : read.deltaPp());
@@ -92,14 +89,6 @@ public class ToolErrorCaseSource implements CaseSource {
      */
     private static double severity(@Nullable Read read) {
         return read == null ? 0.0 : ToolErrorEvidence.severityOf(read.criticality());
-    }
-
-    private static @Nullable Instant onset(FindingRow finding) {
-        try {
-            return Instant.parse(finding.onsetAt());
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     /** {@code tool_error_rate:tool:search_docs:up} → {@code tool:search_docs}. */

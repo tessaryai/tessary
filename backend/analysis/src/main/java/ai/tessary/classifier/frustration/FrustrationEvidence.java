@@ -3,7 +3,6 @@ package ai.tessary.classifier.frustration;
 
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
-import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -165,11 +164,5 @@ public final class FrustrationEvidence {
                 body.path("min_decision_interval").asDouble(0),
                 List.copyOf(conversations),
                 nextCursor);
-    }
-
-    /** Ordering weight for a case, the squash every rate detector on tool_error's engine shares. */
-    public static double severity(FindingRow finding) {
-        double criticality = finding.payload().path("criticality").asDouble(Double.NaN);
-        return Double.isNaN(criticality) ? 0.0 : ToolErrorEvidence.severityOf(criticality);
     }
 }

@@ -3,7 +3,6 @@ package ai.tessary.classifier.detector.groundedness;
 
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.toolerror.ToolErrorDetector.Decision;
-import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.RateDetail;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -183,11 +182,5 @@ public final class GroundednessEvidence {
                 body.path("threshold").asDouble(0),
                 body.path("effect_size").asDouble(0),
                 body.path("criticality").asDouble(0));
-    }
-
-    /** Ordering weight for a case, the squash every rate detector on tool_error's engine shares. */
-    public static double severity(FindingRow finding) {
-        double criticality = finding.payload().path("criticality").asDouble(Double.NaN);
-        return Double.isNaN(criticality) ? 0.0 : ToolErrorEvidence.severityOf(criticality);
     }
 }

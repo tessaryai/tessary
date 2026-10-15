@@ -8,8 +8,6 @@ import ai.tessary.classifier.metric.MetricBaselineRow.Measure;
 import ai.tessary.classifier.metric.MetricDriftDetector.Reference;
 import ai.tessary.classifier.metric.MetricFindingEvidence;
 import ai.tessary.classifier.metric.MetricFindingEvidence.Read;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.OptionalDouble;
 import java.util.Set;
@@ -79,7 +77,7 @@ public class MetricDriftSource implements CaseSource {
                 FindingTitle.of(finding),
                 basis(finding, read),
                 severity(read),
-                onset(finding),
+                CaseSource.onset(finding),
                 // The medians, in the measure's raw units: milliseconds for duration, dollars for cost.
                 read == null ? null : boxed(read.curP50()),
                 read == null ? null : boxed(read.refP50()),
@@ -159,27 +157,5 @@ public class MetricDriftSource implements CaseSource {
     private static @Nullable Double delta(@Nullable Read read) {
         if (read == null || read.refP50().isEmpty() || read.curP50().isEmpty()) return null;
         return read.curP50().getAsDouble() - read.refP50().getAsDouble();
-    }
-
-    /**
-     * When the current spell began: the finding's own onset, moved only across an observed recovery
-     * (see {@code FindingRepository}). A case's own onset is stamped once, at open, and never moves —
-     * this is only ever read on the finding that opens or joins a case.
-     *
-     * <p>Trade-off: under a backfill this isn't exact; the finding's own evidence carries the true
-     * window bounds for a reader who needs them.
-     */
-    private static @Nullable Instant onset(FindingRow finding) {
-        return parse(finding.onsetAt());
-    }
-
-    /** A null onset means the spell is unbracketed, rather than substituting {@code now}. */
-    private static @Nullable Instant parse(@Nullable String iso) {
-        if (iso == null || iso.isBlank()) return null;
-        try {
-            return Instant.parse(iso);
-        } catch (DateTimeParseException e) {
-            return null;
-        }
     }
 }
