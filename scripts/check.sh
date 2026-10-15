@@ -71,12 +71,9 @@
 # ---------------------------------------------------------------------------------------------
 # "Everything" is not one set. It is three, and they are not nested:
 #   1. THIS SCRIPT: the manifest below, minus the rows marked EXCLUDED.
-#   2. .github/workflows/drift-checks.yml: ONE job, workflow_dispatch only, a gate this script does
-#      not run: check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`; its
-#      offline rules half runs here as `vendored-plugin-rules`). It was fourteen jobs until the
-#      trim that deleted every job duplicating a row below.
-#   3. Standalone Taskfile targets neither pipeline runs the same way: `migrations:populated`
-#      (deliberately in neither).
+#   2. `task contract:plugin`: check-vendored-plugin.sh, which this script does not run (its
+#      offline rules half runs here as `vendored-plugin-rules`).
+#   3. `task migrations:populated`, run by hand per migration.
 # The manifest still carries a row for every `scripts/check-*.sh` on disk, EXCLUDED ones included,
 # because the completeness assertion below is what stops a gate from being deleted from the
 # pipeline by accident and saying nothing.
@@ -121,17 +118,14 @@
 # ---------------------------------------------------------------------------------------------
 # CI IS A PER-PR GATE. .github/workflows/check.yml runs this script, this manifest, on
 # `pull_request:`, so "local green => CI green" holds by construction on the same script rather than
-# on a weekly cron nobody watched. secret-scan.yml and boot-checks.yml are armed per PR alongside
-# it, and codeql.yml runs weekly. price-book-refresh.yml runs daily; its bot-authored PRs do not
+# on a weekly cron nobody watched. secret-scan.yml is armed per PR alongside it, and codeql.yml
+# runs weekly. price-book-refresh.yml runs daily; its bot-authored PRs do not
 # trigger check.yml, so it runs the price-book-contract gate itself before pushing. Everything else
-# is workflow_dispatch only, namespace-recheck.yml notably included, so that check runs nowhere
-# automatically; its header says what that costs.
+# is workflow_dispatch only.
 #
 # Nothing is merge-BLOCKING: this repo's plan tier offers neither branch protection nor rulesets, so
 # a red run can be merged past and only convention stops it.
-#
-# What CI runs per PR that this script does NOT is boot-checks.yml's Docker-backed jobs, each an
-# EXCLUDED row below; drift-checks.yml's one job is dispatch-only.
+
 #
 # CI never runs the Taskfile, only these scripts, which is why the gate's own logic lives here
 # rather than inline in Taskfile.yml.
@@ -152,13 +146,13 @@ SLICES="${1:-}"
 #                            the script and so "not here" is declared, not implied.
 _manifest() {
     cat <<'MANIFEST'
-version-consistency|scripts/check-version-consistency.sh|RUN|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. Pure text; unlike check-selfhost-images.sh, no Docker or registry call.
+version-consistency|scripts/check-version-consistency.sh|RUN|the git tag release.yml pushes is the only source of truth for a published version; asserts no file holds a copy and every machine-resolved image default floats to the release `-latest` tag. The artifact's pin is stamped by scripts/lib/pin-compose-version.py and checked by check-compose-artifact.sh. Pure text; no Docker or registry call.
 classifier-quality-doc|scripts/check-classifier-quality-doc.sh|RUN|devdocs/reference/classifier-quality.md pins the public groundedness model: the revision classifiers/groundedness/serve.py serves and the catalog's threshold, both in this tree
 module-hygiene|scripts/check-module-hygiene.sh|RUN
 license-headers|scripts/check-license-headers.sh|RUN|SPDX header presence over the tree; the script's own header names the interim manual-audit + weekly-CI posture it runs under until branch protection is available
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN
 contract-consistency|scripts/check-contract-consistency.sh|RUN
-vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. Its offline rules half runs per PR as the `vendored-plugin-rules` row|declared here only so the completeness assertion can see it
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs via `task contract:plugin`. Its offline rules half runs per PR as the `vendored-plugin-rules` row|declared here only so the completeness assertion can see it
 vendored-plugin-rules|scripts/check-vendored-plugin-rules.sh|RUN|phase 1 of check-vendored-plugin.sh on its own: pytest over contract/tests, the vendored validator rules the platform's import depends on. Offline and sub-second; needs python3 with pyyaml and pytest. check-vendored-plugin.sh calls this script, so the rules have one definition
 caddy|scripts/check-caddy.sh|RUN
 compose-artifact|scripts/check-compose-artifact.sh|RUN|the one-command install: docker-compose.yml is also the OCI artifact behind `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`, so it must stay publishable (long-syntax ports, literal memory limits) and mount no host path in a default-profile service; the build strip that makes the artifact must remove build sections and nothing else; pure text plus a client-side `docker compose config`, no daemon and no network
@@ -171,17 +165,9 @@ price-book-contract|scripts/check-price-book-contract.sh|RUN|the vendored price 
 frontend|scripts/check-frontend.sh|RUN
 backend|scripts/check-backend.sh|RUN|the JDK-25 guard runs before Maven does
 migrations-populated|scripts/check-migrations-populated.sh|EXCLUDED:wants Docker, a JDBC driver and minutes; run per migration that renames or narrows a persisted value|declared here only so the completeness assertion can see it
-open-boot|scripts/check-open-boot.sh|EXCLUDED:wants Docker and minutes to boot a real stack; run via `task check:open:boot` or boot-checks.yml, never part of `task check`|declared here only so the completeness assertion can see it
-open-boot-selfhost|scripts/check-open-boot-selfhost.sh|EXCLUDED:the gate's second leg: boots the self-host docker-compose.yml under the production profile; same Docker-and-minutes cost, run via `task check:open:boot:selfhost` or boot-checks.yml's second job, never part of `task check`|declared here only so the completeness assertion can see it
-selfhost-quickstart|scripts/check-selfhost-quickstart.sh|EXCLUDED:the quickstart rehearsal executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (ports 80/443), asserts every Check as the page words it, walks the three ladder checkpoints and the control arm, and prints the clock; Docker, network, minutes; run via `task check:selfhost:quickstart` or boot-checks.yml|declared here only so the completeness assertion can see it
-selfhost-images|scripts/check-selfhost-images.sh|EXCLUDED:needs Docker and the network to hit two public registries with no login, and a released `v<semver>` git tag (or --version=) to know what to ask for; run via `task check:selfhost:images`, by the quickstart rehearsal before its first timed command, and by boot-checks.yml, never part of `task check`|declared here only so the completeness assertion can see it
-zero-egress|scripts/check-zero-egress.sh|EXCLUDED:layers on the quickstart rehearsal with an internal network, a DNS sink and the opt-out set, asserts nothing outside the published permitted set at three vantage points, then proves the instrument with the heartbeat as positive control and a planted call; Docker, ports 80/443, minutes; run via `task check:zero:egress` or boot-checks.yml|declared here only so the completeness assertion can see it
-selfhost-compose-artifact|scripts/check-selfhost-compose-artifact.sh|EXCLUDED:the one-command install's end-to-end rehearsal — publishes the artifact to a throwaway TLS registry, boots `docker compose -f oci://...:compose up -d -y` from an empty directory and asserts the working directory stays empty; builds four images and boots a stack, so Docker and minutes; run via `task check:selfhost:compose` or boot-checks.yml's fourth job, never part of `task check`|declared here only so the completeness assertion can see it
 dependency-audit|scripts/check-dependency-audit.sh|EXCLUDED:manual/on-demand only — not in CI since 2026-09-02 (owner: no real keys in checks; the Maven leg hard-fails without NVD_API_KEY); runs OWASP dependency-check-maven + pnpm audit + pip-audit
-namespaces|scripts/check-namespaces.sh|EXCLUDED:the namespace ownership recheck: hits Docker Hub, GitHub and Hugging Face over the network; run via `task check:namespaces`, quarterly by namespace-recheck.yml and before every release by release.yml, never part of `task check`|declared here only so the completeness assertion can see it
-exposure-sweep|scripts/check-exposure-sweep.sh|EXCLUDED:the fresh-deployment exposure sweep: boots the self-host artifact and probes it, Docker and minutes; run via `task check:exposure:sweep` (--record to refresh scripts/lib/exposure-sweep-baseline.txt) and by boot-checks.yml's third job, never part of `task check`|declared here only so the completeness assertion can see it
 open-artifacts|scripts/check-open-artifacts.sh|EXCLUDED:the built-artifact diff: builds and exports the four published open images, minutes and Docker; run via `task check:open:artifacts` (add --negative for the planted-violation proof), and by release.yml's verify-open-artifacts job against the images it just built|declared here only so the completeness assertion can see it
-notice-coverage|scripts/check-notice-coverage.sh|EXCLUDED:manual/on-demand only — needs Docker to build the open backend and frontend images, same cost class as check-open-boot.sh; run directly with `bash scripts/check-notice-coverage.sh`
+notice-coverage|scripts/check-notice-coverage.sh|EXCLUDED:manual/on-demand only — needs Docker to build the open backend and frontend images, same cost class as check-open-artifacts.sh; run directly with `bash scripts/check-notice-coverage.sh`
 MANIFEST
 }
 

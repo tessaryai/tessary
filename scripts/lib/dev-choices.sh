@@ -21,9 +21,8 @@
 #   3. .local/dev-choices.env, the answers saved from an earlier run
 #   4. a multiple-choice prompt, when stdin is a terminal
 #   5. the non-interactive default. For agents that is what the stack
-#      did before these were questions, so CI and scripts/check-open-boot.sh see no change. For
-#      sign-in it is now enforced, like a self-hosted install; the one non-interactive caller that
-#      boots this stack already asked for exactly that explicitly.
+#      did before these were questions, so CI sees no change. For
+#      sign-in it is now enforced, like a self-hosted install.
 #
 # Only prompted answers are saved. An export is not: exporting a value once must not quietly
 # change every later plain `task dev`.

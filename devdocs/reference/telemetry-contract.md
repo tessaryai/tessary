@@ -136,12 +136,9 @@ wins).
 
 When set `false`: zero outbound network calls — including DNS resolution to
 `home.tessary.ai` — from the backend process (§4), covering the heartbeat
-ping (§1), the price book check (§1a), and the license-check call (§2). This is written precisely enough for
-`check-zero-egress.sh` to assert
-mechanically: with the var off, no attempt to resolve or reach
-`home.tessary.ai` may occur anywhere in a boot-to-triage run — proven via a
-DNS-sink network, with `TESSARY_TELEMETRY_ENABLED=true` run as the positive
-control that must log exactly `home.tessary.ai`.
+ping (§1), the price book check (§1a), and the license-check call (§2): with the
+var off, no attempt to resolve or reach `home.tessary.ai` may occur anywhere in
+a boot-to-triage run.
 
 ## 4. Scope note: backend-only
 

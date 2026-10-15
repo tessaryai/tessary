@@ -45,7 +45,7 @@ engineering constraints, and [`devdocs/README.md`](./devdocs/README.md) maps the
 | [`backend/`](./backend/) | The Java backend — conventions in [`backend/AGENTS.md`](./backend/AGENTS.md), inventory in [`devdocs/reference/architecture.md`](./devdocs/reference/architecture.md), module layering in [`devdocs/modules.md`](./devdocs/modules.md) |
 | [`frontend/`](./frontend/) | The React app — conventions in [`frontend/AGENTS.md`](./frontend/AGENTS.md) |
 | [`sandbox-runner/`](./sandbox-runner/) | The launcher that runs every agentic lane (RCA, Layer-2 triage) in a fresh E2B microVM — see its README |
-| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`) and the OTLP trace emitter the boot check uses (`classifiers/data_gen/`). Training and research code lives in `tessaryai/experiments`, not here |
+| [`classifiers/`](./classifiers/) | The Python classifier tree: the groundedness model server (`classifiers/groundedness/`). Training and research code lives in `tessaryai/experiments`, not here |
 | [`contract/`](./contract/) | Vendored evals-synth output contract (`scripts/sync-evals-contract.sh`). Files are verbatim copies; `contract/tests/` is OURS — the gate for the vendored validator, since the plugin repo is public and runs no CI |
 | [`claude-skill/`](./claude-skill/) | Claude Code integration helpers (the MCP skill) |
 | [`docs/`](./docs/) | Reference, concepts, guides — start at [`devdocs/README.md`](./devdocs/README.md) |

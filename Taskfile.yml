@@ -319,26 +319,23 @@ tasks:
   # ---- combined ----
   # The project gate. CI is a per-PR gate: .github/workflows/check.yml runs `bash scripts/check.sh`
   # on `pull_request:`, which is this same manifest, so local green => CI green on the same script.
-  # drift-checks.yml holds the one gate check.sh does NOT run (vendored-plugin's freshness half),
-  # dispatch-only. Merge-blocking is still not possible: branch protection is plan-gated on this
-  # repo.
+  # Merge-blocking is still not possible: branch protection is plan-gated on this repo.
   # Each target here and CI invoke the SAME scripts/check-*.sh, so the gate is defined once. There
   # are no per-gate CI JOBS to pair with: check.yml runs one job calling check.sh:
   #   contract:check        -> scripts/check-contract-consistency.sh (vendored contract drift)
-  #   contract:plugin       -> scripts/check-vendored-plugin.sh (validator rules + freshness; drift-checks.yml)
+  #   contract:plugin       -> scripts/check-vendored-plugin.sh (validator rules + freshness)
   #   backend:check         -> scripts/check-backend.sh  (mvn -B -T 2 verify)
   #   frontend:check        -> scripts/check-frontend.sh (pnpm run lint + pnpm run test [the route
   #                            render smoke test] + pnpm run build)
   #   caddy:validate        -> scripts/check-caddy.sh    (caddy validate + spec route coverage)
   #   check:license-headers -> scripts/check-license-headers.sh (SPDX header presence)
   #   migrations:populated (not in `check`) -> scripts/check-migrations-populated.sh
-  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) runs 17 of the 30
-  # scripts/check-*.sh. The 13 it does not run each carry an EXCLUDED manifest row, so the
+  # These are THREE gate sets, not one. `task check` (i.e. scripts/check.sh) does not run every
+  # scripts/check-*.sh. The ones it skips each carry an EXCLUDED manifest row, so the
   # completeness assertion covers them: check-migrations-populated.sh (wants a populated
-  # Postgres), check-vendored-plugin.sh (network; drift-checks.yml), the boot, self-host, egress,
-  # exposure and artifact checks (Docker and minutes; boot-checks.yml or release.yml), and
-  # check-dependency-audit.sh and check-notice-coverage.sh (manual/on-demand only, no real
-  # credential in any check). scripts/check.sh's manifest is where each gate's disposition is
+  # Postgres), check-vendored-plugin.sh (network), check-open-artifacts.sh (Docker and minutes;
+  # release.yml), and check-dependency-audit.sh and check-notice-coverage.sh (manual/on-demand
+  # only, no real credential in any check). scripts/check.sh's manifest is where each gate's disposition is
   # declared, and the manifest is asserted complete against the scripts on disk before anything
   # runs.
   # (A first-party OTLP-producer SDK previously lived under sdk/ with its own on-demand gate; it was
@@ -355,60 +352,15 @@ tasks:
       # rca,metering` and the unknown-slice error path all go through it.
       - bash scripts/check.sh "{{.CLI_ARGS}}"
 
-  check:open:boot:
-    desc: "The detached open-edition BOOT check (EXCLUDED from `task check` and from scripts/check.sh's manifest, see check-open-boot.sh's own header for why). Exports the working tree via scripts/lib/export-simulate.sh's copy+git-init recipe, boots the dev stack keyless in that export, and asserts caddy serves the dev port with an authenticated triage flow producing a real classifier verdict and no denied credential anywhere. Stores a clearly-fake placeholder credential under OPEN_BOOT_PROVIDER_NAME (default ANTHROPIC), no real key, no secret, ever. Needs Docker and a couple of minutes; manual/local use, or boot-checks.yml in CI, never run by an agent (see CLAUDE.md's toolchain notes)."
-    cmds:
-      - bash scripts/check-open-boot.sh
-
-  check:open:boot:selfhost:
-    desc: "The self-host gate's second leg: boots the SELF-HOST artifact, docker-compose.yml, in a clean-room export under the production profile (AuthRequiredInProdGuard, real backend/frontend Dockerfiles, sandbox-runner on the docker default) with only generated run-scoped values and no cloud credential. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-open-boot-selfhost.sh {{.CLI_ARGS}}
-
   check:open:artifacts:
     desc: "Builds the four open images release.yml publishes and diffs each one's real contents (every file, every jar entry, the served bundle) against scripts/lib/open-artifact-denylist.txt; --negative also proves the diff goes red on one planted violation per role. Needs Docker and minutes; EXCLUDED from `task check`; release.yml runs the same script against the images it just built before merging any manifest."
     cmds:
       - bash scripts/check-open-artifacts.sh {{.CLI_ARGS}}
 
-  check:namespaces:
-    desc: "Every registry, hub and source-control coordinate the tree references resolves to tessaryai through the platform's own ownership signal, and every referenced coordinate is in scripts/lib/namespace-inventory.txt; --negative proves the check goes red on a foreign coordinate. Needs the network (and gh auth while the repository is private). EXCLUDED from `task check`; quarterly plus dispatch via namespace-recheck.yml."
-    cmds:
-      - bash scripts/check-namespaces.sh {{.CLI_ARGS}}
-
-  check:exposure:sweep:
-    desc: "Boots the self-host artifact keyless under the production profile and attacks it from outside and from a neighbouring tenant: every spec operation unauthenticated, default credentials, the served bundle for maps and secrets, SSRF and traversal against a listener on the stack network, and a two-tenant substitution sweep. Writes the result set with --record so a later run can re-run it unmodified and diff. Needs Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-exposure-sweep.sh {{.CLI_ARGS}}
-
-  check:selfhost:quickstart:
-    desc: "The self-host quickstart rehearsal. Executes docs/self-hosting/setup.mdx's own command blocks verbatim in a clean-room export on the compose defaults (needs ports 80 and 443 free), asserts every Check as the page words it, and walks the onboarding ladder to fitting. Pass -- --build while the images are unpublished. Docker and minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-selfhost-quickstart.sh {{.CLI_ARGS}}
-
-  check:zero:egress:
-    desc: "Opt-out means silent. Runs the quickstart rehearsal on an internal network with a DNS sink and TESSARY_TELEMETRY_ENABLED=false, asserts no lookup outside the permitted set on docs/self-hosting/configuration.mdx, no daemon pull in the window, no foreign origin on the served page; then the heartbeat as positive control and a planted call. Pass -- --build while the images are unpublished. Docker, ports 80/443, minutes; never run by an agent; EXCLUDED from `task check`."
-    cmds:
-      - bash scripts/check-zero-egress.sh {{.CLI_ARGS}}
-
-  check:selfhost:images:
-    desc: "Asserts the four published image references (backend/frontend/sandbox-runner/AGENT_IMAGE) resolve with no registry login, are labeled with the version they're tagged as, and cover linux/amd64 + linux/arm64 — at BOTH `<service>-<version>` and `<service>-latest`, since an unset TESSARY_VERSION now resolves to the floating tag. Reads the version from the newest `v<semver>` git tag; pass `-- --version=<semver>` to check a specific release. Needs Docker and the network; never run by an agent; EXCLUDED from `task check`; run before the self-host boot job in boot-checks.yml."
-    cmds:
-      - bash scripts/check-selfhost-images.sh {{.CLI_ARGS}}
-
-  check:selfhost:compose:
-    desc: "The one-command install, end to end. Publishes docker-compose.yml as an OCI artifact to a throwaway TLS registry on this host, then runs `docker compose -f oci://.../tessary:compose up -d -y` from an EMPTY directory (no clone, no .env, no build context) and asserts the stack reaches healthy, pins this release's image tags, mounts no host path, leaves the working directory empty, and tears down clean. Builds four images and boots a stack; never run by an agent; EXCLUDED from `task check`; run by boot-checks.yml's fourth job."
-    cmds:
-      - bash scripts/check-selfhost-compose-artifact.sh
-
   publish:compose:
     desc: "Publish docker-compose.yml as the OCI artifact behind the one-command install, to Docker Hub and GHCR under `compose` and `compose-<version>`. The published copy is build-stripped AND version-stamped: the file in the repository holds no version literal, so the release's own version is substituted into its floating image defaults on the way out. Version comes from `--version=` (what release.yml passes) or the newest `v<semver>` git tag. Normally run by release.yml AFTER the images are merged and parity-verified, never on its own; needs a registry login for both repositories. Add --dry-run to see what it would write."
     cmds:
       - bash scripts/publish-compose-artifact.sh {{.CLI_ARGS}}
-  egress:capture:
-    desc: "Boots docker-compose.yml twice (TESSARY_TELEMETRY_ENABLED=true, then =false) and tcpdumps the compose network's own bridge interface on the HOST for each boot, proving the true pass reaches exactly {home.tessary.ai} and the false pass reaches nothing. Needs Docker, tcpdump, a Linux Docker host (not Docker Desktop for Mac/Windows — see scripts/lib/egress-capture.sh's header), and minutes; never run by an agent; EXCLUDED from `task check` and from scripts/check.sh's manifest by name (the script lives at scripts/lib/, not scripts/check-*.sh — see its own header for why)."
-    cmds:
-      - bash scripts/lib/egress-capture.sh
-
   # ---- docker (dev) ----
   # No tmux, so this is the only `up` available to CI, agents, and a plain ssh. It goes through a
   # script rather than inlining `{{.DC_DEV}} up -d --build` so the saved dev choices are resolved

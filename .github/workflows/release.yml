@@ -23,8 +23,7 @@
 # way answers `denied: permission_denied: read_package` — which is how run 34332530449 died, after
 # Docker Hub had already taken half a release. A second registry that can fail independently of the
 # first is a second way to publish half a release, and it bought nothing a self-hoster asked for.
-# The namespace is still ours and still in scripts/lib/namespace-inventory.txt; nothing publishes
-# to it.
+# The namespace is still ours; nothing publishes to it.
 #
 # Versioning: semver, not the repo's local short-SHA convention. THE GIT TAG `v<semver>` THIS
 # WORKFLOW PUSHES IS THE SINGLE SOURCE OF TRUTH for a published version — there is no VERSION file,
@@ -151,8 +150,7 @@
 # supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
 # of a number the tree already states twice — and the only workflow that read it, so nothing else
 # going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
-# the same source every other workflow's pnpm/action-setup reads and the rule drift-checks.yml's `frontend`
-# job states in as many words: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
+# the same source every other workflow's pnpm/action-setup reads: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
 # ARG default covers the launcher build, so dropping the build-arg removed a source rather than
 # adding one.
 

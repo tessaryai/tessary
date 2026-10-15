@@ -39,9 +39,7 @@
 #       one of the four AND CHANGES NOTHING ELSE.
 #
 # Pure text plus `docker compose config` (a client-side render — no daemon, no network), so it is
-# a RUN|RUN row in scripts/check.sh. The end-to-end proof that the artifact actually publishes,
-# resolves over oci:// and boots is a separate, Docker-heavy leg:
-# scripts/check-selfhost-compose-artifact.sh, run by boot-checks.yml.
+# a RUN row in scripts/check.sh.
 #
 #   bash scripts/check-compose-artifact.sh              the tree
 #   bash scripts/check-compose-artifact.sh --negative   in scratch copies: re-add a ${PWD} bind

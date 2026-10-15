@@ -26,8 +26,7 @@ name: Price book refresh
 #      this file (tessary-home fetches it by raw URL, see that script's header) cannot be skipped by
 #      the only PRs that routinely change it.
 #
-# GitHub disables scheduled workflows after 60 days without repository activity (drift-checks.yml's
-# header carries the same caveat). A frequent cron does not fix this: the disable trips on repository
+# GitHub disables scheduled workflows after 60 days without repository activity. A frequent cron does not fix this: the disable trips on repository
 # inactivity, not on cron frequency, and it does not make it worse either.
 #
 # DAILY 05:00 UTC. tessary-home's publish-pricing.yml fetches this file from main once a day at

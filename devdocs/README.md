@@ -59,7 +59,7 @@ at a glance whether a page teaches, explains, instructs, or just states facts.
 
 > Partner- and operator-facing setup lives in the published docs, not here:
 > [`../docs/self-hosting/setup.mdx`](../docs/self-hosting/setup.mdx) is the connect-your-traces
-> walkthrough, and it is the copy the `check:selfhost:quickstart` gate rehearses.
+> walkthrough.
 
 | Doc | What it's for |
 |---|---|

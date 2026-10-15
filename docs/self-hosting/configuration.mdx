@@ -212,7 +212,7 @@ for anyone auditing the wire format against the running code.
 
 ## What leaves your network
 
-The complete set of destinations a self-hosted instance may reach, and when. Anything else is a defect; `scripts/check-zero-egress.sh` in the repository boots the stack on a network with no route out, points every service at a DNS sink that records each name asked for, runs the setup page's steps end to end with the heartbeat turned off, and fails on any name outside this table, on any image pulled after the stack is up, and on any host named anywhere in the files the frontend serves, lazily loaded ones included, that is not on its enumerated list of never-fetched strings. The same run turns the heartbeat back on and requires the one permitted lookup to appear, so the check is known to be able to fail. Two limits the check states rather than hides: the frontend keeps a route out for its published port, so a connection it made to a bare IP address (never a name) would go unobserved, and its only configured egress is certificate issuance; and the sandbox runner pulls the agent image at the first analysis, which the check's walk never reaches, so that pull is listed below rather than measured.
+The complete set of destinations a self-hosted instance may reach, and when. Anything else is a defect.
 
 | Destination | When | Why it is permitted |
 | --- | --- | --- |

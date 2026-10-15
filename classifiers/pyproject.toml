@@ -1,17 +1,9 @@
 [project]
 name = "tessary-classifiers"
 version = "0.1.0"
-description = "The groundedness model server and the OTLP trace emitter the open boot check runs."
+description = "The groundedness model server."
 requires-python = ">=3.11"
 dependencies = []
-
-[project.optional-dependencies]
-# data_gen/emit_local.py. The platform's OTLP receiver is protobuf-only, so the proto-http exporter
-# is required, not the grpc one.
-otlp = [
-    "opentelemetry-sdk>=1.27",
-    "opentelemetry-exporter-otlp-proto-http>=1.27",
-]
 
 [tool.uv]
 package = false
@@ -20,8 +12,7 @@ package = false
 testpaths = ["tests"]
 
 [tool.coverage.run]
-# emit_local.py is boot-check tooling that only talks to a running platform.
-omit = ["data_gen/emit_local.py", "tests/*"]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 # serve.py's model half runs only against the downloaded checkpoint on a real device: scoring

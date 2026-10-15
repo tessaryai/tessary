@@ -20,10 +20,6 @@ import org.slf4j.LoggerFactory;
 /**
  * Pins the boundary that makes the shipped placeholder keys defensible: permitted on a
  * domainless instance, fatal on one that has a hostname.
- *
- * <p>The refuse branch is otherwise reachable only through {@code check-open-boot-selfhost.sh},
- * which is EXCLUDED from {@code task check} and needs Docker, so nothing an engineer runs
- * per-change would exercise it.
  */
 class PlaceholderSecretGuardTest {
 

@@ -37,9 +37,7 @@ import org.springframework.stereotype.Component;
  * <p><b>The enabled-gate is checked FIRST, before {@link InstanceIdRepository}, {@link HomeTessaryClient} or
  * {@link PriceBookFetcher} are touched at all.</b> One gate covers both calls to home, so an opted-out install
  * neither pings nor fetches prices, and prices from the book bundled in its jar. This is the single choke point that makes the contract's §3 guarantee true —
- * "zero outbound calls, including DNS resolution, when disabled" — and what a future {@code
- * check-open-boot.sh} deny-list (named explicitly in the contract, not yet built) will
- * point at.
+ * "zero outbound calls, including DNS resolution, when disabled".
  */
 @Component
 public class TelemetryHeartbeat {

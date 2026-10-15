@@ -471,14 +471,6 @@ removal of the work dirs a dead launcher left.
 (`test/fixtures/fake-e2b`) relays each SDK call to the test, which runs a fake `session.js` per
 sandbox, and the tests also cover the create, the file, the command, the kill on every way out and
 the egress rule.
-`check-open-boot.sh` (the open-edition boot gate's dev leg) does not
-probe this path — it's HTTP-only against backend/frontend/caddy, and docker-compose.dev.yml's
-`sandbox-runner` service is profile-gated off there. The gate's second leg,
-`check-open-boot-selfhost.sh`, boots `docker-compose.yml` with `sandbox-runner` started
-unconditionally and `SANDBOX_BACKEND` left unset, and asserts the launcher is RUNNING on the
-docker default — the boot half of this gap. It still does not drive a sandbox run through it;
-that remains a larger, separately-scoped change. (docker-compose.dev.yml no longer defaults the
-service to `e2b` either — its passthrough is empty, matching docker-compose.yml.)
 
 ### Manual end-to-end proof (2026-09-01, against a real Docker daemon)
 

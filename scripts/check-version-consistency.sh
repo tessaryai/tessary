@@ -22,8 +22,6 @@
 #       alone would pass on a file that deleted its default outright; this is the half that says
 #       the defaults still exist and still say `-latest`.
 # Pure text, no Docker, no network, no git tag lookup: cheap enough to run on every PR.
-# scripts/check-selfhost-images.sh is the separate, Docker-and-network leg that asks a registry
-# whether the tags actually resolve; it reads its expected version from the newest git tag.
 #
 # Must go red on a reintroduced literal, proven rather than asserted: run with
 #   VERSION_SOURCE_SELFTEST=1 bash scripts/check-version-consistency.sh
@@ -117,7 +115,7 @@ try:
         ["git", "ls-files", "-z"], capture_output=True, check=True
     ).stdout.decode("utf-8", "replace").split("\0")
 except (OSError, subprocess.CalledProcessError):
-    # A clean-room export copy is not a git checkout (the quickstart rehearsal runs there). Walk
+    # A clean-room export copy may not be a git checkout. Walk
     # the tree instead; the exclusions mirror what `git ls-files` would never list anyway.
     tracked = []
     SKIP_DIRS = {".git", "node_modules", "target", "dist", ".venv", "__pycache__"}

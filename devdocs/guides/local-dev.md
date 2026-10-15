@@ -49,7 +49,7 @@ The dev stack runs like the one `docker compose -f oci://docker.io/tessaryai/tes
 
 An answer is taken from the first of these that has one: the environment, `.env`, the saved file, a prompt on a terminal, then the non-interactive default. `.env` is read up front because anything the script exports outranks it at compose interpolation, so leaving it to compose would silently override it.
 
-The non-interactive default for agents is what the stack did before these were questions, so CI and `scripts/check-open-boot.sh` are unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
+The non-interactive default for agents is what the stack did before these were questions, so CI is unaffected — agents defaults to `off` outside a terminal, not `docker`, so a headless invocation never triggers an unexpected image build.
 
 With `agents=docker`, `task dev` builds the `sandbox-runner/agent-sandbox/` image before the stack comes up (`docker build`, cached on repeat runs) rather than pulling the published `tessaryai/tessary:agent-sandbox-*` tag — a boot-time failure there stops the whole run rather than surfacing as an opaque 502 on the first `/rca` or `/triage`. Set `AGENT_IMAGE` yourself to skip the checkout build and pin a published tag instead.
 

@@ -111,15 +111,11 @@ services:
       # `task dev` asks this as a question (scripts/lib/dev-choices.sh) and exports the answer, so
       # the default below only reaches someone running this file with compose directly. Opt out
       # with TESSARY_AUTH_DISABLED=true, knowing the sign-in flow cannot complete in that mode.
-      # scripts/check-open-boot.sh already exported "false" for its authenticated-flow proof.
       TESSARY_AUTH_DISABLED: ${TESSARY_AUTH_DISABLED:-false}
       # Where sign-in, sign-out, device-link and GitHub callbacks send the browser. The backend's own
       # default is :8000, the bare-metal `task caddy` port, so the dev origin is passed explicitly.
       TESSARY_AUTH_FRONTEND_URL: ${TESSARY_AUTH_FRONTEND_URL:-${TESSARY_DEV_ORIGIN:-http://localhost}/}
-      # Passthroughs for scripts/check-open-boot.sh, which runs this stack from a clean-room export
-      # with no .env and mints run-scoped random values for both (see its boot-recipe comment).
-      # Compose interpolation reads .env too, so a dev's own values keep winning on plain `task dev`.
-      #
+      # Compose interpolation reads .env, so a dev's own values win on plain `task dev`.
       # Unset everywhere, they land on the SAME two placeholders docker-compose.yml ships, rather
       # than on blank. Blank was a broken stack that looked like a working one: the app came up, and
       # the first account creation 500d with "TESSARY_AUTH_COOKIE_PASSWORD is not configured", which
@@ -329,9 +325,7 @@ services:
   # 2048, Bedrock ~1024); small traces cache nothing and show 0 — that's expected.
   #
   # Opt-in: gated behind the `observability` Compose profile, so this is absent from a
-  # default `task dev` / detached boot — that's exactly the path scripts/check-open-boot.sh
-  # exercises, so this one gate is what actually satisfies "no Alloy container by default"
-  # against the check that enforces it. Bring it up with `COMPOSE_PROFILES=observability
+  # default `task dev` / detached boot. Bring it up with `COMPOSE_PROFILES=observability
   # task dev` (task dev:profiling already does this for you — see scripts/dev.sh).
   alloy:
     profiles: ["observability"]
