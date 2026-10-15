@@ -7,8 +7,8 @@
  * scoring again; the turn-off modal warns, in production only, that the AWS instance keeps running.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderRoute } from "../../test/render";
 import { ApiError } from "../../api/types";
 import { GroundednessEnableModal, SETUP_POLL_MS } from "./GroundednessEnableModal";
 import { GroundednessRestartModal } from "./GroundednessRestartModal";
@@ -21,19 +21,8 @@ vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 beforeEach(() => api.setClassifierEnabled.mockImplementation(async () => ({})));
 
-function renderModal(onPromptCopied = vi.fn()) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <GroundednessEnableModal
-        classifierId="clf-g"
-        onClose={() => {}}
-        onEnabled={() => {}}
-        onPromptCopied={onPromptCopied}
-      />
-    </QueryClientProvider>,
-  );
-}
+const renderModal = (onPromptCopied = vi.fn()) =>
+  renderRoute(<GroundednessEnableModal classifierId="clf-g" onClose={() => {}} onEnabled={() => {}} onPromptCopied={onPromptCopied} />);
 
 /** Moves the fake clock `ms` on and lets the reads and renders it starts settle. */
 async function tick(ms: number) {
@@ -140,13 +129,8 @@ describe("GroundednessEnableModal", () => {
   // staleTime ends.
   it("marks the Classifiers charts and menu stale once it enables", async () => {
     api.getGroundednessStatus.mockResolvedValue(status({ configured: true, available: true }));
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { queryClient: qc } = renderModal();
     seedChartReads(qc);
-    render(
-      <QueryClientProvider client={qc}>
-        <GroundednessEnableModal classifierId="clf-g" onClose={() => {}} onEnabled={() => {}} onPromptCopied={() => {}} />
-      </QueryClientProvider>,
-    );
 
     await screen.findByText("Groundedness enabled");
     expect(api.setClassifierEnabled).toHaveBeenCalledWith("clf-g", true);
@@ -188,11 +172,7 @@ describe("GroundednessRestartModal", () => {
     vi.useFakeTimers();
     api.getGroundednessStatus.mockResolvedValueOnce(status({ state: "not_scoring", mode: "production", configured: true }));
     const onClose = vi.fn();
-    render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />
-      </QueryClientProvider>,
-    );
+    renderRoute(<GroundednessRestartModal classifierId="clf-g" mode="production" setupRef="v1.3.0" onClose={onClose} />);
     await tick(50);
     expect(api.getGroundednessStatus).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
@@ -208,11 +188,7 @@ describe("GroundednessRestartModal", () => {
 
 describe("GroundednessTurnOffModal", () => {
   const renderTurnOff = (mode: "production" | "dev", onClose = vi.fn()) => {
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <GroundednessTurnOffModal classifierId="clf-g" mode={mode} onClose={onClose} />
-      </QueryClientProvider>,
-    );
+    renderRoute(<GroundednessTurnOffModal classifierId="clf-g" mode={mode} onClose={onClose} />);
     return onClose;
   };
 

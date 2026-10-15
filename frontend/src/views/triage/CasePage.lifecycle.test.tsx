@@ -8,9 +8,7 @@
  * failed run that reads as an empty one, and a cause's "Show" that filters nothing.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type {
   CaseDetail,
   ClassifierDetail,
@@ -22,7 +20,7 @@ import type {
 import { ApiError } from "../../api/types";
 import type { CapabilitiesView, Me } from "../../api/types-auth";
 import { AuthProvider } from "../../auth/AuthContext";
-import { ToastProvider } from "../../ui";
+import { renderRoute } from "../../test/render";
 import { CasePage } from "./CasePage";
 import { stamp } from "../classifiers/shared";
 import {
@@ -223,22 +221,13 @@ beforeEach(() => {
     f.mockResolvedValue({});
 });
 
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <AuthProvider>
-          <MemoryRouter initialEntries={["/orgs/acme/projects/default/cases/case-1"]}>
-            <Routes>
-              <Route path="/orgs/:orgSlug/projects/:projectSlug/cases/:caseId" element={<CasePage />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </ToastProvider>
-    </QueryClientProvider>,
+const renderPage = () =>
+  renderRoute(
+    <AuthProvider>
+      <CasePage />
+    </AuthProvider>,
+    { route: "/orgs/acme/projects/default/cases/case-1", path: "/orgs/:orgSlug/projects/:projectSlug/cases/:caseId" },
   );
-}
 
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 const heading = (name: string) => screen.findByRole("heading", { level: 1, name });
