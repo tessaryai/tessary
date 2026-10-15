@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 /*
- * One agent session: one `opencode serve`, one OpenCode session, many messages. The launcher runs
- * `/usr/local/bin/node-sealed session.js <session.json>` once per session and drives it over HTTP
- * on SESSION_PORT; the routes, the events and their order are pinned in sandbox-runner/README.md,
- * "Agent sessions".
- *
- * Three invariants. session.json is deleted as soon as it is read, so no MCP token is on disk while
- * the agent runs: the tokens live only in this process's memory, in the relay. In the Docker agent
- * image this process runs from an execute-only node, so it is not dumpable and the agent's
- * processes, which run as the same user, cannot read its memory or its environment through /proc.
- * The E2B template cannot give that (see its node-sealed step). SESSION_SECRET leaves process.env
- * before `opencode serve` is spawned, so no child inherits it.
+ * One agent session: one `opencode serve`, one OpenCode session, many messages; the protocol is in
+ * sandbox-runner/README.md, "Agent sessions". session.json is deleted once read so MCP tokens live only
+ * in the relay's memory; the Docker image's execute-only node keeps that memory unreadable through
+ * /proc (E2B cannot); SESSION_SECRET leaves process.env before any child is spawned.
  */
 const crypto = require('node:crypto');
 const fs = require('node:fs');
