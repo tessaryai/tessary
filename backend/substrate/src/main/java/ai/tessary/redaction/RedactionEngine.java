@@ -40,29 +40,27 @@ public final class RedactionEngine {
 
     /** A redaction rule ready to apply: validated once, applied many times. */
     public sealed interface CompiledRule permits RegexRule, CorpusRule {
-        String name();
-
         String replacement();
     }
 
     /** An operator-authored or built-in regex, its replacement substituted literally. */
-    public record RegexRule(String name, Pattern pattern, String replacement) implements CompiledRule {}
+    public record RegexRule(Pattern pattern, String replacement) implements CompiledRule {}
 
     /**
      * A built-in rule backed by the {@link GitleaksCorpus} rather than a single regex. It is the one kind of
      * rule that reports what it matched, because a credential redacted on the way in is the record a leak
      * detector reads afterwards: see {@link #apply(String, List, BiConsumer)}.
      */
-    public record CorpusRule(String name, GitleaksCorpus corpus, String replacement) implements CompiledRule {}
+    public record CorpusRule(GitleaksCorpus corpus, String replacement) implements CompiledRule {}
 
     /**
      * Compile a rule's regex, or return null when it does not compile (a malformed rule is skipped, never
      * fatal). The replacement is treated as a literal string (no {@code $group} / backslash interpretation),
      * so a replacement like {@code [REDACTED]} or {@code $} is substituted verbatim.
      */
-    public static @Nullable CompiledRule compile(String name, String regex, String replacement) {
+    public static @Nullable CompiledRule compile(String regex, String replacement) {
         try {
-            return new RegexRule(name, Pattern.compile(regex), replacement);
+            return new RegexRule(Pattern.compile(regex), replacement);
         } catch (PatternSyntaxException e) {
             return null;
         }
@@ -381,10 +379,10 @@ public final class RedactionEngine {
         List<CompiledRule> compiled = new ArrayList<>(rows.size());
         for (RedactionRuleRow row : rows) {
             if (row.builtIn() && row.pattern().startsWith(GitleaksCorpus.PATTERN_SCHEME)) {
-                compiled.add(new CorpusRule(row.name(), GitleaksCorpus.get(), row.replacement()));
+                compiled.add(new CorpusRule(GitleaksCorpus.get(), row.replacement()));
                 continue;
             }
-            CompiledRule rule = compile(row.name(), row.pattern(), row.replacement());
+            CompiledRule rule = compile(row.pattern(), row.replacement());
             if (rule != null) compiled.add(rule);
         }
         return compiled;

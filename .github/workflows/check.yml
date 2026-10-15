@@ -5,10 +5,10 @@ name: Check
 #
 # Everything before the final step assembles the toolchains that script needs in one job:
 # Java (backend, and check-backend.sh hard-fails on the wrong JDK first), pnpm + node (frontend, sandbox-runner and mcp-bridge),
-# python (the gates that shell out to python3), uv (the groundedness gates), and caddy on PATH (the
-# caddy gate). Order matters once: pnpm/action-setup must run before
-# actions/setup-node, since setup-node's pnpm cache shells out to pnpm to resolve the store
-# path.
+# uv (the groundedness gates), and caddy on PATH (the caddy gate). The gates that shell out to
+# python3 use only its standard library, so the runner image's own python3 serves them. Order
+# matters once: pnpm/action-setup must run before actions/setup-node, since setup-node's pnpm
+# cache shells out to pnpm to resolve the store path.
 #
 # This repo's GitHub plan doesn't support branch protection or rulesets, so nothing enforces
 # this workflow as a required check yet beyond convention: treat a red run as blocking even
@@ -134,16 +134,6 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-
-      # Gates shell out to python3 (version-consistency, license-headers, caddy, compose-artifact,
-      # vendored-plugin-rules). Pinned rather than relying on
-      # whatever ubuntu-latest ships.
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-      # vendored-plugin-rules runs pytest over contract/tests, which imports yaml.
-      # Major-pinned, not exact-pinned: see drift-checks.yml's vendored-plugin job for why.
-      - run: pip install 'pyyaml~=6.0' 'pytest~=9.0'
 
       # check-groundedness-serve.sh runs serve.py's tests with `uv run --no-project --with pytest`, and
       # check-groundedness-setup.sh runs `uvx cfn-lint` on the AWS template. Neither syncs

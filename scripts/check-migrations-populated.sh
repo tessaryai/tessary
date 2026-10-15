@@ -238,9 +238,7 @@ expect "finding open+positive backing a live case (pre-0011)" 1 "SELECT count(*)
                                                       WHERE id='fnd_fix_open_cased' AND status='open' AND triage_verdict='positive'"
 expect "eval_case backing the open+positive finding" 1 "SELECT count(*) FROM eval_case
                                                       WHERE finding_id='fnd_fix_open_cased' AND state<>'resolved'"
-expect "annotation all three grains"          3 "SELECT count(DISTINCT subject_kind) FROM annotation"
-expect "failure_mode_instance both grains"    2 "SELECT count(DISTINCT subject_kind) FROM failure_mode_instance"
-expect "metric_rollup metering metrics"       2 "SELECT count(*) FROM metric_rollup WHERE metric IN ('l1_evals','l2_evals')"
+expect "metric_rollup metering metric"        1 "SELECT count(*) FROM metric_rollup WHERE metric='l1_evals'"
 expect "metric_baseline row"                  1 "SELECT count(*) FROM metric_baseline WHERE bucket_key='cs_fix'"
 expect "retention_policy both classes"        2 "SELECT count(DISTINCT data_class) FROM retention_policy
                                                    WHERE data_class IN ('traces','detections')"

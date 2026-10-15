@@ -17,11 +17,6 @@ import org.jspecify.annotations.Nullable;
  */
 public record FlagContext(@Nullable String orgId) {
 
-    /** No org in scope: only a flag's global default (or a global rule) can apply. */
-    public static FlagContext global() {
-        return new FlagContext(null);
-    }
-
     /** Target one org by ULID. */
     public static FlagContext forOrg(@Nullable String orgId) {
         return new FlagContext(orgId);

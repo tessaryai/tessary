@@ -34,24 +34,18 @@ import ai.tessary.classifier.worker.ClassifierSweepRegistry;
 import ai.tessary.classifier.worker.SweepRouting;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.GroundednessProperties;
-import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
-import ai.tessary.llmspi.ModelLane;
 import ai.tessary.model.JobStatus;
 import ai.tessary.open.errors.ClassifierError;
-import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
-import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -146,7 +140,7 @@ class ClassifierServiceTest {
 
         ClassifierDtos.TuningView view = service.getTuning(PID, "clf-cost");
 
-        MetricDriftConfig defaults = MetricDriftConfig.defaults();
+        MetricDriftConfig defaults = MetricDriftConfig.DEFAULTS;
         assertTrue(0 < tight.stdDevLog()
                 && tight.stdDevLog() < middle.stdDevLog()
                 && middle.stdDevLog() < wide.stdDevLog());
@@ -276,34 +270,6 @@ class ClassifierServiceTest {
         assertEquals(JobStatus.DONE, v.status());
         assertEquals(0, v.attempts());
         assertNull(v.lastError());
-    }
-
-    @Test
-    void anOrgOutOfPlatformCreditKeepsItsPauseWhenAnotherKeyIsSaved() {
-        when(projects.findByOrg(ORG))
-                .thenReturn(List.of(new Project(PID, ORG, "p", "P", null, "t0", null, null, true, null)));
-        when(signals.listByProject(PID)).thenReturn(List.of(frustration()));
-        when(signals.findPause(PID, "cls-f"))
-                .thenReturn(Optional.of(new ClassifierPause(ClassifierPause.NO_CREDIT, Instant.EPOCH)));
-        when(decisionProviders.resolve(PID, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
-
-        assertEquals(0, service.unpauseForProvider(ORG, ModelProvider.OPENAI));
-        verify(signals, never()).unpause(PID, "cls-f");
-    }
-
-    /** Enabling asks whether the lane has a provider, not whether it has credit: a sweep pauses it as no_credit. */
-    @Test
-    void enablingFrustrationOnAProviderWithNoCreditLeftIsAccepted() {
-        when(projects.findById(PID))
-                .thenReturn(Optional.of(new Project(PID, ORG, "p", "P", null, "t0", null, null, true, null)));
-        when(signals.findById(PID, "cls-f")).thenReturn(Optional.of(frustration()));
-        when(signals.setEnabled(PID, "cls-f", true)).thenReturn(1);
-        when(decisionProviders.hasProvider(PID, ModelLane.FRUSTRATION)).thenReturn(true);
-        when(decisionProviders.resolve(PID, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
-
-        service.setEnabled(PID, "cls-f", true);
-
-        verify(signals).setEnabled(PID, "cls-f", true);
     }
 
     /** Catches a zero-row write being reported as a success, handing back a row the write never touched. */
@@ -530,12 +496,6 @@ class ClassifierServiceTest {
                 null,
                 "2026-01-01T00:00:00Z",
                 "2026-01-01T00:00:00Z");
-    }
-
-    private static final class NoCredit extends TessaryException implements PlatformCreditExhausted {
-        NoCredit() {
-            super(ModelConfigError.MISSING_CREDENTIALS, ModelProvider.PLATFORM);
-        }
     }
 
     /** The structured fields of every event named {@code name} that {@code source}'s logger wrote while {@code action} ran. */

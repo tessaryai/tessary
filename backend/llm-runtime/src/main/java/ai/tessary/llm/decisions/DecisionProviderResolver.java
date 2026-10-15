@@ -9,6 +9,7 @@ import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
 import ai.tessary.llmspi.ModelLane;
 import java.util.Optional;
+import org.springframework.stereotype.Component;
 
 /**
  * Project to decision target: the decision lane's provider and model for this project, then the org's
@@ -18,15 +19,8 @@ import java.util.Optional;
  * lane runs there even when the org also holds a TypeSafe key, and an unpinned lane follows
  * {@code LanePriority} (TypeSafe first). Empty when the org holds a key for no provider the lane
  * offers, which a caller treats as "no provider".
- *
- * <p>Registered by {@code LlmSeamConfig} only when no other build supplies one, so a build that offers
- * {@link ModelProvider#PLATFORM} can extend this class and resolve that provider to a target of its
- * own. It may throw an exception implementing {@link ai.tessary.llm.PlatformCreditExhausted} when the
- * org has no credit left for it. This build never resolves {@code PLATFORM}: no credential row backs it.
- *
- * <p>{@link #hasProvider} answers only whether the lane has somewhere to run and never calls
- * {@link #resolve}, so a subclass's credit check cannot reach it.
  */
+@Component
 public class DecisionProviderResolver {
 
     private final ProjectModelSettings settings;
@@ -45,23 +39,14 @@ public class DecisionProviderResolver {
         this.orgResolver = orgResolver;
     }
 
-    /**
-     * Whether the lane has a provider to run on: the org holds a key for it, or it is the deployment's
-     * own. Opens no key and asks nothing about credit, which is the difference from {@link #resolve}.
-     */
+    /** Whether the lane has a provider to run on: the org holds a key for it. Opens no key. */
     public boolean hasProvider(String projectId, ModelLane lane) {
-        String orgId = orgResolver.orgIdFor(projectId);
-        if (orgId == null) return false;
-        Optional<ProjectModelSettings.ResolvedDecisionModel> model = settings.resolveDecisionModel(projectId, lane);
-        if (model.isEmpty()) return false;
-        ModelProvider provider = model.get().provider();
-        // ProjectModelSettings offers PLATFORM only when the deployment supplies it to this org.
-        return provider == ModelProvider.PLATFORM
-                || credentials
-                        .findByOrgAndProvider(orgId, provider)
-                        .map(ProviderCredential::apiKeySealed)
-                        .filter(key -> !key.isBlank())
-                        .isPresent();
+        return Optional.ofNullable(orgResolver.orgIdFor(projectId))
+                .flatMap(orgId -> settings.resolveDecisionModel(projectId, lane)
+                        .flatMap(model -> credentials.findByOrgAndProvider(orgId, model.provider())))
+                .map(ProviderCredential::apiKeySealed)
+                .filter(key -> !key.isBlank())
+                .isPresent();
     }
 
     public Optional<DecisionTarget> resolve(String projectId, ModelLane lane) {

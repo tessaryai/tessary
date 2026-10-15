@@ -16,7 +16,7 @@ export interface ApiResponse<T> {
   data: T | null;
 }
 
-export type ResponseMeta = S["ResponseMeta"];
+type ResponseMeta = S["ResponseMeta"];
 export type ErrorBody = S["ErrorBody"];
 
 export class ApiError extends Error {
@@ -91,7 +91,7 @@ export type ChartCard = Omit<S["ChartCard"], "kind" | "unit" | "arming"> & {
   unit: "fraction" | "ms" | "usd" | "count";
   arming: ChartArming | null;
 };
-export type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
+type ChartArming = Omit<S["ArmingView"], "confidence"> & { confidence: "high" | "any" };
 /**
  * One point of a card, from `start_at` to `end_at` (exclusive, UTC). A rate or range point is merged from hours with
  * data until it holds about 500 items or spans a day; a count point is a fixed bucket, zero included. `open` marks the
@@ -260,14 +260,14 @@ export type SearchResults = S["GlobalSearchView"];
  * `rate_shift`, secret leak's `armed_window`, malformed output's `malformed_rate` and groundedness's
  * `groundedness_rate`.
  */
-export type BehaviorCauseKind =
+type BehaviorCauseKind =
   | "distribution_shift"
   | "rate_shift"
   | "armed_window"
   | "malformed_rate"
   | "groundedness_rate";
 
-export type BehaviorFindingStatus = "open" | "closed";
+type BehaviorFindingStatus = "open" | "closed";
 
 /** The two acted-on outcomes. The third outcome is doing nothing, which posts nothing. */
 export type BehaviorResolutionAction = "expected" | "not_expected";
@@ -289,14 +289,14 @@ export type BehaviorFindings = Omit<S["BehaviorFindingsView"], "findings"> & {
  * A cost or duration drop rules `positive` like any other true claim. "Improvement" is a judgement about
  * intent, and triage has no evidence with which to make one.
  */
-export type TriageVerdict = "positive" | "negative";
+type TriageVerdict = "positive" | "negative";
 
 /**
  * What the ruling did. Fixed by the verdict (`sound → opened_case`, everything else → `closed`) and
  * sent anyway, because it is what the reader is being told; deriving it here would be a second copy
  * of a mapping the server owns.
  */
-export type TriageAction = "opened_case" | "closed";
+type TriageAction = "opened_case" | "closed";
 
 /**
  * Where a finding is in the triage lane. `pending` is un-scheduled, not un-ruled.
@@ -305,7 +305,7 @@ export type TriageAction = "opened_case" | "closed";
  * nothing clears the escalation timestamp, so on the finding alone it is identical to one still
  * running: which is why a dead triage used to render as "Triaging" indefinitely.
  */
-export type TriageStatus = "pending" | "in_flight" | "done" | "failed";
+type TriageStatus = "pending" | "in_flight" | "done" | "failed";
 
 /**
  * What pressing Run analysis on a finding produced: the queued job, the lane that will rule on it,

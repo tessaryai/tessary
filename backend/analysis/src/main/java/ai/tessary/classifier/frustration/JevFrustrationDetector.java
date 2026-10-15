@@ -13,8 +13,6 @@ import ai.tessary.classifier.frustration.FrustrationAssessmentRepository.TurnFac
 import ai.tessary.classifier.frustration.FrustrationTurnBuilder.EligibleTurn;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.config.FrustrationProperties;
-import ai.tessary.llm.ModelProvider;
-import ai.tessary.llm.PlatformCreditExhausted;
 import ai.tessary.llm.decisions.DecisionAnswer;
 import ai.tessary.llm.decisions.DecisionClient;
 import ai.tessary.llm.decisions.DecisionProviderResolver;
@@ -233,20 +231,12 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                 return new Page(Status.PAUSED, pause.get().reason(), 0, List.of(), threshold, scorerVersion);
             }
         }
-        Optional<DecisionTarget> resolved;
-        String unresolved = ClassifierPause.NO_PROVIDER;
-        try {
-            resolved = providers.resolve(projectId, ModelLane.FRUSTRATION);
-        } catch (TessaryException e) {
-            if (!(e instanceof PlatformCreditExhausted)) throw e;
-            resolved = Optional.empty();
-            unresolved = ClassifierPause.NO_CREDIT;
-        }
+        Optional<DecisionTarget> resolved = providers.resolve(projectId, ModelLane.FRUSTRATION);
         if (resolved.isEmpty()) {
-            classifiers.pause(projectId, signal.id(), unresolved, now);
+            classifiers.pause(projectId, signal.id(), ClassifierPause.NO_PROVIDER, now);
             // A re-check that still finds nothing to run on passes the page, as the pause it extends would have.
             Status status = recheck ? Status.PAUSED : Status.ABORTED;
-            return new Page(status, unresolved, 0, List.of(), threshold, scorerVersion);
+            return new Page(status, ClassifierPause.NO_PROVIDER, 0, List.of(), threshold, scorerVersion);
         }
         DecisionTarget target = resolved.get();
         if (recheck) classifiers.unpause(projectId, signal.id());
@@ -278,13 +268,10 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         boolean refused =
                 sent.stream().anyMatch(s -> Outcome.REFUSED.equals(s.outcome().failure()));
         if (rejected || refused || sent.stream().anyMatch(s -> s.outcome().stopsTheKey())) {
-            // The platform provider's key is the deployment's, so its refusal or empty balance is not the org's
-            // to fix. The org's own credit running out is no_credit, the same pause as the deployment's provider.
             // A refused request on the org's own key is request_refused: the key works, the request does not,
             // and the log line above carries the provider's words.
             String reason;
-            if (target.provider() == ModelProvider.PLATFORM) reason = ClassifierPause.PLATFORM_UNAVAILABLE;
-            else if (rejected) reason = ClassifierPause.PROVIDER_REJECTED;
+            if (rejected) reason = ClassifierPause.PROVIDER_REJECTED;
             else if (refused) reason = ClassifierPause.REQUEST_REFUSED;
             else reason = ClassifierPause.NO_CREDIT;
             classifiers.pause(projectId, signal.id(), reason, now);
@@ -510,9 +497,6 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             return "the provider refused the request itself on the org's key; see signal.frustration.refused";
         }
         if (ClassifierPause.NO_CREDIT.equals(reason)) return "the org has no credit left on the provider";
-        if (ClassifierPause.PLATFORM_UNAVAILABLE.equals(reason)) {
-            return "the platform provider rejected the deployment's key";
-        }
         return "no provider key is configured for the frustration lane";
     }
 
@@ -528,11 +512,8 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
             if (callCost != null) cost = cost.add(callCost);
         }
         if (page.status() == Status.ABORTED) {
-            // Every org on the deployment shares the platform provider's key, so its refusal needs a human.
-            StructuredLog.Builder line = ClassifierPause.PLATFORM_UNAVAILABLE.equals(page.pauseReason())
-                    ? StructuredLog.error(log, Markers.OPS, "signal.frustration.paused")
-                    : StructuredLog.warn(log, Markers.OPS, "signal.frustration.paused");
-            line.message(
+            StructuredLog.warn(log, Markers.OPS, "signal.frustration.paused")
+                    .message(
                             "paused %s: %s; the page was not recorded",
                             signal.classifierKey(), pauseCause(page.pauseReason()))
                     .field("signal", signal.classifierKey())

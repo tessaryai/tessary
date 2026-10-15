@@ -133,8 +133,7 @@ services:
     expose:
       - "8080"
       # OTLP/gRPC trace receiver. Reachable on the internal `tessary` network so the Caddy
-      # ingress can route :4317 to it. Inert unless tessary.ingest.otlp.enabled=true AND
-      # tessary.ingest.otlp.transport is grpc|both. NOTE: publishing 4317 to the host additionally needs
+      # ingress can route :4317 to it. Inert unless tessary.ingest.otlp.transport is grpc|both. NOTE: publishing 4317 to the host additionally needs
       # `EXPOSE 4317` in backend/Dockerfile (a protected path — human-owned) and a
       # host `ports:` mapping wired with the ingress change.
       - "4317"

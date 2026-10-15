@@ -48,11 +48,6 @@ import org.springframework.stereotype.Component;
  *
  * <p>Each closed (project, bucket) is metered as one idempotent upsert per unit. Re-running a closed
  * bucket overwrites each row with the same stable count (see {@link MetricRollupRepository}).
- *
- * <p>The {@code storage} unit is a LEVEL, not an event stream: it is snapshotted as a
- * {@code COUNT(*)} of ingested-observation rows at rest AS-OF the bucket end, not counted
- * over the bucket window. It is gated behind {@code tessary.metering.storage-enabled} (default off) because
- * the billable basis (rows vs bytes vs retention-days) is an open billing product decision.
  */
 @Component
 public class MeteringWorker {
@@ -166,30 +161,12 @@ public class MeteringWorker {
         upsertUnit(job, UsageUnit.INGESTED_SPANS, rollups.countIngestedSpans(job.projectId(), from, to), createdAt);
         upsertUnit(job, UsageUnit.INGESTED_TRACES, rollups.countIngestedTraces(job.projectId(), from, to), createdAt);
         upsertUnit(job, UsageUnit.L1_EVALS, rollups.countL1Evals(job.projectId(), from, to), createdAt);
-        meterStorage(job, to, createdAt);
         jobs.markDone(job.id());
-    }
-
-    /**
-     * Snapshot the project's storage LEVEL as of the bucket's end and upsert it as the
-     * {@code storage} unit. Unlike the event-stream units, storage is not a closed-bucket
-     * COUNT over {@code [from, to)} — it is a level (rows at rest), so it is a {@code COUNT(*)} snapshot taken
-     * AS-OF the bucket boundary {@code asOf}. The upsert's {@code DO UPDATE SET value = EXCLUDED.value} is
-     * last-writer-wins, which is exactly right for a level: re-running a bucket overwrites the snapshot.
-     *
-     * <p>Gated behind {@code tessary.metering.storage-enabled} (default off): the billable BASIS (rows vs bytes
-     * vs retention-days) is an open billing product decision, so the slot stays reserved until a deployment
-     * opts in. The v1 basis is <b>ingested-observation rows at rest</b> — the durable, already-counted
-     * substrate level.
-     */
-    private void meterStorage(MetricRollupJobRow job, String asOf, String createdAt) {
-        if (!props.isStorageEnabled()) return; // basis-ratification fence
-        upsertUnit(job, UsageUnit.STORAGE, rollups.snapshotStorageRows(job.projectId(), asOf), createdAt);
     }
 
     /** Upsert the one {@code metric_rollup} row this unit's aggregation produced. */
     private void upsertUnit(MetricRollupJobRow job, UsageUnit unit, long value, String createdAt) {
-        rollups.upsert(MetricRollupRow.of(
+        rollups.upsert(new MetricRollupRow(
                 Ids.ulid(),
                 job.orgId(),
                 job.projectId(),

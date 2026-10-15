@@ -19,27 +19,11 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "tessary.metering")
 public class MeteringProperties {
 
-    /**
-     * Whether to produce the {@code storage} usage unit. Default off: storage is a point-in-time
-     * snapshot whose billable basis (rows vs bytes vs retention-days) is a product decision tied to
-     * billing, so the slot stays reserved until a deployment ratifies the basis and opts in. The other
-     * four units always meter.
-     */
-    private boolean storageEnabled = false;
-
     /** How many per-(project, bucket) jobs one heartbeat claims; SKIP-LOCKED spreads the rest. */
     private int claimBatch = 50;
 
     /** Reclaim window (seconds) for a job a worker claimed but did not finish (e.g. crashed mid-aggregation). */
     private long leaseSeconds = 600;
-
-    public boolean isStorageEnabled() {
-        return storageEnabled;
-    }
-
-    public void setStorageEnabled(boolean v) {
-        this.storageEnabled = v;
-    }
 
     public int getClaimBatch() {
         return claimBatch;

@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  */
 class DeterministicNlPhraseCompilerTest {
 
-    private final NlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
+    private final DeterministicNlPhraseCompiler compiler = new DeterministicNlPhraseCompiler();
 
     @ParameterizedTest
     @CsvSource(

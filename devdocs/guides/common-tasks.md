@@ -126,8 +126,7 @@ following is true:
 - The plugin's `CHANGELOG.md` bumped past the `schema_version` in
   `contract/VERSION`.
 - An import fails with a parse error after the user re-ran the plugin.
-- `contract/output_format.md` or `contract/pipeline_io.py` differs from
-  upstream.
+- `contract/output_format.md` differs from upstream.
 - You are about to consume a pipeline shard, directory, or per-file entity the
   platform currently drops.
 

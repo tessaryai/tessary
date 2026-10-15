@@ -32,14 +32,13 @@ public class LlmUsageQueryRepository {
     }
 
     /**
-     * One group of the org's LLM usage — a lane, a project, a model, or (with a null {@code key}) the
-     * whole org.
+     * The org's LLM usage over a window, optionally narrowed by a filter. {@code key} and {@code label}
+     * are always null for this total.
      *
      * <p>{@code costUsd} sums only the calls the pricing catalog held a rate for, so
      * {@code unpricedCalls} is the size of the blind spot behind it: a non-zero count means the real
      * cost is higher than the number shown, and the reader is told rather than quietly under-billed.
-     * The two funding sides are carried apart — platform spend is ours, BYO spend is the customer's own
-     * provider bill — and must not be added together into one figure.
+     * {@code byoCostUsd} is the part of {@code costUsd} the customer's own provider keys paid for.
      */
     public record UsageSlice(
             @Nullable String key,
@@ -51,7 +50,6 @@ public class LlmUsageQueryRepository {
             long cacheWriteTokens,
             long totalTokens,
             BigDecimal costUsd,
-            BigDecimal platformCostUsd,
             BigDecimal byoCostUsd,
             long unpricedCalls) {}
 
@@ -73,9 +71,8 @@ public class LlmUsageQueryRepository {
             BigDecimal costUsd) {}
 
     /**
-     * The aggregate select list every breakdown shares — the four token buckets, the derived total, the
-     * cost split by funding side, and the unpriced-call count. Kept as one constant so a lane view and a
-     * model view can never disagree about what "total tokens" or "cost" means.
+     * The aggregate select list of the window total: the four token buckets, the derived total, the
+     * cost and its BYO share, and the unpriced-call count.
      */
     private static final String AGGREGATES = """
             COUNT(*) AS calls,
@@ -85,7 +82,6 @@ public class LlmUsageQueryRepository {
             COALESCE(SUM(c.cache_write_tokens), 0) AS cache_write_tokens,
             COALESCE(SUM(c.total_tokens), 0) AS total_tokens,
             COALESCE(SUM(c.cost_usd), 0) AS cost_usd,
-            COALESCE(SUM(c.cost_usd) FILTER (WHERE c.funding = 'platform'), 0) AS platform_cost_usd,
             COALESCE(SUM(c.cost_usd) FILTER (WHERE c.funding = 'byo'), 0) AS byo_cost_usd,
             COUNT(*) FILTER (WHERE c.cost_usd IS NULL) AS unpriced_calls""";
 
@@ -95,8 +91,8 @@ public class LlmUsageQueryRepository {
      * matching {@code MetricRollupRepository.orgTotals}; a null filter component drops that predicate.
      *
      * <p>Lane and model are compared against {@code COALESCE(col, '')} because the empty string is a
-     * real key on both axes — a call that reported no model groups under {@code ''} in {@link #byModel},
-     * so filtering by that key has to match the same rows.
+     * real key on both axes — a call that reported no model groups under {@code ''} in the model
+     * series, so filtering by that key has to match the same rows.
      */
     private static final String ORG_WINDOW = """
             FROM llm_call c
@@ -119,45 +115,6 @@ public class LlmUsageQueryRepository {
         return one.get(0);
     }
 
-    /**
-     * The org's usage per lane (the product section that made the call), busiest spend first.
-     *
-     * <p>Unfiltered by design: this breakdown is what the usage page offers as the lane filter's
-     * choices, so narrowing it by the current selection would delete every option but the chosen one.
-     * The same holds for {@link #byProject} and {@link #byModel}.
-     */
-    public List<UsageSlice> byLane(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT c.lane AS key, NULL::text AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY c.lane\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
-    }
-
-    /** The org's usage per project — which organization the spend belongs to. Keyed by project id. */
-    public List<UsageSlice> byProject(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT c.project_id AS key, p.name AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY c.project_id, p.name\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
-    }
-
-    /** The org's usage per model — the axis that explains why two lanes of equal volume cost differently. */
-    public List<UsageSlice> byModel(String orgId, @Nullable String from, @Nullable String to) {
-        return query(
-                "SELECT COALESCE(c.model, '') AS key, NULL::text AS label, " + AGGREGATES + "\n" + ORG_WINDOW
-                        + "\nGROUP BY COALESCE(c.model, '')\nORDER BY total_tokens DESC, calls DESC",
-                orgId,
-                from,
-                to,
-                LlmUsageFilter.NONE);
-    }
-
     // ---- read: per-subject spend (what one unit of work cost) ----------------------------------
 
     /**
@@ -173,7 +130,7 @@ public class LlmUsageQueryRepository {
     /**
      * The org's spend per subject of {@code subjectKind}, costliest first — "which rulings cost what".
      *
-     * <p>This is the half of launch H2 the lane alone cannot answer. `byLane` says the triage agent cost a
+     * <p>This is the half of launch H2 the lane alone cannot answer. The lane total says the triage agent cost a
      * project $40 this week; this says across how many rulings, and therefore what one ruling costs — the
      * number H3's question ("is an agent session per distinct cause the right price for a filter?") turns
      * on, and the evidence H4 wants before anyone decides whether to cap.
@@ -211,8 +168,8 @@ public class LlmUsageQueryRepository {
     // ---- read: bucketed timeseries (the usage chart) -------------------------------------------
 
     /**
-     * The chartable measures per bucket. Narrower than {@link #AGGREGATES} on purpose — the funding
-     * split and the unpriced-call count are window-level footnotes, not per-bar values.
+     * The chartable measures per bucket. Narrower than {@link #AGGREGATES} on purpose — the BYO
+     * share and the unpriced-call count are window-level footnotes, not per-bar values.
      */
     private static final String CELL_AGGREGATES = """
             COUNT(*) AS calls,
@@ -324,7 +281,6 @@ public class LlmUsageQueryRepository {
                         rs.getLong("cache_write_tokens"),
                         rs.getLong("total_tokens"),
                         rs.getBigDecimal("cost_usd"),
-                        rs.getBigDecimal("platform_cost_usd"),
                         rs.getBigDecimal("byo_cost_usd"),
                         rs.getLong("unpriced_calls")))
                 .list();

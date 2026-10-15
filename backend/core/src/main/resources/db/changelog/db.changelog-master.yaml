@@ -149,6 +149,9 @@ databaseChangeLog:
       file: db/changelog/changes/0040-rca-owned-causes-report.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/0041-drop-dead-schema.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/0042-span-llm-usage.sql
       relativeToChangelogFile: false
   - include:

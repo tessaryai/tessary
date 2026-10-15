@@ -14,12 +14,8 @@ class MeteringPropertiesTest {
         MeteringProperties p = ConfigBinding.bind(
                 "tessary.metering",
                 new MeteringProperties(),
-                Map.of(
-                        "tessary.metering.storage-enabled", "true",
-                        "tessary.metering.claim-batch", "11",
-                        "tessary.metering.lease-seconds", "12"));
+                Map.of("tessary.metering.claim-batch", "11", "tessary.metering.lease-seconds", "12"));
 
-        assertEquals(true, p.isStorageEnabled());
         assertEquals(11, p.getClaimBatch());
         assertEquals(12L, p.getLeaseSeconds());
     }

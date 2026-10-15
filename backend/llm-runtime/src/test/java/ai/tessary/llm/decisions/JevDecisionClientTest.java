@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -94,14 +93,6 @@ class JevDecisionClientTest {
                 "~typesafe/jev-latest",
                 DecisionTarget.endpointFor(ModelProvider.OPENROUTER, null),
                 "or-key");
-    }
-
-    private static DecisionTarget platform() {
-        return new DecisionTarget(
-                ModelProvider.PLATFORM,
-                "~typesafe/jev-latest",
-                URI.create("https://openrouter.ai/api/alpha/decisions"),
-                "platform-key");
     }
 
     private DecisionRequest request() {
@@ -192,7 +183,6 @@ class JevDecisionClientTest {
                         eq("p1"),
                         eq("frustration"),
                         eq("~typesafe/jev-latest"),
-                        eq(false),
                         eq(1000),
                         eq(12),
                         argThat(cost -> cost != null && new BigDecimal("0.00005").compareTo(cost) == 0),
@@ -225,29 +215,6 @@ class JevDecisionClientTest {
 
         assertEquals(0, new BigDecimal("0.00005").compareTo(answer.costUsd()));
         assertNull(answer.priceBookVersion());
-    }
-
-    /**
-     * The credit worker debits only platform-funded rows that carry a cost, so both halves matter. The platform
-     * provider calls OpenRouter, so its cost is OpenRouter's too.
-     */
-    @Test
-    void aPlatformProviderCall_isBookedAsPlatformFundedWithOpenRoutersReportedCost() throws Exception {
-        stub(response(200, answer(",\"cost\":0.00005")));
-
-        client().decide("p1", "frustration", platform(), request());
-
-        verify(accountant)
-                .recordDecisionCall(
-                        eq("p1"),
-                        eq("frustration"),
-                        eq("~typesafe/jev-latest"),
-                        eq(true),
-                        eq(1000),
-                        eq(12),
-                        argThat(cost -> cost != null && new BigDecimal("0.00005").compareTo(cost) == 0),
-                        eq(null),
-                        anyInt());
     }
 
     @Test
@@ -355,8 +322,7 @@ class JevDecisionClientTest {
 
         assertSame(DecisionError.MALFORMED_ANSWER, e.error());
         verify(accountant, times(0))
-                .recordDecisionCall(
-                        anyString(), anyString(), anyString(), anyBoolean(), any(), any(), any(), any(), anyInt());
+                .recordDecisionCall(anyString(), anyString(), anyString(), any(), any(), any(), any(), anyInt());
     }
 
     @Test

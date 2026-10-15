@@ -241,7 +241,6 @@ describe("the configure page", () => {
 
   it.each([
     ["no_credit", "No credit left", /used all of its credit/],
-    ["platform_unavailable", "Provider unavailable", /Nothing needs to change on your side/],
   ])("names a %s pause and explains it in Status", async (readiness, label, explained) => {
     listClassifiers.mockResolvedValue([classifier({ enabled: true, readiness })]);
     renderPage();

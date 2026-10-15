@@ -6,21 +6,18 @@ import ai.tessary.llm.catalog.SupportedMaker;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
- * Per-{@code (provider, model_name)} capability metadata (agentic, effort levels, strict JSON
- * schema, default base URL). {@code vendor} is the model's maker, used to group the model dropdown
+ * Per-{@code (provider, model_name)} capability metadata (agentic, default base URL). {@code vendor} is the model's maker, used to group the model dropdown
  * when a platform hosts several vendors (Bedrock, OpenRouter).
  *
  * <p>{@link #ENTRIES} is not the full roster a project can pick from: {@link #mergeLive} overlays a
  * live-fetched listing onto this table, so a model a provider adds is offered with no code change
- * here, while this class keeps answering the orthogonal question of whether a given model is agentic,
- * what effort levels it takes, and whether its JSON schema is strict. {@link #entries()} returns every
+ * here, while this class keeps answering the orthogonal question of whether a given model is agentic.
+ * {@link #entries()} returns every
  * static row unmerged, for a caller with no live listing.
  *
  * <p>Bedrock entries carry a logical model id only; the actual inference-profile ARN and region live
@@ -33,17 +30,6 @@ public final class ModelCatalog {
             String vendor,
             @JsonProperty("model_name") String modelName,
             @JsonProperty("display_name") String displayName,
-            @JsonProperty("strict_json_schema") boolean strictJsonSchema,
-            /**
-             * The reasoning-effort levels this model accepts, in ascending order; empty when it takes
-             * no effort parameter at all.
-             *
-             * <p>A list rather than a boolean because the sets genuinely differ: the OpenAI line takes
-             * low/medium/high, while the GPT-5.6 models on bedrock-mantle also take none, xhigh and max.
-             * A boolean forced the client to hardcode one vocabulary, which silently hid half the range
-             * on the models that have the most of it.
-             */
-            @JsonProperty("effort_levels") Set<String> effortLevels,
             @JsonProperty("default_base_url") String defaultBaseUrl,
             /**
              * Whether this catalog entry can drive the sandbox agent's tool loop, the
@@ -68,75 +54,19 @@ public final class ModelCatalog {
                 String vendor,
                 String modelName,
                 String displayName,
-                boolean strictJsonSchema,
-                Set<String> effortLevels,
                 String defaultBaseUrl,
                 boolean agentic) {
-            this(
-                    provider,
-                    vendor,
-                    modelName,
-                    displayName,
-                    strictJsonSchema,
-                    effortLevels,
-                    defaultBaseUrl,
-                    agentic,
-                    false);
+            this(provider, vendor, modelName, displayName, defaultBaseUrl, agentic, false);
         }
     }
 
-    /**
-     * What the OpenAI GPT-5 line accepts through the Chat Completions {@code reasoning_effort} field.
-     * Kept to the three levels this app has always offered rather than widened speculatively, unlike
-     * the mantle set, which is transcribed from what the endpoint itself enumerates.
-     */
-    private static final Set<String> OPENAI_EFFORTS = new LinkedHashSet<>(List.of("low", "medium", "high"));
-
-    /** No reasoning control. Named so the entries below read as a deliberate absence, not an omission. */
-    private static final Set<String> NO_EFFORT = Set.of();
-
-    /**
-     * The reasoning-effort levels the GPT-5.6 line accepts on mantle, in ascending order so a UI can
-     * render them as a scale.
-     *
-     * <p>Transcribed from what the endpoint itself enumerates, not from a doc page: AWS's launch blog
-     * lists these six, a secondary source claimed a seventh ({@code minimal}), and the API settles it
-     * by rejecting {@code minimal} with a message naming the supported set. Ordered, so
-     * {@code LinkedHashSet} rather than {@code Set.of}.
-     */
-    private static final Set<String> MANTLE_GPT_EFFORTS =
-            new LinkedHashSet<>(List.of("none", "low", "medium", "high", "xhigh", "max"));
-
     private static final List<CatalogEntry> ENTRIES = List.of(
             // OpenAI (direct), the GPT-5 line.
-            // Reasoning models: they accept a reasoning-effort level.
+            new CatalogEntry(ModelProvider.OPENAI, "OpenAI", "gpt-5.5", "GPT-5.5", "https://api.openai.com/v1", false),
             new CatalogEntry(
-                    ModelProvider.OPENAI,
-                    "OpenAI",
-                    "gpt-5.5",
-                    "GPT-5.5",
-                    true,
-                    OPENAI_EFFORTS,
-                    "https://api.openai.com/v1",
-                    false),
+                    ModelProvider.OPENAI, "OpenAI", "gpt-5.4-mini", "GPT-5.4 mini", "https://api.openai.com/v1", false),
             new CatalogEntry(
-                    ModelProvider.OPENAI,
-                    "OpenAI",
-                    "gpt-5.4-mini",
-                    "GPT-5.4 mini",
-                    true,
-                    OPENAI_EFFORTS,
-                    "https://api.openai.com/v1",
-                    false),
-            new CatalogEntry(
-                    ModelProvider.OPENAI,
-                    "OpenAI",
-                    "gpt-5.4-nano",
-                    "GPT-5.4 nano",
-                    true,
-                    OPENAI_EFFORTS,
-                    "https://api.openai.com/v1",
-                    false),
+                    ModelProvider.OPENAI, "OpenAI", "gpt-5.4-nano", "GPT-5.4 nano", "https://api.openai.com/v1", false),
 
             // Anthropic (direct API). Native client; JSON via per-request response format.
             new CatalogEntry(
@@ -144,8 +74,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "claude-opus-5-5",
                     "Claude Opus 5.5",
-                    false,
-                    NO_EFFORT,
                     "https://api.anthropic.com/v1",
                     false),
             new CatalogEntry(
@@ -153,8 +81,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "claude-sonnet-5-5",
                     "Claude Sonnet 5.5",
-                    false,
-                    NO_EFFORT,
                     "https://api.anthropic.com/v1",
                     true),
             new CatalogEntry(
@@ -162,8 +88,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "claude-sonnet-4-6",
                     "Claude Sonnet 4.6",
-                    false,
-                    NO_EFFORT,
                     "https://api.anthropic.com/v1",
                     false),
             new CatalogEntry(
@@ -171,8 +95,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "claude-haiku-4-5",
                     "Claude Haiku 4.5",
-                    false,
-                    NO_EFFORT,
                     "https://api.anthropic.com/v1",
                     true),
 
@@ -182,8 +104,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic/claude-opus-5.5",
                     "Claude Opus 5.5",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
             new CatalogEntry(
@@ -191,8 +111,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic/claude-sonnet-5.5",
                     "Claude Sonnet 5.5",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
             new CatalogEntry(
@@ -200,8 +118,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic/claude-sonnet-4.6",
                     "Claude Sonnet 4.6",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
             new CatalogEntry(
@@ -209,8 +125,6 @@ public final class ModelCatalog {
                     "OpenAI",
                     "openai/gpt-5.5",
                     "GPT-5.5",
-                    false,
-                    OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
                     false),
             new CatalogEntry(
@@ -218,8 +132,6 @@ public final class ModelCatalog {
                     "Moonshot",
                     "moonshotai/kimi-k2.6",
                     "Kimi K2.6",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
             // GPT-6 Sol and Luna over OpenRouter, the two agentic lanes' models for this provider. Named
@@ -231,8 +143,6 @@ public final class ModelCatalog {
                     "OpenAI",
                     "openai/gpt-6-sol",
                     "GPT-6 Sol (OpenRouter)",
-                    false,
-                    OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
                     true),
             new CatalogEntry(
@@ -240,8 +150,6 @@ public final class ModelCatalog {
                     "OpenAI",
                     "openai/gpt-6-luna",
                     "GPT-6 Luna (OpenRouter)",
-                    false,
-                    OPENAI_EFFORTS,
                     "https://openrouter.ai/api/v1",
                     true),
             new CatalogEntry(
@@ -249,21 +157,12 @@ public final class ModelCatalog {
                     "Auto",
                     "openrouter/auto",
                     "Auto (route best)",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
 
             // Moonshot (direct).
             new CatalogEntry(
-                    ModelProvider.MOONSHOT,
-                    "Moonshot",
-                    "kimi-k2.6",
-                    "Kimi K2.6",
-                    false,
-                    NO_EFFORT,
-                    "https://api.moonshot.ai/v1",
-                    true),
+                    ModelProvider.MOONSHOT, "Moonshot", "kimi-k2.6", "Kimi K2.6", "https://api.moonshot.ai/v1", true),
 
             // AWS Bedrock: currently hosts Anthropic only (Moonshot/Kimi K2.6 not yet
             // available on Bedrock). Logical ids; ARN/region on the row.
@@ -272,8 +171,6 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic.claude-sonnet-5-5",
                     "Claude Sonnet 5.5",
-                    false,
-                    NO_EFFORT,
                     null,
                     false),
             new CatalogEntry(
@@ -281,51 +178,20 @@ public final class ModelCatalog {
                     "Anthropic",
                     "anthropic.claude-sonnet-4-6",
                     "Claude Sonnet 4.6",
-                    false,
-                    NO_EFFORT,
                     null,
                     false),
             new CatalogEntry(
-                    ModelProvider.BEDROCK,
-                    "Anthropic",
-                    "anthropic.claude-opus-5-5",
-                    "Claude Opus 5.5",
-                    false,
-                    NO_EFFORT,
-                    null,
-                    false),
+                    ModelProvider.BEDROCK, "Anthropic", "anthropic.claude-opus-5-5", "Claude Opus 5.5", null, false),
             new CatalogEntry(
-                    ModelProvider.BEDROCK,
-                    "Anthropic",
-                    "anthropic.claude-haiku-4-5",
-                    "Claude Haiku 4.5",
-                    false,
-                    NO_EFFORT,
-                    null,
-                    false),
+                    ModelProvider.BEDROCK, "Anthropic", "anthropic.claude-haiku-4-5", "Claude Haiku 4.5", null, false),
 
             // AWS Bedrock via the mantle endpoint, the only place the GPT-5.6 line exists, over the
             // OpenAI Responses API. Same AWS credential as Bedrock above, so the base URL stays null
-            // here too. These take a reasoning effort, but the level set is not low/medium/high; see
-            // MANTLE_GPT_EFFORTS.
+            // here too.
             new CatalogEntry(
-                    ModelProvider.BEDROCK_MANTLE,
-                    "OpenAI",
-                    "openai.gpt-5.6-luna",
-                    "GPT-5.6 Luna",
-                    true,
-                    MANTLE_GPT_EFFORTS,
-                    null,
-                    false),
+                    ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-5.6-luna", "GPT-5.6 Luna", null, false),
             new CatalogEntry(
-                    ModelProvider.BEDROCK_MANTLE,
-                    "OpenAI",
-                    "openai.gpt-5.6-terra",
-                    "GPT-5.6 Terra",
-                    true,
-                    MANTLE_GPT_EFFORTS,
-                    null,
-                    false),
+                    ModelProvider.BEDROCK_MANTLE, "OpenAI", "openai.gpt-5.6-terra", "GPT-5.6 Terra", null, false),
 
             // The agentic entries: one current-generation model per provider the sandbox launcher can
             // reach. ANTHROPIC's two are marked agentic in its own block above, since it speaks its own
@@ -343,39 +209,19 @@ public final class ModelCatalog {
                     "OpenAI",
                     "gpt-6-sol",
                     "GPT-6 Sol (OpenAI)",
-                    true,
-                    OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
                     true),
-            new CatalogEntry(
-                    ModelProvider.OPENAI,
-                    "OpenAI",
-                    "gpt-5.6",
-                    "GPT-5.6",
-                    true,
-                    OPENAI_EFFORTS,
-                    "https://api.openai.com/v1",
-                    true),
+            new CatalogEntry(ModelProvider.OPENAI, "OpenAI", "gpt-5.6", "GPT-5.6", "https://api.openai.com/v1", true),
             new CatalogEntry(
                     ModelProvider.GEMINI,
                     "Google",
                     "gemini-3.1-pro-preview",
                     "Gemini 3.1 Pro",
-                    false,
-                    NO_EFFORT,
                     "https://generativelanguage.googleapis.com/v1beta/openai/",
                     true),
             new CatalogEntry(
-                    ModelProvider.GLM,
-                    "Zhipu",
-                    "glm-5.3",
-                    "GLM-5.3",
-                    false,
-                    NO_EFFORT,
-                    "https://open.bigmodel.cn/api/paas/v4",
-                    true),
-            new CatalogEntry(
-                    ModelProvider.GROK, "xAI", "grok-4.6", "Grok 4.6", false, NO_EFFORT, "https://api.x.ai/v1", true),
+                    ModelProvider.GLM, "Zhipu", "glm-5.3", "GLM-5.3", "https://open.bigmodel.cn/api/paas/v4", true),
+            new CatalogEntry(ModelProvider.GROK, "xAI", "grok-4.6", "Grok 4.6", "https://api.x.ai/v1", true),
 
             // One small current-generation model per provider, selectable but not anyone's default (see
             // LanePriority): a project running TRIAGE unattended, once per distinct cause, can point it
@@ -390,8 +236,6 @@ public final class ModelCatalog {
                     "OpenAI",
                     "gpt-6-luna",
                     "GPT-6 Luna (OpenAI)",
-                    true,
-                    OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
                     true),
             new CatalogEntry(
@@ -399,8 +243,6 @@ public final class ModelCatalog {
                     "Google",
                     "gemini-3.7-flash",
                     "Gemini 3.7 Flash",
-                    false,
-                    NO_EFFORT,
                     "https://generativelanguage.googleapis.com/v1beta/openai/",
                     true),
             new CatalogEntry(
@@ -408,8 +250,6 @@ public final class ModelCatalog {
                     "Zhipu",
                     "glm-5.3-flash",
                     "GLM-5.3 Flash",
-                    false,
-                    NO_EFFORT,
                     "https://open.bigmodel.cn/api/paas/v4",
                     true),
             // TypeSafe's Jev decision model, direct and over OpenRouter. Only the moving pointer is
@@ -421,8 +261,6 @@ public final class ModelCatalog {
                     "TypeSafe",
                     "jev-latest",
                     "Jev (latest)",
-                    false,
-                    NO_EFFORT,
                     "https://api.typesafe.ai",
                     false,
                     true),
@@ -431,27 +269,16 @@ public final class ModelCatalog {
                     "TypeSafe",
                     "~typesafe/jev-latest",
                     "Jev (latest)",
-                    false,
-                    NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false,
                     true),
             // The deployment-supplied provider runs Anthropic's model on Anthropic's wire, so it prices
             // under the same bare book key. No default base URL: the supplying build decides the route.
-            new CatalogEntry(
-                    ModelProvider.PLATFORM,
-                    "Anthropic",
-                    "claude-sonnet-5-5",
-                    "Claude Sonnet 5.5",
-                    false,
-                    NO_EFFORT,
-                    null,
-                    true),
+            new CatalogEntry(ModelProvider.PLATFORM, "Anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5", null, true),
             // CUSTOM carries no real model list, see ProviderCredential#customModelName, which is
             // what a project actually runs. modelName here is a placeholder the settings UI never
             // shows unqualified.
-            new CatalogEntry(
-                    ModelProvider.CUSTOM, "Custom", "custom-model", "Custom model", false, NO_EFFORT, null, true));
+            new CatalogEntry(ModelProvider.CUSTOM, "Custom", "custom-model", "Custom model", null, true));
 
     private ModelCatalog() {}
 
@@ -553,17 +380,15 @@ public final class ModelCatalog {
     /**
      * Reconcile a live-fetched model listing for {@code provider} with this table's static capability
      * rows. The overlay is per {@code (provider, modelName)}, not per provider, since capability fields
-     * vary within one provider (OPENROUTER's {@code openai/gpt-5.5} carries {@link #OPENAI_EFFORTS}
-     * while every other OPENROUTER entry carries {@link #NO_EFFORT}).
+     * vary within one provider.
      *
      * <ul>
      *   <li>a live model matching an existing static entry: the static row's capability fields win
      *       (they're hand-verified facts a vendor's {@code /models} listing doesn't carry), with the
      *       live listing's {@code displayName}/{@code vendor} overlaid, since those are cosmetic;
      *   <li>a live model with no static match: synthesized fail-closed ({@code agentic=false},
-     *       {@code effortLevels=NO_EFFORT}, {@code strictJsonSchema=false}, {@code defaultBaseUrl=null}),
-     *       since a model this table has never evaluated must not be silently offered as agentic or
-     *       structured-output-strict.
+     *       {@code defaultBaseUrl=null}), since a model this table has never evaluated must not be
+     *       silently offered as agentic.
      * </ul>
      *
      * <p>A static entry with no live match at all is passed through unchanged, so a cold cache degrades
@@ -586,8 +411,6 @@ public final class ModelCatalog {
                                     overlay.vendor(),
                                     e.modelName(),
                                     overlay.displayName(),
-                                    e.strictJsonSchema(),
-                                    e.effortLevels(),
                                     e.defaultBaseUrl(),
                                     e.agentic(),
                                     e.decision()));
@@ -599,8 +422,7 @@ public final class ModelCatalog {
                     && SupportedMaker.fromOpenRouterPrefix(m.modelName()).orElse(null) == SupportedMaker.TYPESAFE) {
                 continue;
             }
-            merged.add(new CatalogEntry(
-                    provider, m.vendor(), m.modelName(), m.displayName(), false, NO_EFFORT, null, false));
+            merged.add(new CatalogEntry(provider, m.vendor(), m.modelName(), m.displayName(), null, false));
         }
         return List.copyOf(merged);
     }

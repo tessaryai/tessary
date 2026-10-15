@@ -27,7 +27,6 @@ public record LlmCallRow(
         String projectId,
         String lane,
         @Nullable String model,
-        @Nullable String serviceTier,
         String funding,
         @Nullable Integer inputTokens,
         @Nullable Integer outputTokens,

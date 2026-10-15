@@ -48,7 +48,7 @@ class MetricDriftConfigTest {
     @Test
     void theDefaultBinCountKeepsTheRegistryGrid() {
         assertEquals(
-                Grid.duration(), MetricDriftConfig.defaults().measured().get(0).grid());
+                Grid.duration(), MetricDriftConfig.DEFAULTS.measured().get(0).grid());
     }
 
     @ParameterizedTest
@@ -56,6 +56,6 @@ class MetricDriftConfigTest {
     @ValueSource(
             strings = {"  ", "{not json", "{\"measures\":\"turn_duration\",\"min_sample\":null,\"w1_floor\":null}"})
     void anAbsentUnreadableOrNullFieldFallsBackToTheDefaults(@Nullable String blob) {
-        assertEquals(MetricDriftConfig.defaults(), MetricDriftConfig.of(MAPPER, blob));
+        assertEquals(MetricDriftConfig.DEFAULTS, MetricDriftConfig.of(MAPPER, blob));
     }
 }

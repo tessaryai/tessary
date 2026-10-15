@@ -2,7 +2,7 @@
 /*
  * Models.tsx: a "Decision models" lane is a provider select and nothing else. Each provider serves
  * one decision model, so the server sends `model_selectable: false` for the group and the row must
- * draw no model, tier or effort control. An agent lane beside it keeps its model select.
+ * draw no model control. An agent lane beside it keeps its model select.
  */
 import { describe, expect, it, vi } from "vitest";
 import { renderRoute } from "../../test/render";
@@ -33,8 +33,6 @@ function entry(provider: CatalogEntry["provider"], modelName: string, flags: Par
     vendor: "Vendor",
     model_name: modelName,
     display_name: modelName,
-    strict_json_schema: false,
-    effort_levels: [],
     default_base_url: "https://example.invalid",
     agentic: false,
     decision: false,
@@ -259,7 +257,7 @@ describe("choosing a model", () => {
   it("says when a stored choice can no longer run, and when there is no key at all", async () => {
     getModelSettings.mockResolvedValue({
       ...TRIAGE,
-      settings: [{ lane: "triage", model_key: "gpt-luna", project_id: "p", created_at: "", updated_at: "", reasoning_effort: null, service_tier: "standard" }],
+      settings: [{ lane: "triage", model_key: "gpt-luna", project_id: "p", created_at: "", updated_at: "" }],
     });
     renderModels();
     expect(await screen.findByText("GPT Luna is no longer available")).toBeTruthy();
@@ -268,7 +266,7 @@ describe("choosing a model", () => {
     getModelSettings.mockResolvedValue({
       ...TRIAGE,
       lanes: [{ ...TRIAGE.lanes[0], automatic: false }],
-      settings: [{ lane: "triage", model_key: "claude-haiku", project_id: "p", created_at: "", updated_at: "", reasoning_effort: null, service_tier: "standard" }],
+      settings: [{ lane: "triage", model_key: "claude-haiku", project_id: "p", created_at: "", updated_at: "" }],
     });
     renderModels();
     await screen.findByLabelText("Triage provider");

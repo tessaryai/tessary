@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -248,8 +248,6 @@ function ProjectShell() {
         <Route path="sessions/:sessionId" element={<SessionDetail />} />
         {/* The charts of what each classifier detects, per call site and per tool. */}
         <Route path="classifiers" element={<ClassifiersPage />} />
-        {/* The old catalog and its rail. Their abilities live on each classifier's configure page now. */}
-        <Route path="classifiers/detectors" element={<CatalogRedirect />} />
         {/* A finding's own evidence, which Triage's findings link every row to. */}
         <Route path="classifiers/findings/:findingId" element={<FindingPage />} />
         {/* One classifier: switch, status, call sites, tuning, detections, reset. Static paths above outrank it. */}
@@ -277,16 +275,11 @@ function ProjectShell() {
           />
           <Route path="git" element={<GitIntegration />} />
           <Route path="models" element={<Models />} />
-          {/* The observer surface it pointed at is gone; fold to Sources like any other retired
-              settings tab rather than redirecting to a route that no longer exists. */}
-          <Route path="observer" element={<Navigate to="../sources" replace />} />
           {/* The summoned flow's admin surface: Slack channel, cadence, quiet hours. */}
           <Route
             path="notifications"
             element={<CapabilityGate capability="alerts_enabled"><Notifications /></CapabilityGate>}
           />
-          {/* Signal tuning moved onto each classifier's configure page (one home per concept). */}
-          <Route path="signal-tuning" element={<Navigate to="../../classifiers" replace />} />
           <Route
             path="mcp-tokens"
             element={<CapabilityGate capability="api_access_enabled"><McpTokens /></CapabilityGate>}
@@ -304,10 +297,6 @@ function ProjectShell() {
           {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
           <Route path="features" element={<Features />} />
-          {/* Appearance lives under Organization, and the old feature-flags tab is Features now.
-              Redirect old bookmarks. */}
-          <Route path="appearance" element={<Navigate to="../organization" replace />} />
-          <Route path="feature-flags" element={<Navigate to="../features" replace />} />
           {/* Any other settings path: a retired tab, a typo, a deep link into a section that was
               removed, folds to Sources rather than rendering an empty <Outlet/>. Absolute, like the
               project-level catch-all: a relative `to="sources"` resolves against the splat it
@@ -315,46 +304,6 @@ function ProjectShell() {
               again, and appended `sources` until react-router gave up. */}
           <Route path="*" element={<ToProjectSegment segment="settings/sources" />} />
         </Route>
-
-        {/* ── Old IA → new IA (2026-07 migration map). ── */}
-        <Route path="overview" element={<Navigate to="../triage" replace />} />
-        <Route path="explore" element={<Navigate to="../traces" replace />} />
-        <Route path="pipeline" element={<Navigate to="../triage" replace />} />
-        {/* Deep pipeline bookmarks (call-site editors, drilldowns) fold to the index. */}
-        <Route path="pipeline/*" element={<ToProjectSegment segment="triage" />} />
-        <Route path="behavior-drift" element={<Navigate to="../classifiers" replace />} />
-        {/* Repo sync and the observer it renamed are both gone. Kept as redirects rather than
-            deleted: a bookmark to either has to land somewhere, and Triage is never gated. */}
-        <Route path="repo-sync" element={<Navigate to="../triage" replace />} />
-        <Route path="observer" element={<Navigate to="../triage" replace />} />
-        <Route path="graders" element={<Navigate to="../triage" replace />} />
-        <Route path="graders/:graderId" element={<Navigate to="../triage" replace />} />
-        <Route path="review" element={<Navigate to="../triage" replace />} />
-        <Route path="review/:queueId" element={<Navigate to="../triage" replace />} />
-        <Route path="runs/batch/:runId" element={<Navigate to="../triage" replace />} />
-        <Route path="datasets/:datasetId" element={<Navigate to="../triage" replace />} />
-        <Route path="datasets/new" element={<Navigate to="../triage" replace />} />
-        {/* Escalations live inside cases now; batch runs keep their detail route above. */}
-        <Route path="runs" element={<Navigate to="../triage" replace />} />
-        <Route path="runs/:runId" element={<Navigate to="../triage" replace />} />
-
-        {/* Older bookmark URLs: redirect into the current IA. */}
-        <Route path="signals" element={<Navigate to="../classifiers" replace />} />
-        <Route path="failure-modes" element={<Navigate to="../triage" replace />} />
-        <Route path="issues" element={<Navigate to="../triage" replace />} />
-        <Route path="intents" element={<Navigate to="../triage" replace />} />
-        <Route path="results" element={<Navigate to="../triage" replace />} />
-        <Route path="entries/:entryId" element={<Navigate to="../traces" replace />} />
-        <Route path="call-sites" element={<Navigate to="../triage" replace />} />
-        <Route path="chains" element={<Navigate to="../triage" replace />} />
-        <Route path="invariants" element={<Navigate to="../triage" replace />} />
-        <Route path="packs" element={<Navigate to="../triage" replace />} />
-        <Route path="taxonomy" element={<Navigate to="../triage" replace />} />
-        <Route path="judge" element={<Navigate to="../triage" replace />} />
-        {/* Datasets is gone; Library never had a page. */}
-        <Route path="datasets" element={<Navigate to="../triage" replace />} />
-        <Route path="library" element={<Navigate to="../triage" replace />} />
-        <Route path="sources" element={<Navigate to="../settings/sources" replace />} />
 
         {/* The catch-all. Every unmatched project path lands on Triage instead of rendering a blank
             shell: a removed route, a mistyped segment and a bookmark from a retired IA all resolve
@@ -364,16 +313,6 @@ function ProjectShell() {
       </Suspense>
     </ShellChrome>
   );
-}
-
-/**
- * The retired catalog. Its rail was addressable as `?classifier=<id>`, and Slack links and bookmarks carry that, so
- * a link that named a classifier lands on that classifier's configure page and a bare one on Classifiers.
- */
-function CatalogRedirect() {
-  const [params] = useSearchParams();
-  const id = params.get("classifier");
-  return <ToProjectSegment segment={id ? `classifiers/${encodeURIComponent(id)}` : "classifiers"} />;
 }
 
 /** Absolute tenant-scoped redirect, for splat routes where relative `..` is ambiguous. */

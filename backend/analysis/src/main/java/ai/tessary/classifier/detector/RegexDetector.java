@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * A regex/keyword detector: the cheapest signal class. A natural-language phrase is compiled
- * <b>once</b>, at signal-definition time, into a {@link Pattern} via the {@link NlPhraseCompiler} seam,
+ * <b>once</b>, at signal-definition time, into a {@link Pattern} via {@link DeterministicNlPhraseCompiler},
  * and that pattern is matched literally over the observation's text (input, output, or both — per
  * {@link ClassifierField}) at evaluation time with <b>no per-trace model call</b>. A literal keyword
  * match is a per-observation, field-restricted search: "the OUTPUT contains X" must stay the output, not
@@ -37,7 +37,7 @@ public final class RegexDetector implements BuiltInDetector {
     private final ClassifierField defaultField;
     private final String severity;
     private final boolean defaultWordBoundary;
-    private final NlPhraseCompiler compiler;
+    private final DeterministicNlPhraseCompiler compiler;
     private final ObjectMapper mapper;
     private final Map<String, Pattern> compiledCache;
 
@@ -46,7 +46,7 @@ public final class RegexDetector implements BuiltInDetector {
             ClassifierField field,
             String severity,
             boolean wordBoundary,
-            NlPhraseCompiler compiler,
+            DeterministicNlPhraseCompiler compiler,
             ObjectMapper mapper) {
         this.kind = kind;
         this.defaultField = field;

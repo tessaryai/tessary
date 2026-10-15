@@ -72,9 +72,8 @@ public class BillingController {
     }
 
     /**
-     * The org's LLM token + cost breakdown over {@code [from, to)} (both optional; an omitted bound is
-     * open), the detail behind the {@code llm_tokens} line above: input / output / cache-read /
-     * cache-write kept apart, cost split by who paid, cut by product lane, by project and by model.
+     * The org's LLM token + cost total over {@code [from, to)} (both optional; an omitted bound is
+     * open): input / output / cache-read / cache-write kept apart, with the BYO share of the cost.
      *
      * <p>Read live off the per-call ledger rather than the closed-bucket rollups, so it answers "what
      * are we burning right now" instead of "what did we burn as of the last closed hour". Same

@@ -536,7 +536,7 @@ public class RedactionService {
      */
     public PreviewResult preview(String pattern, String replacement, String sampleText) {
         // compile() is null exactly when the regex does not compile, so this is the validation.
-        CompiledRule rule = RedactionEngine.compile("preview", pattern, replacement);
+        CompiledRule rule = RedactionEngine.compile(pattern, replacement);
         if (rule == null) throw new TessaryException(RedactionError.INVALID_PATTERN, pattern);
         String redacted = RedactionEngine.applyToTextParts(sampleText, List.of(rule));
         int matches = RedactionEngine.countMatches(sampleText, rule);

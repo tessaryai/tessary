@@ -164,13 +164,8 @@
              (The image is pgvector/pgvector:pg16 for compose parity, even though the
              baseline no longer activates the extension and there is no VectorIndex seam any
              more — both left with the rest of the vector substrate.) Docker is
-             required to run the suite. Versions come from the testcontainers-bom imported
-             above. -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-postgresql</artifactId>
-            <scope>test</scope>
-        </dependency>
+             required to run the suite. The Postgres module arrives with test-support, which owns
+             TestPostgres. Versions come from the testcontainers-bom imported above. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-redpanda</artifactId>

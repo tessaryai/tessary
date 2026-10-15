@@ -12,8 +12,6 @@ import org.jspecify.annotations.Nullable;
  * @param value the aggregated count (or token SUM) — non-negative
  * @param bucketStart ISO-8601 start of the {@code [bucketStart, bucketStart+unit)} window this counts
  * @param granularity the bucket grain ({@code hour} or {@code day})
- * @param dimensions a JSON bag of extra metric dimensions (empty for the usage metrics)
- * @param attributes a free-form JSON attributes bag
  */
 public record MetricRollupRow(
         String id,
@@ -23,21 +21,4 @@ public record MetricRollupRow(
         long value,
         @JsonProperty("bucket_start") String bucketStart,
         @JsonProperty("granularity") String granularity,
-        @Nullable String dimensions,
-        @Nullable String attributes,
-        @JsonProperty("created_at") String createdAt) {
-
-    /** Build a rollup with no extra dimensions/attributes — the usage-metering shape. */
-    public static MetricRollupRow of(
-            String id,
-            String orgId,
-            @Nullable String projectId,
-            String metric,
-            long value,
-            String bucketStart,
-            String granularity,
-            String createdAt) {
-        return new MetricRollupRow(
-                id, orgId, projectId, metric, value, bucketStart, granularity, "{}", "{}", createdAt);
-    }
-}
+        @JsonProperty("created_at") String createdAt) {}
