@@ -14,16 +14,8 @@ import java.util.HexFormat;
 import org.springframework.stereotype.Component;
 
 /**
- * Thin JDK-{@link HttpClient} seam for {@code home.tessary.ai}. Mirrors the house outbound-HTTP style
- * ({@code llm}/{@code WorkOsClient}, and the {@code MixpanelSender} this class
- * replaces): a shared client with a connect timeout and a per-request timeout, no third-party SDK.
- *
- * <p>Payloads are posted as raw JSON to whatever {@code path} the caller supplies — unlike
- * {@code MixpanelSender}'s two hardcoded endpoint constants, {@code path} is a parameter so
- * {@code TelemetryHeartbeat} (the heartbeat ping, §1 of the contract) and the epic-9 license-check
- * client (§2, not built by this issue) can share this one class untouched. This is a dumb transport: it
- * returns the HTTP status and never interprets the body. The caller owns the enabled-gate, payload
- * shape, and error swallowing — see {@code TelemetryHeartbeat}.
+ * Thin JDK {@link HttpClient} transport to {@code home.tessary.ai}. Returns the status and never interprets the body;
+ * the caller owns the enabled-gate, payload and error swallowing (see {@code TelemetryHeartbeat}).
  */
 @Component
 public class HomeTessaryClient {
@@ -40,25 +32,15 @@ public class HomeTessaryClient {
         this.http = http;
     }
 
-    /**
-     * POST {@code json} to {@code path} (e.g. {@code "/v1/ping"}) under {@value #BASE_URL}. Returns the
-     * HTTP status code. Throws on transport failure; the caller swallows — telemetry must never fail a
-     * caller's own operation.
-     *
-     * <p>Public, unlike the package-private {@code MixpanelSender.send} this class replaces: the caller
-     * ({@code TelemetryHeartbeat}, §1) lives in a different module ({@code surfaces}) than this class
-     * ({@code core}), and {@code path} being a parameter rather than a per-call constant is what lets
-     * a future license-check client reuse this same class untouched.
-     */
+    /** Throws on transport failure; the caller swallows, since telemetry must never fail its caller. */
     public int postJson(String path, String json) throws IOException, InterruptedException {
         byte[] body = json.getBytes(StandardCharsets.UTF_8);
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE_URL + path))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                // home's CloudFront signs each request to its Lambda origin but does not hash a POST body,
-                // so the sender supplies the hash. Without it, or with one that does not match these exact
-                // bytes, the edge answers 403 and the handler never sees the ping.
+                // CloudFront signs requests to its Lambda origin without hashing a POST body, so the sender supplies
+                // it; a missing or wrong hash gets 403.
                 .header("x-amz-content-sha256", sha256Hex(body))
                 .timeout(Duration.ofSeconds(10))
                 .build();
@@ -70,15 +52,12 @@ public class HomeTessaryClient {
         return HexFormat.of().formatHex(Sha256.digest(bytes));
     }
 
-    /** A GET's status and body. The body is empty for anything but a 200. */
+    /** The body is empty for anything but a 200. */
     public record Fetched(int status, byte[] body) {}
 
     /**
-     * GET {@code path} (e.g. {@code "/v1/pricing/manifest.json"}) under {@value #BASE_URL}, reading at most
-     * {@code maxBytes} of body. Throws past that limit rather than truncating, so a caller that hashes the
-     * body can never mistake a cut-off file for a different one; throws on transport failure.
-     *
-     * <p>Same enabled-gate contract as {@link #postJson}: the caller checks it before calling.
+     * Throws past {@code maxBytes} rather than truncating, so a caller hashing the body can never mistake a cut-off
+     * file. The caller checks the enabled-gate first.
      */
     public Fetched getBytes(String path, int maxBytes) throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder(URI.create(BASE_URL + path))

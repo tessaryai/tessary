@@ -47,41 +47,21 @@ import java.util.Set;
 public interface ClassifierSweep {
 
     /**
-     * The detector kinds this sweep claims: {@link BuiltInDetector.Kind} values, or kinds no catalog
-     * module declares, which the worker then runs at window grain. A kind claimed by two beans fails
-     * the context at startup rather than picking one, and so does a kind that also has a {@link
-     * BuiltInDetector}; an empty set registers nothing and can never be dispatched; see {@link
-     * ClassifierSweepRegistry}.
-     *
-     * <p>A {@code Set} rather than a single kind because one sweep legitimately serves a family:
-     * {@code MetricDriftSweep} runs both {@code duration_drift} and {@code cost_drift} from one bean
-     * over one baseline store.
+     * A kind claimed twice, or also by a {@link BuiltInDetector}, fails startup; an empty set is never dispatched. A
+     * set because one sweep may serve a family ({@code MetricDriftSweep}: duration and cost).
      */
     Set<String> kinds();
 
-    /**
-     * Run one pass for a claimed job. The worker owns the lease, the attempt budget and the
-     * dead-letter transition; an implementation that throws is retried under that budget, and one
-     * that returns is treated as a clean pass.
-     */
+    /** The worker owns the lease, attempts and dead-lettering; a throw is retried under that budget. */
     SweepOutcome sweep(SweepContext ctx);
 
-    /**
-     * Refuse to turn {@code classifier} on by throwing a {@code TessaryException} whose code says why, for a row
-     * this sweep could not run. {@code ClassifierService#setEnabled} asks before it writes, and only when turning
-     * a row on; turning one off is never refused. The default accepts every row.
-     */
+    /** Asked only when enabling a row; disabling is never refused. */
     default void checkEnable(ClassifierRow classifier) {
-        // A sweep that can run every row it is handed has nothing to refuse.
     }
 
     /**
-     * Forget what this sweep judged and learned for {@code classifier}, for a person's reset: the rows of its own
-     * tables that the reset does not know, such as assessments that stop a judged unit being judged again, and the
-     * state it fitted. {@code ClassifierReset} calls it inside the reset's transaction, after the job restart has
-     * locked the sweep job and before the cursor goes back to the start, so the next pass judges every kept trace
-     * again. Detections in a registered {@code DetectionTable} and unruled findings are cleared by the reset itself.
-     * Returns the rows deleted; the default keeps nothing of its own and deletes nothing.
+     * Clears this sweep's own tables and fitted state for a reset, inside the reset's transaction after the sweep job
+     * is locked. Detections and unruled findings are cleared by the reset itself. Returns rows deleted.
      */
     default int reset(ClassifierRow classifier) {
         return 0;

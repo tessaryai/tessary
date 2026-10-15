@@ -46,25 +46,13 @@ public final class ClassifierDossierAssembler {
     /** ~30k tokens at ~4 chars/token — see the class javadoc for why this is a soft, documented estimate. */
     static final int CHAR_BUDGET = 30_000 * 4;
 
-    /**
-     * The "small enough to enumerate whole" line — matches {@code McpToolRegistry.TRACE_SPAN_CAP}'s
-     * order of magnitude, on the same reasoning: a page of this size is cheap to read completely, and a
-     * different constant here would just be a second number someone has to remember agrees with the
-     * first.
-     */
+    /** Matches {@code McpToolRegistry.TRACE_SPAN_CAP}'s order of magnitude, so there is one number to remember. */
     public static final int SMALL_EVIDENCE_SET_CAP = 200;
 
     /**
-     * Assemble a dossier evidence file for {@code payloadJson}, or empty when its shape is not one this
-     * class has a dedicated assembler for — the caller falls back to {@code DossierPayload.forAgent} in
-     * that case (see the class javadoc's dispatch note).
-     *
-     * @param evidence the finding's evidence table, read only when the enumeration section actually
-     *     needs rows (a page bounded at {@link #SMALL_EVIDENCE_SET_CAP}+1, never the whole population)
-     * @param projectId / @param findingId the evidence table's own composite key
-     * @param evidenceCounts per-role counts already cached on the finding row ({@code
-     *     FindingRow#evidenceCount}) — read here rather than re-derived, so this and the finding's own
-     *     {@code finding.md} section can never disagree about how much evidence exists
+     * Empty when the shape has no dedicated assembler; the caller falls back to {@code DossierPayload.forAgent}. @param
+     * evidence read only when enumeration needs rows (a page of at most {@link #SMALL_EVIDENCE_SET_CAP}+1) @param
+     * evidenceCounts the finding row's cached counts, so this and {@code finding.md} cannot disagree
      */
     public static Optional<String> assemble(
             ObjectMapper mapper,
@@ -97,8 +85,8 @@ public final class ClassifierDossierAssembler {
     }
 
     /**
-     * The evidence enumeration section alone: every evidence row when the set is small, else a declared bounded
-     * selection with the population by role. Public so an adapter's {@code evidence.md} lists the same page.
+     * Every row when the set is small, else a declared bounded selection with per-role population. Public so an
+     * adapter's {@code evidence.md} lists the same page.
      */
     public static String enumeration(
             FindingEvidenceRepository evidence, String projectId, String findingId, EvidenceCounts evidenceCounts) {
@@ -106,10 +94,8 @@ public final class ClassifierDossierAssembler {
     }
 
     /**
-     * Truncate the ENUMERATION section only, keeping the shape-specific summary above it whole. Cuts at
-     * the last full line inside budget rather than mid-line, and always appends a stated truncation
-     * note with the real character counts — a silently clipped file is exactly the undeclared-sample
-     * failure this format exists to end, just moved from "which trace ids" to "how much of the dossier".
+     * Cuts at the last full line inside budget and always states the truncation with real character counts: a silently
+     * clipped file is an undeclared sample.
      */
     public static String budget(String full) {
         if (full.length() <= CHAR_BUDGET) return full;
@@ -125,7 +111,6 @@ public final class ClassifierDossierAssembler {
                         full.length());
     }
 
-    /** Per-role counts, read once and passed to both the shape-specific body and the enumeration. */
     public record EvidenceCounts(long exemplar, long member, long baseline, long witness, long changepoint) {
         public long total() {
             return exemplar + member + baseline + witness + changepoint;

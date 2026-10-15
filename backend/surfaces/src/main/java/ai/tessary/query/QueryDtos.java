@@ -8,32 +8,24 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Wire DTOs for the aggregation-first query API. Snake_case on the wire, camelCase in Java
- * (the {@code ClassifierDtos} convention). All four operations share a common shape — a {@code dataset},
- * an optional time {@code range}, and equality {@code filters} on indexed discriminators — plus a few
- * per-operation extras. Filters are bound as parameters; the {@code dataset}/{@code field}/{@code
- * interval} strings are resolved against {@link QueryDataset}/{@link QueryInterval} allow-lists before
- * any SQL is built (never interpolated raw).
+ * Wire DTOs for the query API. {@code dataset}, {@code field} and {@code interval} resolve against
+ * {@link QueryDataset}/{@link QueryInterval} allow-lists, never interpolated raw; filters are bound.
  */
 public final class QueryDtos {
 
     private QueryDtos() {}
 
     /**
-     * A half-open time window {@code [from, to)} on the dataset's own event clock ({@link
-     * QueryDataset#timeColumn()}, ISO-8601 strings) — {@code started_at} for {@code spans} and {@code
-     * tool_calls}, {@code created_at} for the others. Either bound may be null (open-ended); {@code
-     * timeseries()} requires both.
+     * Half-open on the dataset's own event clock ({@link QueryDataset#timeColumn()}). Either bound may be null;
+     * {@code timeseries()} requires both.
      */
     public record TimeRange(@Nullable String from, @Nullable String to) {}
 
-    /** {@code count()} request: total matching rows for a dataset/range/filters. */
     public record CountRequest(
             @NotBlank String dataset,
             @Nullable TimeRange range,
             @Nullable Map<String, String> filters) {}
 
-    /** {@code count()} result: a single total. */
     public record CountView(long count) {
 
         public static CountView of(long count) {
@@ -41,18 +33,16 @@ public final class QueryDtos {
         }
     }
 
-    /** {@code timeseries()} request: bucketed counts over {@code created_at} at {@code interval}. */
     public record TimeseriesRequest(
             @NotBlank String dataset,
             @NotBlank String interval,
             @Nullable TimeRange range,
             @Nullable Map<String, String> filters) {}
 
-    /** One {@code (bucket_start, count)} point. {@code bucketStart} is the truncated ISO-8601 instant. */
+    /** {@code bucketStart} is the truncated ISO-8601 instant. */
     public record TimeseriesBucket(
             @JsonProperty("bucket_start") String bucketStart, long count) {}
 
-    /** {@code timeseries()} result: the ordered list of buckets. */
     public record TimeseriesView(List<TimeseriesBucket> buckets) {
 
         public static TimeseriesView of(List<QueryRepository.Bucket> rows) {
@@ -62,7 +52,6 @@ public final class QueryDtos {
         }
     }
 
-    /** {@code facets()} request: top-N breakdown of {@code field} for a dataset/range/filters. */
     public record FacetsRequest(
             @NotBlank String dataset,
             @NotBlank String field,
@@ -70,10 +59,9 @@ public final class QueryDtos {
             @Nullable Map<String, String> filters,
             @JsonProperty("top_n") @Nullable Integer topN) {}
 
-    /** One {@code (value, count)} facet bucket. {@code value} is null when the dimension is NULL. */
+    /** {@code value} is null when the dimension is NULL. */
     public record FacetBucket(@Nullable String value, long count) {}
 
-    /** {@code facets()} result: the ranked facet buckets for {@code field}. */
     public record FacetsView(String field, List<FacetBucket> facets) {
 
         public static FacetsView of(String field, List<QueryRepository.Facet> rows) {
@@ -86,11 +74,8 @@ public final class QueryDtos {
     }
 
     /**
-     * {@code search()} request: structured/keyword filter search returning matching rows (not
-     * aggregated). {@code mode} defaults to, and must be, {@code keyword} — a prior {@code semantic}
-     * mode (kNN over a vector index) was removed along with the rest of the embedding substrate;
-     * any other {@code mode} value is a {@code 400 UNKNOWN_SEARCH_MODE}. {@code cursor} is
-     * the opaque keyset page token returned as {@code next_cursor}.
+     * {@code mode} must be {@code keyword}; anything else is {@code 400 UNKNOWN_SEARCH_MODE}. {@code cursor} is the
+     * {@code next_cursor} token.
      */
     public record SearchRequest(
             @NotBlank String dataset,
@@ -101,11 +86,9 @@ public final class QueryDtos {
             @Nullable Integer limit,
             @Nullable String cursor) {}
 
-    /** One matched row: its id, {@code created_at}, and the dataset's allow-listed display columns. */
     public record SearchRow(
             String id, @JsonProperty("created_at") String createdAt, Map<String, String> fields) {}
 
-    /** {@code search()} result: a bounded, keyset-paginated page of rows. */
     public record SearchView(
             List<SearchRow> rows,
             @JsonProperty("next_cursor") @Nullable String nextCursor) {
