@@ -47,58 +47,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The WINDOW-grain sweep of the classifier worker, alongside the trace-grain and observation-grain ones.
- * Design contract: {@code devdocs/concepts/metric-drift.md}.
- *
- * <p>No new scheduler or job table: exactly as {@code BehaviorDriftSweep} does it, a metric-drift
- * signal is an ordinary {@code classifier} job whose cursor walks {@code trace} rows, reusing that
- * job's cursor, lease, attempt budget and dead-letter path. {@link ClassifierWorker} already claims
- * the job; this is one more dispatch branch on {@link Grain}.
- *
- * <p>The scored unit is a window of a bucket, not a span, a turn, or a trace: individual traces fold
- * into a running sketch and are never labelled, since slow is not bad and expensive is not bad
- * (metric-drift.md §0). What this sweep produces is a closed window compared against the same bucket's
- * own earlier windows.
- *
- * <h2>Two clocks</h2>
- *
- * <ul>
- *   <li><b>Windows are cut on event time</b>, {@code COALESCE(started_at, created_at)}
- *       ({@link TraceHead#eventAt()}). A backfill lands a whole corpus in one ingest burst, so by
- *       ingest time "the last hour of traffic" is an artefact of the writer's chunking.
- *   <li><b>The keyset cursor stays on ingest time</b>, {@code trace.created_at}, the clock that is
- *       monotonic and gap-free. A cursor on event time would skip every trace a backfill delivered
- *       out of order, permanently.
- * </ul>
- *
- * <p>The per-baseline watermark ({@code counted_through_*}) is on the ingest clock for the same
- * reason: the cursor lives on the job row while the counters live on the baseline, so clearing a
- * stuck queue restarts the sweep from a null cursor and would otherwise re-fold samples the sketch
- * already holds.
- *
- * <p><b>The {@code :previous} control ring is on event time too</b> [R11]: a window is keyed, aged,
- * weighted and compared against {@link MetricControl} entirely by the day of its own closing sample,
- * never by the day the sweep happened to run the comparison on. A replayed backfill therefore judges
- * every window against its own trailing 21 event-days, and a historical regression can surface on
- * import — the ring's day keys are event-time, so absorb and the pinned-reference arm, which compare
- * against a specific window rather than a rolling average, are unaffected.
- *
- * <h2>Findings, not firings</h2>
- *
- * <p>A closed window past the floor writes one {@code behavior_finding} row per cause; a shift
- * persisting across twenty windows keeps that one row with a climbing count. Findings are written
- * unbudgeted by decision (§9): thresholds get tuned against real firings rather than a guessed
- * number, and the valve goes on escalation, the expensive step, rather than on the row.
- *
- * <h2>One pass, one transaction</h2>
- *
- * <p>{@link #sweep} is the transactional unit: the counters, the summaries they describe, and the
- * cursor that decides what has been counted must land together. Five writes — window rotation,
- * current sketch, counter-plus-watermark, finding row, job cursor — reach the database through
- * {@link org.springframework.jdbc.core.simple.JdbcClient}, which autocommits each statement on its
- * own, so without the wrapping transaction the gaps between them become double-counts: a failure
- * between {@code updateCurrentSketch} and {@code advanceWindow} leaves a sketch holding samples the
- * watermark does not cover, and a retry folds that block a second time.
+ * The WINDOW-grain sweep: an ordinary {@code classifier} job whose keyset cursor walks {@code trace} rows. Windows are
+ * cut on event time, while each baseline's watermark stays on ingest time so a re-swept page never re-folds samples.
+ * {@link #sweep} is one transaction because each JdbcClient write autocommits and a gap between them double-counts.
  */
 @Component
 public class MetricDriftSweep implements ClassifierSweep {
@@ -106,18 +57,14 @@ public class MetricDriftSweep implements ClassifierSweep {
     private static final Logger log = LoggerFactory.getLogger(MetricDriftSweep.class);
 
     /**
-     * Traces read per sweep pass. A constant rather than a config dial, deliberately: it is a
-     * transport-level bound on one round trip and has no bearing on the operating point, whereas every
-     * number in {@link MetricDriftConfig} changes what the detector decides. Sized at the default
-     * {@code window_target_count} so a thick bucket closes about one window per pass rather than
-     * accumulating a backlog of unclosed windows that all rotate at once.
+     * Traces read per pass: a transport bound, not a detector dial. Sized at the default {@code window_target_count} so
+     * a thick bucket closes about one window per pass.
      */
     static final int PAGE_SIZE = 500;
 
     /**
-     * The two classifiers that file into {@code finding} from here. Named rather than derived, because
-     * {@code classifier_key} is the column every shared reader routes on, and the mapping from measure
-     * to key must stay consistent with what was backfilled into existing rows.
+     * Named rather than derived: {@code classifier_key} is what every shared reader routes on and must match the
+     * backfilled rows.
      */
     private static final List<String> METRIC_CLASSIFIERS =
             List.of(BuiltInDetector.Kind.DURATION_DRIFT, BuiltInDetector.Kind.COST_DRIFT);
@@ -153,34 +100,21 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * What one metric sweep did, including the one number only this classifier has.
-     *
-     * <p>Richer than the seam's {@link SweepOutcome} on purpose: {@code windowsClosed} describes
-     * progress here (a pass can scan four hundred traces, fire nothing, and still rotate two windows)
-     * but means nothing for a trace-grain drift sweep or tool errors. {@link #sweep(SweepContext)}
-     * narrows at the seam so the shared record does not grow a field per classifier.
-     *
-     * @param fired findings written or bumped this pass, one per closed window past the floor, never
-     *     one per trace.
-     * @param windowsClosed windows rotated this pass.
+     * {@code windowsClosed} is progress only this sweep has; {@link #sweep(SweepContext)} narrows to the shared
+     * {@link SweepOutcome}.
      */
     public record MetricSweepOutcome(int scanned, int fired, int windowsClosed) {
 
         static final MetricSweepOutcome EMPTY = new MetricSweepOutcome(0, 0, 0);
 
-        /** The two numbers the worker's completion line prints. */
         SweepOutcome narrowed() {
             return new SweepOutcome(scanned, fired);
         }
     }
 
     /**
-     * Both windowed metric classifiers, from one bean. They share a baseline store, a config record and
-     * a fold, differing only in which measures they read; splitting them into two beans to satisfy a
-     * one-kind-per-sweep port would have bought nothing and doubled the fold.
-     *
-     * <p>Declaring both kinds explicitly, rather than falling through a default branch, means a
-     * classifier with no dispatch of its own fails loudly instead of silently running metric drift.
+     * Declared explicitly so a classifier with no dispatch of its own fails loudly instead of silently running metric
+     * drift.
      */
     @Override
     public Set<String> kinds() {
@@ -188,13 +122,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * The seam entry point: run one pass and report the two numbers every sweep can answer.
-     *
-     * <p>{@code @Transactional} is on both this method and {@link #sweepMetrics}, deliberately: Spring's
-     * proxy only wraps the method it is invoked through, and the self-invocation below bypasses the
-     * proxy, so the annotation alone on {@code sweepMetrics} would leave every worker-driven pass
-     * running with no transaction at all. {@code sweepMetrics} keeps its own because the integration
-     * suite calls it directly and needs the same guarantee; the inner call joins the outer transaction.
+     * {@code @Transactional} is on both this method and {@link #sweepMetrics}: the self-invocation bypasses Spring's
+     * proxy, and the integration suite calls {@code sweepMetrics} directly.
      */
     @Transactional
     @Override
@@ -203,20 +132,16 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * Run one metric-drift sweep for a claimed signal job, advancing its cursor.
-     *
-     * <p>The whole pass is one transaction — see the class comment for the double-counts the gaps
-     * between its writes would otherwise be. The unit ends at {@code markSwept}: baselines, findings and
-     * the cursor commit together, so a retry either re-does a page nothing recorded or skips one
-     * everything recorded, and never the half-and-half in between.
+     * One transaction ending at {@code markSwept}: baselines, findings and the cursor commit together, so a retry never
+     * re-folds a half-recorded page.
      */
     @Transactional
     public MetricSweepOutcome sweepMetrics(ClassifierJobRow job, ClassifierRow signal) {
         MetricDriftConfig config = MetricDriftConfig.of(mapper, signal.configJson());
         List<Measured> live = config.measured();
         if (live.isEmpty()) {
-            // A signal whose blob names no measure this build knows. Finish the job rather than failing
-            // it: the cursor must not advance over traffic nothing measured, and a config edit fixes it.
+            // Finish rather than fail: the cursor must not advance over traffic nothing measured, and a config edit
+            // fixes it.
             StructuredLog.info(log, Markers.OPS, "metric.sweep.no-measures")
                     .field("project", job.projectId())
                     .field("signal", signal.classifierKey())
@@ -225,11 +150,8 @@ public class MetricDriftSweep implements ClassifierSweep {
             return MetricSweepOutcome.EMPTY;
         }
 
-        // EVENT clock. The cursor is (trace.started_at, trace.id) — the same keyset the span- and
-        // trace-grain sweeps use, so this classifier's job row needs no new columns. There is no per-measure
-        // settle horizon any more: trace.is_settled is a fact about the trace rather than a guess scaled
-        // per measure, and a measure that genuinely needs nothing settled (duration_drift) was already
-        // paying the cursor's monotonicity for the ones that do.
+        // The same (trace.started_at, trace.id) keyset the span- and trace-grain sweeps use, so this job row needs no
+        // new columns.
         List<TraceHead> heads = substrate.tracesAfter(job.projectId(), job.cursorAt(), job.cursorId(), PAGE_SIZE);
         if (heads.isEmpty()) {
             jobs.markSwept(job.id(), null, null);
@@ -240,10 +162,7 @@ public class MetricDriftSweep implements ClassifierSweep {
         MetricSource.Tally tally = new MetricSource.Tally();
         Folded folded = Folded.NONE;
 
-        // Read once for the whole page rather than per bucket. A project sweeps thousands of buckets and
-        // the confirmed set is a handful, so this is a map built once and consulted in memory — see
-        // FindingRepository#confirmedSpansBySubject for why the exclusion is decided here, on
-        // the read, rather than when the day was folded.
+        // Read once per page: the confirmed set is a handful and is consulted in memory for thousands of buckets.
         Map<String, List<ConfirmedSpan>> confirmed =
                 findings.confirmedSpansBySubject(job.projectId(), METRIC_CLASSIFIERS);
 
@@ -254,17 +173,13 @@ public class MetricDriftSweep implements ClassifierSweep {
             int admissible = admissibleThrough(heads, turns, config);
             held = heads.size() - admissible;
             if (admissible == 0) {
-                // The whole page is still arriving. Finish the job WITHOUT moving the cursor, so the next
-                // tick re-offers these traces rather than the sweep stepping over turns it cannot read.
+                // Finish WITHOUT moving the cursor, so the next tick re-offers the traces still arriving.
                 jobs.markSwept(job.id(), null, null);
                 return MetricSweepOutcome.EMPTY;
             }
             if (held > 0) {
                 heads = heads.subList(0, admissible);
                 turns = turns.subList(0, admissible);
-                // The tally already counted the held turns' abstentions. Left as counted rather than
-                // re-derived: a NO_ROOT_SPAN that will be swept again next tick is exactly the transient
-                // this gate exists to make visible, and `heldForRoot` below says how many.
             }
             for (Measured spec : turnMeasures) {
                 folded = folded.plus(foldMeasure(
@@ -280,10 +195,7 @@ public class MetricDriftSweep implements ClassifierSweep {
 
         List<Measured> spanMeasures = config.measuredAt(Grain.OBSERVATION);
         if (!spanMeasures.isEmpty()) {
-            // Grouped once and folded per measure, which is exact only while a span carries ONE reading —
-            // MetricSource.ToolMetrics has a single `duration` field and tool_duration is the only measure
-            // at this grain. A second span-grain measure would have to select its own value per span, the
-            // way turnSamples takes a spec and reads that measure off the turn.
+            // Exact only while a span carries ONE reading: tool_duration is the only measure at this grain.
             Map<Bucket, List<Sample>> byTool =
                     inCallSiteScope(signal, toolSamples(heads, source.toolMetrics(job.projectId(), heads, tally)));
             for (Measured spec : spanMeasures) {
@@ -291,28 +203,20 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
         }
 
-        // Both grains are folded before ANY finding is written, which is the whole shape of the §6.1
-        // suppression rule: a turn shift is a finding only if no tool shift inside that call site
-        // accounts for it, and the tool shift that does account for it has to carry it as evidence.
+        // Both grains are folded before ANY finding is written: the §6.1 suppression rule needs to see both.
         int fired = emit(job.projectId(), signal, config, folded.pending());
 
-        // The cursor advances over the WHOLE page, including heads no measure could read (an unattributed
-        // trace, an unfinished turn). A cursor that advanced only over scored rows would re-offer the rest
-        // on every pass forever.
+        // Advance over the WHOLE page, including unreadable heads, or they would be re-offered on every pass forever.
         TraceHead last = heads.get(heads.size() - 1);
         jobs.markSwept(job.id(), last.eventAt(), last.traceId());
 
-        // Logged whether or not anything closed. A measure abstaining on 100% of traffic never fires and
-        // looks identical to a quiet week in the findings; only these counters tell them apart, which is
-        // the failure metric-drift.md §11 opens with.
+        // Logged whether or not anything closed: a measure abstaining on all traffic looks like a quiet week in the
+        // findings.
         StructuredLog.info(log, Markers.OPS, "metric.sweep.windows")
                 .field("project", job.projectId())
                 .field("signal", signal.classifierKey())
                 .field("scanned", heads.size())
-                // How many trailing traces this pass declined to step over because their root span had
-                // not landed yet. Steadily non-zero is normal (it is the newest edge of the page);
-                // steadily equal to PAGE_SIZE means roots are not arriving at all, which is an ingest
-                // fault this line is the only place that names.
+                // Steadily equal to PAGE_SIZE means root spans are not arriving at all.
                 .field("heldForRoot", held)
                 .field("windowsClosed", folded.closed())
                 .field("findings", fired)
@@ -321,14 +225,7 @@ public class MetricDriftSweep implements ClassifierSweep {
         return new MetricSweepOutcome(heads.size(), fired, folded.closed());
     }
 
-    /**
-     * Windows rotated and findings EARNED by one fold, summed across measures and buckets.
-     *
-     * <p>Earned, not written. Folding is where a window closes and a comparison decides; writing happens
-     * once, after both grains have been folded, because the §6.1 suppression rule cannot be evaluated
-     * until it can see both — a turn shift is only a finding if no tool shift explains it, and the tool
-     * shift that explains it has to carry it as evidence.
-     */
+    /** Written only after both grains are folded, because the §6.1 suppression rule needs to see both. */
     private record Folded(int closed, List<Pending> pending) {
 
         static final Folded NONE = new Folded(0, List.of());
@@ -345,17 +242,7 @@ public class MetricDriftSweep implements ClassifierSweep {
 
     /**
      * A finding one closed window earned, held until the whole page has been folded at both grains.
-     *
-     * @param callSites how many of the window's fresh samples came in through each entry point. At turn
-     *     grain that is one key; at tool grain it is however many call sites dispatched the tool. Read
-     *     twice — for the call site the finding row is filed under, and by {@link MetricSuppression} to
-     *     decide whether this tool shift was measured over the traffic whose turns moved.
-     * @param memberRefs every row of the closed window, at the grain the measure is scored at — the
-     *     flagged population, written verbatim as {@code member} evidence when this earns a finding.
-     * @param baselineRefs the rows the REFERENCE was fitted over, or empty when it was not fitted over
-     *     rows anybody kept. The pinned arm has them, because {@code repin} stores the window it pinned;
-     *     the rolling-control arm does not, because that reference is a weighted ring of per-day
-     *     histograms rather than one window, and there is no set of rows it corresponds to.
+     * {@code baselineRefs} is empty for the rolling-control arm, which has no set of rows behind it.
      */
     private record Pending(
             Measured spec,
@@ -374,38 +261,10 @@ public class MetricDriftSweep implements ClassifierSweep {
             List<FindingEvidenceRepository.Ref> baselineRefs,
             @Nullable Resolved control) {}
 
-    // -----------------------------------------------------------------------------------------------
-    // Candidates
-    // -----------------------------------------------------------------------------------------------
-
     /**
-     * How much of the page may be swept now: everything up to the first trace whose root span has not
-     * arrived and is still young enough that it plausibly will. The rest is left for the next tick.
-     *
-     * <p>This is not a settle window. Duration needs no settle horizon: the root span carries its own
-     * start and end, so its arrival is the completion signal, provided the sweep actually waits for
-     * that arrival. The {@code trace} row is created by the first span to land, and a batch exporter
-     * flushes on span end, so the root (which outlives every child) routinely ships in a later request
-     * than the children that created the row. A trace read in that gap has no root, abstains with
-     * {@code NO_END_TIME}, and, because the cursor is forward-only, is never offered again.
-     *
-     * <p>The dropout would be length-biased, which makes it corrosive rather than lossy: the gap
-     * between the trace row and its root is the turn's own duration, so the probability of losing a
-     * turn rises with how long it took. A regression that lengthens turns would push more of the
-     * affected traffic out of the population instead of into its tail, the detector going quieter as
-     * the regression got worse. Tool spans are unaffected (children arrive early), so the two grains
-     * would also sample different populations, silently skewing the §6.1 comparison.
-     *
-     * <p>So the wait is conditional: a trace whose root is already there is swept on the pass it
-     * appears in. Only a rootless one waits, and only up to {@link MetricDriftConfig#settleSeconds},
-     * the backstop that keeps a trace whose root will never arrive from stalling the cursor for good.
-     * Past it the trace is admitted and abstains, which is the honest reading.
-     *
-     * <p>The age is measured on the event clock, {@code COALESCE(started_at, created_at)}: for a
-     * rootless trace that is its earliest child's start, roughly when the turn began. A stamp in the
-     * future does not hold the page.
-     *
-     * @return the number of leading heads that may be folded; {@code heads.size()} when nothing is held
+     * How many leading heads may be folded now: up to the first trace whose root span has not arrived and is younger
+     * than {@link MetricDriftConfig#settleSeconds}. Sweeping a rootless trace would drop it for good, and the dropout
+     * is length-biased: a regression that lengthens turns would make the detector quieter.
      */
     private static int admissibleThrough(List<TraceHead> heads, List<TurnMetrics> turns, MetricDriftConfig config) {
         Instant now = Instant.now();
@@ -415,48 +274,22 @@ public class MetricDriftSweep implements ClassifierSweep {
             if (turns.get(i).completion() != MetricSource.Completion.NO_ROOT_SPAN) continue;
             if (stillArriving(heads.get(i).eventAt(), now, backstop)) return i;
         }
-        // Fewer facts than heads is not a shape this produces (turnFacts returns one row per trace in the
-        // page), but if it ever did, the unmatched tail has been read by nothing and is held rather than
-        // stepped over.
         return n < heads.size() ? n : heads.size();
     }
 
-    /** Whether a rootless trace is young enough that its root may still be in flight. */
     private static boolean stillArriving(String eventAt, Instant now, long backstopSeconds) {
         Duration age = Duration.between(Instant.parse(eventAt), now);
         return !age.isNegative() && age.getSeconds() < backstopSeconds;
     }
 
     /**
-     * One reading, carried with both clocks and the deploy it ran under.
-     *
-     * @param createdAt INGEST time, and {@code traceId} with it: the pair the per-baseline watermark
-     *     compares against, matching the job cursor's keyset exactly.
-     * @param eventAt EVENT time — what windows are cut on.
-     * @param logValue {@code ln} of the measure. Taken once, at the source, because W₁ on logs is what
-     *     makes {@code e^W₁} the multiplicative shift a finding reports.
-     * @param workload what the USER asked for on this turn, folded into the window's workload sketches
-     *     beside the measure. Evidence for the finding, never a covariate of the measure: normalizing
-     *     duration on the agent's own choices would explain the bug away (metric-drift.md §3.2).
-     * @param callSiteId the entry point the trace this reading came from was resolved to. At turn grain
-     *     it is the bucket key itself; at tool grain it is not, because a tool bucket is keyed on an
-     *     {@code ActionSymbol} alone and one tool's window legitimately draws from several call sites.
-     *     Carried per sample rather than per bucket so a tool finding can be filed under the entry point
-     *     most of its window actually came through, and so {@link MetricSuppression} can ask whether a
-     *     tool shift was measured over the traffic of the call site whose turns moved.
-     * @param tokens what this turn's dollars were made of, or null for a measure that has no dollars.
-     *     Folded only under {@code cost}: the decomposition is the explanation a cost finding carries
-     *     (metric-drift.md §6.1), and summarizing it beside a duration would cost a blob per bucket to explain
-     *     nothing. Null here is "this measure has no such quantity", distinct from a null INSIDE
-     *     {@link TokenReadings}, which is "the provider did not report this bucket".
+     * One reading with both clocks. {@code createdAt} and {@code traceId} are the ingest keyset the watermark compares
+     * against; {@code eventAt} is what windows are cut on; {@code logValue} is {@code ln} of the measure so
+     * {@code e^W₁} is a multiplicative shift. {@code tokens} is folded only under {@code cost}.
      */
     private record Sample(
             String traceId,
-            /**
-             * The span this reading came off, at span grain, and null at turn grain — the grain the
-             * finding's evidence refs are written at, so the population a claim rests on is enumerated
-             * at the same resolution the claim was computed at. Never read by the statistic.
-             */
+            /** The span this reading came off at span grain, null at turn grain. Never read by the statistic. */
             @Nullable String spanId,
             String createdAt,
             String eventAt,
@@ -467,28 +300,14 @@ public class MetricDriftSweep implements ClassifierSweep {
             @Nullable TokenReadings tokens) {}
 
     /**
-     * A baseline's scope below the (signal, measure) it belongs to — exactly the columns
-     * {@code metric_baseline_scope} is unique on, and deliberately nothing else.
-     *
-     * <p>The call site is <b>not</b> here. At turn grain it would be redundant with {@code key}; at tool
-     * grain it would be wrong, and wrong in a way that corrupts rather than merely over-partitions —
-     * two buckets differing only in call site resolve through {@code ensure} to the SAME row, so the
-     * second fold of a page would re-read that row's watermark before the first fold's write and count
-     * its samples in twice.
+     * Exactly the columns {@code metric_baseline_scope} is unique on. The call site is not here: two tool buckets
+     * differing only in call site would resolve to the same row and count their samples twice.
      */
     private record Bucket(String key) {}
 
     /**
-     * Group one page's turn-grain readings for one measure into its buckets.
-     *
-     * <p>{@code turnMetrics} returns one reading per head in head order, so the two lists are zipped by
-     * index — the head carries the ingest clock and the reading carries the value.
-     *
-     * <p><b>{@code __unattributed__} is not a bucket</b> (metric-drift.md §2.4). Behaviour drift lumps those
-     * traces together, which is right for a sequence model and wrong here: the pile is a mixture of
-     * everything the instrumentation missed, so its distribution moves whenever the mix moves and every
-     * finding on it would be an artefact. The actionable fact about that pile is its SIZE, which belongs
-     * in {@code vitals/} as a coverage number rather than here as a distribution.
+     * Zipped with {@code turnMetrics} by index. {@code __unattributed__} is not a bucket: its distribution moves
+     * whenever the mix does, so every finding on it would be an artefact.
      */
     private static Map<Bucket, List<Sample>> turnSamples(
             List<TraceHead> heads, List<TurnMetrics> turns, Measured spec) {
@@ -502,8 +321,6 @@ public class MetricDriftSweep implements ClassifierSweep {
             byBucket.computeIfAbsent(bucket, k -> new ArrayList<>())
                     .add(new Sample(
                             head.traceId(),
-                            // Turn grain: the reading is a property of the whole run, so the trace IS
-                            // the row that was measured.
                             null,
                             head.eventAt(),
                             head.eventAt(),
@@ -511,37 +328,15 @@ public class MetricDriftSweep implements ClassifierSweep {
                             turn.callSiteId(),
                             value.logValue(),
                             turn.workload(),
-                            // Only the cost window carries the decomposition, because only the cost
-                            // finding is explained by it. Reading it off the same TurnMetrics the measure
-                            // came from is what guarantees the two describe one turn.
                             Measure.COST.equals(spec.measure()) ? turn.tokenReadings() : null));
         }
         return byBucket;
     }
 
     /**
-     * Group one page's dispatchable spans into their tool buckets — the {@code tool_duration} candidates.
-     *
-     * <p>Walked in head order, not query order: the per-baseline watermark is a keyset on
-     * {@code (trace.created_at, trace.id)}, so samples must fold in that order or a later fold would
-     * set a watermark that excludes an earlier trace's spans forever. {@code toolSpanFacts} orders by
-     * {@code trace_id}, which correlates with but is not the same as ingest time, so the heads (which
-     * came out of the keyset query itself) are what the walk follows.
-     *
-     * <p>The bucket is the tool, not the tool-within-a-call-site: a tool's latency is a tool's latency
-     * whichever entry point dispatched it, and scoping per call site would shatter a shared tool into
-     * populations too thin to arm. Which call site a finding is filed under is decided per closed
-     * window, from the traffic that filled it.
-     *
-     * <p>Unattributed traces contribute here, unlike at turn grain: the {@code __unattributed__} pile
-     * is a mixture whose distribution moves whenever the mix does, true of a call-site bucket
-     * assembled from it but not of {@code tool:search_docs}, one tool however the trace that called it
-     * was tagged.
-     *
-     * <p>No workload is folded ({@link MetricSource.Workload#NONE} throughout): a tool call has no
-     * prompt of its own, and folding the enclosing turn's workload per tool call would condition on
-     * the answer, which metric-drift.md §3.2 forbids. A tool finding's workload pairs print as nulls, "no
-     * such quantity" rather than a workload of zero.
+     * Walked in head order, not query order: the watermark is a keyset on {@code (trace.created_at, trace.id)} and a
+     * later fold would otherwise exclude an earlier trace's spans forever. No workload is folded, since folding the
+     * enclosing turn's would condition on the answer.
      */
     private static Map<Bucket, List<Sample>> toolSamples(List<TraceHead> heads, List<MetricSource.ToolMetrics> tools) {
         Map<String, List<MetricSource.ToolMetrics>> byTrace = new LinkedHashMap<>();
@@ -556,34 +351,25 @@ public class MetricDriftSweep implements ClassifierSweep {
                 Bucket bucket = new Bucket(tool.bucketKey());
                 byBucket.computeIfAbsent(bucket, k -> new ArrayList<>())
                         .add(new Sample(
-                                // The TRACE's ingest keyset, not the span's: the watermark has to line up
-                                // with the job cursor, and the cursor walks traces. Every span of a trace
-                                // therefore shares one watermark position and they are folded together or
-                                // not at all, which is what makes a replayed page idempotent here too.
+                                // The TRACE's ingest keyset, not the span's: every span of a trace shares one watermark
+                                // position, which keeps a replayed page idempotent.
                                 head.traceId(),
                                 tool.observationId(),
                                 head.eventAt(),
-                                // EVENT time is the SPAN's own start, though — a window is a stretch of the
-                                // agent's timeline, and a tool called an hour into a long trace belongs in
-                                // the window that hour falls in.
+                                // EVENT time is the span's own start: a tool called an hour into a long trace belongs
+                                // in that hour's window.
                                 tool.eventAt(),
                                 head.projectVersionId(),
                                 tool.callSiteId(),
                                 value.logValue(),
                                 MetricSource.Workload.NONE,
-                                // No decomposition either: a tool span's duration is not made of tokens.
                                 null));
             }
         }
         return byBucket;
     }
 
-    /**
-     * Drop the samples whose entry point is outside the classifier's call sites, and any bucket left empty. A turn
-     * bucket is one call site, so it stays whole or goes. A tool bucket keeps only its in-scope traffic, which is a
-     * change of population when the scope changes; the rolling reference absorbs it within two windows, and a shift
-     * against the pinned reference is the absorb verb's to settle (metric-drift.md §5).
-     */
+    /** Drop samples whose entry point is outside the classifier's call sites, and any bucket left empty. */
     private static Map<Bucket, List<Sample>> inCallSiteScope(ClassifierRow signal, Map<Bucket, List<Sample>> byBucket) {
         if (signal.callSiteIds() == null) return byBucket;
         Map<Bucket, List<Sample>> kept = new LinkedHashMap<>();
@@ -596,11 +382,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         return kept;
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Folding
-    // -----------------------------------------------------------------------------------------------
-
-    /** Fold one measure's whole page into its buckets. */
     private Folded foldMeasure(
             String projectId,
             ClassifierRow signal,
@@ -617,14 +398,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * One window slot's three summaries over ONE set of samples: what the agent did, what the user asked
-     * for, and — under {@code cost} alone — what the dollars were made of. Carried together everywhere so
-     * they can never come from different sets of turns, which is the one way the
-     * flat-inputs-versus-moved-outputs argument could silently become false.
-     *
-     * <p>Every window carries all three slots and the sidecars stay empty where they do not apply; an
-     * empty sidecar serializes to nothing at all ({@link #workloadJson()} / {@link #tokensJson()} return
-     * null), so a tool window costs no blob for a decomposition it has no dollars to decompose.
+     * One window slot's three summaries over ONE set of samples, carried together so they can never come from different
+     * turns. Empty sidecars serialize to null.
      */
     private record Window(MetricSketch measure, MetricWorkload workload, MetricTokens tokens) {
 
@@ -656,13 +431,11 @@ public class MetricDriftSweep implements ClassifierSweep {
             return new Window(measure.copy(), workload.copy(), tokens.copy());
         }
 
-        /** The workload's serialized form, or null when nothing on this window reported any workload. */
         @Nullable
         String workloadJson() {
             return workload.isEmpty() ? null : workload.toJson();
         }
 
-        /** The decomposition's serialized form, or null — which every non-cost window returns. */
         @Nullable
         String tokensJson() {
             return tokens.isEmpty() ? null : tokens.toJson();
@@ -670,25 +443,19 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * The pinned reference as it stands, threaded through the close loop rather than re-read: a page can
-     * close several windows and the first close of a fresh bucket establishes the pin the second is
-     * compared against.
-     *
-     * @param versionId the deploy this reference hangs on, and what a finding against it reports as
-     *     {@code since_version_id} — a shift measured against the window pinned at a deploy is a shift
-     *     since THAT deploy, not since whichever version the current window happened to run under.
+     * Threaded through the close loop rather than re-read: the first close of a fresh bucket establishes the pin the
+     * second is compared against. {@code versionId} is what a finding against it reports as {@code since_version_id}.
      */
     private record Pinned(
             @Nullable MetricSketch sketch,
             @Nullable MetricWorkload workload,
             @Nullable MetricTokens tokens,
-            /** The rows that window was fitted over — the baseline evidence a finding against it writes. */
             List<FindingEvidenceRepository.Ref> refs,
             @Nullable String versionId) {}
 
     /**
-     * Fold one bucket's slice of the page into its current window, closing and comparing whenever the
-     * window's criteria are met — possibly more than once, since a page can be wider than a window.
+     * Fold one bucket's slice of the page, closing and comparing whenever the window's criteria are met, possibly more
+     * than once.
      */
     private Folded foldBucket(
             String projectId,
@@ -706,10 +473,7 @@ public class MetricDriftSweep implements ClassifierSweep {
         Grid grid = spec.grid();
         String gridId = new MetricHistogram(grid).gridId();
         MetricControl control = MetricControl.fromJson(row.controlJson());
-        // The days a confirmed regression ran through, resolved from this baseline's own findings. Held
-        // for the whole page: a page can close several windows and every one of them is judged against a
-        // control excluding the same days, which is what makes the page's outcome independent of where
-        // its boundaries happened to fall.
+        // Held for the whole page, so every window it closes is judged against a control excluding the same days.
         Set<String> excludedDays = MetricBaselineReference.excludedDays(confirmed.get(row.id()));
         Pinned pinned = new Pinned(
                 rehydrate(row.pinnedSketchJson(), row.id()),
@@ -724,21 +488,15 @@ public class MetricDriftSweep implements ClassifierSweep {
         long count;
         String openedAt;
         String state = row.state();
-        // True once a write has zeroed the row's current_count, which decides whether the closing
-        // advanceWindow adds the page's whole contribution or only the part after the last rotation.
         boolean countZeroed = false;
         if (persisted != null && persisted.measure().gridId().equals(gridId)) {
             current = persisted;
             count = row.currentCount();
             openedAt = row.currentOpenedAt();
         } else {
-            // Either nothing has been written yet, or hist_bins was edited under a live project and the
-            // partial window sits on a layout the new samples cannot join. The count, the open time and
-            // the sketch describe one window, so all three restart together. The control ring is left
-            // alone rather than cleared: its day slots on the dead grid are skipped by
-            // MetricControl#resolve and age out on their own, and clearing it would throw away the days
-            // that ARE readable if the grid is later changed back. The pinned reference is
-            // re-established by the first close below, which detects its own mismatch.
+            // Nothing written yet, or hist_bins changed under a live project: the count, open time and sketch restart
+            // together. The control ring is left alone; its dead-grid days are skipped by MetricControl#resolve and age
+            // out.
             current = new Window(grid);
             count = 0;
             openedAt = null;
@@ -748,26 +506,17 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
         }
 
-        // EVENT clock. The open time is the event time of the window's FIRST sample, so a window measures
-        // a span of the agent's real timeline rather than a span of the exporter's.
+        // The event time of the window's FIRST sample.
         String openTimeForWrite = null;
         int closed = 0;
         List<Pending> pending = new ArrayList<>();
-        // Which entry points this window's fresh samples came in through. One key at turn grain; at tool
-        // grain as many as dispatched the tool. Cleared with the window, because it describes THAT window.
         Map<String, Long> callSites = new LinkedHashMap<>();
-        // Every row folded into the window, in fold order — the population a finding on it would be a
-        // claim about. REHYDRATED from the row, not started empty: a window is filled across as many
-        // sweep pages as its traffic takes, and this list used to be a per-page local while the sketch
-        // and count it describes were persisted. A window that spanned pages therefore kept the refs of
-        // one page only — the page its close landed in — so its member evidence was a contiguous tail of
-        // the population presented as the population, which is the one thing the `member` role forbids
-        // the writer to do.
+        // Rehydrated from the row, not started empty: a window spans pages, and member evidence must cover the whole
+        // population, not the page its close landed in.
         List<FindingEvidenceRepository.Ref> windowRefs =
                 new ArrayList<>(MetricEvidenceRefs.fromJson(row.currentRefsJson()));
         if (countZeroed) {
-            // The stale-grid branch above already discarded the window; its refs go with it, or the
-            // window reopening here would inherit a population it never measured.
+            // The stale-grid branch discarded the window, so its refs go with it.
             windowRefs.clear();
         }
         for (Sample sample : fresh) {
@@ -782,15 +531,11 @@ public class MetricDriftSweep implements ClassifierSweep {
             if (!shouldClose(count, openedAt, sample.eventAt(), config)) continue;
 
             Window closedWindow = current.copy();
-            // The window's own EVENT day — the day of its closing sample, never the sweep's wall clock —
-            // is what every slot's age, weight and retention in the control is now measured against, so a
-            // replayed backfill judges each window against its own 21 event-days rather than against
-            // whichever day the replay itself happens to run on.
+            // The window's own EVENT day, never the sweep's wall clock, so a replayed backfill judges each window
+            // against its own 21 event-days.
             String eventDay = MetricControl.dayOf(Instant.parse(sample.eventAt()));
-            // Compared BEFORE the fold, always. The control is what this bucket looked like BEFORE this
-            // window, and folding first would compare the window against a reference that already
-            // contains it — on a thin bucket, where one window is a large share of a day, that alone
-            // would drag the bar most of the way to the window and hide the shift.
+            // Compared BEFORE the fold: folding first would compare the window against a reference that already
+            // contains it.
             MetricControl.Resolved reference = control.resolve(grid, eventDay, excludedDays);
             Compared compared = compareAndPin(
                     projectId,
@@ -808,8 +553,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                     List.copyOf(windowRefs));
             control = control.fold(
                     grid, eventDay, closedWindow.measure(), closedWindow.workload(), closedWindow.tokens());
-            // Refs rotate with the sketch: the window just closed took its population with it into
-            // the finding (compareAndPin, above), and the window opening here has none yet.
             baselines.closeWindow(row.id(), control.toJson(), now);
             pinned = compared.pinned();
             if (compared.pending() != null) pending.add(compared.pending());
@@ -817,8 +560,7 @@ public class MetricDriftSweep implements ClassifierSweep {
             windowRefs = new ArrayList<>();
             if (!MetricBaselineRow.State.ARMED.equals(state)
                     && closedWindow.measure().count() >= config.minSample()) {
-                // Arming is a decision about the row, kept out of advanceWindow on purpose: the sweep must
-                // not be able to arm a bucket as a side effect of counting traffic into it.
+                // Arming stays out of advanceWindow: counting traffic must not arm a bucket as a side effect.
                 baselines.updateState(row.id(), MetricBaselineRow.State.ARMED, now);
                 state = MetricBaselineRow.State.ARMED;
             }
@@ -830,17 +572,14 @@ public class MetricDriftSweep implements ClassifierSweep {
             closed++;
         }
 
-        // The tail: whatever is left in the open window after the last rotation, or the whole page when
-        // nothing rotated.
         boolean empty = current.measure().count() == 0;
         baselines.updateCurrentSketch(
                 row.id(),
                 empty ? null : current.measure().toJson(),
                 empty ? null : current.workloadJson(),
                 empty ? null : current.tokensJson(),
-                // The tail's refs, carried forward for the next page to append to. `empty` is the
-                // window, not the list: a page that rotated and folded nothing after the cut leaves an
-                // empty window, and its refs must be dropped with it rather than outliving the sketch.
+                // `empty` is the window, not the list: refs must be dropped with an empty window rather than outliving
+                // the sketch.
                 empty ? null : MetricEvidenceRefs.toJson(windowRefs),
                 now);
         Sample last = fresh.get(fresh.size() - 1);
@@ -850,40 +589,19 @@ public class MetricDriftSweep implements ClassifierSweep {
                 now,
                 openTimeForWrite,
                 maxEventAt(fresh),
-                // INGEST clock, and the whole reason the watermark is not the job cursor: it shares the
-                // counters' lifetime, so a re-swept page cannot fold the same trace in twice.
+                // INGEST clock: the watermark shares the counters' lifetime, so a re-swept page cannot fold the same
+                // trace twice.
                 last.createdAt(),
                 last.traceId());
         return new Folded(closed, List.copyOf(pending));
     }
 
-    /**
-     * What one close produced: the pinned reference as it now stands, and the finding this window earned,
-     * or null when it earned none.
-     */
     private record Compared(Pinned pinned, @Nullable Pending pending) {}
 
     /**
-     * Run both comparisons for a just-closed window, earn at most one finding, and return the pinned
-     * reference as it now stands.
-     *
-     * <p>Both references run on every close because each is blind in one direction alone: the rolling
-     * control catches sudden breaks and never notices a slow boil; the pinned window catches cumulative
-     * creep and then screams forever once something legitimately changed (metric-drift.md §4.3).
-     *
-     * <p>At most one finding per window: two references are two views of one window, not two events,
-     * and reporting both would say the same thing twice (§6.1: one event, one finding). The pinned
-     * comparison is preferred, since it is the one a human can act on ("Legitimate — absorb" moves the
-     * pinned reference) and settle. The control comparison still opens a finding on its own when the
-     * pinned one is silent: the recovery case (a bucket that broke and came back to its pinned level),
-     * and the case where nothing has been pinned yet.
-     *
-     * <p>Pinning here is a bootstrap, never an absorb. A bucket with no pinned reference has nothing to
-     * compare against, so its first armed close establishes one; a pinned reference stranded on a dead
-     * grid is replaced the same way. Neither is the "Legitimate — absorb" write, which moves a live
-     * reference and is reachable only from a human pressing the verb: {@code BehaviorTriageVerdict}
-     * reads Layer-2's confidence "never as authority to mutate the baseline," since an automatic re-pin
-     * would let the very next window silently normalize a real regression.
+     * Run both comparisons for a just-closed window and earn at most one finding, preferring the pinned one a human can
+     * absorb. Pinning here only bootstraps an empty or dead-grid reference; moving a live one is the human absorb verb,
+     * never automatic.
      */
     private Compared compareAndPin(
             String projectId,
@@ -941,11 +659,8 @@ public class MetricDriftSweep implements ClassifierSweep {
                     last,
                     callSites,
                     windowRefs,
-                    // The rolling control is a weighted merge of per-day histograms over up to
-                    // MetricControl.RETAIN_DAYS days. There is no window behind it whose rows could be
-                    // enumerated, so this arm's claim carries a member set and no baseline one, and the
-                    // finding's per-role counts say which arm it was. What it compared against is
-                    // described on the finding instead — see the `control` block.
+                    // The rolling control has no window of rows behind it, so this arm carries a member set and no
+                    // baseline set.
                     List.of(),
                     control);
         }
@@ -957,16 +672,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * Establish the closed window as the bucket's pinned reference, or leave the pin alone when the
-     * window is too thin to become one.
-     *
-     * <p>A window too thin to be compared is too thin to become the bar everything else is compared
-     * against. It rotates into prev and the bucket keeps waiting, which is the same "wait, don't skip"
-     * the close criteria take.
-     *
-     * <p>Reached from the two places a reference stops being able to answer — nothing pinned yet, and a
-     * sketch stranded on a dead grid. Both are bootstraps rather than absorbs: <em>Legitimate — absorb</em>
-     * moves a LIVE reference and is reachable only from a human pressing the verb.
+     * Establish the closed window as the pinned reference, unless it is too thin to be compared. Only a bootstrap,
+     * never an absorb.
      */
     private Compared repin(
             MetricBaselineRow row,
@@ -983,13 +690,9 @@ public class MetricDriftSweep implements ClassifierSweep {
                 cur.toJson(),
                 closedWindow.workloadJson(),
                 closedWindow.tokensJson(),
-                // The rows behind the sketch, kept because they cannot be recovered later: by the time a
-                // window shifts against this reference, which traffic went into it is only knowable if
-                // it was written down here.
+                // Kept because which traffic went into the reference cannot be recovered later.
                 MetricEvidenceRefs.toJson(windowRefs),
-                // EVENT time of the window's last sample, not the sweep's wall clock: pinned_at describes
-                // the traffic the reference summarizes, and on a backfilled corpus the two are months
-                // apart. The version is that sample's, so a later deploy's re-pin is distinguishable.
+                // EVENT time of the window's last sample: on a backfilled corpus the sweep's wall clock is months away.
                 last.eventAt(),
                 last.projectVersionId(),
                 Instant.now().toString());
@@ -998,29 +701,10 @@ public class MetricDriftSweep implements ClassifierSweep {
                 pending);
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Emission — metric-drift.md §6.1, one event one finding
-    // -----------------------------------------------------------------------------------------------
-
     /**
-     * Write the findings a page earned, after the §6.1 suppression rule has decided which of them are the
-     * same event seen twice.
-     *
-     * <p>Tool first, then the turns nothing explained. A turn that is slow because one tool is slow is
-     * one cause: the tool row names the fix, the turn row only restates the symptom, and the symptom
-     * rides on the tool row as evidence so suppressing it loses nothing. An unexplained turn shift still
-     * fires on its own — every call as fast as it always was and only the count moved, which is
-     * invisible at tool grain and is the entire reason turn duration is measured.
-     *
-     * <p>Cost is written unconditionally: its own §6.1 rule (the four token buckets are evidence, never
-     * findings) is enforced by the measure registry, so a bucket that cannot open a finding never
-     * reaches this method. Cost is also kept out of the suppression pairing above — a turn that got
-     * more expensive and a tool that got slower are two causes even when they arrive together.
-     *
-     * <p>Suppression is a within-pass judgement, over the windows that closed together: turn and tool
-     * windows fill at different rates, so a shift is only paired when both grains rotate in the same
-     * sweep. In practice they usually do, and a persisting shift re-fires on every close, so the
-     * failure mode when they do not is one extra finding, not a missing one.
+     * Write the findings a page earned. Tool shifts first, then turn shifts no tool shift explains, which ride on the
+     * tool row as evidence. Cost is written unconditionally and kept out of the pairing. Pairing only sees windows that
+     * closed in the same pass, so a miss costs one extra finding, not a missing one.
      */
     private int emit(String projectId, ClassifierRow signal, MetricDriftConfig config, List<Pending> pending) {
         List<Pending> tools = new ArrayList<>();
@@ -1034,7 +718,6 @@ public class MetricDriftSweep implements ClassifierSweep {
             }
         }
 
-        // Parallel to `tools`: the shift view the rule reads, and what each ended up explaining.
         List<Shift> toolShifts = new ArrayList<>(tools.size());
         List<List<Explained>> attached = new ArrayList<>(tools.size());
         for (Pending tool : tools) {
@@ -1074,17 +757,13 @@ public class MetricDriftSweep implements ClassifierSweep {
         for (Pending turn : unexplained) {
             written.add(new Written(openFinding(projectId, turn, List.of(), config), turn));
         }
-        // The pass ends at the written findings. Ruling on a shift costs an E2B microVM with a repo
-        // clone, and a shift is CHANGE rather than a problem — slow is not bad and expensive is not
-        // bad — so this sweep is not entitled to spend one on a lead. A human escalates from the
-        // classifier's rail (`POST /findings/{id}/analysis`).
+        // Ruling on a shift costs an E2B microVM and a shift is change, not a problem, so a human escalates via `POST
+        // /findings/{id}/analysis`.
         return written.size();
     }
 
-    /** One finding this pass wrote, beside the closed window it was written from. */
     private record Written(Recorded recorded, Pending pending) {}
 
-    /** The rule's view of one earned finding: where it happened, and how far its median moved in ms. */
     private static Shift shiftOf(Pending pending) {
         return new Shift(
                 pending.bucket().key(),
@@ -1095,15 +774,13 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * A sketch's median back in the measure's raw units, or NaN when it has none. Read through
-     * {@link MetricFindingEvidence} rather than computed here so the number the rule decides on and the
-     * number the evidence prints cannot drift apart.
+     * Read through {@link MetricFindingEvidence} so the number the rule decides on and the number the evidence prints
+     * cannot drift apart.
      */
     private static double medianOf(MetricReading sketch) {
         return MetricFindingEvidence.rawQuantile(sketch, 0.5).orElse(Double.NaN);
     }
 
-    /** One suppressed turn shift, as the tool finding that accounts for it will carry it. */
     private static Explained explainedBy(Pending turn, double covered) {
         return new Explained(
                 turn.spec().measure(),
@@ -1116,14 +793,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * The entry point a finding on this window is filed under: the one most of the window's traffic came
-     * in through.
-     *
-     * <p>At turn grain the map has one key and this is an identity. At tool grain it is a real choice —
-     * a tool bucket is not scoped by call site — and the modal caller is the honest one, because
-     * {@code behavior_finding.call_site_id} is what a human clicks through to and what a Layer-2
-     * triage agent clones a repo to read. First-seen order breaks a tie, so the answer is stable across a
-     * replayed page rather than depending on hash order.
+     * The call site most of the window's traffic came through. First-seen order breaks a tie, so a replayed page gives
+     * a stable answer.
      */
     private static String primaryCallSite(Map<String, Long> callSites) {
         String best = BehaviorSubstrateRepository.UNATTRIBUTED;
@@ -1138,14 +809,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * Write (or bump) the finding for one shifted window.
-     *
-     * <p>The row is per CAUSE and the sample count accumulates onto it, so twenty consecutive shifted
-     * windows leave one finding whose count climbs rather than twenty rows. The exemplar is the trace
-     * that closed the window — a member of the shifted population, which is what a Layer-2 escalation
-     * needs to be pointed at — and it sticks on first write while the evidence blob is refreshed every
-     * window, because the blob has to describe where the bucket sits NOW for the absorb verb to absorb
-     * the right thing.
+     * Write or bump the per-cause finding for one shifted window. The exemplar sticks on first write; the evidence blob
+     * is refreshed every window so absorb absorbs where the bucket sits now.
      */
     private Recorded openFinding(
             String projectId, Pending pending, List<Explained> explains, MetricDriftConfig config) {
@@ -1163,33 +828,20 @@ public class MetricDriftSweep implements ClassifierSweep {
                 pending.refWorkload(),
                 closedWindow.workload(),
                 pending.refTokens(),
-                // Null on every duration finding, and on a cost window whose traffic reported no usage at
-                // all — the block is written only when there is a decomposition to write.
                 closedWindow.tokens().isEmpty() ? null : closedWindow.tokens(),
                 pending.sinceVersionId(),
                 pending.windowOpenedAt(),
-                // EVENT time again: a window closed by a backfill closed when the traffic happened, not
-                // when the exporter caught up.
+                // EVENT time: a backfilled window closed when the traffic happened.
                 pending.last().eventAt(),
                 closedWindow.measure().count() >= config.windowTargetCount() ? "count" : "elapsed",
                 explains,
                 pending.control());
         Instant at = Instant.now();
-        // EVENT time of the window's own close — the same clock the ring now keys and weighs on [R11] —
-        // written into onset_at and last_seen_at, and what the quiet-spell horizon below is measured back
-        // from. A backfill therefore reads every window's spell exactly as it read at the time: history
-        // that has already gone quiet on the event clock reads as already over rather than as freshly
-        // firing the moment it is replayed. That is an accepted consequence of moving this to event time,
-        // not a bug — a live install's event clock and wall clock stay within seconds of each other, so
-        // nothing here changes for ordinary ingestion.
+        // EVENT time of the window's close, so a backfill reads each window's spell as it read at the time.
         Instant eventAt = Instant.parse(pending.last().eventAt());
         var recorded = findings.recordShift(
                 Ids.ulid(),
                 projectId,
-                // Which classifier filed it, as its own column rather than a derivation. Duration and cost
-                // are separately armable and separately configured, and every reader of the shared table
-                // routes on classifier_key — so a single `distribution_shift` cause kind for both would
-                // put the wrong detector's name on half the cases.
                 classifierKeyFor(spec.measure()),
                 pending.row().id(),
                 causeKey,
@@ -1198,19 +850,12 @@ public class MetricDriftSweep implements ClassifierSweep {
                 primaryCallSite(pending.callSites()),
                 evidence,
                 pending.last().eventAt(),
-                // The recovery horizon, and deliberately the SAME expression MetricDriftSource calls its
-                // quiet window: the longest a still-regressing bucket can go between two firings. A finding
-                // unrefreshed for longer had returned to its reference, so this window opens a new spell
-                // and its onset moves — without which a bucket that recovered and broke again inside the
-                // reopen window would never reopen its case.
+                // Deliberately the SAME expression MetricDriftSource uses for its quiet window, so a bucket that
+                // recovered and broke again reopens its case.
                 eventAt.minus(Duration.ofHours(config.windowMaxHours())).toString(),
                 at.toString());
-        // Both windows are re-pointed at the window that just fired: `recordShift` replaces the stated
-        // quantiles on every close, so leaving the evidence on an old window would let a persisting
-        // shift claim one window's numbers while enumerating another's — which Layer 2 (auditing the
-        // claim by reading the evidence) would read as the detector contradicting itself. Whichever
-        // half moves, both must. No freeze guard needed here: `recordShift`'s conflict target already
-        // excludes a ruled row (see `FindingRepository`), so this call is always on an unruled finding.
+        // Both evidence windows move to the window that just fired: `recordShift` replaces the stated quantiles, and
+        // stale evidence would contradict them. `recordShift` already excludes a ruled row.
         evidenceRefs.replace(
                 projectId, recorded.findingId(), FindingEvidenceRow.Role.MEMBER, pending.memberRefs(), at.toString());
         evidenceRefs.replace(
@@ -1231,7 +876,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         return recorded;
     }
 
-    /** One folded sample as the evidence ref it becomes: a span at span grain, its trace at turn grain. */
     private static FindingEvidenceRepository.Ref refOf(Sample sample) {
         String spanId = sample.spanId();
         return spanId == null
@@ -1240,9 +884,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * One comparison, on the ops log. A firing one goes on to earn a {@code behavior_finding} row (subject
-     * to §6.1 suppression); the SILENT ones are logged here and nowhere else, because "did not fire" and
-     * "was never asked" are indistinguishable in a findings table and only this line tells them apart.
+     * One comparison on the ops log. Silent comparisons are logged only here: "did not fire" and "was never asked" are
+     * otherwise indistinguishable.
      */
     private void report(String projectId, ClassifierRow signal, Bucket bucket, Decision decision) {
         var silence = decision.silence();
@@ -1261,39 +904,18 @@ public class MetricDriftSweep implements ClassifierSweep {
                 .log();
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Window mechanics
-    // -----------------------------------------------------------------------------------------------
-
     /**
-     * Whether the window that now holds {@code count} samples, opened at {@code openedAt} in event time
-     * and just extended to {@code eventAt}, should close.
-     *
-     * <p><b>The minimum sample is a wait, not a skip</b> (metric-drift.md §2.3). A bucket under it holds its
-     * window open past the elapsed horizon rather than closing one nothing can be compared against, so a
-     * tool called thirty times a week is watched on a slower clock instead of never being watched. That
-     * is ADWIN's native behaviour and behaviour drift's {@code min_support} posture, and it is why
-     * {@link MetricDriftConfig} clamps {@code min_sample} at or below {@code window_target_count}.
-     *
-     * <p>The elapsed test is on the EVENT clock at both ends. On the ingest clock a backfill would stamp
-     * a whole corpus within minutes of itself, so the elapsed criterion could never fire and one window
-     * would swallow the lot.
+     * The minimum sample is a wait, not a skip: a thin bucket holds its window open past the elapsed horizon. Elapsed
+     * time is on the EVENT clock, or a backfill would put a whole corpus in one window.
      */
     private static boolean shouldClose(long count, String openedAt, String eventAt, MetricDriftConfig config) {
         if (count < config.minSample()) return false;
-        // Either criterion closes it: the count where traffic is thick, the elapsed event time where it
-        // is thin. Both are read only after the minimum sample, which is what makes the floor a wait.
         return count >= config.windowTargetCount() || elapsedHours(openedAt, eventAt) >= config.windowMaxHours();
     }
 
     /**
-     * Hours between two event stamps, or 0 when they run backwards. Parsed as
-     * INSTANTS, never compared as strings: {@code Instant.toString()} elides trailing zeros in the
-     * fractional second, so the rendered forms are variable-length and lexical order diverges from
-     * chronological ({@code ...:37Z} sorts after {@code ...:37.4Z} because {@code 'Z' > '.'}).
-     *
-     * <p>Backwards is not an error — event time genuinely goes backwards inside a backfilled page — it
-     * simply means this sample cannot extend the window's span.
+     * Parsed as instants, never compared as strings: {@code Instant.toString()} is variable-length, so lexical order
+     * diverges from chronological. Event time can run backwards inside a backfilled page; that yields 0.
      */
     private static double elapsedHours(String openedAt, String eventAt) {
         Duration elapsed = Duration.between(Instant.parse(openedAt), Instant.parse(eventAt));
@@ -1301,12 +923,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * The samples at or below this baseline's watermark are already in its sketch; everything strictly
-     * after it is new. A null watermark (a bucket seen for the first time) admits everything.
-     *
-     * <p>On the INGEST clock, matching the SQL keyset exactly. The compare is lexicographic over the
-     * rendered timestamps, which agrees with the keyset only while every row renders the same offset —
-     * true of the UTC strings ingest writes, and the same caveat {@code BehaviorDriftSweep} carries.
+     * Samples strictly after the baseline's watermark; a null watermark admits everything. The lexicographic compare
+     * matches the SQL keyset only while every timestamp renders in UTC.
      */
     private static List<Sample> notYetCounted(MetricBaselineRow row, List<Sample> samples) {
         String at = row.countedThroughAt();
@@ -1322,7 +940,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         return fresh;
     }
 
-    /** The latest EVENT time in the page, which a backfill can put anywhere but the end. */
     private static @Nullable String maxEventAt(List<Sample> samples) {
         String best = null;
         Instant bestAt = null;
@@ -1336,11 +953,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         return best;
     }
 
-    // -----------------------------------------------------------------------------------------------
-    // Rows
-    // -----------------------------------------------------------------------------------------------
-
-    /** A bucket's row as it stands on first sight: learning, unpinned, nothing counted. */
     private static MetricBaselineRow seed(
             String projectId, String classifierId, Measured spec, Bucket bucket, String now) {
         return new MetricBaselineRow(
@@ -1351,9 +963,6 @@ public class MetricDriftSweep implements ClassifierSweep {
                 spec.bucketKind(),
                 bucket.key(),
                 MetricBaselineRow.State.LEARNING,
-                // The pinned and current sketch, the workload, token and ref blobs beside both, then the
-                // control ring and the window's open time: a bucket seen for the first time has closed
-                // nothing and pinned nothing.
                 null,
                 null,
                 null,
@@ -1375,9 +984,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * Rehydrate a persisted sketch, or null when there is none. A blob that will not parse is logged and
-     * treated as absent rather than throwing: one corrupt sketch must not dead-letter the sweep of every
-     * other bucket in the project, and the next close writes a readable one over it.
+     * A blob that will not parse is logged and treated as absent: one corrupt sketch must not dead-letter every other
+     * bucket.
      */
     private static @Nullable MetricSketch rehydrate(@Nullable String json, String baselineId) {
         if (json == null || json.isBlank()) return null;
@@ -1392,7 +1000,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         }
     }
 
-    /** The same tolerance for a workload blob, and for the same reason. */
     private static @Nullable MetricWorkload rehydrateWorkload(@Nullable String json, Grid grid, String baselineId) {
         if (json == null || json.isBlank()) return null;
         try {
@@ -1406,7 +1013,6 @@ public class MetricDriftSweep implements ClassifierSweep {
         }
     }
 
-    /** The same tolerance for a token blob, and for the same reason. */
     private static @Nullable MetricTokens rehydrateTokens(@Nullable String json, Grid grid, String baselineId) {
         if (json == null || json.isBlank()) return null;
         try {
@@ -1421,13 +1027,8 @@ public class MetricDriftSweep implements ClassifierSweep {
     }
 
     /**
-     * A persisted window slot, or null when it holds no measure sketch.
-     *
-     * <p>A slot with a sketch but no sidecar is the ordinary shape twice over: for rows written before
-     * those columns existed, and for every duration baseline, which never writes a token blob at all. It
-     * rehydrates with an EMPTY sidecar rather than being discarded — the measure half of that window is
-     * still a perfectly good reference, and the evidence blob renders the missing pairs as nulls, which
-     * reads as "not recorded then" rather than as a workload or a token count of zero.
+     * A slot with a sketch but no sidecar (older rows, every duration baseline) rehydrates with an EMPTY sidecar; the
+     * measure half is still a good reference.
      */
     private static @Nullable Window rehydrateWindow(
             @Nullable String sketchJson,
