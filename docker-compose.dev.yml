@@ -8,7 +8,7 @@
 #
 # Usage:
 #   echo "TESSARY_SECRET_KEY=$(openssl rand -base64 32)" >> .env   # for ingestion sources
-#   task docker:dev:tmux         # launches tmux + compose up
+#   task dev                     # launches tmux + compose up
 # or (PNPM_VERSION defaults to the Taskfile's pin; a raw compose call needs nothing exported):
 #     docker compose -f docker-compose.dev.yml up -d --build
 #   open http://localhost
