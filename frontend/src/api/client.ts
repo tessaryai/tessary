@@ -133,6 +133,30 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+function send<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+  return http<T>(path, body === undefined ? { method } : { method, body: JSON.stringify(body) });
+}
+
+/** `path` with every param that is set appended; null, undefined and "" are left out. */
+function withQuery(path: string, params: object = {}): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null && v !== "") q.set(k, String(v));
+  }
+  const qs = q.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+/** A page of a finding's cited rows; `cause` narrows it to one RCA cause: its report and 0-based position there. */
+type CausePageParams = { limit?: number; cursor?: string | null; cause?: { rcaReport: string; index: number } };
+
+const causePage = (params?: CausePageParams) => ({
+  limit: params?.limit,
+  cursor: params?.cursor,
+  rcaReport: params?.cause?.rcaReport,
+  cause: params?.cause?.index,
+});
+
 export interface EntityDiff {
   added: number;
   updated: number;
@@ -200,10 +224,7 @@ export const auth = {
     http<OrgMember[]>(`/api/orgs/${enc(orgSlug)}/members`),
 
   addMember: (orgSlug: string, body: { email: string; role: OrgRole }) =>
-    http<AddMemberResult>(`/api/orgs/${enc(orgSlug)}/members`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    send<AddMemberResult>("POST", `/api/orgs/${enc(orgSlug)}/members`, body),
 
   listInvitations: (orgSlug: string) =>
     http<OrgInvitation[]>(`/api/orgs/${enc(orgSlug)}/invitations`),
@@ -212,39 +233,26 @@ export const auth = {
     http<SignupPolicy>(`/api/orgs/${enc(orgSlug)}/signup-policy`),
 
   updateSignupPolicy: (orgSlug: string, body: Pick<SignupPolicy, "mode" | "domains">) =>
-    http<SignupPolicy>(`/api/orgs/${enc(orgSlug)}/signup-policy`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+    send<SignupPolicy>("PUT", `/api/orgs/${enc(orgSlug)}/signup-policy`, body),
 
   revokeInvitation: (orgSlug: string, invitationId: string) =>
-    http<null>(`/api/orgs/${enc(orgSlug)}/invitations/${enc(invitationId)}`, {
-      method: "DELETE",
-    }),
+    send<null>("DELETE", `/api/orgs/${enc(orgSlug)}/invitations/${enc(invitationId)}`),
 
   updateMember: (orgSlug: string, userId: string, body: { role: OrgRole }) =>
-    http<OrgMember>(`/api/orgs/${enc(orgSlug)}/members/${enc(userId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
+    send<OrgMember>("PATCH", `/api/orgs/${enc(orgSlug)}/members/${enc(userId)}`, body),
 
   removeMember: (orgSlug: string, userId: string) =>
-    http<null>(`/api/orgs/${enc(orgSlug)}/members/${enc(userId)}`, {
-      method: "DELETE",
-    }),
+    send<null>("DELETE", `/api/orgs/${enc(orgSlug)}/members/${enc(userId)}`),
 
   createProject: (orgSlug: string, body: { name: string; description?: string | null }) =>
-    http<Project>(`/api/orgs/${enc(orgSlug)}/projects`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects`, body),
 
   /**
    * The connect gate's quiet escape hatch: idempotent, a second call (a double click, a
    * stale tab) returns the same sample project rather than minting a duplicate.
    */
   ensureSampleProject: (orgSlug: string) =>
-    http<Project>(`/api/orgs/${enc(orgSlug)}/sample-project`, { method: "POST" }),
+    send<Project>("POST", `/api/orgs/${enc(orgSlug)}/sample-project`),
 
   /**
    * The org's capability object: one boolean per capability, resolved server-side from the build's
@@ -261,40 +269,26 @@ export const auth = {
 
   /** Pin one capability on or off for the org. Owner or admin. */
   setCapabilityOverride: (orgSlug: string, key: CapabilityWire, enabled: boolean) =>
-    http<CapabilityOverrideView>(`/api/orgs/${enc(orgSlug)}/capabilities/overrides/${enc(key)}`, {
-      method: "PUT",
-      body: JSON.stringify({ enabled }),
-    }),
+    send<CapabilityOverrideView>("PUT", `/api/orgs/${enc(orgSlug)}/capabilities/overrides/${enc(key)}`, { enabled }),
 
   // ---- Organization lifecycle ----
 
   updateOrg: (orgSlug: string, body: { name: string; settings?: string | null }) =>
-    http<Organization>(`/api/orgs/${enc(orgSlug)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }),
+    send<Organization>("PATCH", `/api/orgs/${enc(orgSlug)}`, body),
 
   // ---- Project lifecycle ----
 
   makeProjectDefault: (orgSlug: string, projectSlug: string) =>
-    http<Project>(`/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/default`, {
-      method: "POST",
-    }),
+    send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/default`),
 
   archiveProject: (orgSlug: string, projectSlug: string) =>
-    http<Project>(`/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/archive`, {
-      method: "POST",
-    }),
+    send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/archive`),
 
   unarchiveProject: (orgSlug: string, projectSlug: string) =>
-    http<Project>(`/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/unarchive`, {
-      method: "POST",
-    }),
+    send<Project>("POST", `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}/unarchive`),
 
   deleteProject: (orgSlug: string, projectSlug: string) =>
-    http<null>(`/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}`, {
-      method: "DELETE",
-    }),
+    send<null>("DELETE", `/api/orgs/${enc(orgSlug)}/projects/${enc(projectSlug)}`),
 
   loginUrl: (returnTo?: string) =>
     `/auth/login${returnTo ? `?returnTo=${enc(returnTo)}` : ""}`,
@@ -305,7 +299,7 @@ export const auth = {
    * frontendUrl after the cookie is cleared.
    */
   logout: () =>
-    http<{ frontendUrl: string }>("/auth/logout", { method: "POST" }),
+    send<{ frontendUrl: string }>("POST", "/auth/logout"),
 
   /**
    * Which flow the active provider drives: polled by the Login/Signup views on mount so
@@ -315,17 +309,11 @@ export const auth = {
 
   /** Create a local account and sign in, via the dependency-free password provider. */
   signup: (email: string, password: string) =>
-    http<CredentialAuthResult>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
+    send<CredentialAuthResult>("POST", "/auth/signup", { email, password }),
 
   /** Sign in with email/password, via the dependency-free password provider. */
   login: (email: string, password: string) =>
-    http<CredentialAuthResult>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
+    send<CredentialAuthResult>("POST", "/auth/login", { email, password }),
 };
 
 export interface DeviceLinkView {
@@ -340,13 +328,10 @@ export const link = {
   get: (userCode: string) => http<DeviceLinkView>(`/api/link/${enc(userCode)}`),
 
   confirm: (userCode: string, body: { org_slug: string; project_slug: string }) =>
-    http<{ status: string }>(`/api/link/${enc(userCode)}/confirm`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    send<{ status: string }>("POST", `/api/link/${enc(userCode)}/confirm`, body),
 
   deny: (userCode: string) =>
-    http<{ status: string }>(`/api/link/${enc(userCode)}/deny`, { method: "POST" }),
+    send<{ status: string }>("POST", `/api/link/${enc(userCode)}/deny`),
 };
 
 /**
@@ -368,15 +353,10 @@ export function orgApi(orgSlug: string) {
     listProviderCredentials: () => http<ProviderCredentialListResponse>(`${base}/providers`),
 
     upsertProviderCredential: (provider: ModelProvider, body: UpsertProviderCredentialRequest) =>
-      http<ProviderCredentialView>(`${base}/providers/${enc(provider)}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+      send<ProviderCredentialView>("PUT", `${base}/providers/${enc(provider)}`, body),
 
     deleteProviderCredential: (provider: ModelProvider) =>
-      http<{ deleted: boolean }>(`${base}/providers/${enc(provider)}`, {
-        method: "DELETE",
-      }),
+      send<{ deleted: boolean }>("DELETE", `${base}/providers/${enc(provider)}`),
   };
 }
 
@@ -407,29 +387,26 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getCase: (id: string) => http<CaseDetail>(`${base}/cases/${encodeURIComponent(id)}`),
     /** Close a case. The detector's reference stays where it was, so this case's evidence is left out of it. */
     closeCase: (id: string) =>
-      http<Case>(`${base}/cases/${encodeURIComponent(id)}/resolve`, { method: "POST", body: JSON.stringify({}) }),
+      send<Case>("POST", `${base}/cases/${encodeURIComponent(id)}/resolve`, {}),
     /**
      * Close the case and move the detector's reference, so the level it fired on becomes the new
      * baseline. Distinct from `closeCase`, which closes this case and leaves the bar where it
      * was: an unchanged population then opens another case tomorrow.
      */
     absorbCase: (id: string) =>
-      http<Case>(`${base}/cases/${encodeURIComponent(id)}/absorb`, { method: "POST" }),
+      send<Case>("POST", `${base}/cases/${encodeURIComponent(id)}/absorb`),
 
     // Notifications: the alert rules and delivery channels behind Settings → Notifications.
     listAlertRules: () => http<AlertRule[]>(`${base}/alert-rules`),
     upsertAlertRule: (body: UpsertAlertRule) =>
-      http<AlertRule>(`${base}/alert-rules`, { method: "PUT", body: JSON.stringify(body) }),
+      send<AlertRule>("PUT", `${base}/alert-rules`, body),
     setAlertRuleEnabled: (id: string, enabled: boolean) =>
-      http<AlertRule>(`${base}/alert-rules/${encodeURIComponent(id)}/enabled`, {
-        method: "PUT",
-        body: JSON.stringify({ enabled }),
-      }),
+      send<AlertRule>("PUT", `${base}/alert-rules/${encodeURIComponent(id)}/enabled`, { enabled }),
     listAlertChannels: () => http<AlertChannel[]>(`${base}/alert-channels`),
     createAlertChannel: (body: CreateAlertChannel) =>
-      http<AlertChannel>(`${base}/alert-channels`, { method: "POST", body: JSON.stringify(body) }),
+      send<AlertChannel>("POST", `${base}/alert-channels`, body),
     deleteAlertChannel: (id: string) =>
-      http<{ deleted: boolean }>(`${base}/alert-channels/${encodeURIComponent(id)}`, { method: "DELETE" }),
+      send<{ deleted: boolean }>("DELETE", `${base}/alert-channels/${encodeURIComponent(id)}`),
 
     getPipeline: () => http<PipelineEnvelope>(`${base}/pipeline`),
 
@@ -453,22 +430,16 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // endpoints list them, toggle a definition, and read recent detections.
     listClassifiers: () => http<Classifier[]>(`${base}/classifiers`),
     setClassifierEnabled: (id: string, enabled: boolean) =>
-      http<Classifier>(`${base}/classifiers/${enc(id)}/enabled`, {
-        method: "PUT",
-        body: JSON.stringify({ enabled }),
-      }),
+      send<Classifier>("PUT", `${base}/classifiers/${enc(id)}/enabled`, { enabled }),
     /** Limit a classifier to some call sites, or `null` to run it on every call site again. */
     setClassifierCallSites: (id: string, callSiteIds: string[] | null) =>
-      http<Classifier>(`${base}/classifiers/${enc(id)}/call-sites`, {
-        method: "PUT",
-        body: JSON.stringify({ call_site_ids: callSiteIds }),
-      }),
+      send<Classifier>("PUT", `${base}/classifiers/${enc(id)}/call-sites`, { call_site_ids: callSiteIds }),
     /** The call sites a classifier can be limited to: declared in the bundle, or seen on traces. */
     listClassifierCallSites: () => http<string[]>(`${base}/classifiers/call-sites`),
     listClassifierHealth: () => http<ClassifierHealth[]>(`${base}/classifiers/health`),
     /** Forget what the classifier found and learned, and check every kept trace again. 409s while it sweeps. */
     resetClassifier: (id: string) =>
-      http<Classifier>(`${base}/classifiers/${enc(id)}/reset`, { method: "POST" }),
+      send<Classifier>("POST", `${base}/classifiers/${enc(id)}/reset`),
     /**
      * The detections one classifier produced, newest-first: the traces that tripped it. This is
      * the full high-recall set, which is what a classifier's configure page shows.
@@ -485,11 +456,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     getClassifierChartScopes: (days: ChartRange = 28) =>
       http<ChartScopes>(`${base}/classifiers/chart-scopes?days=${days}`),
     /** The series for every classifier on one call site, or on one tool across call sites. */
-    getClassifierCharts: (scope: ChartScope, days: ChartRange = 28) => {
-      const q = new URLSearchParams(scope);
-      q.set("days", String(days));
-      return http<ClassifierCharts>(`${base}/classifiers/charts?${q}`);
-    },
+    getClassifierCharts: (scope: ChartScope, days: ChartRange = 28) =>
+      http<ClassifierCharts>(withQuery(`${base}/classifiers/charts`, { ...scope, days })),
     /**
      * Debug bundle for one classifier: sweep-job cursor/lease detail plus family-specific fitted
      * state (metric_baseline rows for cost/duration drift). Not part of the product surface; see
@@ -502,10 +470,7 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     /** The window/threshold operating point for a metric-drift classifier (cost_drift, duration_drift). */
     getClassifierTuning: (id: string) => http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`),
     setClassifierTuning: (id: string, req: SetClassifierTuningRequest) =>
-      http<ClassifierTuning>(`${base}/classifiers/${enc(id)}/tuning`, {
-        method: "PUT",
-        body: JSON.stringify(req),
-      }),
+      send<ClassifierTuning>("PUT", `${base}/classifiers/${enc(id)}/tuning`, req),
 
     // ---- Vitals: cost / tool-error / turn-latency statistics, per call site ----
     /** Cost / tool-error / turn-latency statistics for a window, grouped by call site. */
@@ -535,64 +500,36 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      * <p>Paged rather than read off the finding: a tool-error cause can cite 27,000 refs, and
      * attaching them to the finding view would download the whole set just to open one finding.
      */
-    getBehaviorFindingEvidence: (id: string, params?: { role?: string; limit?: number; cursor?: string }) => {
-      const q = new URLSearchParams();
-      if (params?.role) q.set("role", params.role);
-      if (params?.limit != null) q.set("limit", String(params.limit));
-      if (params?.cursor) q.set("cursor", params.cursor);
-      const qs = q.toString();
-      return http<EvidenceSpanPage>(`${base}/findings/${enc(id)}/evidence${qs ? `?${qs}` : ""}`);
-    },
+    getBehaviorFindingEvidence: (id: string, params?: { role?: string; limit?: number; cursor?: string }) =>
+      http<EvidenceSpanPage>(
+        withQuery(`${base}/findings/${enc(id)}/evidence`, {
+          role: params?.role,
+          limit: params?.limit,
+          cursor: params?.cursor,
+        }),
+      ),
 
-    /**
-     * One page of the frustrated sessions a `frustration_rate` finding cites, newest flag first. `cause`
-     * narrows it to one RCA cause's share: the report that found it and its 0-based position there.
-     */
-    getFrustratedSessions: (
-      id: string,
-      params?: { limit?: number; cursor?: string | null; cause?: { rcaReport: string; index: number } },
-    ) => {
-      const q = new URLSearchParams();
-      if (params?.limit != null) q.set("limit", String(params.limit));
-      if (params?.cursor) q.set("cursor", params.cursor);
-      if (params?.cause) {
-        q.set("rcaReport", params.cause.rcaReport);
-        q.set("cause", String(params.cause.index));
-      }
-      const qs = q.toString();
-      return http<FrustratedSessionPage>(`${base}/findings/${enc(id)}/frustrated-sessions${qs ? `?${qs}` : ""}`);
-    },
+    /** One page of the frustrated sessions a `frustration_rate` finding cites, newest flag first. */
+    getFrustratedSessions: (id: string, params?: CausePageParams) =>
+      http<FrustratedSessionPage>(withQuery(`${base}/findings/${enc(id)}/frustrated-sessions`, causePage(params))),
 
-    /**
-     * One page of the flagged answers a `groundedness_rate` finding cites, newest flag first. `cause` narrows
-     * it to one RCA cause's share: the report that found it and its 0-based position there.
-     */
-    getFlaggedAnswers: (
-      id: string,
-      params?: { limit?: number; cursor?: string | null; cause?: { rcaReport: string; index: number } },
-    ) => {
-      const q = new URLSearchParams();
-      if (params?.limit != null) q.set("limit", String(params.limit));
-      if (params?.cursor) q.set("cursor", params.cursor);
-      if (params?.cause) {
-        q.set("rcaReport", params.cause.rcaReport);
-        q.set("cause", String(params.cause.index));
-      }
-      const qs = q.toString();
-      return http<FlaggedAnswerPage>(`${base}/findings/${enc(id)}/flagged-answers${qs ? `?${qs}` : ""}`);
-    },
+    /** One page of the flagged answers a `groundedness_rate` finding cites, newest flag first. */
+    getFlaggedAnswers: (id: string, params?: CausePageParams) =>
+      http<FlaggedAnswerPage>(withQuery(`${base}/findings/${enc(id)}/flagged-answers`, causePage(params))),
 
     /**
      * One field's failing outputs since onset, for a `malformed_rate` finding's "How outputs broke".
      * `field` is a declared field's collapsed path (`items[].sku`), or `not_json` / `other` for the
      * two buckets no declared field owns.
      */
-    getMalformedOutputs: (id: string, field: string, params?: { limit?: number; cursor?: string }) => {
-      const q = new URLSearchParams({ field });
-      if (params?.limit != null) q.set("limit", String(params.limit));
-      if (params?.cursor) q.set("cursor", params.cursor);
-      return http<MalformedOutputPage>(`${base}/findings/${enc(id)}/malformed-outputs?${q.toString()}`);
-    },
+    getMalformedOutputs: (id: string, field: string, params?: { limit?: number; cursor?: string }) =>
+      http<MalformedOutputPage>(
+        withQuery(`${base}/findings/${enc(id)}/malformed-outputs`, {
+          field,
+          limit: params?.limit,
+          cursor: params?.cursor,
+        }),
+      ),
 
     /**
      * Hand one finding to Layer 2: a repo-grounded microVM ruling the deviation against the
@@ -600,15 +537,12 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      * when the finding cites no evidence at all.
      */
     analyzeBehaviorFinding: (id: string) =>
-      http<BehaviorAnalysis>(`${base}/findings/${enc(id)}/analysis`, { method: "POST" }),
+      send<BehaviorAnalysis>("POST", `${base}/findings/${enc(id)}/analysis`),
 
     /** Record a human decision on one finding. Leaving a finding alone is also a valid outcome
      *  and posts nothing: persistence graduation then runs as normal. */
     resolveBehaviorFinding: (id: string, action: BehaviorResolutionAction) =>
-      http<BehaviorFinding>(`${base}/findings/${enc(id)}/resolution`, {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      }),
+      send<BehaviorFinding>("POST", `${base}/findings/${enc(id)}/resolution`, { action }),
 
     // ---- Traces read API (list / detail) -----------------------------------
     // Ingested production traces, one item per producer trace id, newest first. Every number on the
@@ -630,14 +564,8 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       /** A classifier id, or "any": traces a classifier flagged. */
       detectedBy?: string;
       sort?: string;
-    }) => {
-      const p = new URLSearchParams();
-      Object.entries(params ?? {}).forEach(([k, v]) => {
-        if (v != null && v !== "") p.set(k, String(v));
-      });
-      const qs = p.toString();
-      return http<TracesPageView>(`${base}/traces${qs ? `?${qs}` : ""}`);
-    },
+    }) => 
+      http<TracesPageView>(withQuery(`${base}/traces`, params)),
 
     /**
      * One trace in full: its own row (rollups and all) plus its ordered spans.
@@ -654,31 +582,19 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // parameter: ordering sessions by cost or tokens would mean summing every session in the
     // project before a page could be chosen.
     // The filters are the traces list's: a session is listed when one of its traces passes every one.
-    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) => {
-      const p = new URLSearchParams();
-      Object.entries(params ?? {}).forEach(([k, v]) => {
-        if (v != null && v !== "") p.set(k, String(v));
-      });
-      const qs = p.toString();
-      return http<SessionsPageView>(`${base}/sessions${qs ? `?${qs}` : ""}`);
-    },
+    listSessions: (params?: { limit?: number; cursor?: string; include?: "totals" } & TraceFilterParams) => 
+      http<SessionsPageView>(withQuery(`${base}/sessions`, params)),
 
     /** One session. Given the traces list's filters, `matched_trace_ids` names the traces that pass them. */
-    getSession: (sessionId: string, filters?: TraceFilterParams) => {
-      const p = new URLSearchParams();
-      Object.entries(filters ?? {}).forEach(([k, v]) => {
-        if (v != null && v !== "") p.set(k, String(v));
-      });
-      const qs = p.toString();
-      return http<SessionDetailView>(`${base}/sessions/${enc(sessionId)}${qs ? `?${qs}` : ""}`);
-    },
+    getSession: (sessionId: string, filters?: TraceFilterParams) => 
+      http<SessionDetailView>(withQuery(`${base}/sessions/${enc(sessionId)}`, filters)),
 
     /** Every span across a session's traces, in one read: see {@link SessionSpansView}. */
     getSessionSpans: (sessionId: string) =>
       http<SessionSpansView>(`${base}/sessions/${enc(sessionId)}/spans`),
 
     createSource: (body: CreateSourceRequest) =>
-      http<IngestionSource>(`${base}/sources`, { method: "POST", body: JSON.stringify(body) }),
+      send<IngestionSource>("POST", `${base}/sources`, body),
 
     // ---- Git integration ----------------------------------------------------
     // Coalesce to null: when the project has no integration the backend sends
@@ -701,10 +617,10 @@ export function projectApi(orgSlug: string, projectSlug: string) {
       http<InstallationOptions>(`${base}/git/github/installation-options?token=${enc(token)}`),
     /** Finalize a picker choice: binds the chosen repo/installation to this project. */
     selectGithubInstallation: (body: { token: string; installationId: number; repoOwner: string; repoName: string }) =>
-      http<GitIntegration>(`${base}/git/github/select-installation`, { method: "POST", body: JSON.stringify(body) }),
+      send<GitIntegration>("POST", `${base}/git/github/select-installation`, body),
     connectGit: (body: ConnectGitRequest) =>
-      http<GitIntegration>(`${base}/git/connect`, { method: "POST", body: JSON.stringify(body) }),
-    disconnectGit: () => http<{ deleted: boolean }>(`${base}/git`, { method: "DELETE" }),
+      send<GitIntegration>("POST", `${base}/git/connect`, body),
+    disconnectGit: () => send<{ deleted: boolean }>("DELETE", `${base}/git`),
 
     // ---- Import (populates project pipeline) -------------------------------
     //
@@ -732,15 +648,10 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     listMcpTokens: () => http<McpTokenView[]>(`${base}/mcp-tokens`),
 
     issueMcpToken: (name: string) =>
-      http<IssueTokenResponse>(`${base}/mcp-tokens`, {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      }),
+      send<IssueTokenResponse>("POST", `${base}/mcp-tokens`, { name }),
 
     revokeMcpToken: (tokenId: string) =>
-      http<{ revoked: boolean }>(`${base}/mcp-tokens/${enc(tokenId)}`, {
-        method: "DELETE",
-      }),
+      send<{ revoked: boolean }>("DELETE", `${base}/mcp-tokens/${enc(tokenId)}`),
 
     // ---- Managed API keys (project-scoped) ---------------------------------
     // List includes revoked keys (filter client-side on revoked_at if needed).
@@ -748,21 +659,14 @@ export function projectApi(orgSlug: string, projectSlug: string) {
 
     // 201: returns the one-time plaintext secret under `plaintext`.
     createApiKey: (body: CreateKeyRequest) =>
-      http<IssuedKeyResponse>(`${base}/api-keys`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      send<IssuedKeyResponse>("POST", `${base}/api-keys`, body),
 
     // 201: re-issues the secret for an existing key, returning a fresh plaintext.
     rotateApiKey: (keyId: string) =>
-      http<IssuedKeyResponse>(`${base}/api-keys/${enc(keyId)}/rotate`, {
-        method: "POST",
-      }),
+      send<IssuedKeyResponse>("POST", `${base}/api-keys/${enc(keyId)}/rotate`),
 
     revokeApiKey: (keyId: string) =>
-      http<RevokeKeyResponse>(`${base}/api-keys/${enc(keyId)}`, {
-        method: "DELETE",
-      }),
+      send<RevokeKeyResponse>("DELETE", `${base}/api-keys/${enc(keyId)}`),
 
     // Newest-first, capped at 200 rows server-side.
     listApiKeyAudit: () => http<ApiKeyAudit[]>(`${base}/api-keys/audit`),
@@ -785,14 +689,14 @@ export function projectApi(orgSlug: string, projectSlug: string) {
      * case coalesces onto the existing report, which may already be running or done.
      */
     runCaseRca: (caseId: string) =>
-      http<RcaReport>(`${base}/cases/${enc(caseId)}/rca`, { method: "POST" }),
+      send<RcaReport>("POST", `${base}/cases/${enc(caseId)}/rca`),
     getRcaReport: (id: string) => http<RcaReport>(`${base}/rca/${enc(id)}`),
     /**
      * Re-run the analysis behind a finished report. Reports are immutable, so this returns a new
      * report to navigate to (a re-run while the first one is still running is a no-op that hands
      * back the running report).
      */
-    rerunRca: (id: string) => http<RcaReport>(`${base}/rca/${enc(id)}/rerun`, { method: "POST" }),
+    rerunRca: (id: string) => send<RcaReport>("POST", `${base}/rca/${enc(id)}/rerun`),
 
     // Provider credentials moved to orgApi(); see that factory's own comment.
 
@@ -805,59 +709,37 @@ export function projectApi(orgSlug: string, projectSlug: string) {
     // rather than patching one row and hoping the rest still matches. That matters more on the reset
     // below than it looks: the lane it clears may land on a different model than the one it left.
     setLaneModel: (lane: ModelLane, body: SetLaneModelRequest) =>
-      http<ModelSettingsResponse>(`${base}/model-settings/${enc(lane)}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+      send<ModelSettingsResponse>("PUT", `${base}/model-settings/${enc(lane)}`, body),
 
     // DELETE drops this project's choice for the lane, returning it to automatic: the best model in
     // the lane's priority order that the org's configured providers can serve. Hence a full view
     // back, same as the PUT: which model that turns out to be is the server's answer, not ours.
     resetLaneModel: (lane: ModelLane) =>
-      http<ModelSettingsResponse>(`${base}/model-settings/${enc(lane)}`, {
-        method: "DELETE",
-      }),
+      send<ModelSettingsResponse>("DELETE", `${base}/model-settings/${enc(lane)}`),
 
     // ---- Data retention (Settings → Data retention) ------------------------
     getRetention: () => http<RetentionView>(`${base}/retention`),
 
     updateRetention: (body: RetentionUpdateRequest) =>
-      http<RetentionView>(`${base}/retention`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+      send<RetentionView>("PUT", `${base}/retention`, body),
 
     // ---- PII redaction (Settings → PII redaction playground) --------------
     listRedactionRules: () => http<RedactionRuleListView>(`${base}/redaction/rules`),
 
     createRedactionRule: (body: UpsertRedactionRuleRequest) =>
-      http<RedactionRuleView>(`${base}/redaction/rules`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      send<RedactionRuleView>("POST", `${base}/redaction/rules`, body),
 
     updateRedactionRule: (ruleId: string, body: UpsertRedactionRuleRequest) =>
-      http<RedactionRuleView>(`${base}/redaction/rules/${enc(ruleId)}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
+      send<RedactionRuleView>("PUT", `${base}/redaction/rules/${enc(ruleId)}`, body),
 
     setRedactionRuleEnabled: (ruleId: string, enabled: boolean) =>
-      http<RedactionRuleView>(`${base}/redaction/rules/${enc(ruleId)}/enabled`, {
-        method: "PUT",
-        body: JSON.stringify({ enabled }),
-      }),
+      send<RedactionRuleView>("PUT", `${base}/redaction/rules/${enc(ruleId)}/enabled`, { enabled }),
 
     deleteRedactionRule: (ruleId: string) =>
-      http<null>(`${base}/redaction/rules/${enc(ruleId)}`, {
-        method: "DELETE",
-      }),
+      send<null>("DELETE", `${base}/redaction/rules/${enc(ruleId)}`),
 
     previewRedaction: (body: RedactionPreviewRequest) =>
-      http<RedactionPreviewView>(`${base}/redaction/preview`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      send<RedactionPreviewView>("POST", `${base}/redaction/preview`, body),
 
   };
 }
