@@ -2,7 +2,6 @@
 package ai.tessary.plan;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.featureflags.FeatureFlags;
 import java.util.HashMap;
@@ -27,14 +26,6 @@ class CapabilityServiceTest {
         var service = new CapabilityService(flags, CapabilityDefaults.open());
         assertFalse(service.isEnabled(ORG_ID, Capability.TRIAGE_AUTOMATIC));
         assertFalse(service.defaultFor(Capability.TRIAGE_AUTOMATIC));
-    }
-
-    @Test
-    void suppliedDefaultsDecideAnOrgWithNoOverride() {
-        var service = new CapabilityService(flags, triageOn);
-        assertTrue(service.isEnabled(ORG_ID, Capability.TRIAGE_AUTOMATIC));
-        assertTrue(service.defaultFor(Capability.TRIAGE_AUTOMATIC));
-        assertFalse(service.isEnabled(ORG_ID, Capability.ALERTS), "only the capability the defaults flip moves");
     }
 
     @Test

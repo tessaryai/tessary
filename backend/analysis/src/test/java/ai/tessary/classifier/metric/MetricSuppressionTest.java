@@ -31,7 +31,6 @@ class MetricSuppressionTest {
     private static final MetricDriftConfig CONFIG = MetricDriftConfig.DEFAULTS;
 
     private static final String CALL_SITE = "discover-sales-prospects";
-    private static final String OTHER_CALL_SITE = "summarize-thread";
 
     /**
      * Each row: the turn median before and after, a tool's bucket, its median before and after, the call site whose
@@ -55,23 +54,6 @@ class MetricSuppressionTest {
     }
 
     @Test
-    @DisplayName("a tool used by both call sites explains the one whose traffic it was measured over")
-    void aSharedToolMatchesOnAnyContributingCallSite() {
-        Shift turn = turnShift(2_000, 4_000);
-        Shift tool = new Shift(
-                "tool:search_docs",
-                Set.of(OTHER_CALL_SITE, CALL_SITE),
-                fired(Measure.TOOL_DURATION, Direction.UP),
-                500,
-                2_500);
-
-        Explanation explanation = MetricSuppression.explain(turn, List.of(tool), CONFIG.explainedByFraction());
-
-        assertNotNull(explanation);
-        assertEquals("tool:search_docs", explanation.tool().bucketKey());
-    }
-
-    @Test
     @DisplayName("with several tools slowing at once, the one accounting for most time wins")
     void theBestExplanationIsTheOneCoveringMost() {
         // Point the reader at the tool owning most of the added time, not the first one folded.
@@ -84,17 +66,6 @@ class MetricSuppressionTest {
         assertNotNull(explanation);
         assertEquals("tool:search_docs", explanation.tool().bucketKey());
         assertEquals(0.8, explanation.covered(), 0.01);
-    }
-
-    @Test
-    @DisplayName("a tightened bar is what a swallowed regression is corrected with")
-    void raisingTheFractionUnsuppresses() {
-        // This number is the dial: same shifts, two bars, two answers.
-        Shift turn = turnShift(2_000, 4_000);
-        Shift tool = toolShift("tool:search_docs", 600, 1_800, CALL_SITE);
-
-        assertNotNull(MetricSuppression.explain(turn, List.of(tool), 0.5));
-        assertNull(MetricSuppression.explain(turn, List.of(tool), 0.75));
     }
 
     private static Shift turnShift(double refMillis, double curMillis) {

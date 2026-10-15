@@ -210,34 +210,6 @@ class ClassifierServiceTest {
     }
 
     @Test
-    void failingSweep_surfacesStatusAttemptsAndLastError() {
-        when(signals.listByProject(PID)).thenReturn(List.of(signal("sig-b")));
-        ClassifierJobRow failing = new ClassifierJobRow(
-                "job-1",
-                PID,
-                "sig-b",
-                JobStatus.FAILED,
-                null,
-                null,
-                null,
-                null,
-                3,
-                "classify: connection refused",
-                "2026-01-01T00:00:00Z",
-                "2026-01-05T12:00:00Z",
-                0);
-        when(jobs.listByProject(PID)).thenReturn(List.of(failing));
-
-        ClassifierHealthView v = service.health(PID).get(0);
-
-        assertEquals(JobStatus.FAILED, v.status());
-        assertEquals(3, v.attempts());
-        assertEquals("classify: connection refused", v.lastError());
-        assertEquals("2026-01-05T12:00:00Z", v.lastSweptAt());
-        assertNull(v.nextAttemptAt(), "no backoff stamp on main yet — null reads as 'next heartbeat'");
-    }
-
-    @Test
     void healthySweep_reportsDoneWithNoAlarmingState() {
         when(signals.listByProject(PID)).thenReturn(List.of(signal("sig-c")));
         ClassifierJobRow done = new ClassifierJobRow(

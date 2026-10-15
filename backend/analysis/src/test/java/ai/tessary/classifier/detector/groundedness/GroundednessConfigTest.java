@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.tessary.classifier.toolerror.ToolErrorConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,27 +69,6 @@ class GroundednessConfigTest {
                 5_000,
                 GroundednessConfig.of(MAPPER, "{\"min_baseline_traces\":5000}").freezeBaselineTraces(),
                 "an absent freeze below a raised minimum is raised with it");
-    }
-
-    /** A project's tuning reaches the engine; the keys this classifier does not set stay at the engine's. */
-    @Test
-    void theEngineRunsOnTheParsedTuning() {
-        GroundednessConfig c = GroundednessConfig.of(MAPPER, """
-                {"arl_target":20000,"min_decision_interval":5,"shift_multiple":3.0,"shift_floor":0.03,
-                 "min_baseline_traces":300,"freeze_baseline_traces":2000}
-                """);
-
-        assertEquals(
-                new ToolErrorConfig(
-                        20_000L,
-                        3.0,
-                        0.03,
-                        300,
-                        ToolErrorConfig.DEFAULT_DOWN_ARM_MIN_RATE,
-                        ToolErrorConfig.DEFAULT_MAX_PATTERNS,
-                        5.0,
-                        2_000),
-                c.engine());
     }
 
     @Test

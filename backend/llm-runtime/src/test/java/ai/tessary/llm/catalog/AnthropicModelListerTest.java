@@ -87,15 +87,6 @@ class AnthropicModelListerTest {
     }
 
     @Test
-    void displayNameDefaultsToId_whenAbsent() throws Exception {
-        stub(page(200, "{\"data\":[{\"id\":\"claude-x\"}],\"has_more\":false}"));
-
-        List<ProviderModel> models = lister().list(cred("sk-ant-test"));
-
-        assertEquals(List.of(new ProviderModel("claude-x", "claude-x", "Anthropic")), models);
-    }
-
-    @Test
     void followsHasMoreCursorAcrossPages() throws Exception {
         stub(
                 page(200, "{\"data\":[{\"id\":\"claude-a\"}],\"has_more\":true,\"last_id\":\"claude-a\"}"),

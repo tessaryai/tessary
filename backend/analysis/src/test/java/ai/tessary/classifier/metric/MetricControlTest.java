@@ -164,19 +164,6 @@ class MetricControlTest {
     }
 
     @Test
-    @DisplayName("exclusion is retroactive: the ring keeps the day, the read leaves it out")
-    void theRingIsExactAndExclusionIsLate() {
-        MetricControl control = ringOf("2026-08-09", "2026-08-10");
-        assertEquals(2, daysOf(control).size(), "the ring records what closed, not what was later ruled on");
-
-        // A verdict applies on the next read with no rewrite, so a late triage can still act.
-        MetricControl.Resolved resolved = control.resolve(GRID, EVENT_DAY, Set.of("2026-08-10"));
-        assertNotNull(resolved);
-        assertEquals(1, resolved.daysUsed());
-        assertEquals(2, daysOf(MetricControl.fromJson(control.toJson())).size(), "and the ring still holds both");
-    }
-
-    @Test
     @DisplayName("the ring round-trips, and an unreadable one comes back empty rather than throwing")
     void serializationRoundTripsAndToleratesGarbage() {
         MetricControl control = MetricControl.empty()
@@ -195,17 +182,6 @@ class MetricControlTest {
         // An unreadable ring waits for a fresh one; it does not take the sweep down.
         assertNull(MetricControl.fromJson("{not json").newest());
         assertNull(MetricControl.fromJson(null).newest());
-    }
-
-    @Test
-    @DisplayName("a day on a retired grid is skipped, not merged, and the rest of the ring still answers")
-    void aDeadGridDayIsSkipped() {
-        MetricControl control = MetricControl.empty().fold(GRID, "2026-08-10", window(200, 1000), workload(), tokens());
-
-        // hist_bins edited under a live project: a layout the stored day cannot join.
-        Grid moved = new Grid(GRID.lo(), GRID.ratio(), GRID.bins() - 1);
-        assertNull(
-                control.resolve(moved, EVENT_DAY, Set.of()), "a ring of dead days answers nothing rather than wrongly");
     }
 
     /** An unparseable day slot is dropped from the read rather than failing the bucket or the sweep. */

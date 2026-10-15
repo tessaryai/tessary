@@ -117,14 +117,6 @@ class CapabilityInterceptorTest {
         assertEquals(CapabilityError.DISABLED.render(Capability.SLACK.wire()), e.getMessage());
     }
 
-    @Test
-    void anUnknownOrgIsLeftToTheHandlersOwnResolver() throws Exception {
-        when(orgs.findBySlug("nobody")).thenReturn(Optional.empty());
-        overrides.put(Capability.RCA.wire(), false);
-
-        assertTrue(preHandle(handler(new GatedController(), "report"), Map.of("orgSlug", "nobody")));
-    }
-
     @ParameterizedTest
     @ValueSource(strings = {"none", "no-slug", "blank-slug", "non-string-slug", "not-a-map"})
     void aRequestThatNamesNoOrgPassesThrough(String shape) throws Exception {

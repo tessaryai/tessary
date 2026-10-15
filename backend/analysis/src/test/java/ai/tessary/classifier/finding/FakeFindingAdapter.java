@@ -55,11 +55,6 @@ public final class FakeFindingAdapter implements FindingAdapter {
         return new FakeFindingAdapter(ownedKey, triageMethod, rcaMethod, evidence, detail, failure);
     }
 
-    /** Owns {@code ownedKey} and throws {@code failure} from every {@code absorbed} call. */
-    public static FakeFindingAdapter failingToAbsorb(String ownedKey, RuntimeException failure) {
-        return new FakeFindingAdapter(ownedKey, "# Method\n", "# Method\n", null, null, failure);
-    }
-
     @Override
     public boolean owns(FindingClaim finding) {
         return ownedKey.equals(finding.classifierKey());

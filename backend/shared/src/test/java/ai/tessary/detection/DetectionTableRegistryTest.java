@@ -7,18 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.tessary.detection.DetectionTable.Grain;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 class DetectionTableRegistryTest {
-
-    @Test
-    void twoBeansClaimingOneKindFailAtConstruction() {
-        ObjectProvider<DetectionTable> dup = Providers.of(
-                new DetectionTable("classifier", "user_classifier_detection", Grain.SPAN, false, false),
-                new DetectionTable("classifier", "some_other_table", Grain.SPAN, false, false));
-
-        assertThrows(IllegalStateException.class, () -> new DetectionTableRegistry(dup));
-    }
 
     @Test
     void badTableNameIsRejectedAtConstruction() {

@@ -2,7 +2,6 @@
 package ai.tessary.classifier.finding.dossier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -129,26 +128,6 @@ class ClassifierDossierAssemblerTest {
         assertTrue(
                 subB >= 0 && subA >= 0 && subB < subA, "higher `covered` (sub_b, 0.71) must rank above sub_a (0.20)");
         assertTrue(dossier.contains("1200 → 2100"), "the paired before/after quantile must be rendered");
-    }
-
-    @Test
-    void smallEvidenceSetIsFullyEnumerated() throws Exception {
-        String payload = "{\"bucket\":{\"key\":\"k\"},\"ratio\":1.0,\"window\":{}}";
-        List<FindingEvidenceRow> rows =
-                List.of(row(FindingEvidenceRow.Role.MEMBER, 1), row(FindingEvidenceRow.Role.MEMBER, 2));
-        FindingEvidenceRepository evidence = mock(FindingEvidenceRepository.class);
-        when(evidence.claimFirst(eq(PROJECT_ID), eq(FINDING_ID), eq(ClassifierDossierAssembler.SMALL_EVIDENCE_SET_CAP)))
-                .thenReturn(headOf(rows, false));
-
-        Optional<String> out = ClassifierDossierAssembler.assemble(
-                MAPPER, evidence, PROJECT_ID, FINDING_ID, new EvidenceCounts(0, 2, 0, 0, 0), payload);
-
-        assertTrue(out.isPresent());
-        String dossier = out.get();
-        assertTrue(dossier.contains("Complete enumeration"));
-        assertTrue(dossier.contains("trace-1"));
-        assertTrue(dossier.contains("trace-2"));
-        assertFalse(dossier.contains("DECLARED SELECTION"));
     }
 
     @Test

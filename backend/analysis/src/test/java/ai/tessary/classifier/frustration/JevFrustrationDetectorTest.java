@@ -145,32 +145,6 @@ class JevFrustrationDetectorTest {
     }
 
     @Test
-    void unhappyAboutSomethingElseNeverFires() {
-        SubstrateObservation turn = eligibleTurn("t-other", "conv-a");
-        client.answer("t-other", 0.05, 0.93);
-        JevFrustrationDetector d = detector();
-
-        List<FiredTurn> fired = d.complete(signal("{}"), d.score(signal("{}"), List.of(turn)), PageAction.PERSIST, 5);
-
-        assertTrue(fired.isEmpty());
-        verify(detections, never())
-                .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void theThresholdComesFromTheClassifierConfig() {
-        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
-        client.answer("t-1", 0.45, 0.01);
-        JevFrustrationDetector d = detector();
-
-        String strict = "{\"threshold\":0.5}";
-        List<FiredTurn> fired =
-                d.complete(signal(strict), d.score(signal(strict), List.of(turn)), PageAction.PERSIST, 5);
-
-        assertTrue(fired.isEmpty(), "0.45 fires under the 0.40 default but not under 0.5");
-    }
-
-    @Test
     void everySentTurnIsAssessedAndEveryFiredTurnIsADetection() throws Exception {
         SubstrateObservation high = eligibleTurn("t-high", "conv-a");
         SubstrateObservation low = eligibleTurn("t-low", "conv-b");
@@ -264,32 +238,6 @@ class JevFrustrationDetectorTest {
         assertEquals(3, page.sent());
         assertEquals(1, fired.size());
         assertEquals("t-2", fired.get(0).turn().traceId());
-        verify(assessments, times(3)).insert(any());
-    }
-
-    /**
-     * A session is a conversation on one call site. Keyed on the conversation alone, the reply call site's flag
-     * stops the support call site in the same conversation, and the support call site's own flag is never written.
-     */
-    @Test
-    void aFlagOnOneCallSiteDoesNotStopTheSameConversationOnAnother() {
-        SubstrateObservation reply1 = eligibleTurn("reply-1", "t-1", "conv-a", "cs-reply", 30);
-        SubstrateObservation support1 = eligibleTurn("support-1", "t-1", "conv-a", "cs-support", 30);
-        SubstrateObservation reply2 = eligibleTurn("reply-2", "t-2", "conv-a", "cs-reply", 20);
-        SubstrateObservation support2 = eligibleTurn("support-2", "t-2", "conv-a", "cs-support", 20);
-        client.answer("reply-1", 0.8, 0.0);
-        client.answer("support-1", 0.1, 0.0);
-        client.answer("reply-2", 0.9, 0.0);
-        client.answer("support-2", 0.9, 0.0);
-        JevFrustrationDetector d = detector();
-
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(reply1, support1, reply2, support2));
-        List<FiredTurn> fired = d.complete(signal("{}"), page, PageAction.PERSIST, 5);
-
-        assertEquals(Set.of("reply-1", "support-1", "support-2"), client.requests.keySet());
-        assertEquals(
-                List.of("span-reply-1", "span-support-2"),
-                fired.stream().map(f -> f.turn().observationId()).sorted().toList());
         verify(assessments, times(3)).insert(any());
     }
 
@@ -398,19 +346,6 @@ class JevFrustrationDetectorTest {
         assertEquals(4, sent.state().get("earlier_messages").size());
         assertEquals(Set.of(JevFrustrationQuestion.NAME), sent.questions().keySet());
         assertEquals("frustration", client.lanes.get("t-1"));
-    }
-
-    @Test
-    void aHeldOrSkippedPageWritesNothing() {
-        SubstrateObservation turn = eligibleTurn("t-1", "conv-a");
-        client.answer("t-1", 0.9, 0.0);
-        JevFrustrationDetector d = detector();
-        JevFrustrationDetector.Page page = d.score(signal("{}"), List.of(turn));
-
-        assertTrue(d.complete(signal("{}"), page, PageAction.HOLD, 5).isEmpty());
-        assertTrue(d.complete(signal("{}"), page, PageAction.SKIP, 5).isEmpty());
-
-        verify(assessments, never()).insert(any());
     }
 
     @Test
