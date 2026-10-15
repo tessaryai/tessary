@@ -110,9 +110,7 @@ refused with `CLASSIFIER.PROVIDER_REQUIRED`; credit is not checked, so a provide
 still enables. The configure page's enable dialog picks the provider, takes the key when the org has none, and
 sets the lane before it enables. When the provider later refuses the key, the key runs out of funds, or
 the key is deleted, the classifier pauses (`readiness` reads `provider_rejected`, `no_credit` or
-`no_provider`, shown beside the switch and in Status on the classifier's configure page) and sends nothing until the key works again. On
-`PLATFORM`, an org out of credit also pauses as `no_credit`, and a refusal of the deployment's own key
-pauses as `platform_unavailable`. Saving
+`no_provider`, shown beside the switch and in Status on the classifier's configure page) and sends nothing until the key works again. Saving
 the key the lane runs on lifts the pause at once, as does the configure page's Retry or any re-enable; otherwise
 the sweep re-checks every `tessary.frustration.credential-retry-seconds`.
 
