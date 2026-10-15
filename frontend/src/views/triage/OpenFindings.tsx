@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Triage's Findings section: every open finding that has not become a case yet.
- *
- * A finding is in one of two places on this page, never both. Triage turns a sound finding into a case, and from
- * then on the case is the thing to work, so a `positive` finding that carries a case lives in Cases above. What
- * is left here is everything still on its way: pending, in flight, a run that gave up, and a sound finding whose
- * case has not been written yet. A finding triage closed is done and shows nowhere.
- *
- * The title is the classifier's own sentence. Each detector writes its finding's title with its own numbers in it
- * ("search_docs is failing 3.1% of the time, up from 0.4%"), so there is no shared "reading" column restating the
- * shift: the detectors do not measure comparable things, and one column would fit none of them.
- */
+// Every open finding that has not become a case yet: a finding is in Cases or here, never both. The title
+// is the classifier's own sentence, since detectors do not measure comparable things.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -31,8 +21,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
   const { api } = useTenant();
   const navigate = useNavigate();
 
-  // `include: "all"` by default: the gated read returns only what triage found sound, which hides every finding
-  // still waiting for its run.
+  // `include: "all"`: the gated read returns only what triage found sound, hiding findings awaiting their run.
   const findingsQ = useQuery({
     queryKey: ["behavior-findings", api.base, "all"],
     queryFn: () => api.listBehaviorFindings(),
@@ -63,8 +52,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
           </THead>
           <TBody>
             {open.map((f) => (
-              // The whole row opens the finding for a mouse; the title is the link a keyboard and a screen reader
-              // reach, and it stops its click so one press is one navigation.
+              // The row opens the finding for a mouse; the title link is for keyboard and screen readers and stops its click.
               <TR key={f.id} interactive onClick={() => navigate(findingPath(f.id))}>
                 <TD className="truncate" style={{ maxWidth: 0 }} title={f.title}>
                   <Link
@@ -98,10 +86,7 @@ export function OpenFindings({ basePath }: { basePath: string }) {
   );
 }
 
-/**
- * Where triage left the finding. A run that gave up gets a red icon beside grey words: red text fails contrast at
- * table size, and the icon alone is enough to pull the eye.
- */
+/** Where triage left the finding. A run that gave up gets a red icon beside grey words; red text fails contrast. */
 function TriageCell({ finding }: { finding: BehaviorFinding }) {
   const state = triageState(finding);
   if (state.tone === "failed") {

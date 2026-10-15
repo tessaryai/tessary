@@ -1,17 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Traces index — the filter bar.
- *
- * Every filter here is server-side. The list is keyset-paginated, so narrowing it
- * in the browser would only ever narrow the page you happen to have loaded; each
- * control writes to the URL, the URL is the query, and the query is re-pulled.
- *
- * The time range is the one control with real subtlety. Its bounds are resolved
- * to ABSOLUTE instants at selection time, not sent as `now-30d`: paging walks a
- * keyset over `created_at`, and a lower bound that drifts forward between page
- * one and page four would silently drop rows out from under the cursor. Picking
- * "Past 30 days" pins an instant; the ↻ button re-pins it.
- */
+// Every filter is server-side; the list is keyset-paginated. Time ranges resolve to absolute instants at
+// selection, so a drifting lower bound cannot drop rows from under the cursor. ↻ re-pins.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Calendar, Check, ChevronDown, RotateCw } from "lucide-react";
@@ -103,10 +92,8 @@ function parseRange(params: URLSearchParams): TraceTimeRange {
 }
 
 /**
- * The filter bar's state, in the URL. Deep links already land here with
- * `?call_site=` (from Vitals) and `?status=` (from Classifiers); those are the
- * same params the controls write, so an arriving link shows its filter as a chip
- * and the control reads as already set.
+ * The filter bar's state, in the URL. Deep links from Vitals (`?call_site=`) and Classifiers (`?status=`)
+ * use the same params, so they show as chips.
  */
 export function useTraceQueryState(): {
   state: TraceQueryState;
@@ -215,16 +202,9 @@ function keptOf(params: URLSearchParams): URLSearchParams {
 }
 
 /**
- * Keeps the filters for the tab, so leaving the page and coming back does not reset them.
- *
- * <p>The URL stays the source of truth; this only copies its filter params to `sessionStorage` and
- * puts them back when the page opens on a bare URL, the sidebar's plain `/traces`. A URL that brings
- * its own filters, a Vitals or Classifiers deep link, wins and becomes the kept view. Per tab rather
- * than per browser: a new tab starts clean, a reload does not.
- *
- * <p>Returns false until the restored filters are in the URL, so the page never fetches the
- * unfiltered list only to throw it away. That is a wait on the URL itself, not on the navigate call:
- * the router applies the change as a transition, a render or more after it is asked for.
+ * Keeps the filter params for the tab in `sessionStorage` and restores them on a bare URL. A URL with its
+ * own filters wins. Returns false until the restored filters are in the URL, so the page never fetches the
+ * unfiltered list first; the router applies navigate as a transition, a render or more later.
  */
 export function useKeptTraceView(scope: string): boolean {
   const [params, setParams] = useSearchParams();
@@ -272,20 +252,8 @@ const AUTO_INTERVAL_MS = 30_000;
 const AT_TOP_PX = 120;
 
 /**
- * A 30-second auto-refresh that yields to the reader.
- *
- * <p>A refresh here is a full re-pin: it resolves a rolling range against a new
- * `now` and drops every page already fetched, because appending to a stale
- * cursor chain would interleave two different windows. That is correct at the
- * top of the list and hostile anywhere else — scroll to the four-hundredth row,
- * and thirty seconds later you are back at the first with your place gone.
- *
- * So a tick only fires while the reader is at the top. Scroll down and it holds
- * (the toggle shows amber and says so); scroll back and it resumes on the next
- * tick. This is the standard live-tail behaviour, and it is why the interval is
- * not merely a react-query `refetchInterval`: that would refetch every loaded
- * page on every tick — seven requests per 30s for a list scrolled to seven pages
- * — and still yank the ground out from under whoever was reading.
+ * A 30-second auto-refresh that only fires while the reader is at the top, since a refresh drops loaded
+ * pages. Not a react-query `refetchInterval`, which would refetch every loaded page and still jump.
  */
 export function useAutoRefresh(onTick: () => void): {
   auto: boolean;
@@ -311,8 +279,7 @@ export function useAutoRefresh(onTick: () => void): {
     }
   }, []);
 
-  // Held in a ref so a new handler identity each render does not restart the
-  // interval — otherwise the timer resets before it ever reaches 30s.
+  // In a ref so a new handler identity each render does not restart the interval.
   const tick = useRef(onTick);
   tick.current = onTick;
 
@@ -330,10 +297,7 @@ export function useAutoRefresh(onTick: () => void): {
       if (atTop() && document.visibilityState === "visible") tick.current();
     }, AUTO_INTERVAL_MS);
 
-    // The label also follows the scroll directly. Left to the interval alone it
-    // lags by up to 30s, so the control still reads "held" for half a minute
-    // after you have scrolled back to the top — stale in the one moment someone
-    // is most likely to be looking at it.
+    // The label follows the scroll directly, or it lags up to 30s after scrolling back to the top.
     const onScroll = () => setPaused(!atTop());
     scroller?.addEventListener("scroll", onScroll, { passive: true });
     setPaused(!atTop());
@@ -545,19 +509,8 @@ export function TimeRangeControl({
 // ---- refresh control -------------------------------------------------------
 
 /**
- * Refreshing, as ONE control: the icon refreshes now, the chevron beside it
- * governs whether that also happens on its own every 30 seconds.
- *
- * Two sibling buttons — a ↻ and an `Auto` toggle — read as two unrelated
- * things sitting next to each other, when they are one capability with a manual
- * and an automatic mode. A split button is the shape that says so.
- *
- * On-ness is carried by the icon breathing and by the interval appearing beside
- * it, not by an accent fill. A filled green control in the header competes with
- * the page's actual accent (links, the primary action) for a setting that is
- * ambient rather than important; a slow pulse reads as "live" without claiming
- * that much attention. It stops when a tick is skipped, so a held refresh looks
- * held rather than silently broken.
+ * Refresh now, with a chevron for 30-second auto refresh, as one split control. On-ness shows as a slow
+ * pulse, not an accent fill, and the pulse stops while ticks are skipped.
  */
 export function RefreshControl({
   onRefresh,
@@ -600,8 +553,7 @@ export function RefreshControl({
             strokeWidth={1.5}
             aria-hidden="true"
             className={cn("shrink-0", live && "animate-pulse")}
-            // Slower than the default pulse, which at 1s reads as a warning
-            // rather than a heartbeat.
+            // Slower than the default pulse, which reads as a warning at 1s.
             style={live ? { animationDuration: "2400ms" } : undefined}
           />
           {auto && (

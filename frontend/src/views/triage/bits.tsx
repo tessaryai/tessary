@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Small shared pieces for the Triage/Case surface.
- *
- * Everything here derives its display string from a real value. The redesign's
- * first pass took pre-formatted strings ("100%", "14:52", polyline points) off
- * the wire, which only a fixture could ever produce — formatting lives on the
- * client, values live on the server.
- */
 import type { Case } from "../../api/types";
 import { RCA_VERDICT_LABEL } from "../rcaLabels";
 
@@ -16,11 +8,8 @@ const MONTHS = [
 ];
 
 /**
- * Age from an ISO instant: relative under an hour ("2m ago"), an absolute
- * "July 29 14:30" beyond that — a bare "2h ago"/"3d ago" stops being useful once
- * you're deciding whether something is stale. Hand-formatted (not
- * `toLocaleString`) so the shape stays exact instead of picking up a
- * locale-dependent comma.
+ * Relative under an hour ("2m ago"), then an absolute "July 29 14:30". Hand-formatted so the shape does
+ * not pick up a locale-dependent comma.
  */
 export function timeAgo(iso: string): string {
   const d = new Date(iso);
@@ -40,23 +29,15 @@ export function truncateId(id: string, keep = 8): string {
 export { detectorLabel } from "../classifiers/shared";
 
 /**
- * The call site to SHOW, or null.
- *
- * `__unattributed__` is not a call site. It is the sentinel for turns nothing
- * could be attributed to, and a tool-error case carries it by design: a tool's
- * failure rate belongs to the tool, across every entry point it is reached
- * through. Right data, wrong word to put in front of a partner — so the chip is
- * dropped rather than translated, because there is no call site to name.
+ * The call site to show, or null. `__unattributed__` is the sentinel for turns nothing could be attributed
+ * to, so the chip is dropped rather than translated.
  */
 export function displayCallSite(callSiteId: string | null | undefined): string | null {
   if (!callSiteId || callSiteId === "__unattributed__") return null;
   return callSiteId;
 }
 
-/**
- * The shared bordered-list chassis (triage rows, driving verdicts): a 1px row
- * gap over border-color background draws the dividers.
- */
+/** The shared bordered-list chassis: a 1px row gap over the border colour draws the dividers. */
 export function ListChassis({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -78,12 +59,8 @@ export function Dot() {
 }
 
 /**
- * A case row's ONE colored element (constitution rule 2), and it reads as how far along the case is:
- * red needs someone, amber has been explained and needs a decision, green is closed.
- *
- * <p>`analysed` is a second axis rather than a fourth state: a case is open whether or not an RCA has
- * run, and the dot says which of those two an open case is. There is no claimed state — nothing in
- * this product is assigned.
+ * A case row's one coloured element: red needs someone, amber is explained and needs a decision, green is
+ * closed. `analysed` marks whether an open case has had an RCA.
  */
 export function StateDot({ state, analysed }: { state: string; analysed?: boolean }) {
   if (state === "resolved") {
@@ -108,14 +85,7 @@ function Dotted({ colour, label }: { colour: string; label: string }) {
   );
 }
 
-/**
- * What a finished RCA concluded, as one line — or null where none has finished.
- *
- * <p>The line is the run's one-sentence summary, printed as written: the summary itself says whether a
- * cause was proven, so a prefix would only repeat it. A run with no summary falls back to the verdict's
- * own label, which is a category ("Traffic mix shifted") and reads as one. An inconclusive run with no
- * summary says so plainly.
- */
+/** What a finished RCA concluded, as one line: the run's summary as written, else the verdict's label. */
 export function causeLine(c: Pick<Case, "cause" | "rca_verdict">): string | null {
   if (c.rca_verdict == null) return null;
   if (c.cause != null) return c.cause;

@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Session interior — data layer over the session detail + session spans APIs.
- *
- * Two separate reads, fetched in parallel by the rail: `useSessionDetail` for the header (totals,
- * trace list) and `useSessionSpans` for the heavier per-span read the three views actually render.
- * They stay two calls rather than one for the same reason the backend keeps them two endpoints (see
- * SessionDtos.SessionSpans's doc comment) — a session's header should never wait on span payloads it
- * doesn't need.
- */
+// Two parallel reads: the header and the heavier spans read, so the header never waits on spans.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { SessionDetailView } from "../../api/types";
@@ -49,11 +41,7 @@ export function useSpansByTrace(spans: Span[] | undefined): Map<string, Span[]> 
   return useMemo(() => groupSpansByTrace(spans ?? []), [spans]);
 }
 
-/**
- * The whole session in one line — the rail header's meta, same shape as {@link traceSummary} one level
- * up: trace count, duration across every trace, total tokens, and the honesty devices (unsettled
- * traces, spans truncated) rather than presenting a partial sum as a finished one.
- */
+/** The whole session in one line: trace count, duration, total tokens, and unsettled or truncated markers. */
 export function sessionSummary(detail: SessionDetailView | undefined, spansTruncated: boolean): string {
   if (!detail) return "";
   const parts = [`${detail.trace_count} trace${detail.trace_count === 1 ? "" : "s"}`];

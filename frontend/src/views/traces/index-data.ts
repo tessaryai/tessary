@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Traces index — data layer over the traces read API.
- *
- * Every column this table renders is a column on the trace row: span count,
- * error count, the five typed token buckets, the costs, the previews, the call
- * site. The server computes none of them per request — the rollup worker wrote
- * them when the trace settled — so the page is a filter, a sort and a page all
- * the way down.
- *
- * That is also why there is no models column and no tool-call count any more.
- * Both were questions about a trace's SPANS, and answering them for a page of
- * fifty rows meant aggregating every observation in the project. They live in
- * the trace detail now, where reading one trace's spans is the point.
- */
+// Every column is a column on the trace row, written by the rollup worker when the trace settled,
+// so the page is a filter, a sort and a page. Span-level facts live in the trace detail.
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
 import type { TraceFilterParams } from "../../api/client";
@@ -47,24 +35,12 @@ export function filterParams(filters: TraceFilters): TraceFilterParams {
   };
 }
 
-/**
- * 50 a page: the server's own default, and small enough that the first screen
- * paints before the scroll can reach the sentinel.
- */
+/** 50 a page: the server default, and small enough to paint before the scroll reaches the sentinel. */
 const PAGE_SIZE = 50;
 
 /**
- * The traces list, page by page.
- *
- * `sort` is pinned to `when` rather than left to the server's default: the list
- * is a feed of what just happened, and reading it means newest first, always.
- * The other sorts the API offers (tokens, cost) are an analysis question, not a
- * monitoring one, and they would reorder the keyset under an infinite scroll.
- *
- * `epoch` is a cache-busting nonce, not a filter. It exists so the ↻ button can
- * re-resolve a rolling range's bounds and drop every page already fetched —
- * appending fresh rows onto a stale cursor chain would interleave two different
- * windows into one list.
+ * The traces list, page by page. `sort` is pinned to `when`: other sorts would reorder the keyset under
+ * an infinite scroll. `epoch` is a cache-busting nonce so ↻ can re-pin a rolling range and drop old pages.
  */
 export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true) {
   const api = useProjectApi();
@@ -81,18 +57,8 @@ export function useTracesIndex(filters: TraceFilters, epoch = 0, enabled = true)
 }
 
 /**
- * Call-site options for the facet, harvested from the rows on screen.
- *
- * There is no facets endpoint on the project API — `/v1/query/facets` is
- * token-scoped for MCP, not session-scoped for the UI — so the honest source is
- * what the list has actually served. The call site is on the trace row (copied
- * down from its spans by the rollup), which is why it can still be harvested
- * this way and the model and kind vocabularies cannot: those are span facts, and
- * the list no longer reads spans at all.
- *
- * The set only ever grows within a session. Once you filter to one call site, the
- * loaded rows all carry it, and a set recomputed from them would collapse to a
- * single option and strand you there.
+ * Call-site options harvested from the rows on screen; there is no session-scoped facets endpoint. The set
+ * only grows, because once filtered every row carries the same call site.
  */
 export function useObservedFacets(rows: TraceListItem[]): { callSites: string[] } {
   const seen = useRef(new Set<string>());
@@ -104,19 +70,7 @@ export function useObservedFacets(rows: TraceListItem[]): { callSites: string[] 
   }, [rows]);
 }
 
-/**
- * A trace's numbers are absent for three different reasons, and the table has to
- * say which.
- *
- * - `pending` — the trace has not rolled up. Its totals are not zero and not
- *   unknown; they are not yet computed, because spans are still arriving.
- * - `none` — settled, and the value really is nothing. No span reported usage.
- * - `value` — a real number.
- *
- * All three rendered as one em dash before this milestone, which meant a live
- * turn and a free turn were indistinguishable on the one surface where the
- * difference matters.
- */
+/** Why a number is absent: `pending` (not rolled up yet), `none` (settled, really nothing) or `value`. */
 export type CellState = "pending" | "none" | "value";
 
 export function cellState(row: TraceListItem, value: number | null | undefined): CellState {
@@ -124,15 +78,7 @@ export function cellState(row: TraceListItem, value: number | null | undefined):
   return row.is_settled ? "none" : "pending";
 }
 
-/**
- * The When column: `14:52:11` for today, `Aug 8 14:52:11` for anything older.
- *
- * A bare clock was fine when the list was one screen of recent traffic. Over a
- * 30-day window scrolled indefinitely it is actively misleading — thirty rows
- * reading `03:27:04`, `03:14:32`, `03:04:31` look like one busy hour and are in
- * fact three different days. The date appears exactly when it carries
- * information, so today's traffic keeps the narrow, scannable column.
- */
+/** `14:52:11` for today, `Aug 8 14:52:11` for anything older, so rows from different days do not read as one hour. */
 export function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -158,13 +104,7 @@ export function formatWhen(iso: string | null | undefined): string {
   return `${date} ${clock}`;
 }
 
-/**
- * A duration, unit-labeled per part rather than a bare number — the Latency column now spans
- * everything from a sub-second tool call to a session running multiple days, so a fixed "seconds"
- * unit stopped making sense the moment session rows joined this column. Each tier keeps only the units
- * that matter at that scale: `42s`, `5m 30s`, `2h 15m 30s`, `3d 2h 15m 30s` — never a unit that would
- * read as `0` and never one so fine it just adds noise.
- */
+/** A duration labeled per part (`42s`, `5m 30s`, `2h 15m 30s`, `3d 2h 15m 30s`), since session rows can span days. */
 export function formatLatency(ms: number | null | undefined): string {
   if (ms == null) return "—";
   const totalSeconds = Math.round(Math.max(0, ms) / 1000);
@@ -181,25 +121,14 @@ export function formatLatency(ms: number | null | undefined): string {
   return `${d}d ${h}h ${m}m ${s}s`;
 }
 
-/**
- * Dollars, unitless for the same reason. Four decimals is not fussiness: a
- * single Haiku turn costs about $0.008, so two decimals renders most of this
- * table as `0.01` and the input/output split as `0.00`.
- */
+/** Four decimals: a single Haiku turn costs about $0.008. */
 export function formatCost(usd: number | null | undefined): string {
   if (usd == null) return "—";
   if (usd === 0) return "0";
   return usd >= 1 ? usd.toFixed(2) : usd.toFixed(4);
 }
 
-/**
- * Three significant digits inside one unit: 1.23, 12.3, 123.
- *
- * The thresholds are the ROUNDING boundaries, not the plain ones: 9.999 is
- * under 10 but `toFixed(2)` renders it "10.00", and 99.999 is under 100 but
- * `toFixed(1)` renders it "100.0" — four digits either way. Comparing against
- * 9.995 / 99.95 picks the bracket the number will land in after rounding.
- */
+/** Three significant digits. The thresholds are rounding boundaries: 9.999 renders "10.00" via toFixed(2). */
 function threeDigits(n: number): string {
   if (n >= 99.95) return String(Math.round(n));
   if (n >= 9.995) return n.toFixed(1);
@@ -215,13 +144,8 @@ const UNITS: { at: number; suffix: string }[] = [
 ];
 
 /**
- * Token counts at a fixed three digits — `1.23k`, `12.3k`, `123k`, `1.23M`.
- *
- * The width is the point: this is a right-aligned numeric column read by
- * comparison down the page, and a mix of `1k` and `1.2M` makes two turns that
- * differ 1000-fold look like near neighbours. Three digits is also the most
- * precision that fits without the column setting its own width. The exact count
- * is one hover away — see {@link exactTokens} — so nothing is actually lost.
+ * Token counts at a fixed three digits (`1.23k`, `12.3k`, `123k`, `1.23M`) so a right-aligned column compares
+ * by width. The exact count is in the tooltip; see {@link exactTokens}.
  */
 export function formatTokens(tokens: number | null | undefined): string {
   if (tokens == null) return "—";

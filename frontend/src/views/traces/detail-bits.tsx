@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The trace interior's shared pieces: the view segment and TraceMedia. Kept
- * surface-local.
- */
 import { useMemo } from "react";
 import { cn } from "../../ui";
 import { MediaResolverContext } from "../components/PayloadViewer";
@@ -11,19 +7,8 @@ import { useTenant } from "../../tenant/TenantContext";
 export type TraceView = "conversation" | "tree" | "timeline" | "json";
 
 /**
- * Teaches the payload viewers inside a trace how to reach an externalized image.
- *
- * Ingest rewrites inline base64 to `{type:"image_ref", data:<mediaId>}`, so the
- * bytes are no longer in the payload — they are behind
- * `GET /api/orgs/{org}/projects/{proj}/media/{id}`, which needs the tenant slugs
- * the viewer has no way to know. Without a resolver in context the viewer is not
- * wrong, just blind: it falls back to a "stored image" chip. That fallback was
- * what every trace showed, because this provider did not exist and the context
- * defaulted to null everywhere.
- *
- * It wraps the whole trace interior rather than the Conversation view alone —
- * Tree and Timeline hang the same payload panes off their span rows, and an
- * image should not appear or vanish depending on which tab is open.
+ * Ingest rewrites inline base64 to an image_ref behind a tenant-scoped endpoint the viewer cannot build.
+ * Wraps the whole interior so an image does not depend on which tab is open.
  */
 export function TraceMedia({ children }: { children: React.ReactNode }) {
   const { orgSlug, projectSlug } = useTenant();
@@ -42,7 +27,6 @@ const VIEWS: { id: TraceView; label: string }[] = [
   { id: "json", label: "JSON" },
 ];
 
-/** Renderings of execution only — judgment is the pill, never a view. */
 export function ViewSegment({
   view,
   onChange,

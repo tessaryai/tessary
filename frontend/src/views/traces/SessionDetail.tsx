@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Session interior — the full page, opened from the rail's ⤢. Same shell as TraceDetail: Conversation |
- * Tree | Timeline over the session's spans, stitched across every trace in it, plus JSON, the session and
- * its spans as the API sent them. No Verdicts panel here —
- * judgment is per-trace, and a session-wide verdicts read is out of scope (see detail-views.tsx's
- * SessionConversationView doc comment).
- *
- * URL contract: ?view=tree|timeline|json (conversation default).
- */
+// URL contract: ?view=tree|timeline|json (conversation default).
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ErrorNote, LoadingRow, PageHeader } from "../../ui";
 import { useTenant } from "../../tenant/TenantContext";

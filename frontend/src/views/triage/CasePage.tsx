@@ -1,41 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Case page — the story of one thing going wrong.
- *
- * Four beats, in order: what happened and over what window, why (once RCA has
- * run), how big it was, and the failures themselves. Everything else is gone.
- *
- * <h2>The answer sits above the figure</h2>
- * The causes are what a reader came here for, so they are carded
- * directly under the headline and the magnitude follows them. The figure is the
- * SIZE of the answer, not the answer, and a page that opens with a chart makes
- * a reader scroll past the measurement to reach the finding. The checks stay
- * below the figure, where they read as working rather than as the conclusion.
- *
- * <h2>The headline IS the story, and it rewrites itself</h2>
- * Before RCA the title is the detector's own sentence plus the window it spans.
- * After, the cause is appended to that same sentence — never a re-worded one,
- * because a case that re-words its finding leaves a reader matching two names
- * for one event. The ruling that opened the case does not vanish when the
- * attribution arrives; it demotes to a line, because "is this claim true" and
- * "what changed" are different questions and must not look alike.
- *
- * <h2>One figure, and it is the finding's figure</h2>
- * The magnitude is drawn by the same components the finding page uses, from the
- * same bytes: `RateChart` for a rate shift, `ShiftChart` for a distribution
- * shift. A detector whose movement has no drawable shape gets no chart and says
- * so — the rule this file already held, now with something real to hold it
- * against.
- *
- * <h2>Colour is the problem, and the one action</h2>
- * The direction of the shift carries error/success, and the primary button
- * carries the accent. Nothing else is tinted: a page that colour-codes five
- * kinds of row tells a reader everything is important, which is the same as
- * telling them nothing is.
- *
- * Lifecycle here is open → resolved, plus mute. There is no claim: nothing in
- * this product is assigned.
- */
+// Case page: headline, why (once RCA has run), how big, then the failures. The causes sit above the
+// figure; after RCA the cause is appended to the detector's own sentence, never a re-worded one.
+// Lifecycle is open → resolved, plus mute. Nothing is assigned, so there is no claim.
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -87,9 +53,8 @@ export function CasePage() {
   const detail: CaseDetail | undefined = detailQ.data;
   const c = detail?.case;
 
-  // The finished report is inlined on the case read, which is why it is inlined at all. The separate
-  // query exists only for the gap between "a run was started" and "a run finished": the case carries
-  // an id and no report in that window, and this is what polls it to completion.
+  // The finished report is inlined on the case read; this query only polls between "run started" and "run
+  // finished", when the case carries an id and no report.
   const stillRunning = detail?.rca_report_id != null && detail.rca == null;
   const rcaQ = useQuery({
     queryKey: ["rca", api.base, detail?.rca_report_id],
@@ -131,21 +96,15 @@ export function CasePage() {
       void qc.invalidateQueries({ queryKey: ["behavior-findings", api.base] });
     },
   });
-  // The first press sends the case id and nothing else: the server locks the case, resolves the finding
-  // behind it, and that id is all that reaches the analysis lane. A case with no finding cannot be analysed,
-  // which is what `rca_available` already says. Once a report exists the case trigger would coalesce onto it,
-  // so "Re-run RCA" re-runs that report instead, which starts a fresh analysis of the same finding.
+  // The first press sends only the case id; the server resolves the finding behind it. Once a report exists
+  // the case trigger would coalesce onto it, so "Re-run RCA" re-runs that report.
   const rcaM = useMutation({
     mutationFn: () =>
       detail?.rca_report_id != null ? api.rerunRca(detail.rca_report_id) : api.runCaseRca(caseId ?? ""),
     onSuccess: invalidate,
   });
-  // A report EXISTS from the moment the run is queued, so "is there a report" is the wrong question
-  // for anything a reader acts on. `analysing` covers the whole in-flight span — the mutation, the
-  // gap before the case read carries an id, and the queued/claimed statuses — and `analysed` is the
-  // only state in which this page knows anything it did not know before the press.
-  // Once the polled report is in hand its own status decides: the case read that started the poll still
-  // carries no report, so `stillRunning` alone would hold "Analyzing" after the run has finished.
+  // A report exists from the moment the run is queued, so `analysing` covers the whole in-flight span. Once
+  // the polled report is in hand its own status decides; the case read that started the poll carries none.
   const analysing = rcaM.isPending || (report != null ? rcaRunning(report.status) : stillRunning);
   const analysed = report != null && !analysing;
 
@@ -180,17 +139,13 @@ export function CasePage() {
   const groundednessCauses =
     groundedness && report?.report_kind === "groundedness_causes" && !analysing ? report.causes : [];
 
-  // The window the spell spans. The detector's own blob wins where it has one — it is what the
-  // detector actually measured — and the case's timestamps answer for every other detector.
-  // A drift window is taken whole or not at all: the case's last seen is the wall clock the case
-  // opened at, and pairing it with the window's event-time open draws a span that never happened.
+  // The detector's own window wins where it has one. A drift window is taken whole or not at all: the case's
+  // last seen is wall clock, and pairing it with an event-time open draws a span that never happened.
   const driftWindow =
     detail.metric?.windowOpenedAt && detail.metric.windowClosedAt
       ? { openedAt: detail.metric.windowOpenedAt, closedAt: detail.metric.windowClosedAt }
       : null;
-  // A case that gathered several findings spans all of them: from the first window's open to the newest
-  // window's close. Every block below draws only the newest finding, so without this the header would
-  // jump forward each time a window joined.
+  // A case that gathered several findings spans from the first window's open to the newest window's close.
   const firstOpenedAt =
     detail.findings.length > 1
       ? detail.findings.reduce((a, f) => (Date.parse(f.window_opened_at) < Date.parse(a) ? f.window_opened_at : a),
@@ -223,17 +178,13 @@ export function CasePage() {
           ›
         </span>
         <span className="font-mono text-fg">{c.reference}</span>
-        {/* State as a dot rather than a pill. It is one bit of information and it was the loudest
-            thing on the page — a filled chip in error red, competing with the headline it sat
-            beside. Beside the reference it is still the first thing scanned and no longer shouts. */}
         <StateDot state={c.state} analysed={c.rca_verdict != null} />
       </nav>
 
       {/* ------------------------------------------------- the story, in one line */}
       <header className="mb-7.5">
         <div className="flex items-start gap-6">
-          {/* Tool and grader ids are long unbroken snake/kebab tokens; without an explicit break
-              they overflow the flex track and run under the state chip. */}
+          {/* Tool and grader ids are long unbroken tokens; without an explicit break they overflow the flex track. */}
           <h1
             className="min-w-0 flex-1 text-h1 text-fg"
             style={{
@@ -244,18 +195,12 @@ export function CasePage() {
             {c.title}
           </h1>
 
-          {/* ONE control beside the headline, and it is always the same verb: analyse this.
-              Four buttons used to sit here, which crowded the title off its line and — worse —
-              put "Resolve" and "Legitimate — absorb" ABOVE the report that justifies either one.
-              Those two are the disposition of the case, and a disposition is reached at the END
-              of a story, not offered at the top of it; they moved to the closing bar with Mute.
-              What stays is the one thing the reader can do before they have read anything. */}
+          {/* One control beside the headline. Resolve and Absorb are the disposition, reached at the end of the
+             story, so they sit in the closing bar with Mute. */}
           {live && detail.detector_available && rcaEnabled && detail.rca_available && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {/* The second control here is deliberate and temporary: an RCA with no repo rules on
-                  trace evidence alone, and the moment before someone presses Run is the only one
-                  where that is still fixable. It is owner-gated and disappears for good once a
-                  repository is connected, so the page returns to its one-control rule by itself. */}
+              {/* Deliberate and temporary: an RCA with no repo rules on trace evidence alone. Owner-gated, and it
+                 disappears once a repository is connected. */}
               {canPromptRepo && (
                 <Button size="sm" variant="secondary" onClick={() => setConnectRepoOpen(true)}>
                   Connect repository
@@ -280,8 +225,7 @@ export function CasePage() {
           </span>
           <Dot />
           <span className="font-mono text-subtle">{detectorLabel(c.detector)}</span>
-          {/* `__unattributed__` is not a call site — a tool's failure rate belongs to the tool
-              across every entry point, so there is nothing to name here. */}
+          {/* `__unattributed__` is not a call site; a tool's failure rate belongs to the tool across entry points. */}
           {displayCallSite(c.call_site_id) && (
             <>
               <Dot />
@@ -305,9 +249,7 @@ export function CasePage() {
           </p>
         )}
 
-        {/* A case whose classifier the organization no longer has still renders — it is a record
-            of something that happened — but every action on it is withheld, and the page says
-            why rather than offering buttons that 409 on the press. */}
+        {/* A case whose classifier is gone still renders, but every action is withheld (they would 409) and the page says why. */}
         {live && !detail.detector_available && (
           <p className="text-warning mt-4 mx-0 mb-0 text-small" style={{ maxWidth: 720 }}>
             The classifier behind this case ({detectorLabel(c.detector)}) is no longer available to this
@@ -499,11 +441,7 @@ function Block({
   );
 }
 
-/**
- * Every window this case gathered, oldest first, each opening its own finding. It stands where the failures used
- * to: the figure above draws one window, so this is where the others stay reachable, and each finding page has
- * that window's evidence.
- */
+/** Every window this case gathered, oldest first, each opening its own finding page. */
 function CaseFindings({ findings, basePath }: { findings: CaseDetail["findings"]; basePath: string }) {
   const findingPath = (id: string) => `${basePath}/classifiers/findings/${encodeURIComponent(id)}`;
   return (
@@ -539,16 +477,8 @@ function CaseFindings({ findings, basePath }: { findings: CaseDetail["findings"]
 }
 
 /**
- * How big it was, drawn by whichever figure this detector's movement honestly has.
- *
- * <p>Both figures and both readouts come from the finding page, from the same parsed blob, so the
- * two surfaces cannot disagree about the magnitude of the same event. The detector's own `basis`
- * sentence sits under the figure as its caption rather than above it as prose: it says why THIS
- * detector considers this crossed, which is a caption's job, and the ranked list mixes detectors
- * with different bars so the case has to say which one it means.
- *
- * <p>Neither figure present is the normal state for a shift with no drawable shape, and it says so.
- * That is the rule this file has always held; it now has something real to hold it against.
+ * How big it was, drawn with the finding page's own figures from the same parsed blob, so the two cannot
+ * disagree. The detector's `basis` is the caption. A shift with no drawable shape says so instead.
  */
 function Magnitude({ detail, basis, basePath }: { detail: CaseDetail; basis: string; basePath: string }) {
   // A frustration case draws the finding page's own figure, whose first note already states the basis.
@@ -654,14 +584,8 @@ function affectedUnit(detail: CaseDetail): [string, string] {
 }
 
 /**
- * The answer, carded directly under the headline: every cause, each on its own card with its confidence.
- *
- * <p>An older report graded some causes as leads. With no proven cause there, the block says so first, gives
- * the run's summary, and only then shows the leads, labelled as leads. Leads never appear beside a proven
- * cause here; the report page lists them.
- *
- * <p>It also owns the in-flight state, so "Analyzing" appears once and in the place the answer will
- * land rather than under a heading further down the page.
+ * The causes, carded under the headline. With no proven cause in an older report, the summary comes first
+ * and the leads are labelled as leads. Also owns the in-flight "Analyzing" state.
  */
 function Why({
   report,
@@ -747,13 +671,7 @@ function Why({
   );
 }
 
-/**
- * What else was checked — the working behind the answer, below the figure.
- *
- * <p>Every candidate the analysis ruled out, as the sentence it wrote. An older report lists every check it
- * measured instead, asked as the analysis phrased it, with its assessment, its id and the answer. None of it is
- * the conclusion, which is why it sits under the figure rather than at the top.
- */
+/** What else was checked: the candidates the analysis ruled out, below the figure since none is the conclusion. */
 function Checks({ report, analysing }: { report: RcaReport | undefined; analysing: boolean }) {
   // The card above owns the in-flight state, and there is nothing to say before a run.
   if (analysing || !report) return null;
@@ -769,8 +687,7 @@ function Checks({ report, analysing }: { report: RcaReport | undefined; analysin
     );
   }
 
-  // EVERY check, not just the eliminated ones: a `contributing` check is part of the story and an
-  // `explains` check IS the story.
+  // Every check, not just the eliminated ones: `contributing` and `explains` are part of the story.
   const checks = report.ruled_out;
   if (checks.length === 0) return null;
   const eliminated = checks.filter((c) => c.assessment === "ruled_out").length;
@@ -824,13 +741,7 @@ function assessmentColour(assessment: string | null): string {
   }
 }
 
-/**
- * What has happened to this case, collapsed.
- *
- * <p>Kept because a case that recovered and re-fired is a fact the story needs and nothing else on
- * the page carries it. Collapsed because it is the least urgent thing here and used to be a quarter
- * of the scroll.
- */
+/** What has happened to this case, collapsed. A case that recovered and re-fired is a fact nothing else shows. */
 function Activity({ events }: { events: CaseDetail["events"] }) {
   const [open, setOpen] = useState(false);
   if (events.length === 0) return null;
@@ -865,8 +776,7 @@ function Activity({ events }: { events: CaseDetail["events"] }) {
 }
 
 function RcaErrorNote({ error }: { error: unknown }) {
-  // Reachable even though the button is gated on `rca_available`: the analysis runs against a live
-  // finding, and it can be resolved between this page loading and the click.
+  // Reachable despite the `rca_available` gate: the finding can be resolved between page load and click.
   if (error instanceof ApiError && error.code === "RCA.SUBJECT_NOT_FOUND") {
     return (
       <p className="text-warning mt-3 mx-0 mb-0 text-small">
@@ -935,10 +845,7 @@ function FrustrationList({
   );
 }
 
-/**
- * How many flagged traces a groundedness cause names. Counted as answers on the page, as the rate is: a
- * trace is flagged by its answer, and a trace with two flagged answers is still one.
- */
+/** Counted as answers, as the rate is: a trace with two flagged answers is still one. */
 function causeTraceCount(cause: RcaCause) {
   return new Set(cause.evidence_trace_ids).size;
 }
