@@ -15,32 +15,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * Turns the model string a producer reported into a {@code model.id}, or nothing.
- *
- * <p>The precedence is exact, then region-stripped, then vendor-stripped, lifted unchanged from
- * the read-time price book it replaces, because the two rules it encodes were each paid for by a
- * real mis-priced project.
- *
- * <p><b>Exact always wins.</b> Wherever the book carries an id verbatim, that entry is the
- * authority.
- *
- * <p><b>A region prefix is a pricing dimension, so stripping it stops there.</b> Bedrock and
- * Vertex prefix the same model with a routing scope ({@code global.anthropic.claude-sonnet-5-5},
- * {@code us.anthropic....}), and the regional profiles bill a premium: +10% for
- * {@code us./eu./au./jp.} and +20% for {@code us-gov.}, on 28 keys in the current snapshot. Once
- * a region prefix has been consumed, only a key that still carries it can be trusted; falling
- * further to the bare model would resolve {@code us.anthropic.claude-haiku-4-5} to the
- * non-regional rate and under-report that spend by 10%, silently. Unresolved is the better
- * answer: the substrate records it as unpriced and counts it.
- *
- * <p><b>A vendor prefix is stripped only when the book lacks the prefixed key and no region prefix
- * was consumed first.</b> Producers emit undated Bedrock-style ids the snapshot does not always
- * carry verbatim: {@code anthropic.claude-haiku-4-5} is absent while both {@code claude-haiku-4-5}
- * and the dated {@code anthropic.claude-haiku-4-5-20251001-v1:0} are present, so before this
- * fallback a real project's entire spend read as unpriced. Vendors may price the same model
- * differently ({@code anthropic.claude-mythos-preview} on Bedrock is not {@code
- * claude-mythos-preview} direct), which is why the exact key always wins; the fallback answers
- * only for a spelling the book does not carry.
+ * Exact, then region-stripped, then vendor-stripped; each rule was paid for by a mis-priced project. A consumed region
+ * prefix stops the fallback: regional profiles bill +10-20%, so resolving to the bare model would under-report
+ * silently, and unpriced is the better answer. A vendor prefix is stripped only when the book lacks the prefixed key.
  */
 @Component
 public class ModelResolver {
@@ -52,13 +29,9 @@ public class ModelResolver {
     private static final String[] VENDOR_PREFIXES = {"anthropic.", "openai.", "meta.", "mistral.", "cohere.", "amazon."
     };
 
-    /** How long a memoised cache-creation answer is trusted before the books in force are re-read. */
     private static final Duration BOOKS_RECHECK = Duration.ofMinutes(5);
 
-    /**
-     * {@link #reportedModelBillsCacheCreation} answers, valid for the books in force when {@code books} was read.
-     * Swapped whole, never edited in place, so a reader never sees answers from two different books.
-     */
+    /** Swapped whole, never edited in place, so a reader never sees answers from two books. */
     private record CacheCreationMemo(List<String> books, Instant checkedAt, Map<String, Boolean> answers) {}
 
     private final PriceBookRepository books;
@@ -73,17 +46,11 @@ public class ModelResolver {
         this(books, Clock.systemUTC());
     }
 
-    /** The clock as a seam, so a test can step past the books recheck without waiting it out. */
     ModelResolver(PriceBookRepository books, Clock clock) {
         this.books = books;
         this.clock = clock;
     }
 
-    /**
-     * The {@code model.id} this reported name resolves to, or empty when no known model matches.
-     *
-     * @param providedModelName the model string exactly as the producer reported it
-     */
     public Optional<String> resolve(@Nullable String providedModelName) {
         if (providedModelName == null || providedModelName.isBlank()) return Optional.empty();
         String key = providedModelName.trim().toLowerCase(Locale.ROOT);
@@ -98,34 +65,9 @@ public class ModelResolver {
     }
 
     /**
-     * Whether this model is billed for cache <b>creation</b>, i.e. whether writing to its prompt
-     * cache is a charged, and therefore reported, quantity at all.
-     *
-     * <p>This is the book-backed form of the question the metric-drift {@code tok_cache_write}
-     * measure asks: whether a missing write count means "no writes" or "not measured". Those are
-     * different sentences and only one of them is a number: a call site that switched provider
-     * would otherwise show a clean collapse in cache writes for purely bookkeeping reasons.
-     *
-     * <p>The metric-drift measure asks once per leaf span inside a sweep, so it calls the memoised
-     * {@link #reportedModelBillsCacheCreation} rather than this.
-     *
-     * <p>Takes a {@code model.id}: a name as a producer reported it must be put through {@link
-     * #resolve} first, or a vendor-prefixed spelling the book carries only in bare form answers
-     * {@code false}.
-     *
-     * <p><b>Why the rate table answers this and a provider-family list does not.</b> The obvious
-     * rule is "Anthropic and Bedrock bill cache creation explicitly, OpenAI's automatic caching
-     * does not", but measured against the snapshot it is wrong inside a single vendor and in both
-     * directions at once. Some OpenAI-family keys carry a cache-creation rate (the {@code gpt-5.6}
-     * line, whose caching is explicit) while most do not ({@code gpt-4o}, {@code o3}); Gemini
-     * carries none on any key, because it bills cache storage per hour rather than per written
-     * token. A hand-kept family predicate would have to be re-derived every time a vendor changes
-     * convention. The rate table is the record of who is billed.
-     *
-     * <p>A model no book in force prices answers {@code false}: unknown convention, so no claim. A
-     * rate of exactly zero also answers {@code false}, matching the reading that a bucket with no
-     * rate is a bucket never billed: the gateway-routed keys carrying a literal {@code 0.0} there
-     * record "writing this cache is free" rather than "writes are counted".
+     * The rate table answers, not a provider-family list: the convention differs within a vendor ({@code gpt-5.6} bills
+     * creation, {@code gpt-4o} does not). Takes a resolved {@code model.id}. An unpriced model, or a rate of exactly
+     * zero, answers false.
      */
     public boolean billsCacheCreation(@Nullable String modelId) {
         if (modelId == null || modelId.isBlank()) return false;
@@ -138,13 +80,8 @@ public class ModelResolver {
     }
 
     /**
-     * {@link #billsCacheCreation} for a model name as a producer reported it, memoised per name for the books in
-     * force. The metric-drift {@code tok_cache_write} measure asks this once per leaf span inside a sweep, where
-     * {@link #resolve} plus a rate lookup would be several queries per span; memoised, a sweep costs one lookup
-     * per distinct model.
-     *
-     * <p>The books in force are re-read at most every {@link #BOOKS_RECHECK}, and a changed set discards every
-     * answer, so a book fetched from home.tessary.ai reaches this within that window without a restart.
+     * Memoised per name because the drift sweep asks once per leaf span. A changed set of books in force discards every
+     * answer within {@link #BOOKS_RECHECK}.
      */
     public boolean reportedModelBillsCacheCreation(@Nullable String reportedModelName) {
         if (reportedModelName == null || reportedModelName.isBlank()) return false;
@@ -170,7 +107,6 @@ public class ModelResolver {
         return next;
     }
 
-    /** {@code key} with the first matching prefix removed, or unchanged when none matches. */
     private static String strip(String key, String[] prefixes) {
         for (String prefix : prefixes) {
             if (key.startsWith(prefix)) return key.substring(prefix.length());

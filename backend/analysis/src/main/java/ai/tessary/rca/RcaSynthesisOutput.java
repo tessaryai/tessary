@@ -19,24 +19,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Parsing + validation of {@link AgenticRcaEngine}'s sandboxed run, so nothing the agent asserts reaches an
- * immutable report unchecked. One parser for every report kind:
- *
- * <ul>
- *   <li>A cause's trace and session ids are checked against this finding's flagged and baseline evidence. A hallucinated
- *       receipt is worse than none, so unknown ids are dropped, and a cause left citing nothing is dropped.</li>
- *   <li>A cause below {@code medium} is not a cause, so one whose confidence is not {@code high} or
- *       {@code medium} is dropped, and so is one without a valid {@code change}. An unknown {@code type} reads as
- *       {@code other}. Labels are compared ignoring case.</li>
- *   <li>Without a cloned repo there is no file or commit to point at, so {@code path} and {@code commit} are
- *       cleared.</li>
- *   <li>The verdict is {@code causes_identified} or {@code no_cause_found}; a {@code causes_identified} with no
- *       cause left is recorded as {@code no_cause_found}, with a note the report surfaces.</li>
- *   <li>Each {@code ruled_out} sentence becomes one {@link RuledOutCheck}.</li>
- * </ul>
- *
- * <p>Causes are stored {@code high} first, then by how many flagged rows they explain; a cause explains at least
- * the rows it cites. A blank summary falls back to the first cause's title, never to the raw reply.
+ * Nothing the agent asserts reaches an immutable report unchecked: ids outside the finding's evidence are dropped (a
+ * hallucinated receipt is worse than none), causes below {@code medium} or without a valid {@code change} are dropped,
+ * and without a cloned repo {@code path} and {@code commit} are cleared. A {@code causes_identified} with no surviving
+ * cause becomes {@code no_cause_found} with a note.
  */
 final class RcaSynthesisOutput {
 
@@ -44,8 +30,7 @@ final class RcaSynthesisOutput {
 
     private static final Set<String> CONFIDENCES = Set.of(Cause.HIGH, Cause.MEDIUM);
 
-    // A stored cause's `change` is what tells the UI it is a new-format cause, so one without a valid
-    // value would render under the old rules: it is dropped, never stored half-formed.
+    // `change` tells the UI a cause is new-format, so one without a valid value is dropped, never stored half-formed.
     private static final Set<String> CHANGES = Set.of("change", "standing");
 
     private static final Set<String> TYPES =
@@ -84,9 +69,6 @@ final class RcaSynthesisOutput {
             @Nullable String commit,
             @Nullable String excerpt) {}
 
-    /** A validated run result. {@code summary} is null when the agent wrote none and no cause survived;
-     *  {@code detailedReport} is null when the agent ignored its schema; {@code verdictNote} is non-null when
-     *  the verdict was downgraded and explains why. */
     record Parsed(
             @Nullable String summary,
             String verdict,
@@ -95,14 +77,7 @@ final class RcaSynthesisOutput {
             @Nullable String detailedReport,
             @Nullable String verdictNote) {}
 
-    /**
-     * Parse the agent's final JSON and validate it. Throws {@link TessaryException} when the text is not the
-     * expected shape — a persisted immutable report must not degrade to unvalidated prose.
-     *
-     * @param citableTraceIds every trace id in this finding's evidence
-     * @param citableSessionIds every session id in this finding's evidence
-     * @param repoCloned whether the run had the repo to read
-     */
+    /** Throws when the text is not the expected shape: an immutable report must not degrade to unvalidated prose. */
     static Parsed parse(
             ObjectMapper mapper,
             String text,
@@ -219,7 +194,7 @@ final class RcaSynthesisOutput {
         return new LinkedHashSet<>(ids).stream().filter(citable::contains).toList();
     }
 
-    /** A label as the schema spells it: the model may capitalise or pad an enum value. */
+    /** The model may capitalise or pad an enum value. */
     private static String label(@Nullable String v) {
         return v == null ? "" : v.strip().toLowerCase(Locale.ROOT);
     }
@@ -228,24 +203,19 @@ final class RcaSynthesisOutput {
         return v == null || v.isBlank() ? null : v;
     }
 
-    /** Bind the agent's reply, or throw: a persisted immutable report must not degrade to unvalidated prose. */
     private static ReportBody body(ObjectMapper mapper, String text, String projectId) {
         ReportBody body = null;
         Exception failure = null;
         try {
             body = bind(mapper, text);
         } catch (Exception e) {
-            // Keep the FIRST failure as the cause: it is the one that names the offending property or
-            // offset in the reply the agent actually sent. The fence-stripped salvage below reports a
-            // miss as null rather than throwing, because its own failure says nothing this one did not.
+            // Keep the first failure as the cause: it names the offending property or offset.
             failure = e;
             body = salvage(mapper, extractObject(text));
         }
         if (body == null) {
-            // The most expensive failure in this file: it lands at the END of a run that already spent
-            // its wall clock and its tokens, and until now it said only "not the expected JSON shape",
-            // which does not distinguish prose from a fence from a truncated reply. A short, bounded
-            // prefix is what makes the next one diagnosable without re-running the investigation.
+            // This failure lands after a run spent its whole budget, so log a bounded prefix to tell prose, fence and
+            // truncation apart.
             log.warn(
                     "rca analysis project={} unparseable body ({} chars), starts: {}",
                     projectId,
@@ -257,16 +227,8 @@ final class RcaSynthesisOutput {
     }
 
     /**
-     * Bind one candidate body; null only for blank input.
-     *
-     * <p><b>Unknown properties are ignored on purpose</b>, and that is a deliberate departure from the
-     * {@code @Primary} mapper's strictness ({@code JacksonConfig} keeps
-     * {@code FAIL_ON_UNKNOWN_PROPERTIES} on). The response schema does not set
-     * {@code additionalProperties: false}, so a model is free to add a field, and {@link ReportBody}
-     * and {@link CauseBody} are closed records — one stray key anywhere in the tree rejected an
-     * otherwise complete investigation. Every other validation in this class already drops what it
-     * cannot accept (hallucinated ids, a confidence below medium) rather than failing the run; binding
-     * did the opposite, which contradicted the class's own design.
+     * Unknown properties are ignored on purpose, unlike the @Primary mapper: the schema allows extra fields, and one
+     * stray key once rejected a complete investigation.
      */
     private static @Nullable ReportBody bind(ObjectMapper mapper, String candidate) throws java.io.IOException {
         if (candidate.isBlank()) return null;
@@ -275,8 +237,7 @@ final class RcaSynthesisOutput {
                 .readValue(candidate);
     }
 
-    /** The second attempt, over the brace-delimited slice: a miss is null, not a throw, so the caller
-     *  can keep the first (more informative) failure as the exception's cause. */
+    /** A miss is null, not a throw, so the caller keeps the more informative first failure. */
     private static @Nullable ReportBody salvage(ObjectMapper mapper, String candidate) {
         try {
             return bind(mapper, candidate);
@@ -285,18 +246,17 @@ final class RcaSynthesisOutput {
         }
     }
 
-    /** The substring from the first '{' to the last '}', or "" if none — strips surrounding prose.
-     *  Mirrors {@code BehaviorTriageVerdict#extractObject}, the triage lane's equivalent; kept local
-     *  rather than shared because the two lanes' envelope handling is otherwise unrelated. Only ever
-     *  reached when the text is not already clean JSON, so a well-formed reply never goes near it. */
+    /**
+     * Kept local rather than shared with {@code BehaviorTriageVerdict#extractObject}: the lanes' envelope handling is
+     * otherwise unrelated.
+     */
     private static String extractObject(String text) {
         int open = text.indexOf('{');
         int close = text.lastIndexOf('}');
         return (open < 0 || close <= open) ? "" : text.substring(open, close + 1);
     }
 
-    /** A bounded prefix for the failure log — never the whole body, which carries the agent's full
-     *  markdown report over the traces it read. */
+    /** Never the whole body, which carries the agent's full report over the traces it read. */
     private static String abbreviate(String text) {
         if (text.isBlank()) return "<empty>";
         String flat = text.strip().replaceAll("\\s+", " ");

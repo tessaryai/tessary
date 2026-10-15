@@ -7,39 +7,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Locale;
 
 /**
- * What a finding is called, in a sentence — {@code "policy-gpt.member-chat turns are 1.47× more expensive"}
- * rather than {@code "cost:policy-gpt.member-chat:dearer:pinned"}.
- *
- * <p><b>One implementation, because two surfaces name the same object.</b> A finding on the Classifiers
- * page and the case it opens in Triage are the same event seen at two stages, and they used to be named
- * by two different pieces of code: Triage built a sentence from the stored evidence, while Classifiers
- * rendered the raw cause key. A reader who saw both had to work out for themselves that
- * {@code cost:policy-gpt.member-chat:dearer:pinned} and "policy-gpt.member-chat turns are 1.47× more
- * expensive" were one thing. The case sources now delegate here, so the two cannot drift apart by
- * construction — a wording change lands on both surfaces or on neither.
- *
- * <p>The key still spells the direction {@code dearer} and the sentence no longer does. That is
- * deliberate: {@code cause_key} is the identity of a finding, so its spelling is frozen, while the copy
- * is free to change. See {@link MetricFindingEvidence#directionWord} beside
- * {@link MetricFindingEvidence#directionPhrase}.
- *
- * <p><b>It never invents a number.</b> Every title is read back out of the finding's own evidence blob
- * through that classifier's reader, exactly as {@code MetricDriftSource} already did it. When the blob
- * is missing or unreadable — a cause that carries no measured shift, or a row written before the
- * evidence was recorded — this falls back to a form of the cause key rather than guessing at
- * a magnitude. A title that says less is survivable; one that says the wrong multiple is not.
+ * The single implementation both surfaces (Classifiers and Triage) delegate to, so a finding and its case are named
+ * identically. The cause key's spelling is frozen identity; the copy may change. Never invents a number: an unreadable
+ * blob falls back to the cause key.
  */
 public final class FindingTitle {
 
     private FindingTitle() {}
 
     /**
-     * The sentence for this finding, the title its writer stored for a cause with no sentence here, or its cause
-     * key when neither can be read.
-     *
-     * <p>Dispatch is on the cause kind rather than on which reader happens to parse the blob: the two
-     * measured causes each own an evidence schema, and asking one to read the other's would turn a
-     * missing field into a wrong sentence instead of an honest fallback.
+     * Dispatch is on cause kind: one cause's reader parsing another's blob would turn a missing field into a wrong
+     * sentence.
      */
     public static String of(FindingRow finding) {
         return switch (finding.causeKind()) {
@@ -53,20 +31,12 @@ public final class FindingTitle {
         };
     }
 
-    /**
-     * A cause this class has no sentence for reads the title its writer stored, which a rate writer refreshes with
-     * the spell; else its cause key.
-     */
     private static String stored(FindingRow finding) {
         String title = finding.title();
         return title == null || title.isBlank() ? finding.nativeCauseKey() : title;
     }
 
-    /**
-     * What a measured cause is called when its numbers are gone. Not the bare key: this is the string
-     * both case sources already used, and the point of this class is that a finding and its case are
-     * named identically even in the degraded path.
-     */
+    /** The same string both case sources used, so a finding and its case match even when degraded. */
     private static String unreadable(FindingRow finding) {
         return finding.nativeCauseKey() + " has shifted";
     }
@@ -78,16 +48,8 @@ public final class FindingTitle {
     }
 
     /**
-     * {@code "search_docs showing elevated error rates"}.
-     *
-     * <p><b>No rate in the headline.</b> It used to carry one, and the number it carried was the tool's
-     * lifetime average, which read 6.2% during an 80% outage. Measuring it over the run since onset fixes
-     * the number but not the shape of the sentence: a percentage in a headline invites a reader to weigh
-     * two findings by comparing them, and two tools' error rates are not comparable. The criticality
-     * badge carries "how much does this matter"; the finding's basis carries the arithmetic.
-     *
-     * <p>Direction comes off the cause key, which is where it is persisted. This read "up from"
-     * unconditionally, mislabelling every improvement the down arm found.
+     * No rate in the headline: two tools' error rates are not comparable. Direction comes off the cause key, where it
+     * is persisted.
      */
     private static String toolError(FindingRow finding) {
         ToolErrorEvidence.Read read = ToolErrorEvidence.read(finding.payloadJson());
@@ -99,13 +61,7 @@ public final class FindingTitle {
                 Locale.ROOT, "%s showing %s error rates", ToolErrorEvidence.shortName(read.bucketKey()), movement);
     }
 
-    /**
-     * {@code "aws-access-key-id in peter-drucker output"} for a finding filed per call site and facet; the
-     * classifier's own key for one filed against the whole classifier, which is what it read before.
-     *
-     * <p>Built from the payload and the call-site column, not the cause key: the key leads with a classifier
-     * id, which means nothing to someone reading a title.
-     */
+    /** Built from the payload and call site: the cause key leads with a classifier id, meaningless in a title. */
     private static String armed(FindingRow finding) {
         String facet = FindingPayload.text(finding.payloadJson(), "facet");
         if (facet == null) return finding.nativeCauseKey();
@@ -113,22 +69,13 @@ public final class FindingTitle {
         return facet + " in " + (callSite == null ? "agent" : callSite) + " output";
     }
 
-    /**
-     * {@code "checkout-agent outputs failing their schema"}. No rate in the headline, for the reason
-     * {@link #toolError} gives: the finding's basis carries the numbers, and a percentage in a title invites
-     * comparing two call sites whose traffic is not comparable.
-     */
+    /** No rate in the headline, for the reason {@link #toolError} gives. */
     private static String malformedRate(FindingRow finding) {
         String callSite = finding.callSiteId();
         return (callSite == null ? finding.nativeCauseKey() : callSite) + " outputs failing their schema";
     }
 
-    /**
-     * {@code "Frustrated sessions increased from 20.3% to 36.6% on checkout-agent"}. Unlike {@link #toolError}
-     * the rates are in the headline: both are shares of the same call site's own sessions, the learned
-     * normal and the rate since onset, so the sentence states what happened rather than inviting a comparison
-     * across call sites. A payload that carries no rates falls back to the sentence without them.
-     */
+    /** Rates are in the headline: both are shares of the same call site's own sessions. */
     private static String frustrationRate(FindingRow finding) {
         String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
         JsonNode body = finding.payload();
@@ -141,19 +88,15 @@ public final class FindingTitle {
     }
 
     /**
-     * {@code "Answers on rag-answer became less grounded"}. The direction only, with no rates: the flagged
-     * rate counts the model's false alarms and misses its real ones, so the direction is reliable where the
-     * size is not. The finding's body carries the numbers, labelled as flagged.
+     * Direction only: the flagged rate counts false alarms and misses, so the direction is reliable where the size is
+     * not.
      */
     private static String groundednessRate(FindingRow finding) {
         String callSite = finding.callSiteId() == null ? finding.nativeCauseKey() : finding.callSiteId();
         return "Answers on " + callSite + " became less grounded";
     }
 
-    /**
-     * A failure rate, at the precision that keeps a small one from rounding to zero. Shared with the
-     * case source's basis line so a case and its finding quote the same two numbers.
-     */
+    /** Shared with the case source's basis line so a case and its finding quote the same numbers. */
     public static String pct(double rate) {
         double p = rate * 100.0;
         return p > 0 && p < 0.1 ? String.format(Locale.ROOT, "%.2f%%", p) : String.format(Locale.ROOT, "%.1f%%", p);

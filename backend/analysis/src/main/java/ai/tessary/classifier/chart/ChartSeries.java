@@ -38,49 +38,34 @@ import java.util.function.BinaryOperator;
 import java.util.function.ToLongFunction;
 import org.jspecify.annotations.Nullable;
 
-/** The pure rules behind a chart card: its points, the headline, the baseline and whether a classifier is on. */
 final class ChartSeries {
 
     private ChartSeries() {}
 
-    /** The ranges the page offers. */
     static final Set<Integer> RANGES = Set.of(7, 28);
 
-    /** The headline always covers the last seven UTC days, whatever the range. */
     static final int HEADLINE_DAYS = 7;
 
-    /**
-     * A rate or range point closes once it holds this many trials or samples, or before it would span more than
-     * {@link #POINT_MAX}. Both mirror the metric-drift window (500 samples or one day), so a busy call site draws
-     * several points a day and a quiet one about one.
-     */
+    /** Both mirror the metric-drift window (500 samples or one day). */
     static final long POINT_TARGET = 500;
 
     static final Duration POINT_MAX = Duration.ofHours(24);
 
     private static final Duration HOUR = Duration.ofHours(1);
 
-    /** The first day of a {@code days}-long range ending {@code today}. */
     static LocalDate fromDay(LocalDate today, int days) {
         return today.minusDays(days - 1L);
     }
 
-    /** A count card's fixed bucket: an hour on 7 days, six hours (from 00, 06, 12 and 18 UTC) on 28. */
     static Duration countWidth(int days) {
         return days == 7 ? HOUR : Duration.ofHours(6);
     }
 
-    // ---- the merge rule -----------------------------------------------------------------------------
-
-    /** One merged stretch of hours, {@code [start, end)}, and whether it is still filling. */
     record Window<T>(Instant start, Instant end, T tally, boolean open) {}
 
     /**
-     * Merges the hours from {@code from} to the hour holding {@code now} into points. An hour with no items neither
-     * starts a point nor moves its end. An hour that would stretch the open point past {@link #POINT_MAX} closes it
-     * first; a point that reaches {@link #POINT_TARGET} items closes after the hour that took it there. A point is
-     * open while it can still change: it holds the current hour, or it is the last one and the current hour could
-     * still join it.
+     * An hour with no items neither starts a point nor moves its end. A point is open while it holds the current hour
+     * or the current hour could still join it.
      */
     static <T> List<Window<T>> merge(
             Instant from, Instant now, Map<Instant, T> hours, ToLongFunction<T> items, BinaryOperator<T> plus) {
@@ -123,7 +108,6 @@ final class ChartSeries {
         }
     }
 
-    /** A rate card's points from its hourly rows. */
     static List<ChartPoint> ratePoints(Instant from, Instant now, List<RateRow> rows) {
         Map<Instant, Trials> hours = new HashMap<>();
         for (RateRow r : rows) hours.merge(r.hour(), new Trials(r.checked(), r.flagged()), Trials::plus);
@@ -137,7 +121,6 @@ final class ChartSeries {
                 .toList();
     }
 
-    /** A range card's points from its hourly histogram rows: the samples per bin of {@code grid}. */
     static List<ChartPoint> rangePoints(Instant from, Instant now, Grid grid, List<RangeRow> rows) {
         Map<Instant, SortedMap<Integer, Long>> hours = new HashMap<>();
         for (RangeRow r : rows) {
@@ -166,10 +149,6 @@ final class ChartSeries {
         return out;
     }
 
-    /**
-     * The {@code q} quantile of samples counted per bin of {@code grid}, interpolated inside its bin in log space as
-     * {@code MetricHistogram#quantile} does; null with no sample.
-     */
     static @Nullable Double quantile(Grid grid, SortedMap<Integer, Long> bins, double q) {
         long n = samples(bins);
         if (n == 0) return null;
@@ -187,17 +166,7 @@ final class ChartSeries {
         return Math.exp(grid.logHi());
     }
 
-    // ---- count points -------------------------------------------------------------------------------
-
-    /**
-     * One count point per {@code width} bucket from {@code from} to the bucket holding {@code now}, empty ones
-     * included. Without a bar every detection counts and nothing is reached. With one, {@code count} is the bar's
-     * count in the bucket, and {@code reached} says whether a window of the bar overlapping it held the threshold.
-     *
-     * @param own the call site's detections per bucket: the total
-     * @param bar what the bar counts per bucket: the busiest facet, or the whole project; ignored without a bar
-     * @param windows what the bar counts per window of the bar
-     */
+    /** @param bar the busiest facet or the whole project; ignored without a bar */
     static List<ChartPoint> countPoints(
             Instant from,
             Instant now,
@@ -236,7 +205,6 @@ final class ChartSeries {
         return out;
     }
 
-    /** Whether a window of the bar that overlaps {@code [start, end)} reached the threshold. */
     private static boolean reached(
             Instant start, Instant end, ClassifierArming.Config arming, Map<Instant, Long> perWindow) {
         long win = arming.windowSeconds();
@@ -246,15 +214,11 @@ final class ChartSeries {
         return false;
     }
 
-    /** Where a count read must start so the bar's first window is whole: the start of the window holding {@code from}. */
     static Instant windowStart(Instant from, ClassifierArming.Config arming) {
         long win = arming.windowSeconds();
         return Instant.ofEpochSecond(Math.floorDiv(from.getEpochSecond(), win) * win);
     }
 
-    // ---- headlines ----------------------------------------------------------------------------------
-
-    /** Flagged over checked, pooled over the hours since {@code headFrom}; null when nothing was checked. */
     static HeadlineView rateHeadline(List<RateRow> rows, Instant headFrom, @Nullable ChartBaseline baseline) {
         long checked = 0;
         long flagged = 0;
@@ -269,18 +233,13 @@ final class ChartSeries {
         return new HeadlineView(value, rate == null ? null : value - rate);
     }
 
-    /** The pooled p95 of the last seven days, against the baseline's p95. */
     static HeadlineView rangeHeadline(@Nullable Double pooledP95, @Nullable ChartBaseline baseline) {
         if (pooledP95 == null) return new HeadlineView(null, null);
         Double p95 = baseline == null ? null : baseline.p95();
         return new HeadlineView(pooledP95, p95 == null ? null : pooledP95 - p95);
     }
 
-    /**
-     * Every detection on the scope since {@code headFrom}: the sum of {@code total}, not of what the bar counts. The
-     * bar can count the whole project (a user classifier) or one pattern in its band (Secret Leak). A count has no
-     * baseline, so no delta.
-     */
+    /** The sum of {@code total}, not of what the bar counts. A count has no baseline, so no delta. */
     static HeadlineView countHeadline(List<CountRow> own, Instant headFrom) {
         long count = 0;
         for (CountRow r : own) {
@@ -289,7 +248,6 @@ final class ChartSeries {
         return new HeadlineView((double) count, null);
     }
 
-    /** Whether the range holds anything to draw: a checked trial, a sample or a detection. */
     static boolean hasData(String kind, List<ChartPoint> points) {
         for (ChartPoint p : points) {
             long n =
@@ -303,10 +261,7 @@ final class ChartSeries {
         return false;
     }
 
-    /**
-     * The grid a range card bins {@code measure} on: the one the row's drift config sketches it on, so the chart
-     * bins as the detector does.
-     */
+    /** The detector's own grid, so the chart bins as the detector does. */
     static Grid grid(MetricDriftConfig config, String measure) {
         return config.measured().stream()
                 .filter(m -> measure.equals(m.measure()))
@@ -316,9 +271,8 @@ final class ChartSeries {
     }
 
     /**
-     * The reference a rate card draws, or null while learning. A Tool Errors reference a person accepted wins over
-     * the learned one. A learned one counts only once it holds {@code minBaseline}: below that the detector stays
-     * silent, so the card stays learning.
+     * A person-accepted Tool Errors reference wins. A learned one counts only once it holds {@code minBaseline},
+     * matching the detector's silence.
      */
     static @Nullable ChartBaseline rateBaseline(
             @Nullable CarriedState state, @Nullable AcceptedReference reference, long minBaseline) {
@@ -331,7 +285,6 @@ final class ChartSeries {
         return ChartBaseline.rate(learned.calls(), learned.failures(), ToolErrorDetector.baselineRate(learned), false);
     }
 
-    /** The minimum a rate classifier's reference must hold before it judges anything: never the freeze. */
     static long minBaseline(ClassifierRow row, ObjectMapper mapper) {
         return switch (row.detector()) {
             case BuiltInDetector.Kind.FRUSTRATION ->
@@ -342,14 +295,12 @@ final class ChartSeries {
         };
     }
 
-    /** The bar as the card shows it, with the band resolved against the row's mode. */
     static @Nullable ArmingView armingView(ClassifierArming.@Nullable Config arming, ClassifierRow row) {
         if (arming == null) return null;
         return new ArmingView(
                 arming.threshold(), arming.windowSeconds(), arming.basis(), arming.highOnly(row) ? "high" : "any");
     }
 
-    /** {@code on}, {@code off} or {@code waiting}, and why it waits. */
     record Availability(String state, @Nullable String reason) {
 
         static final String ON = "on";
@@ -368,22 +319,11 @@ final class ChartSeries {
         }
     }
 
-    /** The waiting reason when Malformed Output's call site declares no output schema. */
     static final String NO_SCHEMA = "no_schema";
 
-    /**
-     * What a call-site rule needs to know about one classifier beyond its row.
-     *
-     * @param waitingReason why the row as a whole cannot judge: a pause, or Groundedness not scoring; null when it can
-     * @param schemaCallSites the call sites that declare an output schema
-     * @param measures the drift measures the row's config is live for
-     */
     record Facts(@Nullable String waitingReason, Set<String> schemaCallSites, Set<String> measures) {}
 
-    /**
-     * Whether {@code row} runs on {@code callSiteId}, and if so whether it is waiting. A drift classifier is on only
-     * for the measure its call-site card shows.
-     */
+    /** A drift classifier is on only for the measure its call-site card shows. */
     static Availability forCallSite(ClassifierRow row, String callSiteId, Facts facts) {
         if (!row.enabled()) return Availability.OFF_NOW;
         boolean runs =
@@ -403,7 +343,6 @@ final class ChartSeries {
         return facts.waitingReason() == null ? Availability.ON_NOW : Availability.waiting(facts.waitingReason());
     }
 
-    /** Whether {@code row} has a tool card: Tool Errors when enabled, Duration Drift when it measures tools. */
     static Availability forTool(ClassifierRow row, Set<String> measures) {
         if (!row.enabled()) return Availability.OFF_NOW;
         if (BuiltInDetector.Kind.TOOL_ERROR.equals(row.detector())) return Availability.ON_NOW;

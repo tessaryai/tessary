@@ -20,54 +20,21 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The async usage-metering worker. On an operational heartbeat it (1) schedules a per-(project,
- * bucket) job for the most-recent CLOSED hour bucket, (2) claims a bounded batch of due jobs with
- * {@code FOR UPDATE SKIP LOCKED} (so running N backends is safe and no two run the same scan), and (3) for
- * each claimed job runs bounded aggregation queries over already-committed rows ({@code observation} /
- * {@code verdict} / {@code signal_event}) for that closed bucket and idempotently upserts the per-unit
- * values into {@code metric_rollup}, then marks the job done.
- *
- * <p>Strictly off the ingest/grade hot path — it reads committed rows on a schedule (the {@code AlertWorker}
- * model), never tees the write path. Counting a CLOSED bucket makes the aggregate stable and the
- * {@code (org, project, env, unit, bucket_start, granularity)} upsert idempotent: a re-run is a no-op.
- *
- * <p>On by default — usage metering is infrastructure for billing quotas, always on; no enablement gate.
- *
- * <p><b>Grains.</b> Each heartbeat schedules the most-recent CLOSED <b>hour</b> and the most-recent CLOSED
- * <b>day</b>. A {@code day} rollup re-aggregates the same producer rows over the wider
- * {@code [dayStart, dayStart+24h)} window (not a sum of the 24 hourly rollups), so it carries no
- * rollup-of-rollups ordering/lateness semantics and lands in a separate {@code granularity='day'} key space.
- *
- * <p><b>Freshness, and what quota enforcement does about it.</b> Because only closed buckets are metered,
- * usage lags by up to one bucket grain plus one heartbeat. This is correct for billing (invoices cover closed
- * periods). Quota enforcement ({@code ingest/IngestQuotaGate}) reads this lagged rollup ANYWAY and accepts the
- * overshoot rather than live-querying the source tables for the open bucket: the caps are monthly, so the
- * tolerance is roughly an hour in a month, and closing it would mean an unbounded aggregate on the ingest hot
- * path. The consequence to know is that a freshly-lowered cap does not bite until the current bucket is
- * metered, and an org already past its cap keeps ingesting for that long.
- *
- * <p>Each closed (project, bucket) is metered as one idempotent upsert per unit. Re-running a closed
- * bucket overwrites each row with the same stable count (see {@link MetricRollupRepository}).
- *
- * <p>The {@code storage} unit is a LEVEL, not an event stream: it is snapshotted as a
- * {@code COUNT(*)} of ingested-observation rows at rest AS-OF the bucket end, not counted
- * over the bucket window. It is gated behind {@code tessary.metering.storage-enabled} (default off) because
- * the billable basis (rows vs bytes vs retention-days) is an open billing product decision.
+ * Meters only closed buckets, so the upsert is idempotent and a re-run is a no-op. Quota enforcement reads this lagged
+ * rollup and accepts about an hour of overshoot per month rather than run an unbounded aggregate on the ingest path; a
+ * lowered cap bites only once the current bucket is metered. A {@code day} rollup re-aggregates source rows, never sums
+ * hours.
  */
 @Component
 public class MeteringWorker {
 
     private static final Logger log = LoggerFactory.getLogger(MeteringWorker.class);
 
-    /** The hourly grain — the most-recent CLOSED hour is metered every heartbeat. */
     static final String BUCKET_HOUR = UsageUnit.BUCKET_HOUR;
 
     /**
-     * The daily grain. A {@code day} rollup re-aggregates the SAME producer rows as the hour
-     * grain over the wider {@code [dayStart, dayStart+24h)} window — NOT a sum-of-24-hourly-rollups — so it
-     * needs no rollup-of-rollups ordering/lateness semantics and the existing idempotent upsert is unchanged
-     * (a {@code day} row is a separate key space from the {@code hour} rows via {@code granularity}). See
-     * {@code decision.md}.
+     * Re-aggregates the same rows over the whole day, not a sum of hourly rollups, in its own {@code granularity} key
+     * space.
      */
     static final String BUCKET_DAY = UsageUnit.BUCKET_DAY;
 
@@ -94,15 +61,13 @@ public class MeteringWorker {
                 scheduleClosedHour(Instant.now());
                 scheduleClosedDay(Instant.now());
             } catch (RuntimeException e) {
-                // No jobs get scheduled this heartbeat — a genuine, actionable failure, not
-                // expected/retriable (the next heartbeat retries, but nothing here degrades gracefully).
+                // No jobs get scheduled this heartbeat: a genuine, actionable failure.
                 log.error(Markers.OPS, "metering scheduling failed", e);
             }
             meterClaimedJobs();
         }
     }
 
-    /** Schedule a job for the most-recent CLOSED hour bucket (the hour strictly before the current one). */
     private void scheduleClosedHour(Instant now) {
         Instant closedBucket = now.truncatedTo(ChronoUnit.HOURS).minus(1, ChronoUnit.HOURS);
         int scheduled = jobs.scheduleDueBuckets(closedBucket.toString(), BUCKET_HOUR);
@@ -111,11 +76,7 @@ public class MeteringWorker {
         }
     }
 
-    /**
-     * Schedule a job for the most-recent CLOSED day bucket — the UTC day strictly before today.
-     * Re-scheduling the same day every heartbeat is a no-op (the job queue's {@code ON CONFLICT DO NOTHING}
-     * on {@code (project, bucket_start, granularity)}), so the day is metered once when first closed.
-     */
+    /** Re-scheduling the same day is a no-op via {@code ON CONFLICT DO NOTHING}. */
     private void scheduleClosedDay(Instant now) {
         Instant closedBucket = now.truncatedTo(ChronoUnit.DAYS).minus(1, ChronoUnit.DAYS);
         int scheduled = jobs.scheduleDueBuckets(closedBucket.toString(), BUCKET_DAY);
@@ -124,13 +85,11 @@ public class MeteringWorker {
         }
     }
 
-    /** Claim and aggregate a bounded batch of due jobs. */
     private void meterClaimedJobs() {
         List<MetricRollupJobRow> due;
         try {
             due = jobs.claimBatch(props.getClaimBatch(), props.getLeaseSeconds());
         } catch (RuntimeException e) {
-            // Zero jobs get claimed/metered this heartbeat — a genuine, actionable failure.
             log.error(Markers.OPS, "metering claim failed", e);
             return;
         }
@@ -140,8 +99,7 @@ public class MeteringWorker {
                 meterOne(job);
                 metered++;
             } catch (RuntimeException e) {
-                // Leave the job claimed; its lease expires and a later heartbeat reclaims it. The idempotent
-                // upsert makes a re-run safe, so a transient failure is retried, not silently dropped.
+                // The lease expires and a later heartbeat reclaims it; the idempotent upsert makes the re-run safe.
                 log.warn(Markers.OPS, "metering aggregation failed bucket={}", job.bucketStart(), e);
             }
         }
@@ -150,15 +108,7 @@ public class MeteringWorker {
         }
     }
 
-    /**
-     * Aggregate one closed (project, bucket) and upsert one row per metered unit, then mark the job done.
-     * Re-running a closed bucket overwrites each row with the same stable count — a no-op.
-     *
-     * <p><b>Four units were dropped</b> and are not re-sourced: {@code l2_evals},
-     * {@code llm_tokens} and both {@code llm_cost_micro_usd_*} were all aggregated {@code FROM verdict},
-     * a table grading took with it. Per-lane, per-model LLM spend is unaffected — that view reads the
-     * {@code llm_call} ledger through {@code LlmUsageQueryRepository}, which this worker never touched.
-     */
+    /** Re-running a closed bucket overwrites each row with the same count. */
     void meterOne(MetricRollupJobRow job) {
         String from = job.bucketStart();
         String to = bucketEnd(job.bucketStart(), job.granularity());
@@ -171,23 +121,14 @@ public class MeteringWorker {
     }
 
     /**
-     * Snapshot the project's storage LEVEL as of the bucket's end and upsert it as the
-     * {@code storage} unit. Unlike the event-stream units, storage is not a closed-bucket
-     * COUNT over {@code [from, to)} — it is a level (rows at rest), so it is a {@code COUNT(*)} snapshot taken
-     * AS-OF the bucket boundary {@code asOf}. The upsert's {@code DO UPDATE SET value = EXCLUDED.value} is
-     * last-writer-wins, which is exactly right for a level: re-running a bucket overwrites the snapshot.
-     *
-     * <p>Gated behind {@code tessary.metering.storage-enabled} (default off): the billable BASIS (rows vs bytes
-     * vs retention-days) is an open billing product decision, so the slot stays reserved until a deployment
-     * opts in. The v1 basis is <b>ingested-observation rows at rest</b> — the durable, already-counted
-     * substrate level.
+     * A level, snapshotted as of the bucket boundary, so last-writer-wins is right. Gated off by default while the
+     * billable basis is undecided.
      */
     private void meterStorage(MetricRollupJobRow job, String asOf, String createdAt) {
         if (!props.isStorageEnabled()) return; // basis-ratification fence
         upsertUnit(job, UsageUnit.STORAGE, rollups.snapshotStorageRows(job.projectId(), asOf), createdAt);
     }
 
-    /** Upsert the one {@code metric_rollup} row this unit's aggregation produced. */
     private void upsertUnit(MetricRollupJobRow job, UsageUnit unit, long value, String createdAt) {
         rollups.upsert(MetricRollupRow.of(
                 Ids.ulid(),
@@ -200,11 +141,6 @@ public class MeteringWorker {
                 createdAt));
     }
 
-    /**
-     * The exclusive end of a bucket: {@code bucketStart + 1h} for an {@code hour} grain, {@code bucketStart +
-     * 24h} for a {@code day} grain. A {@code day} job therefore re-aggregates the producer rows
-     * over the whole closed day with the unchanged aggregation queries — no rollup-of-rollups.
-     */
     private static String bucketEnd(String bucketStart, String granularity) {
         ChronoUnit step = BUCKET_DAY.equals(granularity) ? ChronoUnit.DAYS : ChronoUnit.HOURS;
         return Instant.parse(bucketStart).plus(1, step).toString();

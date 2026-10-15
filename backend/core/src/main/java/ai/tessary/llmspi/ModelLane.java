@@ -8,29 +8,12 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Locale;
 
 /**
- * The distinct jobs the platform runs an LLM for, each independently pointable at a model in a
- * project's settings.
- *
- * <p>The lanes fall into {@link LaneGroup}s, split by how the platform reaches the model rather than
- * by what the work is for. {@link LaneGroup#AGENT_VM} lanes hand an inference-profile id to an agent
- * inside an E2B microVM and never see the request: the model has to sustain a long tool-use loop over
- * a repository or a dossier, and an AGENT_VM lane runs once per mover or per cause, so it is worth a
- * frontier model. {@link LaneGroup#DECISION_CALLS} lanes ask a hosted decision model one typed
- * question per observation; the provider is the whole choice there, since each serves one decision
- * model.
- *
- * <p>These lanes run on the org's own credential, or on the {@code PLATFORM} provider when the
- * deployment supplies one. Every RCA/TRIAGE/AGENT_RUN run resolves a credential for its provider and injects it
- * into the sandbox request; see {@code AgenticCredentialResolver}. A run that pins a model explicitly in the run modal bypasses
- * lanes entirely and bills the customer's own provider credential.
+ * Lanes are grouped by how the platform reaches the model. Lanes run on the org's own credential, or PLATFORM when the
+ * deployment supplies one. A model pinned explicitly in the run modal bypasses lanes and bills the customer's own
+ * credential.
  */
 public enum ModelLane {
 
-    /**
-     * The agentic RCA run on a trend mover: the coding agent in an E2B microVM with the repo, the
-     * evidence dossier and (optionally) live MCP reads. Long-running and once per run, so it is the
-     * lane where a frontier model is most obviously worth its price.
-     */
     RCA(
             "rca",
             "RCA",
@@ -38,17 +21,8 @@ public enum ModelLane {
             LaneGroup.AGENT_VM),
 
     /**
-     * Ruling on whether a classifier finding is a real deviation: Layer 2, one agent in a microVM
-     * reading the finding's evidence dossier, plus the project's repository when it has one.
-     *
-     * <p>Separated from {@link #RCA} because of volume rather than shape. RCA runs when a person asks
-     * about one mover; this runs once per distinct cause, and once {@code triage_automatic_enabled}
-     * is on for an org it runs unattended over every finding that clears the recurrence bar. Every
-     * run books against {@code (project, triage)} in the LLM ledger, and the lane can be pointed at a
-     * different model for one project without moving RCA with it. It offers exactly the same models
-     * as RCA, in the same order, with the same defaults, so a project that never chose a triage model
-     * runs whatever RCA would; picking a model priced above its provider's default is allowed, and
-     * the settings page warns first.
+     * Separate from {@link #RCA} because of volume: it runs once per distinct cause, unattended once automatic triage
+     * is on. It offers RCA's models in RCA's order.
      */
     TRIAGE(
             "triage",
@@ -56,12 +30,7 @@ public enum ModelLane {
             "Rules whether a finding is a real deviation. Runs an agent per cause, in a sandbox.",
             LaneGroup.AGENT_VM),
 
-    /**
-     * An agent that an extension runs on the platform, one-shot ({@code AgentRunService}) or as a
-     * live session, reading the project's recent traces over MCP and, when the project has one, its
-     * repository. Each run is started by a person, so it is sized like RCA and offers exactly RCA's
-     * models in RCA's order.
-     */
+    /** Started by a person, so sized like RCA. */
     AGENT_RUN(
             "agent_run",
             "Agent runs",
@@ -69,11 +38,7 @@ public enum ModelLane {
                     + " project has one, its repository.",
             LaneGroup.AGENT_VM),
 
-    /**
-     * The Frustration classifier's per-turn question to TypeSafe's Jev: direct, over OpenRouter, or on
-     * the deployment's own provider. Runs once per eligible user turn, so the price per thousand turns
-     * is what matters.
-     */
+    /** Runs once per eligible user turn, so price per thousand turns is what matters. */
     FRUSTRATION(
             "frustration",
             "Frustration",
@@ -93,49 +58,35 @@ public enum ModelLane {
         this.group = group;
     }
 
-    /** The snake_case wire/DB identifier, matching {@code project_model_setting.lane}. */
     @JsonValue
     public String wire() {
         return wire;
     }
 
-    /** Human label for the settings page. */
     public String label() {
         return label;
     }
 
-    /** One line explaining what this lane does, so the settings row is self-explanatory. */
     public String description() {
         return description;
     }
 
-    /** How the platform reaches the model for this lane, and the settings section it renders under. */
     public LaneGroup group() {
         return group;
     }
 
-    /**
-     * Whether this lane's model has to be able to drive the coding agent in a sandbox, true exactly
-     * for {@link LaneGroup#AGENT_VM}. Those sandboxes ask the model to sustain a long tool-use loop
-     * over a repo or a dossier, so a model that is a fine choice for every other lane can still be an
-     * unrunnable one here; the settings validator rejects the pairing and the UI hides the option.
-     */
+    /** A model that is fine elsewhere can be unrunnable here; the validator rejects the pairing. */
     public boolean agentic() {
         return group == LaneGroup.AGENT_VM;
     }
 
-    /**
-     * Whether this lane runs a hosted decision model rather than a chat model, true exactly for
-     * {@link LaneGroup#DECISION_CALLS}. A decision lane takes only decision models and no other lane
-     * takes one; the settings validator enforces both directions.
-     */
+    /** The validator enforces both directions. */
     public boolean decision() {
         return group == LaneGroup.DECISION_CALLS;
     }
 
     /**
-     * Resolve a wire value, or a typed 400. Unknown lanes throw rather than defaulting: a typo'd lane
-     * in a PUT that silently wrote to another lane would be a very confusing bill.
+     * Unknown lanes throw rather than default: a typo'd lane silently writing another lane would be a confusing bill.
      */
     @JsonCreator
     public static ModelLane fromWire(String value) {

@@ -27,34 +27,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Maps a decoded OTLP {@link ExportTraceServiceRequest} into the platform's canonical
- * {@link RawEntry} batch — the same normalized shape every pull adapter emits — so the OTLP push
- * front door feeds the <em>identical</em> downstream write path
- * ({@code SubstrateWriter} → {@code SpanBatchWriter}) as Langfuse/Braintrust,
- * and the substrate's idempotency/ordering/de-conflict guarantees apply unchanged.
- *
- * <p><b>Flatten, then normalize at the edge.</b> Each {@code ResourceSpans → ScopeSpans → Span} is
- * flattened to a {@code Map<String,Object>} of its attributes (resource attributes merged in, span
- * attributes winning on a key clash), then:
- * <ul>
- *   <li>If the span carries OpenInference keys ({@code llm.*}/{@code openinference.*}),
- *       {@link OpenInferenceNormalizer#toRawEntry} rewrites them to canonical {@code gen_ai.*} — the
- *       standalone seam its javadoc names "a future OTLP receiver" as a caller. We never fork it.</li>
- *   <li>Otherwise the span is read natively: {@code gen_ai.operation.name} →
- *       {@link KindNormalizer} kind, {@code gen_ai.request.model} → model,
- *       {@code gen_ai.input.messages}/{@code gen_ai.output.messages} threaded onto the OTLP-native
- *       {@link RawEntry} message fields (the structural source the write path uses for
- *       {@code message} rows), and the span end-time onto {@code RawEntry.endTimestamp} (the source
- *       for {@code tool_call.latencyMs}). Neither is available on the pull path.</li>
- * </ul>
- *
- * <p>Span/trace ids are lowercase hex (matching {@code parentSpanId} → {@code parentId} so the
- * enricher's provider span-id graph resolves parent links). Per the never-truncate invariant, no
- * attribute or message content is clipped here — the batch is bounded by span count upstream
- * ({@code OtlpReceiverProperties.maxSpansPerRequest}), never by truncation.
- *
- * <p>A singleton {@link Component} so every OTLP transport (HTTP and gRPC) shares one mapper
- * instance and both front doors normalize identically.
+ * Maps OTLP into the same {@link RawEntry} shape every pull adapter emits, so the push door feeds the identical write
+ * path. Resource attributes are merged under span attributes; OpenInference spans go through
+ * {@link OpenInferenceNormalizer} (never forked). Never truncates; the batch is bounded by span count upstream.
  */
 @Component
 public final class OtlpSpanMapper {
@@ -65,7 +40,6 @@ public final class OtlpSpanMapper {
         this.mapper = mapper;
     }
 
-    /** Flatten every span across every resource/scope into one canonical {@link RawEntry} batch. */
     public List<RawEntry> toRawEntries(ExportTraceServiceRequest request) {
         List<RawEntry> out = new ArrayList<>();
         for (ResourceSpans rs : request.getResourceSpansList()) {
@@ -81,13 +55,12 @@ public final class OtlpSpanMapper {
     }
 
     private RawEntry toRawEntry(Span span, Map<String, Object> resourceAttrs) {
-        // Resource attributes first, span attributes win on a clash (the span is more specific).
+        // Span attributes win on a clash: the span is more specific.
         Map<String, Object> attrs = new LinkedHashMap<>(resourceAttrs);
         attrs.putAll(flattenAttributes(span.getAttributesList()));
 
-        // emptyToNull on all three ids: a missing/empty id must degrade to null (which the write path's
-        // validation drops), not "" — an empty sourceExternalId would collide every empty-id span in the
-        // batch into one row, cross-linking unrelated spans.
+        // A missing id must degrade to null, not "": an empty sourceExternalId would collide every empty-id span in the
+        // batch into one row.
         String spanId = emptyToNull(hex(span.getSpanId().toByteArray()));
         String traceId = emptyToNull(hex(span.getTraceId().toByteArray()));
         String parentId = emptyToNull(hex(span.getParentSpanId().toByteArray()));
@@ -95,51 +68,40 @@ public final class OtlpSpanMapper {
         String start = isoFromUnixNano(span.getStartTimeUnixNano());
         String end = isoFromUnixNano(span.getEndTimeUnixNano());
 
-        // A span error status is structural — surface it into attrs (so it lands in metadata) for BOTH the
-        // OpenInference and native paths to read. Set before the OI branch so an OI span's error is captured too.
+        // Set before the OI branch so an OI span's error is captured too.
         if (span.hasStatus() && span.getStatus().getCode() == Status.StatusCode.STATUS_CODE_ERROR) {
             attrs.put("level", "ERROR");
             String message = emptyToNull(span.getStatus().getMessage());
             if (message != null) attrs.put("statusMessage", message);
         }
 
-        // OpenInference inputs route through the standalone normalizer (reused, never forked).
         if (OpenInferenceNormalizer.isOpenInference(attrs)) {
             RawEntry oi = OpenInferenceNormalizer.toRawEntry(
                     mapper.valueToTree(attrs), spanId, name, parentId, traceId, start, attrs);
-            // Thread the OTLP-native structural fields the normalizer doesn't know about
-            // (end-time for latency; OI messages are already folded into input/output text).
+            // Thread the OTLP-native fields the normalizer doesn't know (end time for latency).
             return withOtlpFields(oi, end, null, null);
         }
 
-        // Native gen_ai.* read.
         String operationName = str(attrs, GenAiAttributes.OPERATION_NAME);
-        // Foreign-sender fallback: a raw OpenLLMetry framework span carries traceloop.span.kind
-        // instead of gen_ai.operation.name. Producers that emit canonical gen_ai already set this, so this
-        // only fires for foreign senders. Never overrides a native gen_ai operation name.
+        // Foreign-sender fallback for raw OpenLLMetry spans; never overrides a native gen_ai operation name.
         if (operationName == null)
             operationName = TraceloopNormalizer.operationName(attrs.get(TraceloopNormalizer.SPAN_KIND));
-        // Kind from gen_ai.operation.name alone, plus the one standard
-        // attribute discriminator: execute_tool + gen_ai.tool.type=extension → mcp.
+        // execute_tool + gen_ai.tool.type=extension → mcp.
         String operationKind = KindNormalizer.normalize(operationName, attrs);
         String model = str(attrs, GenAiAttributes.REQUEST_MODEL);
-        // Model-presence backstop, mirroring LangfuseSource / OpenInferenceNormalizer.
         if (operationKind == null && model != null && !model.isBlank()) operationKind = KindNormalizer.LLM;
 
         String inputMessages = str(attrs, GenAiAttributes.INPUT_MESSAGES);
         String outputMessages = str(attrs, GenAiAttributes.OUTPUT_MESSAGES);
-        // OpenLLMetry/Traceloop encode messages as indexed-flattened attrs (gen_ai.prompt.N.role|content).
-        // Reconstruct them into the canonical [{role, content}] array ONLY when the structured array is
-        // absent — the structured form always wins — and only when the zero-index sentinel key is present, so
-        // a non-message span never pays a key scan. The structural source itself stays encoding-agnostic.
+        // Reconstructed only when the structured array is absent and the zero-index sentinel key exists, so a
+        // non-message span never pays a key scan.
         if (inputMessages == null && attrs.containsKey(GenAiAttributes.TRACELOOP_PROMPT_PREFIX + "0.role")) {
             inputMessages = reconstructIndexedMessages(attrs, GenAiAttributes.TRACELOOP_PROMPT_PREFIX);
         }
         if (outputMessages == null && attrs.containsKey(GenAiAttributes.TRACELOOP_COMPLETION_PREFIX + "0.role")) {
             outputMessages = reconstructIndexedMessages(attrs, GenAiAttributes.TRACELOOP_COMPLETION_PREFIX);
         }
-        // Plain input/output (a producer's canonicalized carrier) win; else fall back to the raw
-        // traceloop.entity.* payload for foreign OpenLLMetry framework spans.
+        // Plain input/output win; else the raw traceloop.entity.* payload.
         String input = firstNonBlank(inputMessages, str(attrs, "input"), TraceloopNormalizer.input(attrs));
         String output = firstNonBlank(outputMessages, str(attrs, "output"), TraceloopNormalizer.output(attrs));
 
@@ -187,16 +149,9 @@ public final class OtlpSpanMapper {
         return null;
     }
 
-    // ----- OpenLLMetry/Traceloop indexed-flattened message reconstruction ---------------------------
-
     /**
-     * Reconstruct an OpenLLMetry/Traceloop indexed-flattened message family ({@code <prefix>N.role} /
-     * {@code <prefix>N.content}) into the canonical {@code [{role, content}]} JSON array {@code RawEntry}
-     * carries and the write path consumes. Keyed into a {@link java.util.NavigableMap} by the
-     * parsed index N so the array is emitted in message order regardless of attribute-map order; a non-integer or
-     * malformed index segment is skipped (fail-open — the reconstruction degrades, never throws). Content is
-     * carried whole (never clipped — never-truncate invariant). Returns {@code null} when no well-formed
-     * indexed entry is found, so the caller leaves the message field absent rather than emitting an empty array.
+     * Keyed by the parsed index so messages come out in order regardless of map order. Malformed indices are skipped;
+     * null when nothing well-formed is found.
      */
     private @Nullable String reconstructIndexedMessages(Map<String, Object> attrs, String prefix) {
         java.util.NavigableMap<Integer, ObjectNode> byIndex = new java.util.TreeMap<>();
@@ -235,9 +190,6 @@ public final class OtlpSpanMapper {
         }
     }
 
-    // ----- attribute flattening --------------------------------------------------------------------
-
-    /** Flatten an OTLP {@code repeated KeyValue} attribute list into a string-keyed map of plain values. */
     private Map<String, Object> flattenAttributes(List<KeyValue> kvs) {
         Map<String, Object> out = new LinkedHashMap<>();
         for (KeyValue kv : kvs) {
@@ -247,7 +199,6 @@ public final class OtlpSpanMapper {
         return out;
     }
 
-    /** Convert an OTLP {@link AnyValue} to a plain Java value (String/Long/Double/Boolean/JSON-string). */
     private @Nullable Object anyValue(AnyValue v) {
         return switch (v.getValueCase()) {
             case STRING_VALUE -> v.getStringValue();
@@ -257,17 +208,13 @@ public final class OtlpSpanMapper {
             case BYTES_VALUE -> hex(v.getBytesValue().toByteArray());
             case ARRAY_VALUE -> arrayValueJson(v.getArrayValue());
             case KVLIST_VALUE -> kvListJson(v.getKvlistValue());
-            // OTLP 1.9+ dictionary encoding (opentelemetry-proto 1.11.0-alpha): a string given
-            // as an index into a string table carried elsewhere in the request. This mapper reads
-            // plain values only and does not resolve that table, so the value is dropped (null, same
-            // as unset) rather than misread as the index number. Exhaustive switch: a future case
-            // will fail compilation here again, on purpose.
+            // OTLP 1.9+ dictionary encoding: the string table is not resolved here, so the value is dropped rather than
+            // misread as the index number. The switch is exhaustive so a future case fails compilation.
             case STRING_VALUE_STRINDEX -> null;
             case VALUE_NOT_SET -> null;
         };
     }
 
-    /** Serialize a complex array attribute to a JSON string (kept whole — never clipped). */
     private String arrayValueJson(ArrayValue arr) {
         List<Object> list = new ArrayList<>(arr.getValuesCount());
         for (AnyValue v : arr.getValuesList()) {
@@ -276,7 +223,6 @@ public final class OtlpSpanMapper {
         return mapper.valueToTree(list).toString();
     }
 
-    /** Serialize a nested key-value-list attribute to a JSON object string. */
     private String kvListJson(KeyValueList kvl) {
         ObjectNode node = mapper.createObjectNode();
         for (KeyValue kv : kvl.getValuesList()) {
@@ -285,14 +231,12 @@ public final class OtlpSpanMapper {
         return node.toString();
     }
 
-    // ----- scalar helpers --------------------------------------------------------------------------
-
     private static @Nullable String str(Map<String, Object> attrs, String key) {
         Object v = attrs.get(key);
         return v instanceof String s && !s.isBlank() ? s : null;
     }
 
-    /** Lowercase hex of an id/byte array; {@code ""} for an empty array (the OTLP unset form). */
+    /** {@code ""} for an empty array, the OTLP unset form. */
     private static String hex(byte[] bytes) {
         if (bytes.length == 0) return "";
         StringBuilder sb = new StringBuilder(bytes.length * 2);
@@ -306,7 +250,7 @@ public final class OtlpSpanMapper {
         return s == null || s.isEmpty() ? null : s;
     }
 
-    /** OTLP carries Unix-nanos; render ISO-8601 (null for the unset 0 sentinel). */
+    /** Null for the unset 0 sentinel. */
     private static @Nullable String isoFromUnixNano(long unixNano) {
         if (unixNano == 0L) return null;
         long seconds = unixNano / 1_000_000_000L;

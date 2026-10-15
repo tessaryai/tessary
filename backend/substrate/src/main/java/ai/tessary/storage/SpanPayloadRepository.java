@@ -17,31 +17,20 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for {@code span_payload} (substrate-model.md §4).
- *
- * <p>The payload is written in the same transaction as its span row, under the same {@code event_ts}
- * guard, so span and payload can never disagree about which version they hold. A payload that survived a
- * span replacement would show one version's prompt beside another version's token counts, and nothing
- * downstream could tell.
- *
- * <p><b>Every read here is a deliberate step outside the list surfaces.</b> The payload is the only place the
- * raw conversation lives, so the reads are point lookups and page-scoped joins — never a scan — and each one
- * is called from a surface that has already narrowed to the rows a caller asked to read in full.
+ * Written in the same transaction and under the same {@code event_ts} guard as its span, so the two never disagree on
+ * version. Every read is a point lookup or page-scoped join, never a scan.
  */
 @Repository
 public class SpanPayloadRepository {
 
     /**
-     * The exact word expression of {@code ix_span_payload_project_fts},
-     * over a payload aliased {@code p}. Postgres matches an expression index only against a syntactically identical
-     * expression: a different text-search config, a differently spelled cap or an added column still returns correct
-     * rows, by re-parsing every payload instead. The cap means search sees the first ~100 KB of each of input and
-     * output.
+     * Postgres matches an expression index only against an identical expression; any variation still returns correct
+     * rows by re-parsing every payload. The cap means search sees the first ~100 KB of input and output.
      */
     public static final String PAYLOAD_TSVECTOR =
             "to_tsvector('simple', left(coalesce(p.input, ''), 100000) || ' ' || left(coalesce(p.output, ''), 100000))";
 
-    /** Words shorter than this match whole, since a one- or two-letter prefix matches nearly every payload. */
+    /** A one- or two-letter prefix matches nearly every payload. */
     static final int MIN_PREFIX_LENGTH = 3;
 
     private static final String COLS = "project_id, trace_id, span_id, input, output, attributes::text AS attributes, "
@@ -86,12 +75,8 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * The {@code to_tsquery('simple', …)} text that matches every word of {@code text} as a prefix, or null when
-     * {@code text} holds no word at all.
-     *
-     * <p>The words come from Postgres's own {@code 'simple'} parser, the one {@link #PAYLOAD_TSVECTOR} indexed with,
-     * so a search splits {@code ORD-55812} or an email address exactly as the payload did. {@code quote_literal} makes
-     * each word a literal, so operators a user types are never read as tsquery syntax.
+     * Split by Postgres's own {@code 'simple'} parser, the one the index used. {@code quote_literal} keeps typed
+     * operators from being read as tsquery syntax.
      */
     public @Nullable String prefixQuery(String text) {
         return jdbc.sql("""
@@ -106,11 +91,7 @@ public class SpanPayloadRepository {
                 .orElse(null);
     }
 
-    /**
-     * How many of the project's payloads hold {@code words}, counting no further than {@code cap}. Served by
-     * {@code ix_span_payload_project_fts}, which intersects the project's rows with the words' rows inside the index,
-     * so another tenant's matches are never fetched.
-     */
+    /** The index intersects the project's rows with the words' rows, so another tenant's matches are never fetched. */
     public int countMatches(String projectId, String words, int cap) {
         return jdbc.sql("SELECT count(*) FROM (SELECT 1 FROM span_payload p WHERE p.project_id = :pid AND "
                         + PAYLOAD_TSVECTOR + " @@ to_tsquery('simple', :words) LIMIT :cap) m")
@@ -122,15 +103,8 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * Prepares the rest of the caller's transaction for a search: every statement stops at {@code timeoutMs}, and is
-     * planned without looking at the searched words. Outside a transaction it does neither, so a search read must run
-     * in one.
-     *
-     * <p>The generic plan is deliberate. Shown a common word, the planner prefers reading each payload and parsing it
-     * again over the payload index, because it prices {@code to_tsvector} far below what parsing kilobytes of text
-     * costs. On a 300k-span project that made a search for {@code redacted} take 1.9 s instead of 39 ms. A plan made
-     * without the word's frequency keeps the index for the match list and the count; the walk is chosen by the
-     * count, not by the planner.
+     * Outside a transaction it does neither. The generic plan is deliberate: shown a common word, the planner re-parses
+     * payloads instead of using the index (1.9 s instead of 39 ms on 300k spans).
      */
     public void boundSearch(long timeoutMs) {
         jdbc.sql("SELECT set_config('statement_timeout', :ms, true),"
@@ -140,10 +114,7 @@ public class SpanPayloadRepository {
                 .listOfRows();
     }
 
-    /**
-     * Last-write-wins upsert of a whole batch of payloads, one JDBC batch, under the same {@code event_ts}
-     * guard as {@link SpanRepository#upsertAll}: ties go to the latest arrival.
-     */
+    /** Under the same {@code event_ts} guard as {@link SpanRepository#upsertAll}: ties go to the latest arrival. */
     public void upsertAll(List<SpanPayloadRow> rows) {
         int[] applied = named.batchUpdate(
                 UPSERT_SQL, rows.stream().map(SpanPayloadRepository::params).toArray(SqlParameterSource[]::new));
@@ -160,15 +131,7 @@ public class SpanPayloadRepository {
                 .optional();
     }
 
-    /**
-     * Every payload of one trace, read through the primary-key prefix.
-     *
-     * <p>The trace detail is the surface this is for, and it reads a whole trace at once rather than a row
-     * per span. A LIST surface must not call it: the traces list stays a single-table read, which is why
-     * payloads can age out ahead of spans without breaking anything a list shows. {@link #listByKeys} and
-     * {@link #existingKeys} are how the one list that does need payload facts asks for exactly the page it is
-     * rendering, instead of for every payload of every trace on it.
-     */
+    /** A list surface must not call it; payloads may age out ahead of spans, and lists stay single-table reads. */
     public List<SpanPayloadRow> listByTrace(String projectId, String traceId) {
         return jdbc.sql("SELECT " + COLS + " FROM span_payload WHERE project_id = :pid AND trace_id = :tid")
                 .param("pid", projectId)
@@ -177,10 +140,7 @@ public class SpanPayloadRepository {
                 .list();
     }
 
-    /**
-     * Every payload of a set of traces (a session's), in one read through the same primary-key prefix as {@link
-     * #listByTrace}. Unordered; a payload that has aged out is absent.
-     */
+    /** Unordered; a payload that has aged out is absent. */
     public List<SpanPayloadRow> listByTraceIds(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) {
             return List.of();
@@ -192,14 +152,7 @@ public class SpanPayloadRepository {
                 .list();
     }
 
-    /**
-     * The payloads of an arbitrary set of spans, in ONE query — for a page whose spans come from many traces
-     * (a search page), where {@link #listByTrace} would be a query per trace AND would read the payloads of
-     * every span the page did not select.
-     *
-     * <p>Unordered, and possibly shorter than {@code keys}: a span whose payload has aged out (spec §10) is
-     * simply absent here.
-     */
+    /** For a page whose spans come from many traces. A span whose payload aged out is absent. */
     public List<SpanPayloadRow> listByKeys(String projectId, List<SpanKey> keys) {
         if (keys.isEmpty()) {
             return List.of();
@@ -211,15 +164,8 @@ public class SpanPayloadRepository {
     }
 
     /**
-     * Which of {@code keys} have a payload row at all — existence, without the text.
-     *
-     * <p>The distinction this answers is not cosmetic. Payloads age out ahead of spans, so "no payload row"
-     * and "a payload whose input was empty" are different facts, and a list that renders them identically
-     * tells its reader "this call had no input" when the truth is "we no longer hold it".
-     *
-     * <p>Separate from {@link #listByKeys} because the projection is the point: the key columns alone are an
-     * index-only probe of the primary key, whereas learning the same thing from {@code listByKeys} would drag
-     * every conversation on the page through memory to throw all of it away.
+     * "No payload row" (aged out) and "empty input" are different facts. An index-only probe, so the page's
+     * conversations are never read just to be thrown away.
      */
     public Set<SpanKey> existingKeys(String projectId, List<SpanKey> keys) {
         if (keys.isEmpty()) {

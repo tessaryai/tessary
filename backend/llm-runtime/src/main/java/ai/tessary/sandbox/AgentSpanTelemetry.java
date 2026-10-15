@@ -15,32 +15,20 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Shared OTel/Langfuse enrichment for the E2B agent sandboxes that drive the coding agent in a
- * microVM (judge-prompt synthesis and deterministic codegen). Each gets back the agent's
- * stream-json telemetry (a result envelope + per-turn usage) from the launcher and stamps it
- * onto spans the same way, so the logic lives here once — in {@code sandbox} because more than one
- * feature now shares it.
- *
- * <p>All methods are best-effort: telemetry must never fail the surrounding sandbox call.
- */
+/** All methods are best-effort: telemetry must never fail the surrounding sandbox call. */
 public final class AgentSpanTelemetry {
 
-    // Deliberately a static bare mapper, not the shared JacksonConfig bean: this is a
-    // non-Spring static utility, and the @Primary bean has identical strict semantics.
+    // A static bare mapper, not the JacksonConfig bean: this is a non-Spring utility, and the @Primary bean has
+    // identical strict semantics.
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private AgentSpanTelemetry() {}
 
-    // OTel GenAI gen_ai.operation.name values (semconv v1.37.0; open enum). We carry the TRUE kind so the
-    // platform can segregate agent vs single-LLM vs tool by the standard, not by a vendor's lossy type.
     public static final String OP_CHAT = "chat"; // a single LLM call (one turn)
     public static final String OP_INVOKE_AGENT = "invoke_agent"; // a (multi-turn) agent invocation
 
     /**
-     * Stamp plain input/output strings onto a non-generation {@code span} (e.g. the orchestration root that
-     * fans work out), via {@code langfuse.observation.input}/{@code output}, so the trace root shows its
-     * context + result without being mis-rendered as a model call. Best-effort.
+     * Stamped via {@code langfuse.observation.input}/{@code output} so the root is not mis-rendered as a model call.
      */
     public static void recordSpanIo(Span span, String inputText, String outputText) {
         try {
@@ -51,7 +39,6 @@ public final class AgentSpanTelemetry {
                 span.setAttribute("langfuse.observation.output", outputText);
             }
         } catch (RuntimeException ignored) {
-            // telemetry is best-effort
         }
     }
 
@@ -66,14 +53,8 @@ public final class AgentSpanTelemetry {
     }
 
     /**
-     * One assistant turn as an ordered OTel GenAI message list: an assistant message (a {@code text} part when
-     * the model wrote prose, plus one {@code tool_call} part per tool it requested — {id, name, arguments}),
-     * followed — when the results are known — by a {@code tool}-role message of {@code tool_call_response} parts
-     * carrying those results. Bundling the results onto the SAME turn makes each span a complete
-     * request→response→result triple (what agent-eval graders score) rather than a half-open pair whose result
-     * leaked onto the next span. Mirrors the real Anthropic exchange; leaves carry FULL content (Jackson escapes
-     * them, so the JSON stays valid) — never truncated. Returns null when the turn has neither text, tool calls,
-     * nor results.
+     * Results ride on the same turn so each span is a complete request, response and result triple, which agent-eval
+     * graders score. Content is never truncated.
      */
     private static @Nullable String assistantTurnJson(String text, JsonNode toolCalls, JsonNode toolResults) {
         boolean hasText = text != null && !text.isBlank();
@@ -117,13 +98,8 @@ public final class AgentSpanTelemetry {
     }
 
     /**
-     * One sandbox run's token buckets and cost, as the runner's result envelope reports them — the
-     * shape both the span enrichment below and the usage ledger read.
-     *
-     * <p>{@code costUsd} is the cost OpenCode computed for the run ({@code usage.cost_usd}), from the
-     * models.dev rates the launcher declared for its model. Null when the envelope carried none, and
-     * also when it says $0 for a run that used tokens: that is a model OpenCode had no rate for, and
-     * booking it as free would hide that the cost is missing.
+     * Null when the envelope carried no cost, and also when it says $0 for a run that used tokens: that is a missing
+     * rate, not a free run.
      */
     public record AgentUsage(
             long inputTokens,
@@ -132,11 +108,6 @@ public final class AgentSpanTelemetry {
             long cacheWriteTokens,
             @Nullable BigDecimal costUsd) {}
 
-    /**
-     * Read one result envelope's usage, or null when there is none to read (blank
-     * envelope, unparseable JSON). Best-effort like everything else here — a caller books what it gets
-     * and skips what it doesn't.
-     */
     public static @Nullable AgentUsage parseUsage(ObjectMapper mapper, @Nullable String envelopeJson) {
         if (envelopeJson == null || envelopeJson.isBlank()) return null;
         try {
@@ -156,10 +127,6 @@ public final class AgentSpanTelemetry {
         }
     }
 
-    /**
-     * Stamp cost + token usage from the runner's result envelope onto {@code span} so Langfuse prices it
-     * like any other generation (instead of a hollow model-only span).
-     */
     public static void recordUsage(Span span, ObjectMapper mapper, @Nullable String envelopeJson) {
         if (envelopeJson == null || envelopeJson.isBlank()) return;
         try {
@@ -189,26 +156,18 @@ public final class AgentSpanTelemetry {
             long turns = env.path("num_turns").asLong(0);
             if (turns > 0) span.setAttribute("gen_ai.usage.num_turns", turns);
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException ignored) {
-            // usage is best-effort telemetry; never fail the sandbox call over it
         }
     }
 
     /**
-     * Coalesce the launcher's per-stream-json-event entries into one entry per LOGICAL turn. A single
-     * assistant response can arrive as several {@code assistant} events (thinking / text / each tool_use),
-     * and only the FIRST entry of a turn carries a non-blank {@code input} (the prompt for turn 0, the prior
-     * tool results otherwise) — a real user/tool-result event is the only thing that populates it. So an entry
-     * with a blank {@code input} (and not the first) is a CONTINUATION of the turn in progress: fold its text,
-     * tool calls, tool results, tools and usage into that turn (and extend it to the continuation's {@code ts}).
-     * The result is one entry per user→assistant turn, eliminating single-part fragment spans and content-less
-     * thinking-only spans. A no-op once the in-VM capture already emits one entry per logical turn.
+     * One assistant response can arrive as several stream-json events, and only the first carries a non-blank
+     * {@code input}, so a later blank-input entry is a continuation folded into the turn in progress.
      */
     private static List<JsonNode> coalesceTurns(JsonNode turns) {
         List<JsonNode> out = new ArrayList<>();
         ObjectNode current = null;
         for (JsonNode t : turns) {
             if (!t.isObject()) continue;
-            // continuation = a later stream-json event of the SAME assistant response (blank input)
             if (current != null && t.path("input").asText("").isBlank()) {
                 mergeTurn(current, t);
             } else {
@@ -219,7 +178,6 @@ public final class AgentSpanTelemetry {
         return out;
     }
 
-    /** Fold a continuation entry {@code t} into the in-progress turn {@code cur} (see {@link #coalesceTurns}). */
     private static void mergeTurn(ObjectNode cur, JsonNode t) {
         String tText = t.path("text").asText("");
         if (!tText.isBlank()) {
@@ -245,7 +203,6 @@ public final class AgentSpanTelemetry {
         if (t.has("ts")) cur.put("ts", t.path("ts").asLong(0L)); // last fragment's ts ends the merged span
     }
 
-    /** Append every element of {@code src} (when a non-empty array) onto {@code cur}'s {@code field} array. */
     private static void appendArray(ObjectNode cur, String field, JsonNode src) {
         if (!src.isArray() || src.isEmpty()) return;
         ArrayNode dst = cur.path(field).isArray() ? (ArrayNode) cur.get(field) : cur.putArray(field);
@@ -253,17 +210,8 @@ public final class AgentSpanTelemetry {
     }
 
     /**
-     * Render each LOGICAL assistant turn the launcher captured (stream-json) as a child
-     * {@code agent.llm_request} span carrying that turn's model + token usage — so Langfuse shows the
-     * agent's conversation rather than one opaque generation. The launcher emits one entry per stream-json
-     * {@code assistant} event, and a harness (notably on Bedrock) can split a single assistant response into
-     * SEPARATE events — a thinking block, a text block, then each {@code tool_use} — so a turn arrives
-     * fragmented and only the first fragment carries the input. {@link #coalesceTurns} folds those fragments
-     * back together first, so one span = one complete user→assistant turn (input + all text + all tool calls +
-     * their results), not single-part fragments and empty thinking-only spans. Created with the current
-     * context as parent, so each turn nests under it. Placed relative to {@code parentStart} using the microVM
-     * offsets ({@code ts - runStartMs}), kept monotonic, so microVM↔host clock skew can't push a turn outside
-     * the parent window.
+     * Turns are coalesced first so one span is one complete turn. Placed from microVM offsets and kept monotonic, so
+     * clock skew can't push a turn outside the parent window.
      */
     public static void recordTurns(Tracer tracer, @Nullable JsonNode turns, long runStartMs, Instant parentStart) {
         if (turns == null || !turns.isArray() || turns.isEmpty()) return;
@@ -280,8 +228,7 @@ public final class AgentSpanTelemetry {
                 try {
                     String turnModel = turn.path("model").asText("");
                     turnSpan.setAttribute("gen_ai.request.model", turnModel);
-                    // One coalesced user→assistant exchange → gen_ai.operation.name=chat (the truthful KIND;
-                    // the parent author span is invoke_agent). Set even on a tool-only turn so it classifies.
+                    // Set even on a tool-only turn so it classifies.
                     turnSpan.setAttribute("gen_ai.operation.name", OP_CHAT);
                     if (!turnModel.isBlank()) {
                         turnSpan.setAttribute("gen_ai.provider.name", TraceSpanMapper.inferSystem(turnModel));
@@ -303,10 +250,7 @@ public final class AgentSpanTelemetry {
                     if (tools.isArray() && !tools.isEmpty()) {
                         turnSpan.setAttribute("tessary.agent.tools", tools.toString());
                     }
-                    // This turn's INPUT (what prompted this LLM call: the initial prompt on turn 0, the prior
-                    // tool results on later turns) and OUTPUT (the assistant's text + structured tool_call parts,
-                    // followed by the tool_call_response parts those calls produced — a complete triple on ONE
-                    // span). All captured in-VM. Older payloads omit them.
+                    // Older payloads omit input and output.
                     String input = turn.path("input").asText("");
                     if (!input.isBlank()) {
                         turnSpan.setAttribute("gen_ai.input.messages", messagesJson("user", input));
@@ -322,7 +266,6 @@ public final class AgentSpanTelemetry {
                 prevOffset = offset;
             }
         } catch (RuntimeException ignored) {
-            // turn spans are best-effort telemetry; never fail the sandbox call over them
         }
     }
 }
