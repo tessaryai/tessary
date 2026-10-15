@@ -8,11 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * What one decision call asks: a {@code state} (a string or a JSON object) and named, typed questions
- * about it. The wire body is this plus the model id, exactly as the provider documents it.
- *
- * @param state what the questions are about, sent as is
- * @param questions question name to question, in the order they are sent
+ * A decision call's {@code state} (a string or JSON object) and named questions about it; the wire body adds only the
+ * model id. @param questions sent in this order
  */
 public record DecisionRequest(JsonNode state, Map<String, Question> questions) {
 
@@ -21,11 +18,8 @@ public record DecisionRequest(JsonNode state, Map<String, Question> questions) {
     }
 
     /**
-     * One question in the provider's documented shape.
-     *
-     * @param type {@code choice}, {@code score} or {@code noul}
-     * @param instructions the question text
-     * @param criteria for a choice, each option key to its description, in order; empty otherwise
+     * @param type {@code choice}, {@code score} or {@code noul} @param criteria for a choice, each option key to its
+     * description, in order; empty otherwise
      */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public record Question(String type, String instructions, Map<String, String> criteria) {
@@ -34,7 +28,7 @@ public record DecisionRequest(JsonNode state, Map<String, Question> questions) {
             criteria = Collections.unmodifiableMap(new LinkedHashMap<>(criteria));
         }
 
-        /** A choice question: the provider picks one of {@code criteria}'s keys and scores them all. */
+        /** The provider picks one of {@code criteria}'s keys and scores them all. */
         public static Question choice(String instructions, Map<String, String> criteria) {
             return new Question("choice", instructions, criteria);
         }

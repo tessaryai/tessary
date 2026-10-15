@@ -15,15 +15,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a call site whose declared-schema failure rate survived triage into a case, from the CUSUM
- * {@link MalformedOutputRateService} replays through tool_error's engine.
- *
- * <p><b>Same gate as tool error</b>: {@link CaseOpener} only calls {@link #shape} once triage has ruled
- * the shift's claim sound or a human has pressed <em>Real deviation</em>, so a Triage row means the same
- * thing whichever of the two rate-shaped detectors found it.
- *
- * <p>One case per call site: {@code malformed_rate}'s subject is already scoped that way ({@code
- * CauseKey.malformedOutput}), and a call site's schema and its fix both live at that call site alone.
+ * Shapes a call site whose schema-failure rate survived triage into a case, from the CUSUM
+ * {@link MalformedOutputRateService} replays through tool_error's engine. Same gate as tool error. One case per call
+ * site, since a schema and its fix live there alone.
  */
 @Component
 public class MalformedOutputCaseSource implements CaseSource {
@@ -35,8 +29,7 @@ public class MalformedOutputCaseSource implements CaseSource {
 
     @Override
     public CaseDetection shape(FindingRow finding) {
-        // The case's basis only needs the rate, never a specific failing output, so the witness list
-        // this reader would otherwise thread through stays empty — see MalformedOutputEvidence#rateDetail.
+        // The basis needs only the rate, so the witness list stays empty.
         RateDetail read = MalformedOutputEvidence.rateDetail(finding, List.of());
         String callSite = finding.nativeCauseKey();
         CaseKey key = new CaseKey(
@@ -49,7 +42,7 @@ public class MalformedOutputCaseSource implements CaseSource {
                 callSite,
                 finding.callSiteId(),
                 finding.id(),
-                // The same sentence the Classifiers page renders on the finding this came from.
+                // The same sentence the Classifiers page renders.
                 FindingTitle.of(finding),
                 basis(finding, read),
                 severity(finding),
@@ -70,8 +63,7 @@ public class MalformedOutputCaseSource implements CaseSource {
                 read.nRef());
     }
 
-    /** Ordering only, delegating the squash to tool_error's reader, exactly as {@link ToolErrorCaseSource}
-     *  does: two rate detectors sharing one engine must not disagree about how their severity is computed. */
+    /** Delegates to tool_error's reader so two rate detectors on one engine never disagree about severity. */
     private static double severity(FindingRow finding) {
         double criticality = finding.payload().path("criticality").asDouble(Double.NaN);
         return Double.isNaN(criticality) ? 0.0 : ToolErrorEvidence.severityOf(criticality);

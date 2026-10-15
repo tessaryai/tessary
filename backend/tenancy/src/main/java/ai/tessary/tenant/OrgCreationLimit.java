@@ -2,20 +2,11 @@
 package ai.tessary.tenant;
 
 /**
- * How many organizations a single user may own, via the org-creation path. It is enforced inside a
- * transaction under a per-owner lock ({@code OrganizationRepository#lockOrgCreationFor}) in
- * {@code TenantService#bootstrapOrg}.
- *
- * <p>This build self-hosts one org per install: {@code createOrg} exists only to bootstrap that
- * first org on a fresh signup, so the default caps at 1. {@link OrganizationController} depends
- * only on this interface, so a build wanting a different ceiling can supply its own implementation.
- *
- * <p>This is deliberately its own SPI rather than a reuse of {@code CapabilityService}, since
- * capping org count per user has no org to key an override against (the limit applies before the
- * second org exists), so it gets a one-method interface of its own instead.
+ * How many organizations a user may own, enforced under a per-owner lock
+ * ({@code OrganizationRepository#lockOrgCreationFor}). Defaults to 1, since this build self-hosts one org. Its own SPI
+ * rather than {@code CapabilityService}, which has no org to key on before the second org exists.
  */
 public interface OrgCreationLimit {
 
-    /** The maximum number of organizations this user may own at a time. */
     int maxOwnedOrgsFor(String userId);
 }

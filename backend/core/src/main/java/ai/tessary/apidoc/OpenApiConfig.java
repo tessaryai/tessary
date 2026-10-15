@@ -8,18 +8,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Code-first OpenAPI configuration: derive the API contract from the controllers via
- * springdoc, so the checked-in canonical spec stays in lockstep with the running server.
- *
- * <p>The generated {@code /v3/api-docs} document is the input to the checked-in-spec drift guard, so it must be
- * <em>deterministic</em> across builds. springdoc's default {@code operationId} derivation appends a
- * numeric suffix based on discovery order (unstable); {@link #operationIdCustomizer()} replaces it with a
- * stable {@code <ControllerSimpleName>_<methodName>} id.
+ * Code-first OpenAPI via springdoc. The generated spec feeds the checked-in drift guard, so it must be deterministic.
  */
 @Configuration
 public class OpenApiConfig {
 
-    /** Top-level API metadata. */
     @Bean
     public OpenAPI tessaryOpenApi() {
         return new OpenAPI()
@@ -32,9 +25,8 @@ public class OpenApiConfig {
     }
 
     /**
-     * Deterministic {@code operationId}s: {@code <ControllerSimpleName>_<methodName>}. Stable across builds
-     * (unlike springdoc's discovery-order-suffixed default), which the byte-equal spec drift test
-     * requires.
+     * {@code <ControllerSimpleName>_<methodName>}, replacing springdoc's discovery-order suffix, which the byte-equal
+     * drift test cannot tolerate.
      */
     @Bean
     public OperationCustomizer operationIdCustomizer() {
