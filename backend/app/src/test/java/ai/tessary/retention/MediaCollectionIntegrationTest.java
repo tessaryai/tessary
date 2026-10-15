@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -85,51 +86,30 @@ record MediaCollectionIntegrationTest(RetentionSweeper sweeper, TenantService te
 
     /** Fresh enough that no policy tier touches it during the test. */
     private void payload(Project p, String traceId, String spanId) {
-        String at = Instant.now().toString();
-        jdbc.sql("INSERT INTO trace (project_id, id, started_at, event_ts)"
-                        + " VALUES (:pid, :tid, :at::timestamptz, :at::timestamptz)")
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("at", at)
-                .update();
-        jdbc.sql("INSERT INTO span (project_id, trace_id, id, kind, started_at, event_ts)"
-                        + " VALUES (:pid, :tid, :sid, 'llm', :at::timestamptz, :at::timestamptz)")
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .param("at", at)
-                .update();
-        jdbc.sql("INSERT INTO span_payload (project_id, trace_id, span_id, input, event_ts)"
-                        + " VALUES (:pid, :tid, :sid, 'an image_ref lives in here', :at::timestamptz)")
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .param("at", at)
-                .update();
+        SeedRows.insert(jdbc, """
+            trace        | project_id | id       | started_at | event_ts
+                         | $1         | $2       | $4         | $4
+            span         | project_id | trace_id | id         | kind  | started_at | event_ts
+                         | $1         | $2       | $3         | llm   | $4         | $4
+            span_payload | project_id | trace_id | span_id    | input                      | event_ts
+                         | $1         | $2       | $3         | an image_ref lives in here | $4
+            """, p.id(), traceId, spanId, Instant.now());
     }
 
     private String media(Project p, String digest, String createdAt) {
         String id = Ids.ulid();
-        jdbc.sql("""
-            INSERT INTO media_object (id, project_id, digest, media_type, bytes, size_bytes, created_at)
-            VALUES (:id, :pid, :digest, 'image/png', :bytes, 4, :createdAt)
-            """)
-                .param("id", id)
-                .param("pid", p.id())
-                .param("digest", digest)
-                .param("bytes", new byte[] {1, 2, 3, 4})
-                .param("createdAt", createdAt)
-                .update();
+        SeedRows.insert(jdbc, """
+            media_object | id | project_id | digest | media_type | bytes | size_bytes | created_at
+                         | $1 | $2         | $3     | image/png  | $4    | 4          | $5
+            """, id, p.id(), digest, new byte[] {1, 2, 3, 4}, createdAt);
         return id;
     }
 
     private void ref(Project p, String mediaId, String traceId, String spanId) {
-        jdbc.sql("INSERT INTO media_ref (project_id, media_id, trace_id, span_id)" + " VALUES (:pid, :mid, :tid, :sid)")
-                .param("pid", p.id())
-                .param("mid", mediaId)
-                .param("tid", traceId)
-                .param("sid", spanId)
-                .update();
+        SeedRows.insert(jdbc, """
+            media_ref | project_id | media_id | trace_id | span_id
+                      | $1         | $2       | $3       | $4
+            """, p.id(), mediaId, traceId, spanId);
     }
 
     private boolean exists(Project p, String mediaId) {

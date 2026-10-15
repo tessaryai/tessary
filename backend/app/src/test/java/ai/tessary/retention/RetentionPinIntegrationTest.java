@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -245,14 +246,10 @@ record RetentionPinIntegrationTest(
     }
 
     private void session(Project p, String sessionId) {
-        jdbc.sql("""
-            INSERT INTO session (project_id, id, started_at, last_activity_at, event_ts)
-            VALUES (:pid, :id, :at::timestamptz, :at::timestamptz, :at::timestamptz)
-            """)
-                .param("pid", p.id())
-                .param("id", sessionId)
-                .param("at", AGED)
-                .update();
+        SeedRows.insert(jdbc, """
+            session | project_id | id | started_at | last_activity_at | event_ts
+                    | $1         | $2 | $3         | $3               | $3
+            """, p.id(), sessionId, AGED);
     }
 
     /** An aged trace with one span and its payload: the three tiers the traces class deletes. */
@@ -265,34 +262,14 @@ record RetentionPinIntegrationTest(
     }
 
     private void insertTrace(Project p, String traceId, @Nullable String sessionId, String at) {
-        jdbc.sql("""
-            INSERT INTO trace (project_id, id, session_id, started_at, event_ts)
-            VALUES (:pid, :id, :sid, :at::timestamptz, :at::timestamptz)
-            """)
-                .param("pid", p.id())
-                .param("id", traceId)
-                .param("sid", sessionId)
-                .param("at", at)
-                .update();
-        jdbc.sql("""
-            INSERT INTO span (project_id, trace_id, id, session_id, kind, started_at, event_ts)
-            VALUES (:pid, :tid, :sid, :sess, 'llm', :at::timestamptz, :at::timestamptz)
-            """)
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", "span-" + traceId)
-                .param("sess", sessionId)
-                .param("at", at)
-                .update();
-        jdbc.sql("""
-            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-            VALUES (:pid, :tid, :sid, 'in', 'out', :at::timestamptz)
-            """)
-                .param("pid", p.id())
-                .param("tid", traceId)
-                .param("sid", "span-" + traceId)
-                .param("at", at)
-                .update();
+        SeedRows.insert(jdbc, """
+            trace        | project_id | id       | session_id | started_at | event_ts
+                         | $1         | $2       | $3         | $4         | $4
+            span         | project_id | trace_id | id         | session_id | kind | started_at | event_ts
+                         | $1         | $2       | span-$2    | $3         | llm  | $4         | $4
+            span_payload | project_id | trace_id | span_id    | input      | output | event_ts
+                         | $1         | $2       | span-$2    | in         | out    | $4
+            """, p.id(), traceId, sessionId, at);
     }
 
     private String classifier(Project p) {
@@ -360,19 +337,10 @@ record RetentionPinIntegrationTest(
             @Nullable String sessionId,
             @Nullable String traceId,
             @Nullable String spanId) {
-        jdbc.sql("""
-            INSERT INTO finding_evidence (id, project_id, finding_id, session_id, trace_id, span_id,
-                                          role, created_at)
-            VALUES (:id, :pid, :fid, :sess, :tid, :span, 'exemplar', :now)
-            """)
-                .param("id", Ids.ulid())
-                .param("pid", p.id())
-                .param("fid", findingId)
-                .param("sess", sessionId)
-                .param("tid", traceId)
-                .param("span", spanId)
-                .param("now", Instant.now().toString())
-                .update();
+        SeedRows.insert(jdbc, """
+            finding_evidence | id | project_id | finding_id | session_id | trace_id | span_id | role     | created_at
+                             | $1 | $2         | $3         | $4         | $5       | $6      | exemplar | $7
+            """, Ids.ulid(), p.id(), findingId, sessionId, traceId, spanId, Instant.now());
     }
 
     /**

@@ -10,6 +10,7 @@ import ai.tessary.search.GlobalSearchDtos.SearchHit;
 import ai.tessary.storage.SpanPayloadRepository;
 import ai.tessary.tenant.Ids;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.SeedRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
 import java.util.List;
@@ -230,40 +231,26 @@ record GlobalSearchServiceIntegrationTest(
      * Seeds a trace, span, and span_payload with raw SQL, the name feeding the trigram leg and the payload the FTS
      * leg. Returns the trace id.
      */
-    private String seedSpan(String projectId, String name, String input, String output) {
-        String now = Instant.now().toString();
+    private String seedSpan(String projectId, @Nullable String name, String input, String output) {
         String traceId = Ids.ulid();
-        jdbc.sql("""
-            INSERT INTO trace (project_id, id, started_at, event_ts)
-            VALUES (:pid, :id, :now::timestamptz, :now::timestamptz)
-            """)
-                .param("pid", projectId)
-                .param("id", traceId)
-                .param("now", now)
-                .update();
-        String spanId = Ids.ulid();
-        jdbc.sql("""
-            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-            VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-            """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("name", name)
-                .param("now", now)
-                .update();
-        jdbc.sql("""
-            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-            VALUES (:pid, :trace, :id, :input, :output, :now::timestamptz)
-            """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("input", input)
-                .param("output", output)
-                .param("now", now)
-                .update();
+        Instant now = Instant.now();
+        SeedRows.insert(jdbc, """
+            trace | project_id | id | started_at | event_ts
+                  | $1         | $2 | $3         | $3
+            """, projectId, traceId, now);
+        seedSpanIn(projectId, traceId, name, input, output, now);
         return traceId;
+    }
+
+    /** One more span, under an existing trace, for a trace that matches on more than one span. */
+    private void seedSpanIn(
+            String projectId, String traceId, @Nullable String name, String input, String output, Instant at) {
+        SeedRows.insert(jdbc, """
+            span         | project_id | trace_id | id      | kind  | name   | started_at | event_ts
+                         | $1         | $2       | $3      | llm   | $4     | $5         | $5
+            span_payload | project_id | trace_id | span_id | input | output | event_ts
+                         | $1         | $2       | $3      | $6    | $7     | $5
+            """, projectId, traceId, Ids.ulid(), name, at, input, output);
     }
 
     /**
@@ -275,7 +262,7 @@ record GlobalSearchServiceIntegrationTest(
         var fix = TenantFixture.bootstrap(tenants, "search-endpoint");
         String pid = fix.project().id();
         String weakPayload = seedSpan(pid, null, "a note on reconciliation", "ok");
-        seedSpanIn(pid, weakPayload, "reconciliation", "unrelated words");
+        seedSpanIn(pid, weakPayload, "reconciliation", "unrelated words", "ok", Instant.now());
         String longBody = "reconciliation " + "x".repeat(200);
         String unnamed = seedSpan(pid, null, longBody, "ok");
         String blankName = seedSpan(pid, "   ", "reconciliation", "ok");
@@ -307,31 +294,5 @@ record GlobalSearchServiceIntegrationTest(
 
         assertEquals(4, repository.searchLexical(pid, "escalation", 10).size(), "precondition: four traces match");
         assertEquals(2, repository.searchLexical(pid, "escalation", 2).size());
-    }
-
-    /** One more span, under an existing trace, for a trace that matches on more than one span. */
-    private void seedSpanIn(String projectId, String traceId, @Nullable String name, String input) {
-        String now = Instant.now().toString();
-        String spanId = Ids.ulid();
-        jdbc.sql("""
-            INSERT INTO span (project_id, trace_id, id, kind, name, started_at, event_ts)
-            VALUES (:pid, :trace, :id, 'llm', :name, :now::timestamptz, :now::timestamptz)
-            """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("name", name)
-                .param("now", now)
-                .update();
-        jdbc.sql("""
-            INSERT INTO span_payload (project_id, trace_id, span_id, input, output, event_ts)
-            VALUES (:pid, :trace, :id, :input, 'ok', :now::timestamptz)
-            """)
-                .param("pid", projectId)
-                .param("trace", traceId)
-                .param("id", spanId)
-                .param("input", input)
-                .param("now", now)
-                .update();
     }
 }
