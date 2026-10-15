@@ -9,17 +9,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Which rules could possibly match a text, found in one pass over it: an Aho-Corasick automaton over
- * every rule's keywords, matched case-insensitively on ASCII.
- *
- * <p>This is what makes a corpus of two hundred credential rules affordable on the ingest path. Running
- * every regex over every body would be two hundred scans per field; instead a rule's regex runs only when
- * one of its keywords appears, which is the prefilter gitleaks itself uses, and finding the keywords is a
- * single left-to-right walk however many there are.
- *
- * <p>Case is folded per character during the walk rather than by lowercasing the text first, so a
- * multi-megabyte body costs no copy. Keywords are ASCII; a non-ASCII character can be part of no keyword
- * and resets the walk to the root.
+ * An Aho-Corasick automaton over every rule's keywords, case-insensitive on ASCII: a rule's regex runs only when a
+ * keyword appears, as gitleaks prefilters. Case is folded per character so a large body is never copied; a non-ASCII
+ * character resets the walk.
  */
 final class KeywordIndex {
 
@@ -31,10 +23,7 @@ final class KeywordIndex {
     private final BitSet alwaysCandidates;
     private final int ruleCount;
 
-    /**
-     * @param keywordsByRule each rule's keywords, by rule index; a rule with none is a candidate for every
-     *     text, since there is nothing to prefilter it on
-     */
+    /** @param keywordsByRule a rule with no keywords is a candidate for every text */
     KeywordIndex(List<List<String>> keywordsByRule) {
         this.ruleCount = keywordsByRule.size();
         this.alwaysCandidates = new BitSet(ruleCount);
@@ -51,7 +40,6 @@ final class KeywordIndex {
         link();
     }
 
-    /** The rules whose keywords occur in {@code text}, plus every rule that has no keywords. */
     BitSet candidates(String text) {
         BitSet found = (BitSet) alwaysCandidates.clone();
         int state = 0;
@@ -95,9 +83,8 @@ final class KeywordIndex {
     }
 
     /**
-     * Fill in the failure links breadth-first and turn every missing edge into the transition the failure
-     * chain would take, so the walk never backtracks. A state's outputs absorb its failure state's, which
-     * is how a keyword that is a suffix of another is still reported.
+     * Turns missing edges into failure-chain transitions so the walk never backtracks; outputs absorb the failure
+     * state's, so a keyword that is a suffix of another is still reported.
      */
     private void link() {
         Deque<Integer> queue = new ArrayDeque<>();

@@ -13,12 +13,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * The leased queue for RCA jobs on the unified {@code job} table — mirrors {@link
- * ai.tessary.classifier.grader.GraderRunJobRepository}'s finite-job grain (no cursor, no dead-letter
- * cooldown). {@link #createOrGet} is the race-safe coalesce: a concurrent trigger for the same
- * finding resolves to the same job id either way (see {@link RcaJobRow} for the dedupe grain).
- */
+/** The leased RCA queue on {@code job}: finite jobs, no cursor, no dead-letter cooldown. */
 @Repository
 public class RcaJobRepository {
 
@@ -34,19 +29,9 @@ public class RcaJobRepository {
     }
 
     /**
-     * Enqueue the RCA for one finding, or resolve to the already-enqueued job for it — one statement,
-     * race-safe via the {@code ux_job_rca} no-op-update-with-{@code RETURNING} upsert (the same shape as
-     * {@code GraderRunJobRepository#enqueue}). The dedupe key is built HERE, and starts with the project
-     * id — {@code ux_job_rca} is a global index, so two projects must never coalesce onto one job. Returns the job id either way. The
-     * one deliberate difference: re-triggering a {@code failed} event revives it to {@code pending}
-     * with a fresh attempt budget — {@code markFailed} is terminal on this queue (the claim SQL never
-     * reclaims {@code failed}), so without the revival a transient LLM blip would lock the whole
-     * finding behind its dedupe key. A {@code done} report stays immutable.
-     *
-     * <p>An optional {@code runNonce} is appended to the dedupe key. A null nonce is the normal
-     * coalescing trigger. A non-null one deliberately opts OUT of the coalesce — it is how an explicit
-     * re-run gets a second analysis of a finding whose report already exists, instead of silently
-     * resolving back to the first (immutable) report.
+     * Race-safe coalesce via the {@code ux_job_rca} upsert. The dedupe key starts with the project id since the index
+     * is global. Re-triggering a {@code failed} job revives it (failed is terminal for the claim SQL); {@code done}
+     * stays immutable. A non-null {@code runNonce} opts out of coalescing for an explicit re-run.
      */
     public String createOrGet(
             String projectId,
@@ -92,8 +77,7 @@ public class RcaJobRepository {
                 .single();
     }
 
-    /** Claim up to {@code batch} due jobs via {@code FOR UPDATE SKIP LOCKED}, reclaiming expired-lease jobs
-     *  under the attempt cap. Oldest-first by {@code updated_at}. */
+    /** Oldest-first by {@code updated_at}, reclaiming expired leases under the attempt cap. */
     public List<RcaJobRow> claimBatch(String leaseOwner, int batch, long leaseSeconds, int maxAttempts) {
         String now = Instant.now().toString();
         String expires = Instant.now().plus(Duration.ofSeconds(leaseSeconds)).toString();
@@ -108,7 +92,7 @@ public class RcaJobRepository {
                 .list();
     }
 
-    /** Fail jobs whose lease expired with attempts at/over the cap (hung/crashed mid-analysis). */
+    /** Hung or crashed mid-analysis. */
     public int failExhausted(int maxAttempts) {
         return jdbc.sql(LeasedJobSql.failExhaustedOfKind("job", "hung or crashed mid-rca", RcaJobRow.FAILED))
                 .param("kind", JobRow.Kind.RCA)

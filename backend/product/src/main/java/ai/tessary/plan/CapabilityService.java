@@ -44,17 +44,11 @@ public class CapabilityService {
         this.defaults = defaults;
     }
 
-    // ---- capability resolution --------------------------------------------------------------
-
-    /** Whether {@code capability} is on for {@code orgId}: the org's override, else the default. */
     public boolean isEnabled(String orgId, Capability capability) {
         return resolveOne(FlagContext.forOrg(orgId), capability);
     }
 
-    /**
-     * Every capability's resolved state for an org, in ONE pass — the object a session is served and the object
-     * a run gates many items against.
-     */
+    /** Every capability resolved in one pass. */
     public CapabilitySet resolve(String orgId) {
         FlagContext ctx = FlagContext.forOrg(orgId);
         Map<Capability, Boolean> resolved = new EnumMap<>(Capability.class);
@@ -64,40 +58,27 @@ public class CapabilityService {
         return new CapabilitySet(Map.copyOf(resolved));
     }
 
-    /**
-     * Throw {@link CapabilityError#DISABLED} (403) unless {@link #isEnabled}. The server-side gate a
-     * controller calls before a gated capability, mirroring {@code Resolved#require} for RBAC.
-     */
+    /** The server-side gate; throws {@link CapabilityError#DISABLED} (403). */
     public void require(String orgId, Capability capability) {
         if (!isEnabled(orgId, capability)) {
             throw new TessaryException(CapabilityError.DISABLED, capability.wire());
         }
     }
 
-    /**
-     * The answer with nobody's override in play, from {@link CapabilityDefaults}. Public
-     * because the Features settings read renders "on, but that is only the default" differently from
-     * "on, because somebody turned it on", and recomputing this table in the controller would be two
-     * copies of one policy.
-     */
+    /** Public so the Features screen can tell "on by default" from "turned on", without a second copy of the policy. */
     public boolean defaultFor(Capability capability) {
         return defaults.defaultFor(capability);
     }
 
-    /** The org's override of the default. */
     private boolean resolveOne(FlagContext ctx, Capability capability) {
         return featureFlags.override(capability.wire(), ctx).orElseGet(() -> defaultFor(capability));
     }
 
-    /**
-     * An org's resolved capabilities — the payload a session is served and the object a run gates against.
-     * Every entry is already resolved, so a check is a map lookup with no I/O.
-     */
+    /** Fully resolved, so a check is a map lookup with no I/O. */
     public record CapabilitySet(Map<Capability, Boolean> capabilities) {
 
         /**
-         * Whether {@code capability} is on. A capability missing from the map is off: {@link #resolve} always
-         * fills every constant, so an absent key means the set was built by hand and is incomplete.
+         * A missing key is off: {@link #resolve} fills every constant, so absence means a hand-built, incomplete set.
          */
         public boolean isEnabled(Capability capability) {
             return capabilities.getOrDefault(capability, false);

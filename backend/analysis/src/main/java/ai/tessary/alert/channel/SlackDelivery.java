@@ -15,25 +15,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * The backend's one route to Slack: {@code POST slack-service/deliver}.
- *
- * <p>Its one caller is the {@link SlackChannel} alert channel, which posts through a user's incoming
- * webhook.
- *
- * <p><b>The backend cannot reach Slack directly and that is deliberate.</b> No token, no signing secret,
- * no {@code slack.com} URL lives in this process any more; the adapter holds all of it. What this sends
- * is a composed message and a destination the platform already decided on.
- *
- * <p>Never throws for a delivery outcome. The adapter answers 200 with {@code ok:false} when Slack
- * refuses, and a transport fault here is returned as a failure too — the alert fan-out records outcomes
- * per channel and must not have one channel's outage abort the others.
+ * The backend's one route to Slack, via the adapter's {@code POST /deliver}; no Slack token or URL lives here. Never
+ * throws for a delivery outcome, so one channel's outage cannot abort the fan-out.
  */
 @Component
 public class SlackDelivery {
 
     private static final Logger log = LoggerFactory.getLogger(SlackDelivery.class);
 
-    /** A user-configured {@code hooks.slack.com} URL. No token; the URL is the credential. */
+    /** No token; the URL is the credential. */
     public static final String TRANSPORT_WEBHOOK = "webhook";
 
     private final SlackProperties props;
@@ -43,18 +33,13 @@ public class SlackDelivery {
     public SlackDelivery(SlackProperties props, ObjectMapper mapper) {
         this.props = props;
         this.mapper = mapper;
-        // HTTP/1.1 on purpose: `slack-service` is uvicorn, which speaks HTTP/1.1 only, and the JDK
-        // client's HTTP_2 default attempts an h2c upgrade against a plaintext origin. uvicorn drops
-        // the body and answers 400, so a POST fails blaming its payload rather than the protocol —
-        // exactly what it did to `compile-service` before that client was pinned. This path is
-        // unexercised today (Slack is off at launch), so the same bug was sitting here unseen.
+        // HTTP/1.1: uvicorn drops an h2c upgrade's body and answers 400, which reads as a payload error.
         this.http = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
     }
 
-    /** Send through a user's incoming webhook. */
     public DeliveryResult sendToWebhook(String url, String text) {
         ObjectNode body = mapper.createObjectNode();
         body.put("transport", TRANSPORT_WEBHOOK);
@@ -85,14 +70,13 @@ public class SlackDelivery {
             Thread.currentThread().interrupt();
             return DeliveryResult.failure(null, "interrupted");
         } catch (Exception e) {
-            // Categorical, no throwable: the request body carries the message text, and an exception
-            // message from the HTTP stack can echo the URL, which for a webhook IS the credential.
+            // No throwable: the HTTP stack's message can echo the URL, which for a webhook is the credential.
             log.warn("slack-service delivery failed (network)");
             return DeliveryResult.failure(null, "slack-service unreachable");
         }
     }
 
-    /** The adapter reports a Slack-side refusal in the body, not the status — 200 with {@code ok:false}. */
+    /** 200 with {@code ok:false}. */
     private DeliveryResult outcome(String body) {
         try {
             JsonNode parsed = mapper.readTree(body);

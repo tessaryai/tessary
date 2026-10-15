@@ -12,41 +12,30 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One launcher session event ({@code sandbox-runner/README.md}, "Launcher sessions"). {@code seq} is
- * the launcher's sequence number, from 1 and one more per event.
+ * One launcher session event ({@code sandbox-runner/README.md}). {@code seq} starts at 1 and rises by one per event.
  */
 public sealed interface SessionEvent {
 
     long seq();
 
-    /** A piece of the reply's text. */
     record Text(long seq, String delta) implements SessionEvent {}
 
-    /**
-     * A tool call began.
-     *
-     * @param server the MCP server's configured name, null for the agent's own tools
-     */
+    /** @param server the MCP server's configured name, null for the agent's own tools */
     record ToolStart(long seq, String callId, @Nullable String server, String tool, String inputSummary)
             implements SessionEvent {}
 
-    /** A tool call ended. */
     record ToolEnd(long seq, String callId, String resultSummary, long bytes, long durationMs, boolean ok)
             implements SessionEvent {}
 
     /** The reply ended; its usage is what it spent. */
     record MessageEnd(long seq, AgentSpanTelemetry.AgentUsage usage, EndReason reason) implements SessionEvent {}
 
-    /**
-     * A failure the script reported.
-     *
-     * @param kind {@code start}, {@code agent} or {@code opencode_exit}
-     */
+    /** @param kind {@code start}, {@code agent} or {@code opencode_exit} */
     record Failure(long seq, String kind, String detail) implements SessionEvent {}
 
     /**
-     * The session is over; always the last event. {@link CloseReason#UNKNOWN} is the client's own: the
-     * launcher answered 404 for the session, and {@code seq} is then the caller's {@code afterSeq}.
+     * Always the last event. {@link CloseReason#UNKNOWN} is the client's own, for a 404: {@code seq} is then the
+     * caller's {@code afterSeq}.
      */
     record Closed(long seq, CloseReason reason) implements SessionEvent {}
 
@@ -64,10 +53,8 @@ public sealed interface SessionEvent {
     }
 
     /**
-     * One frame's event, empty for a type this build does not know.
-     *
-     * @throws TessaryException {@code AgentRunError.BAD_OUTPUT} for data that does not fit the type;
-     *     the message names the type and the field, never the data
+     * Empty for an unknown type. @throws TessaryException {@code AgentRunError.BAD_OUTPUT} for data that does not fit;
+     * the message names the type and field, never the data
      */
     static Optional<SessionEvent> parse(ObjectMapper mapper, long seq, String type, JsonNode data) {
         return Optional.ofNullable(
