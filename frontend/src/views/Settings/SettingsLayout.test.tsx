@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { currentLocation, renderRoute } from "../../test/render";
 import { SettingsLayout } from "./SettingsLayout";
 
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({ useCapabilities: () => ({ capabilities: {} }) }));
 
 describe("SettingsLayout", () => {

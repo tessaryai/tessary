@@ -9,7 +9,7 @@ import { CONCEPTS } from "../concepts";
 import { currentLocation, renderRoute } from "../test/render";
 import { ConceptPopover } from "./ConceptPopover";
 
-vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 
 describe("ConceptPopover", () => {
   it("names the term by default, glosses it on demand, and closes on a second press", () => {

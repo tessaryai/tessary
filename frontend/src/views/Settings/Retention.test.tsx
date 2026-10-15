@@ -11,14 +11,9 @@ import { ApiError } from "../../api/types";
 import type { RetentionClassView, RetentionView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Retention } from "./Retention";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getRetention: vi.fn(),
-  updateRetention: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const cls = (data_class: string, over: Partial<RetentionClassView> = {}): RetentionClassView => ({
   data_class,

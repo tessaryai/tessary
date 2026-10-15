@@ -12,20 +12,11 @@ import type { OrgMember, OrgRole, Organization as Org, Project } from "../../api
 import { renderRoute } from "../../test/render";
 import { DensityProvider } from "../../ui/density";
 import { Organization } from "./Organization";
+import { auth } from "../../test/api";
 
-const auth = vi.hoisted(() => ({
-  getOrg: vi.fn(),
-  listProjects: vi.fn(),
-  listMembers: vi.fn(),
-  updateOrg: vi.fn(),
-  makeProjectDefault: vi.fn(),
-  archiveProject: vi.fn(),
-  unarchiveProject: vi.fn(),
-  deleteProject: vi.fn(),
-}));
 const session = vi.hoisted(() => ({ role: "owner" as OrgRole }));
 
-vi.mock("../../api/client", () => ({ auth }));
+vi.mock("../../api/client", () => import("../../test/api"));
 vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "support" }) }));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
 

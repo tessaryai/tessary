@@ -11,20 +11,9 @@ import type { BehaviorFinding, Case, TriageView, Vitals } from "../../api/types"
 import { currentLocation, pending, renderRoute } from "../../test/render";
 import { GROUNDEDNESS_CASE_DETAIL } from "../../test/groundednessFixtures";
 import { Triage } from "./Triage";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getTriage: vi.fn(),
-  getVitals: vi.fn(),
-  getModelSettings: vi.fn(),
-  onboarding: vi.fn(),
-  listBehaviorFindings: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-  useProjectApi: () => api,
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({ useCapabilities: () => ({ isEnabled: () => true }) }));
 
 const kase = (id: string, over: Partial<Case> = {}): Case => ({

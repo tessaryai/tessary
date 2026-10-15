@@ -9,14 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Classifier } from "../../api/types";
 import { pending, renderRoute } from "../../test/render";
 import { TuningSection } from "./TuningSection";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getClassifierTuning: vi.fn(),
-  setClassifierTuning: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ api }) }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const COST = { id: "clf-c", detector: "cost_drift" } as Classifier;
 const TUNING = {

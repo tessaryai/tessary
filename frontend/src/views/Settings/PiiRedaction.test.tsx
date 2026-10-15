@@ -12,18 +12,9 @@ import { ApiError } from "../../api/types";
 import type { RedactionRuleView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { PiiRedaction } from "./PiiRedaction";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listRedactionRules: vi.fn(),
-  createRedactionRule: vi.fn(),
-  updateRedactionRule: vi.fn(),
-  setRedactionRuleEnabled: vi.fn(),
-  deleteRedactionRule: vi.fn(),
-  previewRedaction: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const rule = (over: Partial<RedactionRuleView>): RedactionRuleView => ({
   id: "r-1",

@@ -10,18 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type IngestionSource } from "../api/types";
 import { currentLocation, pending, renderRoute } from "../test/render";
 import { Sources } from "./Sources";
+import { api } from "../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listSources: vi.fn(),
-  createApiKey: vi.fn(),
-  createSource: vi.fn(),
-}));
-
-vi.mock("../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }),
-}));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 
 const SOURCE = { id: "s-1", name: "Tessary SDK", provider: "sdk", baseUrl: "tessary://sdk" } as IngestionSource;
 const ENDPOINT = `${window.location.origin}/v1/traces`;

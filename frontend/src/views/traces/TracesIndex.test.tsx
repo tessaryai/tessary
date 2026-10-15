@@ -17,21 +17,9 @@ import type {
 } from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { TracesIndex } from "./TracesIndex";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listTraces: vi.fn(),
-  listSessions: vi.fn(),
-  getSession: vi.fn(),
-  getTrace: vi.fn(),
-  getSessionSpans: vi.fn(),
-  listClassifiers: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function trace(over: Partial<TraceListItemView> = {}): TraceListItemView {
   return {

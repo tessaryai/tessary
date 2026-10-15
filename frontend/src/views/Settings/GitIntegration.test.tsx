@@ -13,20 +13,9 @@ import { ApiError } from "../../api/types";
 import { currentParams, pending, renderRoute } from "../../test/render";
 import { parseRepo, tokenTemplateUrl } from "../components/ConnectRepositoryDialog";
 import { GitIntegration } from "./GitIntegration";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getGitIntegration: vi.fn(),
-  getGithubInstallUrl: vi.fn(),
-  getGithubAuthorizeUrl: vi.fn(),
-  getGithubManifestStart: vi.fn(),
-  getGithubInstallationOptions: vi.fn(),
-  selectGithubInstallation: vi.fn(),
-  connectGit: vi.fn(),
-  disconnectGit: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const CONNECTED = { repoOwner: "acme", repoName: "app", defaultBranch: "main", provider: "github", host: "github.example.com" };
 

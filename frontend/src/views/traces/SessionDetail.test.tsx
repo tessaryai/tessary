@@ -14,18 +14,9 @@ import { currentParams, pending, renderRoute } from "../../test/render";
 import { SessionDetail } from "./SessionDetail";
 import { SessionRail } from "./SessionRail";
 import { TraceRail } from "./TraceRail";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  getSession: vi.fn(),
-  getSessionSpans: vi.fn(),
-  getTrace: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useProjectApi: () => api,
-  useTenant: () => ({ orgSlug: "acme", projectSlug: "default", api }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const j = (v: unknown) => JSON.stringify(v);
 const TRACE_A = traceItem({ id: "tr-a", name: "first-turn", started_at: "2026-09-25T10:00:00Z", ended_at: "2026-09-25T10:00:02Z", latency_ms: 2_000, total_tokens: 1_500, total_cost: 0.004 });

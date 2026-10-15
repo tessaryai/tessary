@@ -11,18 +11,9 @@ import { ApiError } from "../../api/types";
 import type { ChartCard, ChartScopes, ClassifierCharts } from "../../api/types";
 import { currentLocation, renderRoute } from "../../test/render";
 import { ClassifiersPage } from "./ClassifiersPage";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listClassifiers: vi.fn(),
-  listBehaviorFindings: vi.fn(),
-  getClassifierChartScopes: vi.fn(),
-  getClassifierCharts: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({
-  useTenant: () => ({ api, orgSlug: "acme", projectSlug: "default" }),
-}));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 function scopes(s: Partial<ChartScopes> = {}): ChartScopes {
   return {

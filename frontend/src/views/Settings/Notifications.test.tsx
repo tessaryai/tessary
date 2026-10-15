@@ -10,19 +10,11 @@ import { ApiError } from "../../api/types";
 import type { AlertChannel, AlertRule } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Notifications } from "./Notifications";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listAlertRules: vi.fn(),
-  listAlertChannels: vi.fn(),
-  upsertAlertRule: vi.fn(),
-  setAlertRuleEnabled: vi.fn(),
-  createAlertChannel: vi.fn(),
-  deleteAlertChannel: vi.fn(),
-}));
 const caps = vi.hoisted(() => new Set<string>());
 
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../capabilities/useCapabilities", () => ({
   useCapabilities: () => ({ isEnabled: (c: string) => caps.has(c) }),
 }));

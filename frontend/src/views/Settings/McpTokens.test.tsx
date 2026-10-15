@@ -10,15 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpTokenView } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { McpTokens } from "./McpTokens";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listMcpTokens: vi.fn(),
-  issueMcpToken: vi.fn(),
-  revokeMcpToken: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const token = (over: Partial<McpTokenView> = {}): McpTokenView => ({
   id: "t-1",

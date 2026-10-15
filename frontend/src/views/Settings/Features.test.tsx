@@ -9,16 +9,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CapabilityOverrideView } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Features } from "./Features";
+import { auth } from "../../test/api";
 
-const auth = vi.hoisted(() => ({
-  listCapabilityOverrides: vi.fn(),
-  setCapabilityOverride: vi.fn(),
-  listMembers: vi.fn(),
-}));
 const session = vi.hoisted(() => ({ role: "owner" }));
 
-vi.mock("../../api/client", () => ({ auth }));
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: "u-me" } }) }));
 
 const triage = (over: Partial<CapabilityOverrideView> = {}): CapabilityOverrideView => ({

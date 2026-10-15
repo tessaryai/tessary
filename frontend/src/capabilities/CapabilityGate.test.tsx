@@ -13,7 +13,7 @@ const caps = vi.hoisted(() => ({ loading: false, on: new Set<string>() }));
 vi.mock("./useCapabilities", () => ({
   useCapabilities: () => ({ isLoading: caps.loading, isEnabled: (c: string) => caps.on.has(c) }),
 }));
-vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 
 afterEach(() => {
   caps.loading = false;

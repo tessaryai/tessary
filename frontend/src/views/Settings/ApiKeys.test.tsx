@@ -10,17 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKey, ApiKeyAudit } from "../../api/types-auth";
 import { renderRoute } from "../../test/render";
 import { ApiKeys } from "./ApiKeys";
+import { api } from "../../test/api";
 
-const api = vi.hoisted(() => ({
-  base: "/api/orgs/acme/projects/default",
-  listApiKeys: vi.fn(),
-  listApiKeyAudit: vi.fn(),
-  createApiKey: vi.fn(),
-  rotateApiKey: vi.fn(),
-  revokeApiKey: vi.fn(),
-}));
-
-vi.mock("../../tenant/TenantContext", () => ({ useProjectApi: () => api }));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 
 const NOW = new Date("2026-09-25T12:00:00Z");
 const key = (over: Partial<ApiKey>): ApiKey => ({

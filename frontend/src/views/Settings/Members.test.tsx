@@ -12,21 +12,12 @@ import type { OrgInvitation, OrgMember, OrgRole, SignupPolicy } from "../../api/
 import { ApiError } from "../../api/types";
 import { renderRoute } from "../../test/render";
 import { Members } from "./Members";
+import { auth } from "../../test/api";
 
-const auth = vi.hoisted(() => ({
-  listMembers: vi.fn(),
-  listInvitations: vi.fn(),
-  getSignupPolicy: vi.fn(),
-  updateSignupPolicy: vi.fn(),
-  addMember: vi.fn(),
-  updateMember: vi.fn(),
-  removeMember: vi.fn(),
-  revokeInvitation: vi.fn(),
-}));
 const session = vi.hoisted(() => ({ userId: "u-me" }));
 
-vi.mock("../../api/client", () => ({ auth }));
-vi.mock("../../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../../api/client", () => import("../../test/api"));
+vi.mock("../../tenant/TenantContext", () => import("../../test/api"));
 vi.mock("../../auth/AuthContext", () => ({ useAuth: () => ({ user: { id: session.userId } }) }));
 
 const member = (user_id: string, role: OrgRole, over: Partial<OrgMember> = {}): OrgMember => ({

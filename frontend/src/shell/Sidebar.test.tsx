@@ -19,7 +19,7 @@ const { authApi, palette, shell, cases } = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/client", () => ({ auth: authApi }));
-vi.mock("../tenant/TenantContext", () => ({ useTenant: () => ({ orgSlug: "acme", projectSlug: "default" }) }));
+vi.mock("../tenant/TenantContext", () => import("../test/api"));
 vi.mock("../auth/AuthContext", () => ({
   useAuth: () => ({
     user: { email: "dana@example.com", orgs: [{ id: "o1", slug: "acme", name: "Acme Inc", role: "owner" }] },
