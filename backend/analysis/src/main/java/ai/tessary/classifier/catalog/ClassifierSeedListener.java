@@ -11,25 +11,10 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Seeds the built-in classifier catalog into every new project.
- *
- * <p>Auto-classification reads TRACES, not the repo and not the grader set — so it must not depend on
- * either. Seeding used to hang off the first successful generation run ({@code SynthJobProcessor}),
- * which made classification unreachable for any project without a connected GitHub App: generation is
- * hard-gated on a repo, nothing else called {@code seedBuiltIns}, and {@code ClassifierController}
- * exposes no create endpoint. That also took {@code Runs} down with it, since a {@code grader_run} is
- * only ever enqueued by a classifier detection.
- *
- * <p>This fires ONCE and reflects the org's capabilities at that instant. Everything after — a project
- * that predates this listener, a catalog version bump, a capability flag flipped months later — is
- * {@link ClassifierCatalogWorker}, which calls {@link ClassifierService#resyncBuiltIns} for every active
- * project on a heartbeat. The periodic pass is deliberately not conditioned on the project having any
- * traces: it used to be, and a flag turned on for a quiet project then did nothing until that project's
- * first span arrived.
- *
- * <p>AFTER_COMMIT (not a plain {@code @EventListener}): {@code seedBuiltIns} writes {@code classifier}
- * rows referencing the project, so it must not run before the project row commits. Failures are
- * logged and swallowed — the project is already created, and the heartbeat re-seeds.
+ * Seeds the built-in classifier catalog into every new project, independent of any repo or grader set. Fires once;
+ * later changes (catalog bumps, capability flips) are {@link ClassifierCatalogWorker}'s job via
+ * {@link ClassifierService#resyncBuiltIns}. AFTER_COMMIT because the seeded rows reference the project row. Failures
+ * are logged, since the heartbeat re-seeds.
  */
 @Component
 public class ClassifierSeedListener {

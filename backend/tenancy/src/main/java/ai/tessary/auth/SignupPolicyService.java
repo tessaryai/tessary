@@ -21,10 +21,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Enforces the {@link SignupPolicy} at the one moment it applies: after a provider has
- * authenticated someone and before a principal exists for them. The policy gates account creation
- * only. An existing principal is never refused, the first account is always admitted so a fresh
- * install cannot lock itself out, and a pending invitation admits in every mode.
+ * Enforces the {@link SignupPolicy} after authentication and before a principal exists. Existing principals are never
+ * refused, the first account is always admitted so a fresh install cannot lock itself out, and a pending invitation
+ * admits in every mode.
  */
 @Service
 public class SignupPolicyService {
@@ -53,9 +52,8 @@ public class SignupPolicyService {
     }
 
     /**
-     * The organization whose settings govern sign-ups that belong to no organization yet: the
-     * install's first, and the only one; a later personal org on the same install carries no policy
-     * of its own, and the settings routes say so rather than accept one.
+     * The install's first organization. A later personal org carries no policy of its own, and the settings routes
+     * refuse one.
      */
     public Optional<Organization> governingOrg() {
         return orgs.findOldest();
@@ -65,17 +63,11 @@ public class SignupPolicyService {
         return governingOrg().map(o -> o.id().equals(orgId)).orElse(false);
     }
 
-    /** The policy in force for signups that belong to no organization yet. */
     public SignupPolicy current() {
         return governingOrg().map(o -> SignupPolicy.fromSettings(o.settings())).orElse(SignupPolicy.OPEN);
     }
 
-    /**
-     * Throws {@link AuthError#SIGNUP_REFUSED} when creating a principal for this identity would
-     * break the policy. Returns quietly when a principal already exists for the WorkOS id or the
-     * email, when no human account exists yet, when the policy is open, when a pending invitation
-     * names the email, or when the email's domain is listed in domain mode.
-     */
+    /** Throws {@link AuthError#SIGNUP_REFUSED} when creating a principal would break the policy. */
     public void admit(@Nullable String email, @Nullable String workosUserId) {
         if (workosUserId != null && users.findByWorkosId(workosUserId).isPresent()) return;
         if (email != null && users.findByEmail(email).isPresent()) return;
@@ -89,7 +81,6 @@ public class SignupPolicyService {
         throw new TessaryException(AuthError.SIGNUP_REFUSED);
     }
 
-    /** Writes the policy into the organization's settings and records the change in the audit log. */
     public SignupPolicy update(Organization org, SignupPolicy next, @Nullable String actorUserId) {
         SignupPolicy previous = SignupPolicy.fromSettings(org.settings());
         orgs.update(org.id(), org.name(), next.intoSettings(org.settings()));

@@ -13,13 +13,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for the first-class {@code retrieved_doc} table — the retrieved passages of a
- * RAG (retrieval/reranker) span. Append-only insert plus a trace-scoped read.
- *
- * <p>Idempotent insert: {@code ON CONFLICT DO NOTHING} against the primary key, derived from
- * {@code (project, trace, span, seq)} ({@code SideTableIds}), makes the write path's at-least-once
- * replays first-write-wins no-ops. The old natural key {@code (observation_id, seq)} went with the
- * column. jsonb/timestamptz columns carry {@code String} bound with explicit casts.
+ * Repository for {@code retrieved_doc}, the passages of a RAG span. The primary key is derived from
+ * {@code (project, trace, span, seq)} ({@code SideTableIds}), so {@code ON CONFLICT DO NOTHING} makes at-least-once
+ * replays no-ops.
  */
 @Repository
 public class RetrievedDocRepository {
@@ -72,7 +68,6 @@ public class RetrievedDocRepository {
         return source;
     }
 
-    /** Batch-inserts rows; ON CONFLICT DO NOTHING makes replays no-ops. */
     public void insertAll(List<RetrievedDocRow> rows) {
         if (rows.isEmpty()) return;
         int[] applied = named.batchUpdate(
@@ -80,14 +75,9 @@ public class RetrievedDocRepository {
         BatchCounts.requireReal(applied);
     }
 
-    /** One retrieved passage together with the producer span id it belongs to. */
     public record SpanRetrievedDoc(@Nullable String spanId, RetrievedDocRow row) {}
 
-    /**
-     * All retrieved docs of one trace, by producer key — the same re-keying as
-     * {@link ToolCallRepository#listByTrace}, and for the same reason: the old shape joined the v1
-     * {@code observation} table on a bare unscoped surrogate trace id.
-     */
+    /** All retrieved docs of one trace, keyed by producer span as in {@link ToolCallRepository#listByTrace}. */
     public List<SpanRetrievedDoc> listByTrace(String projectId, String traceId) {
         return jdbc.sql("SELECT " + COLS + " FROM retrieved_doc"
                         + " WHERE project_id = :pid AND trace_id = :tid"
@@ -102,9 +92,8 @@ public class RetrievedDocRepository {
     }
 
     /**
-     * The batched sibling of {@link #listByTrace}, for a set of traces (a session's) in one query — same
-     * reasoning as {@link ToolCallRepository#listByTraceIds}: no {@code session_id} column, none needed,
-     * {@code trace_id} already leads the primary key.
+     * Batched {@link #listByTrace} for a session's traces; {@code trace_id} leads the primary key, so no
+     * {@code session_id} column is needed.
      */
     public List<SpanRetrievedDoc> listByTraceIds(String projectId, Collection<String> traceIds) {
         if (traceIds.isEmpty()) {

@@ -7,15 +7,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Builds an {@code INSERT ... ON CONFLICT ... DO UPDATE} statement and its named-parameter binds
- * from a single ordered {@code column -> value} map, so the INSERT column list, the VALUES
- * placeholders, the {@code DO UPDATE SET col = excluded.col} clause, and the parameter binds
- * cannot drift apart. Each column is bound under a placeholder named after the column
- * itself ({@code :judge_prompt}), so the column name lives in exactly one place.
- *
- * <p>Pure SQL + parameter assembly — it holds no {@code JdbcClient}, so it stays outside the
- * {@code @Repository} JDBC boundary; the calling repository feeds {@link #sql()} to
- * {@code jdbc.sql(...)} and {@link #params()} to {@code .params(...)}.
+ * Builds {@code INSERT ... ON CONFLICT ... DO UPDATE} and its binds from one ordered column map, so the column list,
+ * placeholders, SET clause and binds cannot drift apart. Holds no {@code JdbcClient}, so it stays outside the
+ * repository JDBC boundary.
  */
 public final class Upsert {
 
@@ -36,13 +30,8 @@ public final class Upsert {
     }
 
     /**
-     * @param table the target table
-     * @param values ordered map of column name to bound value; iteration order fixes the INSERT
-     *     column order.
-     * @param conflictKeys the columns forming the conflict target (the {@code ON CONFLICT (...)}
-     *     tuple), a subset of {@code values}' keys that leaves at least one column to update.
-     * @return the assembled statement; every non-conflict-key column is updated on conflict from
-     *     {@code excluded}.
+     * @param values iteration order fixes the INSERT column order @param conflictKeys a subset of {@code values}' keys
+     * that leaves at least one column to update
      */
     public static Upsert into(String table, Map<String, Object> values, List<String> conflictKeys) {
         Set<String> keySet = Set.copyOf(conflictKeys);

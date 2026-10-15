@@ -7,29 +7,17 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.MDC;
 
 /**
- * Try-with-resources scope that binds business identifiers (projectId, jobId,
- * classifierKey, …) to the SLF4J MDC so every log statement inside the scope carries
- * them as structured fields — without threading the ids through each message.
- *
- * <p>Async background jobs start with an empty MDC (they are dispatched off the
- * request thread, so there is no request MDC to inherit), so the scope is opened
- * fresh at the top of each async job worker (e.g. {@code ClassifierWorker}). The
- * keys defined here are the single source of truth referenced by
- * {@code logback-spring.xml} ({@code includeMdcKeyName} +
- * {@code captureMdcAttributes}).
- *
- * <p>{@link #close()} restores the prior values rather than clearing, so nested
- * scopes compose and a pooled thread (see {@code MdcTaskDecorator}) never leaks
- * one run's context into the next.
+ * Try-with-resources scope binding business ids to the SLF4J MDC. Async jobs start with an empty MDC, so each worker
+ * opens one. Keys are referenced by {@code logback-spring.xml}. {@link #close()} restores prior values rather than
+ * clearing, so scopes nest and a pooled thread never leaks one run's context into the next.
  */
 public final class LogContext implements AutoCloseable {
 
     public static final String PROJECT_ID = "projectId";
     public static final String JOB_ID = "jobId";
     public static final String CLASSIFIER_KEY = "classifierKey";
-    /** Matches the key Micrometer/OTel tracing already binds on an HTTP request thread. */
+    /** Matches the key Micrometer/OTel tracing binds on a request thread. */
     public static final String TRACE_ID = "traceId";
-    /** Matches the key Micrometer/OTel tracing already binds on an HTTP request thread. */
     public static final String SPAN_ID = "spanId";
 
     private final Map<String, String> prior;
@@ -38,7 +26,7 @@ public final class LogContext implements AutoCloseable {
         this.prior = prior;
     }
 
-    /** Open a scope binding the given key/value pairs. Null values are skipped. */
+    /** Null values are skipped. */
     public static LogContext put(Map<String, String> kv) {
         Map<String, String> prior = new HashMap<>();
         for (Map.Entry<String, String> e : kv.entrySet()) {
@@ -51,7 +39,7 @@ public final class LogContext implements AutoCloseable {
         return new LogContext(prior);
     }
 
-    /** Open a scope binding a single key. Null value is skipped. */
+    /** A null value is skipped. */
     public static LogContext with(String key, @Nullable String value) {
         Map<String, String> kv = new HashMap<>();
         kv.put(key, value);
