@@ -9,15 +9,8 @@ import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One coding-agent session in a fresh sandbox, over whatever a caller hands it: a system prompt, a
- * task, a set of files, optionally a schema the answer must satisfy and the project's repository.
- * The agent reads the platform through the MCP door the request carries. {@link E2bAgentRunSandbox}
- * drives the launcher sidecar; a sandbox is selected by {@code tessary.agentrun.sandbox} matching
- * {@link #key()}, as {@code TriageSandbox} is.
- *
- * <p>Unlike the triage and RCA sandboxes this one resolves nothing itself: the model, provider and
- * credential arrive already resolved on the {@link Request}, so the ceremony around a run lives in
- * one place, {@link AgentRunService}, and a caller never repeats it.
+ * One coding-agent session in a fresh sandbox. Unlike the triage and RCA sandboxes it resolves nothing itself: model,
+ * provider and credential arrive resolved on the {@link Request}, from {@link AgentRunService}.
  */
 public interface AgentRunSandbox {
 
@@ -25,34 +18,18 @@ public interface AgentRunSandbox {
     String key();
 
     /**
-     * Run the agent. Throws {@code TessaryException} carrying an {@code AgentRunError}:
-     * {@code LAUNCHER_UNAVAILABLE} when the launcher could not be reached or failed before the run
-     * started, {@code LAUNCHER_MISCONFIGURED} when it refused the request on terms a retry cannot
-     * change, {@code RUN_FAILED} when this run failed on its own, {@code BAD_OUTPUT} when the agent
-     * finished with nothing usable, and {@code TIMED_OUT} when the run hit its wall clock.
+     * Throws {@code TessaryException} with an {@code AgentRunError}: {@code LAUNCHER_UNAVAILABLE},
+     * {@code LAUNCHER_MISCONFIGURED} (a retry cannot help), {@code RUN_FAILED}, {@code BAD_OUTPUT} or
+     * {@code TIMED_OUT}.
      */
     Result run(Request req);
 
     /**
-     * @param projectId the project the run is for, for trace and cost attribution
-     * @param lane the {@code ModelLane} wire value the run books against
-     * @param systemPrompt the agent's system prompt, replacing the provider default
-     * @param prompt the task
-     * @param files relative path to content, written under the sandbox's {@code dossier/} directory
-     * @param jsonSchema schema the final answer is constrained to; null lets the agent answer in prose
-     * @param cloneUrl authenticated clone URL of the project's repository, or null for none; a secret,
-     *     never logged
-     * @param headSha the commit to check out, present exactly when {@code cloneUrl} is
-     * @param model the model id the agent runs, and the name the ledger row stores
-     * @param modelCost the models.dev rates the run is billed at, declared to OpenCode for {@code model};
-     *     null when models.dev does not price the model, and the run is then unpriced
-     * @param provider the {@code ModelProvider} wire value the credential belongs to
-     * @param credential the org's decrypted credential; sent to the launcher, never logged or filed
-     * @param mcpUrl this platform's MCP endpoint
-     * @param mcpToken short-lived project-scoped key; sent to the launcher, never logged
-     * @param timeoutMs the run's wall clock
-     * @param maxTurns the agent's turn budget
-     * @param subject what the spend is for, booked on the ledger row
+     * @param files relative path to content, written under the sandbox's {@code dossier/} @param jsonSchema null lets
+     * the agent answer in prose @param cloneUrl a secret, never logged; null for no repository @param headSha present
+     * exactly when {@code cloneUrl} is @param modelCost models.dev rates declared to OpenCode; null leaves the run
+     * unpriced @param credential sent to the launcher, never logged or filed @param mcpToken short-lived project-scoped
+     * key; sent to the launcher, never logged
      */
     record Request(
             String projectId,
@@ -73,13 +50,7 @@ public interface AgentRunSandbox {
             int maxTurns,
             LlmUsageAccountant.Subject subject) {}
 
-    /**
-     * @param structuredOutput the schema-constrained object the sandbox extracted and validated, or
-     *     null when the run carried none
-     * @param resultText the agent's final reply as text, or null when blank
-     * @param turns how many turns the agent took
-     * @param durationMs wall-clock time of the launcher round trip
-     */
+    /** @param structuredOutput null when the run carried no schema @param resultText null when blank */
     record Result(
             @Nullable JsonNode structuredOutput, @Nullable String resultText, int turns, long durationMs) {}
 }

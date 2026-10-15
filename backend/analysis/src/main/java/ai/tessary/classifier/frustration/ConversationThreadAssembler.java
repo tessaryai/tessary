@@ -14,16 +14,10 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Reads the conversation a scored user turn belongs to, for the frustration decision model: the two
- * turns of the same call site before it ({@link SubstrateReadRepository#priorTurns}), oldest first, as
- * separate user and assistant messages. A turn is one trace; a router or memory call in the same trace
- * is another call site and adds nothing. System messages are excluded. A turn's user messages are those
- * after its input's last assistant message, so a call site that sends the whole chat on every call
- * gives each turn once. Each turn contributes its dialogue once: the substrate can carry both an {@code
- * agent} and an {@code llm} span per turn, and the {@code llm} span wins. Tool spans and tool parts leave no text; an assistant turn only records whether
- * it ended on a tool call. Every assistant text part between two user messages is joined into one turn,
- * reading the output of every span of the bearer's kind in the turn, so an agentic turn's final answer
- * is not lost behind its first tool call.
+ * The conversation before a scored user turn: the two prior turns of the same call site, oldest first. One
+ * dialogue-bearing span per turn ({@code llm} wins over its {@code agent} twin), system messages excluded, and every
+ * assistant text part between two user messages joined so an agentic turn's final answer is not lost behind its first
+ * tool call.
  */
 @Component
 class ConversationThreadAssembler {
@@ -42,9 +36,8 @@ class ConversationThreadAssembler {
     }
 
     /**
-     * The scored user turn and the dialogue before it as separate messages, oldest first, or empty when
-     * {@code scored} is not a dialogue span, has no call site, or carries no user message. No caps and no eligibility rule
-     * are applied here; see {@link StructuredThread}.
+     * Empty when {@code scored} is not a dialogue span, has no call site, or carries no user message. No caps or
+     * eligibility rule here; see {@link StructuredThread}.
      */
     public Optional<StructuredThread> assembleStructured(SubstrateObservation scored) {
         String kind = scored.kind();
@@ -83,9 +76,8 @@ class ConversationThreadAssembler {
     }
 
     /**
-     * A turn's own user messages: those after the input's last assistant message. A call site that sends the
-     * whole chat on every call repeats every earlier message, and any context block it sends under the user
-     * role, in each turn's input; only what follows the last reply is new in that turn.
+     * Only messages after the input's last assistant message: a call site that resends the whole chat would otherwise
+     * repeat every earlier message.
      */
     private static List<StructuredThread.Message> ownUserMessages(@Nullable String input) {
         return dialogue(DialogueMessages.afterLastAssistant(DialogueMessages.read(input, "user"))).stream()
@@ -94,9 +86,8 @@ class ConversationThreadAssembler {
     }
 
     /**
-     * Append {@code messages} to {@code into}, joining an assistant message onto an assistant turn already
-     * at the tail. User messages are kept distinct, so a user who wrote twice with no reply between stays
-     * visible as two user turns.
+     * Joins onto an assistant turn at the tail; user messages stay distinct, so two user messages with no reply between
+     * stay two turns.
      */
     private static void appendMessages(List<StructuredThread.Message> into, List<StructuredThread.Message> messages) {
         for (StructuredThread.Message msg : messages) {
@@ -111,7 +102,6 @@ class ConversationThreadAssembler {
         }
     }
 
-    /** Several messages of one speaker as one turn: texts newline-joined, the last message's tool ending. */
     private static StructuredThread.Message joined(List<StructuredThread.Message> msgs) {
         StringBuilder text = new StringBuilder();
         boolean hasText = false;
@@ -126,10 +116,7 @@ class ConversationThreadAssembler {
         return new StructuredThread.Message(lastMsg.role(), text.toString(), hasText, lastMsg.endsInToolCall());
     }
 
-    /**
-     * The user and assistant dialogue messages of one stored column ({@link DialogueMessages#read}). A message left
-     * with nothing but a tool result (a tool-result carrier sent under the user role) is not a message.
-     */
+    /** A message left with only a tool result (sent under the user role) is not a message. */
     private static List<StructuredThread.Message> dialogue(List<DialogueMessages.DialogueMessage> messages) {
         return messages.stream()
                 .filter(m -> m.dialogue() && DIALOGUE_ROLES.contains(m.role()))
@@ -138,11 +125,8 @@ class ConversationThreadAssembler {
     }
 
     /**
-     * The one dialogue-bearing observation per turn: {@code turnKey → observationId}. Each turn emits its
-     * user↔assistant delta ONCE even though the substrate carries both an {@code agent} and an {@code
-     * llm} span for the same turn (same delta message). The {@code llm} span is preferred — it carries the
-     * structured {@code gen_ai.input/output.messages} — so an {@code agent} twin only wins when a turn has
-     * no {@code llm} span.
+     * The {@code llm} span is preferred since it carries the structured messages; an {@code agent} twin wins only when
+     * a turn has no {@code llm} span.
      */
     private static Map<String, String> chooseDialogueBearers(List<SubstrateObservation> chronological) {
         Map<String, String> bearer = new HashMap<>();
@@ -162,11 +146,7 @@ class ConversationThreadAssembler {
         return bearer;
     }
 
-    /**
-     * The turn-grouping key: the TRACE id. In v2 the turn is the trace (spec §2), so this is a plain
-     * field read rather than the old "turn context node, falling back to the observation id when the
-     * spine had no turn tier" — a fallback that grouped every spine-less span into a bucket of one.
-     */
+    /** In v2 the turn is the trace. */
     private static String turnKey(SubstrateObservation obs) {
         return obs.traceId();
     }

@@ -21,25 +21,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * The production-signal → pre-deploy loop. Closes the loop: when a
- * NEW production signal is discovered (the {@code ClassifierWorker} sweep writes a fresh detection {@code verdict}
- * with {@code source='automatic'}), this service registers a durable, surface-scoped
- * {@link PreDeployCheckRow} naming the surfaces a FUTURE PR touching them should be checked
- * against pre-merge.
- *
- * <h2>Signal → surface mapping (honest, not fabricated)</h2>
- * A signal carries no learned failure mode today: its {@code verdict} node has no {@code grader}
- * row, so it is excluded from the {@code risk_stat} surface↔failure-mode fold. So the cold-start mapping
- * is an EXPLICIT {@code surfaces} list on the classifier definition's {@code config_json} (validated against
- * {@link TouchedSurface}). When neither a learned mapping (the nullable {@code failure_mode_id} seam,
- * reserved for a learned signal→failure-mode map) nor an explicit list exists, NO check is registered — the honest
- * {@code insufficient_history} discipline the rest of the wedge follows, never a fabricated surface.
- *
- * <h2>Fail-soft + off the hot path</h2>
- * {@link #registerForSignal} is invoked from the async sweep behind {@code tessary.predeploy.enabled}
- * (default off); the caller wraps it fail-soft (logged, never failing the sweep or blocking the cursor),
- * matching {@code ClassifierWorker.emitVerdict}. It does no risk-model ranking — surface resolution is a cheap
- * config parse, so it stays safe even when many events fire in one sweep.
+ * Registers surface-scoped {@link PreDeployCheckRow}s when a new automatic detection is discovered. Surfaces come only
+ * from an explicit {@code surfaces} list on the classifier config; with none, no check is registered rather than a
+ * fabricated surface. Gated by {@code tessary.predeploy.enabled}; the caller wraps it fail-soft.
  */
 @Service
 public class PreDeployCheckService {
@@ -56,16 +40,11 @@ public class PreDeployCheckService {
         this.mapper = mapper;
     }
 
-    /** Whether the loop is active (gates the write trigger). */
     public boolean isEnabled() {
         return props.isEnabled();
     }
 
-    /**
-     * Register a routed pre-deploy check for a newly-discovered signal, one row per implicated surface,
-     * idempotently. Returns the number of NEW rows written (0 when the signal maps to no surface, or all
-     * surfaces were already registered). Never throws on a no-mapping signal — that is the honest no-op.
-     */
+    /** Returns the number of NEW rows written; 0 for a signal with no surface mapping. */
     public int registerForSignal(ClassifierDiscovery discovery) {
         Set<String> surfaces = implicatedSurfaces(discovery);
         if (surfaces.isEmpty()) {
@@ -98,12 +77,7 @@ public class PreDeployCheckService {
         return registered;
     }
 
-    /**
-     * The implicated surfaces for a signal. Today: the explicit {@code surfaces} list on the classifier's
-     * {@code config_json}, validated against {@link TouchedSurface} (unknown wire names are dropped, not
-     * fabricated). This is the single resolution point a future learned signal→failure-mode→surface map
-     * plugs into — it would augment (not replace) this set.
-     */
+    /** Unknown wire names are dropped. The single point a learned mapping would augment. */
     private Set<String> implicatedSurfaces(ClassifierDiscovery discovery) {
         Set<String> out = new LinkedHashSet<>();
         String configJson = discovery.configJson();
@@ -128,19 +102,17 @@ public class PreDeployCheckService {
         return out;
     }
 
-    /** Every registered check for the project (the list read surface), newest first. */
     public List<PreDeployCheckView> list(String projectId) {
         return checks.listByProject(projectId).stream()
                 .map(PreDeployCheckView::of)
                 .toList();
     }
 
-    /** Dismiss a noisy check WITHOUT disabling its signal (the tenant lifecycle the acceptance implies). */
+    /** Without disabling its signal. */
     public void dismiss(String projectId, String id) {
         setStatus(projectId, id, PreDeployCheckRow.Status.DISMISSED);
     }
 
-    /** Reinstate a previously-dismissed check. */
     public void reinstate(String projectId, String id) {
         setStatus(projectId, id, PreDeployCheckRow.Status.ACTIVE);
     }
@@ -151,7 +123,7 @@ public class PreDeployCheckService {
         }
     }
 
-    /** Map a detection severity onto a coarse intensity tier; default medium for an absent severity. */
+    /** Defaults to medium for an absent severity. */
     private static String intensityFor(@Nullable String severity) {
         if (Severity.CRITICAL.equals(severity)) return PreDeployCheckRow.Intensity.HIGH;
         if (Severity.INFO.equals(severity)) return PreDeployCheckRow.Intensity.LOW;
@@ -159,10 +131,8 @@ public class PreDeployCheckService {
     }
 
     /**
-     * A signal discovery, projected to exactly what the registration needs. A narrow input record owned
-     * by this package (not {@code ClassifierRow}) so the {@code ci} ← {@code classifier} dependency stays one-way
-     * — the {@code ClassifierWorker} maps its row to this at the call site, mirroring how {@code RiskModelMiner}
-     * accepts a {@code VersionSignal} rather than importing {@code ClassifierRow}.
+     * A narrow input record (not {@code ClassifierRow}) so the {@code ci} to {@code classifier} dependency stays
+     * one-way.
      */
     public record ClassifierDiscovery(
             String projectId,

@@ -9,29 +9,9 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 
 /**
- * SSRF guard for user-supplied ingestion-source URLs. The ingestion pipeline
- * fetches these URLs server-side with attached credentials, so any pointer at
- * an internal host would either leak credentials onto the internal network or
- * pull a response back to the user that the user wouldn't otherwise see (EC2
- * IMDS, localhost services, RFC1918 neighbours on the docker network).
- *
- * <p>Rules:
- * <ul>
- *   <li>scheme must be {@code http} or {@code https} (no {@code file:},
- *       {@code gopher:}, {@code jar:}, etc.)</li>
- *   <li>host must be present</li>
- *   <li>after DNS resolution, no resolved address may be loopback, link-local
- *       (covers IMDS 169.254.169.254), site-local (RFC1918), any-local
- *       (0.0.0.0), or multicast</li>
- * </ul>
- *
- * <p>The DNS resolution happens at validation time, which means an attacker
- * could in theory bypass this with a DNS-rebinding attack (resolve to a public
- * IP now, an internal IP at fetch time). Mitigation here is upstream: callers
- * persist the URL string and run every fetch through the same guard, so a
- * rebinding-victim fetch will fail at the next call. For a
- * stronger guarantee we'd resolve once and pin the IP in the HttpClient — out
- * of scope for now.</p>
+ * SSRF guard for user-supplied ingestion URLs, fetched server-side with credentials. Only {@code http}/{@code https}, a
+ * host, and no resolved address that is loopback, link-local, site-local, any-local, multicast or reserved. DNS
+ * rebinding is mitigated only by re-checking on every fetch; pinning the IP is out of scope.
  */
 public final class UrlGuard {
 
@@ -55,9 +35,7 @@ public final class UrlGuard {
         if (host == null || host.isBlank()) {
             throw new TessaryException(IngestError.INVALID_BASE_URL, "host missing");
         }
-        // Block obvious bypasses like userinfo `http://evil@169.254.169.254/`.
-        // URI parsing already separates these, but reject userinfo entirely to
-        // keep audit/logging clean.
+        // Reject userinfo (http://evil@169.254.169.254/) entirely to keep audit and logging clean.
         if (uri.getUserInfo() != null) {
             throw new TessaryException(IngestError.INVALID_BASE_URL, "userinfo not allowed");
         }
@@ -88,11 +66,8 @@ public final class UrlGuard {
     }
 
     /**
-     * IPv4 ranges unsafe to fetch server-side that the {@link InetAddress} predicates
-     * above do not cover: RFC 6598 carrier-grade NAT (100.64.0.0/10 — used as the
-     * link-local / metadata range on some clouds), RFC 5735 "this host on this network"
-     * (0.0.0.0/8 beyond the single any-local address), RFC 2544 benchmarking
-     * (198.18.0.0/15), and RFC 7335 / IETF protocol assignments (192.0.0.0/24).
+     * Ranges the {@link InetAddress} predicates miss: CGNAT 100.64.0.0/10 (metadata on some clouds), 0.0.0.0/8,
+     * 198.18.0.0/15 and 192.0.0.0/24.
      */
     private static boolean isReservedIpv4(InetAddress a) {
         byte[] b = a.getAddress();
