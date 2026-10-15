@@ -17,9 +17,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Lists the pre-deploy checks a project's discovered signals registered, and lets a human
- * dismiss or reinstate a noisy one without disabling its signal. Registration itself happens
- * automatically, via the async {@code ClassifierWorker} sweep behind {@code tessary.predeploy.enabled}.
+ * Lists auto-registered pre-deploy checks and lets a human dismiss or reinstate a noisy one without disabling its
+ * signal.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/predeploy-checks")
@@ -36,7 +35,7 @@ public class PreDeployCheckController {
         this.capabilities = capabilities;
     }
 
-    /** Resolve the project and require the CI integration entitlement. */
+    /** Requires the CI integration entitlement. */
     private Resolved requireCapableProject(TenantContext ctx, String orgSlug, String projectSlug) {
         Resolved r = resolver.requireProject(ctx, orgSlug, projectSlug);
         capabilities.require(r.org().id(), Capability.CI_INTEGRATION);

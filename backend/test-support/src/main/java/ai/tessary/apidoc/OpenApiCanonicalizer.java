@@ -13,9 +13,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The one canonical form every checked-in OpenAPI document is pinned in: recursively key-sorted,
- * two-space indented, {@code \n} line endings, trailing newline. The drift guard pins a checked-in
- * document through here, so it can only ever differ from a freshly generated one in content.
+ * Canonical form for checked-in OpenAPI documents (sorted keys, two-space indent, {@code \n}, trailing newline), so the
+ * drift guard only ever sees content differences.
  */
 public final class OpenApiCanonicalizer {
 

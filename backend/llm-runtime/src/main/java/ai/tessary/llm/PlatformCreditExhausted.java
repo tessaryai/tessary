@@ -2,9 +2,7 @@
 package ai.tessary.llm;
 
 /**
- * Marks the exception a deployment's resolver throws when an org has no credit left for
- * {@link ModelProvider#PLATFORM}. A caller that stops on it tells the org it is out of credit, not
- * that it lacks a key. Nothing in this build throws one: only a build that supplies the provider can
- * run out of it.
+ * Marks a resolver's out-of-credit exception for {@link ModelProvider#PLATFORM}, so callers say "out of credit" rather
+ * than "no key". Only a build that supplies that provider throws it.
  */
 public interface PlatformCreditExhausted {}

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.version;
 
-/**
- * One project version, keyed by commit SHA. Rows are materialized lazily — created
- * the first time a pipeline sync attaches to a SHA, not for every commit.
- */
+/** Materialized lazily, the first time a pipeline sync attaches to a SHA. */
 public record ProjectVersionRow(
         String id,
         String projectId,

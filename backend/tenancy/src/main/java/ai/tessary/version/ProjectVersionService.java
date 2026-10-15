@@ -8,11 +8,7 @@ import ai.tessary.version.ProjectVersionRepository.Aspect;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
-/**
- * Facade over project versions (commit SHAs). Versions are materialized lazily
- * by {@code reasonPipelineSync} at import, which also records that the graders
- * are in sync for that commit.
- */
+/** Versions are materialized lazily by {@code reasonPipelineSync} at import. */
 @Service
 public class ProjectVersionService {
 

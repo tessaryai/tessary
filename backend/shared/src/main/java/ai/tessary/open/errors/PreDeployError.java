@@ -3,7 +3,6 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Errors for the production-signal → pre-deploy feedback loop. */
 public enum PreDeployError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "No pre-deploy check '%s'");
 

@@ -5,9 +5,8 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * The diff-classification taxonomy: which kind of LLM-product surface a code
- * change touches. The wire names are the machine-readable contract consumed
- * by risk routing and the change-history risk model; treat renames as breaking.
+ * Which kind of LLM-product surface a code change touches. Wire names are consumed by risk routing; renames are
+ * breaking.
  */
 public enum TouchedSurface {
     PROMPT("prompt"),
@@ -23,12 +22,11 @@ public enum TouchedSurface {
         this.wire = wire;
     }
 
-    /** The machine-readable name used in the stored rows. */
     public String wire() {
         return wire;
     }
 
-    /** Case-insensitive parse of a wire name; empty for unknown values (forward-compatible reads). */
+    /** Empty for unknown values, for forward-compatible reads. */
     public static Optional<TouchedSurface> parse(String raw) {
         if (raw == null || raw.isBlank()) return Optional.empty();
         String norm = raw.trim().toLowerCase(Locale.ROOT).replace('-', '_');

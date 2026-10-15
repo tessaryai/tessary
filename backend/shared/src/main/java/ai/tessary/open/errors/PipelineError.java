@@ -4,11 +4,8 @@ package ai.tessary.open.errors;
 import org.springframework.http.HttpStatus;
 
 /**
- * Validation failures while assembling / importing a {@code .tessary/} bundle (the multipart
- * upload). These were raw {@code IllegalArgumentException}s
- * that the global handler flattened to a generic {@code COMMON.INVALID_PARAMETER} while echoing
- * the parser's raw message; registering them gives the frontend switchable codes and keeps raw
- * parse detail out of the client response (it stays on the server-side cause).
+ * Validation failures importing a {@code .tessary/} bundle. Typed so the frontend can switch on codes while raw parser
+ * detail stays server-side.
  */
 public enum PipelineError implements ErrorCode {
     FILE_READ_FAILED(HttpStatus.BAD_REQUEST, "Could not read uploaded file '%s'"),

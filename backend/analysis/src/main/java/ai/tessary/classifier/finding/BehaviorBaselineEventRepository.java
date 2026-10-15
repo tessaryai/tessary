@@ -8,10 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for {@code behavior_baseline_event} — the baseline changelog. Append-only by
- * design: this table is the module's answer to the boiling-frog problem, and an editable history
- * would not be one. No observability tool today can tell a customer how their agent's behaviour has
- * changed over a quarter; these rows can.
+ * The {@code behavior_baseline_event} changelog. Append-only by design: an editable history could not show how behavior
+ * drifted over a quarter.
  */
 @Repository
 public class BehaviorBaselineEventRepository {

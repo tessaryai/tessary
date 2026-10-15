@@ -2,10 +2,9 @@
 package ai.tessary.retention;
 
 /**
- * A retention another build fixes for a project, in days; {@code 0} means none, so the install default and
- * the project's own override apply. This build fixes nothing, and {@link RetentionSeamConfig} registers that
- * answer only when no other build supplies one. A fixed value replaces both the default and any override,
- * so the sweep and the settings page agree without either knowing where the number came from.
+ * A retention another build fixes for a project, in days; {@code 0} means none. A fixed value replaces both the default
+ * and any override, so sweep and settings page agree. {@link RetentionSeamConfig} registers this build's "none" only as
+ * a fallback.
  */
 public interface FixedRetention {
 

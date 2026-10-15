@@ -2,9 +2,8 @@
 package ai.tessary.git;
 
 /**
- * A project's binding to one repo on one git provider. {@code credentialsEnc}
- * holds SecretBox-sealed, provider-specific JSON (for GitHub: the App
- * installation id). One integration per project (v1).
+ * {@code credentialsEnc} is SecretBox-sealed provider-specific JSON (for GitHub, the installation id). One integration
+ * per project.
  */
 public record GitIntegrationRow(
         String id,

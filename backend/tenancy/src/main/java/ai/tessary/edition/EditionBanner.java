@@ -6,10 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.stereotype.Component;
 
-/**
- * One INFO line at startup naming the resolved edition, so what actually booted is checkable
- * alongside a health endpoint that only reports 200.
- */
+/** Logs the edition at startup, since health only reports 200. */
 @Component
 public class EditionBanner implements SmartInitializingSingleton {
 

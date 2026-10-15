@@ -2,8 +2,7 @@
 package ai.tessary.open.errors;
 
 /**
- * A refusal the client should retry after a delay, as opposed to one it must not repeat. The HTTP
- * edge renders it as {@code Retry-After}; the OTLP gRPC edge as {@code UNAVAILABLE} carrying
+ * A refusal to retry after a delay. HTTP renders it as {@code Retry-After}; OTLP gRPC as {@code UNAVAILABLE} with
  * {@code RetryInfo}, the one shape every stock exporter retries.
  */
 public interface Retryable {

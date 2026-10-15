@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Picks the spool from {@code tessary.ingest.spool.mode}; {@code memory} unless an operator opts into a broker. */
+/** {@code memory} unless an operator opts into a broker. */
 @Configuration
 public class IngestSpoolConfig {
 

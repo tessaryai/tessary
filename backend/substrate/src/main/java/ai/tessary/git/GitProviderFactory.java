@@ -6,12 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
-/**
- * Resolves the right provider implementation by {@link GitProvider}. Spring
- * injects every registered {@link GitProviderClient} / {@link GitTokenService}
- * bean, so adding a provider is just adding its impl classes — nothing here
- * changes.
- */
+/** Resolves a provider's beans by {@link GitProvider}; adding a provider is adding its impl classes. */
 @Component
 public class GitProviderFactory {
 

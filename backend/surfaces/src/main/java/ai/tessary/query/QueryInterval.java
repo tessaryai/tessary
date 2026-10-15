@@ -5,9 +5,8 @@ import ai.tessary.open.errors.QueryError;
 import ai.tessary.open.errors.TessaryException;
 
 /**
- * The allow-listed bucketing intervals for {@code timeseries()}. The wire value maps to a fixed
- * Postgres {@code date_trunc} unit — the unit is selected from this closed enum and never interpolated
- * from a raw request string, so {@code date_trunc(:unit, created_at::timestamptz)} stays injection-safe.
+ * Allow-listed {@code timeseries()} intervals. The {@code date_trunc} unit comes from this closed enum, never from the
+ * request string, so the query stays injection-safe.
  */
 public enum QueryInterval {
     HOUR("hour"),
@@ -21,12 +20,12 @@ public enum QueryInterval {
         this.truncUnit = truncUnit;
     }
 
-    /** The fixed {@code date_trunc} unit literal (a trusted constant, never user input). */
+    /** A trusted constant, never user input. */
     public String truncUnit() {
         return truncUnit;
     }
 
-    /** Resolve a wire interval name to the enum, or {@code 400} if unknown. */
+    /** 400 if unknown. */
     public static QueryInterval fromWire(String wire) {
         for (QueryInterval i : values()) {
             if (i.truncUnit.equals(wire)) {

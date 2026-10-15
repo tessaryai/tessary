@@ -3,19 +3,16 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Errors raised by the signal RCA (root-cause analysis) surface. */
 public enum RcaError implements ErrorCode {
     SUBJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "RCA subject not found: %s"),
-    // Deliberately layer-neutral: this fires for launcher HTTP errors and unparseable agent output
-    // as well as genuine model failures, and the old "synthesis LLM call failed" wording sent an
-    // investigation after the model when the real fault was a sidecar that was not running.
+    // Layer-neutral on purpose: it also fires for launcher HTTP errors and unparseable agent output, not only model
+    // failures.
     UPSTREAM_FAILED(HttpStatus.BAD_GATEWAY, "RCA analysis failed: %s"),
     LAUNCHER_UNREACHABLE(
             HttpStatus.BAD_GATEWAY,
             "RCA could not reach the analysis launcher at %s — it is unreachable or not running"),
-    // A deployment fault, not a user one: the dossier carries the claim and every row behind it is read
-    // through MCP, so a run without that door can only paraphrase the detector back. Fail loudly rather
-    // than shipping a report built on nothing.
+    // A deployment fault: every evidence row is read through MCP, so a run without it could only paraphrase the
+    // detector. Fail loudly instead.
     NO_EVIDENCE_DOOR(HttpStatus.BAD_GATEWAY, "RCA cannot reach the evidence: %s");
 
     private final HttpStatus status;

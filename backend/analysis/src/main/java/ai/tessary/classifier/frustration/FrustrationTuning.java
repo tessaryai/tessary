@@ -25,9 +25,8 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * The Frustration Tuning view: the classifier's dials, and per call site the learned rate, {@code h(p0)}, the
- * accumulator and the last human reset, so a reader can see what each call site learned from what and why a
- * quiet one is quiet ({@code learning n/200}).
+ * Per call site, the learned rate, {@code h(p0)}, the accumulator and the last reset, so a reader can see why a quiet
+ * one is quiet ({@code learning n/200}).
  */
 @Service
 public class FrustrationTuning {

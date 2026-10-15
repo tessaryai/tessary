@@ -4,12 +4,10 @@ package ai.tessary.gate;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
-/** Wire DTOs for the pre-deploy feedback loop. Snake_case on the wire, camelCase in Java. */
 public final class PreDeployCheckDtos {
 
     private PreDeployCheckDtos() {}
 
-    /** A registered pre-deploy check as exposed to the UI / API. */
     public record PreDeployCheckView(
             String id,
             @JsonProperty("classifier_id") String classifierId,

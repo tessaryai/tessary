@@ -3,18 +3,15 @@ package ai.tessary.open.errors;
 
 import org.springframework.http.HttpStatus;
 
-/** Errors raised by the case surface — Triage and the case page. */
 public enum CaseError implements ErrorCode {
     NOT_FOUND(HttpStatus.NOT_FOUND, "Case not found: %s"),
     ALREADY_RESOLVED(HttpStatus.CONFLICT, "Case %s is already closed"),
-    // Absorbing moves the DETECTOR's reference, so it needs one that can move. Some cases have none (see
-    // CaseService#absorbable); they can still be closed.
+    // Absorbing moves the detector's reference; cases with none can still be closed.
     NOT_ABSORBABLE(HttpStatus.CONFLICT, "Case %s has no detector reference that an absorb could move"),
-    // A disposition says what a resolved frustration case turned out to be, and each one changes what the
-    // classifier counts next. No other case has anything it would change, so it is refused rather than stored.
+    // Each disposition changes what the frustration classifier counts next; no other case has anything to change.
     DISPOSITION_NOT_APPLICABLE(HttpStatus.BAD_REQUEST, "Case %s takes no disposition; only a frustration case does"),
-    // A case left open by a classifier the organization no longer has. It still renders as history; every
-    // action on it is withheld rather than failing deeper in with a less legible error.
+    // The case still renders as history, but actions are refused here rather than failing deeper with a less legible
+    // error.
     DETECTOR_UNAVAILABLE(HttpStatus.CONFLICT, "The %s classifier is not available to this organization");
 
     private final HttpStatus status;

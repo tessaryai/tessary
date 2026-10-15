@@ -4,7 +4,6 @@ package ai.tessary.sources;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
 
-/** HTTP-shaped DTOs for /api/sources. */
 public final class SourceDtos {
 
     private SourceDtos() {}

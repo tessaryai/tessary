@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Connect / inspect / disconnect a project's git provider binding. Owner-gated for mutations. */
+/** Owner-gated for mutations. */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/git")
 public class GitIntegrationController {

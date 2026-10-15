@@ -5,9 +5,8 @@ import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.substrate.SubstrateObservation;
 
 /**
- * Which side of an observation a text detector reads: the user-side {@code input}, the agent-side
- * {@code output}, or both. {@link RegexDetector} matches over {@link SubstrateObservation#inputText()}
- * / {@link SubstrateObservation#outputText()} directly, so "OUTPUT contains X" means the output alone.
+ * Which side a text detector reads. {@link RegexDetector} matches the input or output text alone, so "OUTPUT contains
+ * X" means the output only.
  */
 public enum ClassifierField {
     INPUT,

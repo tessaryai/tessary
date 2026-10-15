@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** Wires this build's {@link FixedRetention}, which fixes nothing; another build's bean takes precedence. */
+/** Fixes nothing; another build's bean takes precedence. */
 @Configuration(proxyBeanMethods = false)
 public class RetentionSeamConfig {
 
