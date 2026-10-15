@@ -167,9 +167,9 @@ public final class BehaviorDtos {
     public record BehaviorAnalysisView(String jobId, String jobStatus, boolean alreadyEscalated, String lane) {}
 
     /**
-     * {@code since_version_id} is deliberately not exposed: it is whatever version was running, and "new since <sha>"
-     * would blame every release. {@code triageCitations} is what the ruling rests on; an uncited ruling is never
-     * recorded.
+     * {@code since_version_id} is deliberately not exposed: it is whatever version was running, and "new since this
+     * release" would blame every release. {@code triageCitations} is what the ruling rests on; an uncited ruling is
+     * never recorded.
      */
     public record BehaviorFindingView(
             String id,

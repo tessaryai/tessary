@@ -63,78 +63,12 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * Seeds the sample project's demo data — enough for {@link
- * OnboardingController#progress} to compute {@link OnboardingStage#CASE} without the real detection
- * pipeline ever running, so a project a user reaches by clicking "Start with a sample project" looks
- * like a project that has been live for weeks, not an empty shell with a banner on it.
- *
- * <p>Fires on the same {@link ProjectCreatedEvent} every other per-project seeder does ({@code
- * ClassifierSeedListener}, {@code CaseAlertSeedListener}), and re-reads the project row to check
- * {@link Project#isSample()} before doing anything — the event carries only a project id, and this
- * is the one listener in the catalog that must do NOTHING for the other 99% of projects it fires
- * for. Idempotent the same way the rest of the catalog is: {@code AFTER_COMMIT}, failures logged and
- * swallowed (the project already exists either way; a half-seeded demo project is a worse launch
- * screen than an empty one, never a reason to fail the create).
- *
- * <h2>Deviation from the plan this issue shipped against</h2>
- *
- * <p>The plan located this class at {@code backend/tenancy/.../tenant/SampleProjectSeeder.java}.
- * That is not buildable: every table this class writes to beyond {@code project} itself —
- * {@code classifier}, {@code metric_baseline}, {@code span}/{@code span_payload}/{@code trace},
- * {@code finding}, {@code eval_case}, {@code rca_report} — is owned by {@code substrate}, {@code
- * product}, or {@code analysis}, none of which {@code tenancy} may depend on (it sits BELOW all
- * three in the reactor: {@code shared, contract, core, test-support, tenancy, substrate, product,
- * llm-runtime, analysis, ...}). This class lives in {@code analysis} instead, the same module (and
- * the same event-listener SPI seam — {@link ProjectCreatedEvent}) {@code ClassifierSeedListener} and
- * {@code CaseAlertSeedListener} already use to provision a new project's starting state without
- * {@code tenant/} having to know any of them exist.
- *
- * <p>A second deviation: {@code job}/{@code finding}/{@code eval_case}/{@code rca_report} rows are
- * written with raw SQL ({@link SampleDataRepository}) rather than through the finding writers,
- * {@code CaseRepository#open} or {@code RcaReportRepository#complete}.
- * Those methods model the LIVE detection
- * state machine — severity computed from a real deviation, evidence assembled from real spans,
- * a case opened by a real classifier run. Replaying that machinery to fabricate a finished, static
- * end state for a demo is the wrong tool: it would mean constructing the same domain objects
- * (a real {@code CaseDetection}, a real evidence-refs blob) the live pipeline builds from actual
- * measurements, only to feed them synthetic numbers anyway. A direct insert matching the schema's
- * own NOT NULL/CHECK constraints says plainly "this row is fabricated," which a call through the
- * business-logic layer would not.
- *
- * <p>The Groundedness and Frustration findings are the exception, and go through the live writers
- * ({@code FindingRepository#recordRecomputedRate}, {@code FindingEvidenceRepository}, {@link CaseOpener}).
- * Their counts are read off generated rows the same way the rate services read them, so there is no
- * synthetic number for the business layer to dress up; and what a raw insert would have to copy by hand
- * (the native cause vocabulary in the payload, a case key cut from it, the null title the finding page
- * fills in) would otherwise have to be kept in step with the live writer by hand.
- *
- * <h2>The showcase dataset</h2>
- *
- * <p>{@link SampleShowcase} generates ~500+ "AI customer-support agent" traces spread over a 14-day
- * window and threaded through seven call sites; six of them carry a real cost/duration/error-rate
- * drift baked into the generated span numbers themselves (visible when aggregated by day and call
- * site), and three of those six are elevated into an open {@code eval_case} — one ({@code
- * classify_intent} cost drift) with a full agentic RCA report citing this same generated data. About
- * one ticket in five is a three-turn thread, which is what gives Groundedness answers to score and
- * Frustration conversations to score; each opens a case on the rate it learned before
- * {@link SampleShowcase#UNGROUNDED_ONSET_DAY}. The
- * substrate volume is inserted as batched multi-row SQL ({@link SampleDataRepository#insertTraces}
- * and friends) rather than through the substrate repositories' batch write methods, which
- * exist for live ingest's replay semantics this one-shot seed does not need.
- *
- * <h2>Every seeded row has to be one the LIVE pipeline would have written</h2>
- *
- * <p>Not a style preference — a correctness constraint, and the one the first cut of this class got
- * wrong, back when a periodic {@code CaseWorker} reconciled the case table against every detector's
- * live set and would resolve a case whose key it didn't recognise as {@code RECOVERED}. There is no
- * such sweep any more (decision 1: a case opens once, from the ruling that qualified it, never from a
- * later pass), but the key still has to agree with what {@code MetricDriftSource}/{@code
- * ToolErrorCaseSource} would cut from the SAME finding, because a real firing on the same cause later
- * joins this seeded case through exactly that key — a mismatch there would open a silent duplicate
- * instead. The key is {@code (detector, subject_kind, subject_id, metric)} and {@code subject_id} is
- * the finding's {@link FindingRow#nativeCauseKey()} — never the {@code metric_baseline} id, which is
- * only the uniqueness scope prefixed onto {@code cause_key}. {@link #seedCase} derives both halves
- * from the finding it is paired with for exactly this reason.
+ * Seeds the sample project so it looks weeks old without the detection pipeline running. Fires on every
+ * {@link ProjectCreatedEvent} and does nothing unless {@link Project#isSample()}; failures are logged and swallowed.
+ * Lives in {@code analysis} because {@code tenancy} sits below every module whose tables it writes. Most rows are raw
+ * SQL ({@link SampleDataRepository}) that plainly says it is fabricated; groundedness and frustration go through the
+ * live writers. Each case key must equal what the live case source would cut from the same finding, or a real firing
+ * opens a silent duplicate; {@link #seedCase} derives it from the finding.
  */
 @Component
 public class SampleProjectSeedListener {
@@ -210,16 +144,12 @@ public class SampleProjectSeedListener {
         }
     }
 
-    // ---- showcase -----------------------------------------------------------------------------
-
     private void seedShowcase(String projectId) {
         for (String callSite : SampleShowcase.CALL_SITES) {
             pipeline.ensureCallSite(projectId, callSite);
         }
 
-        // The built-in catalog is idempotent (insert-if-missing), so calling it here is safe
-        // regardless of whether ClassifierSeedListener has already run for this same event — and it
-        // has to run BEFORE the lookup below, which is what hangs the findings off a real classifier.
+        // Idempotent, and must run BEFORE the lookup below that hangs findings off a real classifier.
         classifiers.seedBuiltIns(projectId);
 
         Map<String, ClassifierRow> classifierRows = classifiers.list(projectId).stream()
@@ -249,9 +179,7 @@ public class SampleProjectSeedListener {
         retrievedDocs.insertAll(dataset.retrievedDocs());
 
         List<SampleShowcase.DriftStat> drift = dataset.driftStats();
-        // Order matches the design spec's drift array exactly: [0] classify_intent cost (Case A),
-        // [1] generate_response cost, [2] kb_search duration, [3] refund_api duration (Case B),
-        // [4] refund_api tool error, [5] ticket_escalation tool error (Case C).
+        // Matches the design spec's drift array order.
         FindingRef classifyCostFinding =
                 costDriftId == null ? null : seedMetricFinding(projectId, costDriftId, drift.get(0), true);
         if (costDriftId != null) {
@@ -265,8 +193,7 @@ public class SampleProjectSeedListener {
         seedToolErrorFinding(projectId, drift.get(4), false);
         FindingRef escalationErrorFinding = seedToolErrorFinding(projectId, drift.get(5), true);
 
-        // Case numbers are allocated MAX(seq)+1 by the live opener, so the seed takes 1..3 and the
-        // first case a real detector opens on this project continues from 4.
+        // The live opener allocates MAX(seq)+1, so the seed takes 1..3 and real cases continue from 4.
         if (classifyCostFinding != null) {
             seedCaseA(projectId, drift.get(0), classifyCostFinding);
         }
@@ -275,7 +202,7 @@ public class SampleProjectSeedListener {
         }
         seedCase(projectId, 3L, CaseRow.Detector.TOOL_ERROR, drift.get(5), escalationErrorFinding);
 
-        // After the three cases above, so the live opener these two go through numbers them 4 and 5.
+        // After the three cases above, so the live opener numbers these 4 and 5.
         ClassifierRow groundedness = classifierRows.get(BuiltInDetector.Kind.GROUNDEDNESS);
         if (groundedness != null) seedGroundedness(projectId, groundedness, dataset);
         ClassifierRow frustration = classifierRows.get(BuiltInDetector.Kind.FRUSTRATION);
@@ -287,24 +214,12 @@ public class SampleProjectSeedListener {
     }
 
     /**
-     * A seeded finding's id together with the two halves of the {@link ai.tessary.cases.CaseKey}
-     * the LIVE case source would cut from it — see this class's header for why that identity has to
-     * match exactly.
-     *
-     * <p>{@code caseSubjectId} is deliberately NOT the finding's own {@code subject_id}. For metric
-     * drift the finding's subject is the {@code metric_baseline} row (the uniqueness scope), while the
-     * case's subject is the classifier's own cause key, which is what {@code MetricDriftSource} reads
-     * back through {@link FindingRow#nativeCauseKey()}. For tool error the two coincide — the bucket
-     * key {@code tool:<name>} — and the field is filled with the same string for both so a reader
-     * never has to know which case they are looking at.
+     * {@code caseSubjectId} is NOT the finding's {@code subject_id}: for metric drift that is the
+     * {@code metric_baseline} row, while the case subject is the cause key {@code MetricDriftSource} reads via
+     * {@link FindingRow#nativeCauseKey()}.
      */
     private record FindingRef(String id, String caseSubjectId, String caseSubjectKind, String caseMetric) {}
 
-    /**
-     * A metric-baseline-backed finding (cost_drift or duration_drift): mints the {@code
-     * metric_baseline} row the finding's {@code subject_id} points at, then the finding itself —
-     * triaged and case-linked when {@code openCase}, open and untriaged otherwise.
-     */
     private FindingRef seedMetricFinding(
             String projectId, String classifierId, SampleShowcase.DriftStat stat, boolean openCase) {
         String now = Instant.now().toString();
@@ -374,17 +289,8 @@ public class SampleProjectSeedListener {
     }
 
     /**
-     * The evidence rows behind a seeded finding, in the roles {@code RcaAnalysisService.sides} reads.
-     *
-     * <p>This is what makes a seeded finding analysable rather than merely displayable. RCA resolves
-     * a finding's evidence into a baseline and a flagged side and refuses the run when both are
-     * empty, so before this every "Run RCA" press in the sample project failed — and failed under
-     * {@code SUBJECT_NOT_FOUND}, which reads as "no such finding" when the finding was there all
-     * along and its evidence was not.
-     *
-     * <p>{@code witness} is written only where the classifier draws one: {@code tool_error} claims a
-     * fraction, so its members are every call in the window and the witnesses are the failing subset.
-     * A metric drift makes no such split and its members are themselves the flagged side.
+     * Makes a seeded finding analysable: RCA refuses a run with no evidence, which failed every sample Run RCA under
+     * {@code SUBJECT_NOT_FOUND}. Only tool_error writes {@code witness}.
      */
     private void seedFindingEvidence(String projectId, String findingId, SampleShowcase.DriftStat stat, String now) {
         sampleData.insertFindingEvidence(
@@ -459,8 +365,7 @@ public class SampleProjectSeedListener {
                 detector,
                 finding.caseSubjectKind(),
                 finding.caseSubjectId(),
-                // The subject LABEL is what the triage list reads out, and it stays the call site — the
-                // subject ID above is a cause key nobody should ever be shown.
+                // The label stays the call site; the subject id is a cause key nobody should be shown.
                 stat.subjectLabel(),
                 stat.callSiteId(),
                 finding.caseMetric(),
@@ -470,33 +375,23 @@ public class SampleProjectSeedListener {
                 stat.onsetAt(),
                 stat.meanPost(),
                 stat.meanPre(),
-                // Tool-error rates are carried as PERCENTAGE POINTS on a case (`delta_pp` in the
-                // evidence blob, which is what the live source passes), while a metric drift's delta
-                // is in the measure's own raw unit. Writing the tool delta as a fraction here made the
-                // seeded row disagree with the sweep's own refresh of it by a factor of 100.
+                // Tool-error deltas are PERCENTAGE POINTS on a case, as the live source writes them.
                 isTool ? (stat.meanPost() - stat.meanPre()) * 100 : stat.meanPost() - stat.meanPre(),
                 now,
                 finding.id()));
     }
 
     /**
-     * The severity the live case source would compute from this finding's evidence, not the finding's
-     * own. The two are different scales on purpose — a finding's severity grades the claim, a case's
-     * only orders the triage list — and seeding the finding's value here would make a seeded case jump
-     * in the ranking the moment a real finding on the same cause later joins it and a case's severity
-     * (the running peak across its findings, {@code CaseLedger#openOrJoin}) recomputes.
+     * The live case source's severity, not the finding's: different scales, and seeding the finding's would make the
+     * case jump when a real finding joins it.
      */
     private static double caseSeverity(SampleShowcase.DriftStat stat, boolean isTool) {
         if (isTool) {
-            // ToolErrorEvidence.severityOf, fed the criticality this seeder writes into the payload.
             return ToolErrorEvidence.severityOf(criticalityOf(stat));
         }
-        // MetricDriftSource.severity: |W1 on logs| against a ln(3) saturation point.
         return Math.min(1, Math.abs(Math.log(Math.max(1.01, stat.ratio()))) / Math.log(3));
     }
 
-    /** Case A: {@code classify_intent} cost drift, with a full agentic RCA report tracing the shift
-     *  back to {@code assemble_ticket_context}'s own generated data. */
     private void seedCaseA(String projectId, SampleShowcase.DriftStat stat, FindingRef finding) {
         String now = Instant.now().toString();
         double ratio = stat.ratio();
@@ -653,9 +548,8 @@ public class SampleProjectSeedListener {
     }
 
     /**
-     * The criticality this seeder writes into a tool-error finding's evidence, chosen so that
-     * {@link ToolErrorEvidence#severityOf} inverts it back to {@link #severityFor}'s answer — the
-     * finding and the case it opens then agree instead of ranking the same event two ways.
+     * Chosen so {@link ToolErrorEvidence#severityOf} inverts it to {@link #severityFor}'s answer, keeping finding and
+     * case in agreement.
      */
     private static double criticalityOf(SampleShowcase.DriftStat stat) {
         double severity = severityFor(1.0 + (stat.meanPost() - stat.meanPre()) * 10);
@@ -760,13 +654,9 @@ public class SampleProjectSeedListener {
         return writeJson(root);
     }
 
-    // ---- groundedness and frustration --------------------------------------------------------------
-
     /**
-     * Groundedness on {@code generate_response}: the call site declared {@code rag_answer} so the finding page
-     * can rebuild each answer's question and documents, one assessment per scored answer and one detection per
-     * flagged one, then the finding, its evidence and its case through the same writers the live rate service
-     * and triage use. The classifier stays as the catalog seeded it, disabled, so no sweep rescores this data.
+     * Through the same writers the live rate service and triage use. The classifier stays disabled as seeded, so no
+     * sweep rescores this data.
      */
     private void seedGroundedness(String projectId, ClassifierRow classifier, SampleShowcase.Dataset dataset) {
         sampleData.setCallSiteShape(projectId, SampleShowcase.GENERATE, "rag_answer");
@@ -819,12 +709,7 @@ public class SampleProjectSeedListener {
         if (findingId != null) caseOpener.ensureCaseFor(projectId, findingId, null);
     }
 
-    /**
-     * Frustration on the threads' third turns: one assessment per scored turn and one detection per frustrated
-     * thread, then the finding the live rate service files, ruled positive at filing with its own summary, and
-     * its case. Scored with no model call, so the assessment rows carry the request as it would have been sent
-     * and a response shaped like the decision model's.
-     */
+    /** Scored with no model call; the assessment rows carry the request as it would have been sent. */
     private void seedFrustration(String projectId, ClassifierRow classifier, SampleShowcase.Dataset dataset) {
         FrustrationConfig config = FrustrationConfig.of(mapper, classifier.configJson());
         String scorerVersion = config.scorerVersion();
@@ -887,16 +772,11 @@ public class SampleProjectSeedListener {
         if (findingId != null) caseOpener.ensureCaseFor(projectId, findingId, null);
     }
 
-    /** What the frustration assessments name as the model that scored them: a Jev call on TypeSafe. */
     private static final String SAMPLE_DECISION_PROVIDER = "TYPESAFE";
 
     private static final String SAMPLE_DECISION_MODEL = "jev-latest";
 
-    /**
-     * A rate finding as the live rate services file it ({@code recordRecomputedRate}), with its members and
-     * witnesses, ruled positive with {@code summary}. Returns the finding id, or null when a ruled finding on the
-     * same cause already covered it.
-     */
+    /** Null when a ruled finding on the same cause already covered it. */
     private @Nullable String seedRateFinding(
             String projectId,
             ClassifierRow classifier,
@@ -933,10 +813,6 @@ public class SampleProjectSeedListener {
         return recorded.findingId();
     }
 
-    /**
-     * The decision tool_error's engine reaches on these counts: the Jeffreys-smoothed reference, the up arm's
-     * log-likelihood CUSUM over the trials since onset, and the decision interval that reference earns.
-     */
     private static ToolErrorDetector.Decision decision(SampleShowcase.RateStat stat, ToolErrorConfig engine) {
         double p0 = (stat.baselineFailures() + 0.5) / (stat.baselineTrials() + 1.0);
         double p1 = ToolErrorDetector.shiftedUp(p0, engine);
@@ -961,7 +837,6 @@ public class SampleProjectSeedListener {
                 null);
     }
 
-    /** The detection the groundedness detector writes for a flagged answer: its flagged sentence, with offsets. */
     private String groundednessDetectionEvidence(SampleShowcase.ScoredAnswer answer) {
         SampleShowcase.FlaggedSentence flagged = Objects.requireNonNull(answer.flagged());
         Map<String, Object> sentence = new LinkedHashMap<>();
@@ -978,7 +853,6 @@ public class SampleProjectSeedListener {
         return writeJson(ev);
     }
 
-    /** The decision model's answer to the one question, as its response body carries it. */
     private String frustrationResponse(double score) {
         double other = (1 - score) * 0.2;
         Map<String, Object> probabilities = new LinkedHashMap<>();

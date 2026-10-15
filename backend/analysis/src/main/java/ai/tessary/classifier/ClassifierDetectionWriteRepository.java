@@ -18,41 +18,21 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Writes a fired detection into its classifier's own table (migration {@code 0088}).
- *
- * <p>A detection used to be a {@code verdict} row with {@code source='automatic'}, sharing a table with
- * grader scores, human rulings and escalation runs. It no longer is. Each per-span classifier has a
- * table, each table declares the grain that classifier judges at, and the idempotency follows from that
- * grain instead of from whatever the shared {@code ux_verdict_online_subject} index happened to key on.
- *
- * <p><b>The routing is by detector kind, not by table name guessing.</b> {@link #tableFor} is the one
- * place that maps a classifier onto its store; a kind with no table is a classifier that does not write
- * per-span detections (the drift families file findings directly), and {@link #tableFor} says so by
- * returning null rather than inventing a destination. Every other method takes a kind that has a table.
- *
- * <p>The name says WRITE because {@link ClassifierDetectionRepository} is the read side: that one
- * projects the stitched view for the events surface, this one owns the six tables the view is stitched
- * from and the window counts a classifier's arming gate reads back.
- *
- * <p><b>Insert-if-absent, first-write-wins.</b> {@code ON CONFLICT DO NOTHING} against the per-table
- * unique subject index, so a re-sweep over the same window writes nothing and
- * {@link #insert} reports {@code false}: a genuinely new detection is the one that inserted. That is the
- * same contract the old online-verdict upsert had, and the arming counter and the pre-deploy
- * registration both still key on it.
+ * Writes a fired detection into its classifier's own table, whose unique subject index sets the idempotency.
+ * {@link #tableFor} is the one routing map; null means the classifier files findings directly. Insert-if-absent: a
+ * re-sweep writes nothing and {@link #insert} reports {@code false}, which arming and pre-deploy registration key on.
  */
 @Repository
 public class ClassifierDetectionWriteRepository {
 
     /**
-     * The window a detection falls in, on its own {@code subject_started_at} (migration {@code 0012}):
-     * {@code floor(subject_started_at / W) * W} in epoch seconds. Bound to {@code :window}, and the same
-     * expression wherever a facet or whole-classifier window is read, so the query that finds which
-     * windows a sweep touched and the one that counts them cannot disagree.
+     * The same expression wherever a window is read, so the touched-windows query and the counting query cannot
+     * disagree.
      */
     private static final String EVENT_WINDOW =
             "(floor(extract(epoch FROM d.subject_started_at) / :window)::bigint * :window)";
 
-    /** The HIGH band. NULL reads as high, the convention every detection read here uses. */
+    /** NULL reads as high, as every detection read here does. */
     private static final String HIGH_BAND = " AND (confidence = 'high' OR confidence IS NULL)";
 
     private static final String SPAN_JOIN = " JOIN span s ON s.project_id = d.project_id"

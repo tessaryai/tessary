@@ -317,14 +317,9 @@ public class E2bTriageSandbox implements TriageSandbox {
         }
     }
 
-    /** A bare mapper for {@link #kindOf}, which only ever reads one field off an already-scrubbed
-     *  launcher body — {@link #classifyFailure} must stay callable with no Spring context around it. */
+    /** A bare mapper so {@link #classifyFailure} stays callable with no Spring context. */
     private static final ObjectMapper KIND_MAPPER = new ObjectMapper();
 
-    /**
-     * Book the run's tokens and cost against the triage lane, and against the FINDING it ruled on.
-     * One run is one ledger entry.
-     */
     private void bookUsage(
             String projectId, String findingId, String model, String envelopeJson, boolean platformFunded) {
         AgentSpanTelemetry.AgentUsage u = AgentSpanTelemetry.parseUsage(mapper, envelopeJson);
@@ -339,26 +334,16 @@ public class E2bTriageSandbox implements TriageSandbox {
                 u.cacheReadTokens(),
                 u.cacheWriteTokens(),
                 u.costUsd(),
-                // The finding this ruling was about: without it the ledger can say the triage agent
-                // cost a project $40 last week but not across how many rulings, which is the number
-                // that decides whether an agent session per distinct cause is the right price for a
-                // filter.
+                // Per finding, so the ledger can price an agent session per distinct cause.
                 new LlmUsageAccountant.Subject(SUBJECT_KIND, findingId));
     }
 
-    /**
-     * The model the agent runs: the project's {@link ModelLane#TRIAGE} choice, else the
-     * observer's agentic model — the value this lane used before it had a lane of its own, so a
-     * project that has chosen nothing behaves exactly as it did.
-     */
+    /** Falls back to the observer's agentic model, so a project that chose nothing behaves as before. */
     private Optional<ProjectModelSettings.ResolvedAgenticModel> resolvedModel(String projectId) {
         return modelSettings.resolveAgenticModel(projectId, ModelLane.TRIAGE);
     }
 
-    /**
-     * The message a dead-lettered job and a tripped breaker both carry. Names the remedy for the two
-     * statuses that have one, because "401" on its own has cost a day before.
-     */
+    /** Names the remedy, because a bare "401" has cost a day before. */
     private static String launcherDiagnosis(int status, String launcherUrl, String diag) {
         String remedy =
                 switch (status) {
@@ -371,7 +356,6 @@ public class E2bTriageSandbox implements TriageSandbox {
         return "status " + status + " from " + launcherUrl + remedy;
     }
 
-    /** The launcher's {@code buildErrorBody} JSON as a short log fragment; empty when unparseable. */
     private String describeLauncherError(String body) {
         try {
             JsonNode n = mapper.readTree(body);
