@@ -23,17 +23,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Makes the springdoc-generated schemas <em>faithful</em> to the DTO records' JSpecify nullability:
- * the codebase is {@code @NullMarked}, so a record component is non-null unless it
- * carries {@code @Nullable}. swagger-core can't see JSpecify, so by default it emits every field as
- * optional and non-nullable — which makes the generated TS types materially weaker than the wire truth.
- *
- * <p>This {@link ModelConverter} post-processes every {@code ai.tessary} record schema: Jackson's
- * default inclusion is {@code ALWAYS}, so every component is present in the JSON and therefore
- * <em>required</em> — except that a {@code @Nullable} component of a {@code @JsonInclude(NON_NULL)} class
- * is omitted when null (so optional). {@code @Nullable} components are additionally marked nullable
- * (OpenAPI 3.1 {@code type: [T, "null"]}). Registered globally via {@link ModelConverters} (idempotent
- * across the many {@code @SpringBootTest} contexts in one JVM).
+ * Makes springdoc schemas follow JSpecify nullability, which swagger-core cannot see. Response record components are
+ * required (Jackson ALWAYS inclusion) unless {@code @Nullable} in a {@code NON_NULL} class; {@code @Nullable}
+ * components become OpenAPI 3.1 nullable. Registered globally via {@link ModelConverters}.
  */
 @Component
 public class JSpecifyNullabilityConverter implements ModelConverter {
@@ -56,8 +48,7 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
             try {
                 applyNullability(type, resolved, context);
             } catch (RuntimeException e) {
-                // Faithful-typing is best-effort: never fail spec generation over a reflection edge case — a
-                // type Jackson cannot map, a $ref the context never defined. Each lands here, schema untouched.
+                // Best-effort: never fail spec generation over a reflection edge case.
                 log.debug("faithful-nullability post-processing skipped for a schema", e);
             }
         }
@@ -72,11 +63,8 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         Schema<?> target = objectSchema(resolved, context);
         boolean omitNulls = raw.isAnnotationPresent(JsonInclude.class)
                 && raw.getAnnotation(JsonInclude.class).value() == JsonInclude.Include.NON_NULL;
-        // A request-body DTO is deserialized from a client-supplied (often partial) JSON — the server fills
-        // defaults/validates — so its fields must NOT be marked required (that over-constrains the generated
-        // client, forcing callers to send every field). We only mark fields required for RESPONSE DTOs, which
-        // are serialized whole (Jackson ALWAYS-inclusion ⇒ every field present). Heuristic on the codebase
-        // convention: request DTOs are the {@code *Request}/{@code *Filter} records used as {@code @RequestBody}.
+        // Request DTOs are deserialized from partial JSON, so their fields are never required. Heuristic:
+        // {@code *Request}/{@code *Filter} records.
         boolean requestDto =
                 raw.getSimpleName().endsWith("Request") || raw.getSimpleName().endsWith("Filter");
 
@@ -88,8 +76,6 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
                 continue;
             }
             boolean nullable = isNullable(rc);
-            // ALWAYS-inclusion (the app default) ⇒ every response field is present ⇒ required; a @Nullable
-            // field of a NON_NULL-inclusion class is omitted when null ⇒ optional; request DTOs stay optional.
             if (!requestDto && !(nullable && omitNulls)) {
                 required.add(name);
             }
@@ -102,10 +88,7 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         }
     }
 
-    /**
-     * Resolve the concrete object {@link Schema} — following a {@code $ref} into the context's models. A
-     * {@code $ref} to a model the context never defined throws, which {@link #resolve} turns into a skip.
-     */
+    /** A {@code $ref} to an undefined model throws, which {@link #resolve} turns into a skip. */
     private static Schema<?> objectSchema(Schema<?> resolved, ModelConverterContext context) {
         if (resolved.get$ref() != null) {
             String ref = resolved.get$ref();
@@ -115,11 +98,7 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         return resolved;
     }
 
-    /**
-     * OpenAPI 3.1 nullability. For a typed schema, add {@code "null"} to its type set. For a {@code $ref}
-     * (a nested-object property) there is no {@code type} to widen, so wrap it in {@code anyOf: [{$ref},
-     * {type: "null"}]} — the 3.1-correct way to make a referenced schema nullable.
-     */
+    /** A {@code $ref} has no type to widen, so it is wrapped in {@code anyOf: [{$ref}, {type: "null"}]}. */
     private static void makeNullable(Schema<?> prop) {
         if (prop.get$ref() != null) {
             String ref = prop.get$ref();
@@ -141,7 +120,6 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         }
     }
 
-    /** True when the record component's type carries a JSpecify (or any) {@code @Nullable}. */
     private static boolean isNullable(RecordComponent rc) {
         return hasNullable(rc.getAnnotatedType().getAnnotations())
                 || hasNullable(rc.getAnnotations())
@@ -157,7 +135,6 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         return false;
     }
 
-    /** The JSON property name — {@code @JsonProperty} override on the component/accessor, else the name. */
     private static String jsonName(RecordComponent rc) {
         JsonProperty jp = rc.getAnnotation(JsonProperty.class);
         if (jp == null) {
@@ -169,7 +146,7 @@ public class JSpecifyNullabilityConverter implements ModelConverter {
         return rc.getName();
     }
 
-    /** The type's raw class. A type Jackson cannot construct (none at all, say) throws, which {@link #resolve} skips. */
+    /** A type Jackson cannot construct throws, which {@link #resolve} skips. */
     private static Class<?> rawClass(AnnotatedType type) {
         java.lang.reflect.Type t = type.getType();
         if (t instanceof Class<?> c) {

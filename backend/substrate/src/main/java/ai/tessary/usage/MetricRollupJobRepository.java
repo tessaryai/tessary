@@ -10,21 +10,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The per-(project, bucket) rollup work queue, folded onto the unified {@code job} table
- * with {@code kind='usage_rollup'}. Metering has no per-row config table, so the set of buckets to roll up
- * is derived; this queue makes that derived set a durable, claimable work surface. A heartbeat (1)
- * {@link #scheduleDueBuckets} — inserts one PENDING job per live project for the closed bucket
- * (deduped by {@code ON CONFLICT DO NOTHING} on the {@code ux_job_usage_rollup} natural key) — and (2)
- * {@link #claimBatch} — takes a bounded batch with {@code FOR UPDATE SKIP LOCKED} so N backends never both
- * run the same aggregation scan.
- *
- * <p>NON-LEASED kind: the rows carry NULL lease columns and this queue keeps its OWN {@code claimed_at}-style
- * claim SQL (it is excluded from the shared {@code LeasedJobSql} machinery by design). {@code org_id}/{@code
- * bucket_start}/{@code granularity}/{@code claimed_at} live in the {@code payload} jsonb; {@code
- * dedupe_key = project:bucket:granularity} keys the all-status {@code ux_job_usage_rollup} unique so a done
- * bucket is never re-scheduled and re-scanned (the efficiency guard). The {@code metric_rollup} aggregate
- * UNIQUE remains the final double-count guard. This repo keeps its signatures and the {@link
- * MetricRollupJobRow} shape, so {@code MeteringWorker} is unchanged.
+ * The per-(project, bucket) rollup queue on {@code job} with {@code kind='usage_rollup'}. Non-leased: it keeps its own
+ * {@code claimed_at} claim SQL outside {@code LeasedJobSql}. {@code dedupe_key} keys the all-status
+ * {@code ux_job_usage_rollup} unique, so a done bucket is never re-scanned; the {@code metric_rollup} UNIQUE is the
+ * final double-count guard.
  */
 @Repository
 public class MetricRollupJobRepository {
@@ -36,13 +25,7 @@ public class MetricRollupJobRepository {
     }
 
     /**
-     * Insert one PENDING job per (project, {@code bucketStart}) for every live project that has no
-     * job for that bucket yet. Archived projects are skipped, and so are projects accepted for deletion:
-     * metering one costs a scan whose result is deleted moments later by the purge worker.
-     *
-     * <p>Idempotent: {@code ON CONFLICT DO NOTHING} on {@code ux_job_usage_rollup} (dedupe_key =
-     * {@code project_id:bucket_start:granularity}, all statuses), so re-scheduling a bucket that is
-     * already pending OR done is a no-op and N backends racing to schedule converge on one row per
+     * Skips archived and deleting projects. Idempotent across statuses, so racing backends converge on one row per
      * (project, bucket). Returns rows inserted.
      */
     public int scheduleDueBuckets(String bucketStart, String granularity) {
@@ -66,10 +49,8 @@ public class MetricRollupJobRepository {
     }
 
     /**
-     * Claim up to {@code batch} PENDING jobs (or jobs whose claim lease has expired) via {@code FOR UPDATE
-     * SKIP LOCKED}, stamping {@code payload.claimed_at = now} in the same statement so a peer instance skips
-     * them. A job claimed by a worker that then dies is reclaimable once {@code now - claimed_at >
-     * leaseSeconds}.
+     * Stamps {@code payload.claimed_at} in the same statement; a dead worker's job is reclaimable after
+     * {@code leaseSeconds}.
      */
     public List<MetricRollupJobRow> claimBatch(int batch, long leaseSeconds) {
         String now = Instant.now().toString();
@@ -94,7 +75,6 @@ public class MetricRollupJobRepository {
                 .list();
     }
 
-    /** Mark a claimed job done once its rollup has been upserted. */
     public void markDone(String id) {
         jdbc.sql("UPDATE job SET status = 'done', updated_at = :now WHERE kind = 'usage_rollup' AND id = :id")
                 .param("now", Instant.now().toString())

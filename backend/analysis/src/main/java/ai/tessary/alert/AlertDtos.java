@@ -7,12 +7,11 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalTime;
 import org.jspecify.annotations.Nullable;
 
-/** Wire DTOs for the unified alert-rule feature. Snake_case on the wire, camelCase in Java. */
 public final class AlertDtos {
 
     private AlertDtos() {}
 
-    /** A unified alert rule as exposed to the UI / API (both grains; grain fields are null when N/A). */
+    /** Grain fields are null when N/A. */
     public record AlertRuleView(
             String id,
             @JsonProperty("rule_type") String ruleType,
@@ -32,8 +31,7 @@ public final class AlertDtos {
             @JsonProperty("last_evaluated_at") @Nullable String lastEvaluatedAt,
             @JsonProperty("last_digest_at") @Nullable String lastDigestAt,
             @JsonProperty("last_brief_at") @Nullable String lastBriefAt,
-            /** Cadence and quiet hours. Null for every rule type other than {@code case_opened}, whose
-             *  schedule is a policy rather than a cron. */
+            /** Null for every rule type other than {@code case_opened}. */
             @Nullable PolicyView policy,
             @JsonProperty("created_at") String createdAt,
             @JsonProperty("updated_at") String updatedAt) {
@@ -69,14 +67,9 @@ public final class AlertDtos {
     }
 
     /**
-     * When a partner is willing to hear from us — launch requirement I3, and the whole configuration
-     * surface of a case-opened rule.
-     *
-     * @param cadenceSeconds minimum spacing between deliveries; 0 is every heartbeat.
-     * @param quietFrom local {@code HH:mm} the quiet window opens, or null for none.
-     * @param quietTo local {@code HH:mm} it closes. A window that wraps midnight is normal.
-     * @param quietZone the IANA zone the two times are read in. Required with a window, because "22:00"
-     *     with no zone is not a time.
+     * @param cadenceSeconds minimum spacing between deliveries; 0 is every heartbeat @param quietTo a window that wraps
+     * midnight is normal @param quietZone the IANA zone; required with a window, because a time with no zone is not a
+     * time
      */
     public record PolicyView(
             @JsonProperty("cadence_seconds") long cadenceSeconds,
@@ -96,17 +89,8 @@ public final class AlertDtos {
     }
 
     /**
-     * Create or replace an alert rule.
-     *
-     * <p>Named {@code UpsertAlertRuleRequest} rather than {@code UpsertRuleRequest} because springdoc keys
-     * the OpenAPI component map on the SIMPLE class name: the redaction slice has a request record by that
-     * name too, and the two collapsed into one component — so the generated client typed this endpoint's
-     * body as a redaction rule (a regex and a replacement string) and typed nothing here at all.
-     *
-     * <p>{@code ruleType} selects the grain: {@code threshold} needs
-     * {@code classifier_id} + {@code basis} (+ optional {@code threshold}/{@code window_seconds}); {@code digest}
-     * / {@code brief} need a cron ({@code digest} defaults to the server cron; {@code brief} requires
-     * {@code brief_cron}).
+     * Not {@code UpsertRuleRequest}: springdoc keys components on the simple class name, and the redaction slice's
+     * record of that name collapsed with this one in the generated client.
      */
     public record UpsertAlertRuleRequest(
             @JsonProperty("rule_type") @NotBlank String ruleType,
@@ -121,8 +105,7 @@ public final class AlertDtos {
             @Nullable String severity,
             @JsonProperty("digest_cron") @Nullable String digestCron,
             @JsonProperty("brief_cron") @Nullable String briefCron,
-            /** Cadence and quiet hours, for a {@code case_opened} rule. Absent means every tick, no
-             *  quiet window — which is what a partner gets until they say otherwise. */
+            /** Absent means every tick and no quiet window. */
             @Nullable PolicyView policy) {
 
         public int thresholdOrDefault() {
@@ -133,8 +116,10 @@ public final class AlertDtos {
             return windowSeconds == null ? 86_400 : windowSeconds; // default rolling 24h
         }
 
-        /** The request's policy, or {@link AlertPolicy#IMMEDIATE} — through the same lenient parser the
-         *  stored blob goes through, so a policy cannot mean one thing saved and another read back. */
+        /**
+         * Through the same lenient parser as the stored blob, so a policy cannot mean one thing saved and another read
+         * back.
+         */
         public AlertPolicy policyOrDefault() {
             PolicyView p = policy;
             return p == null
@@ -143,14 +128,12 @@ public final class AlertDtos {
         }
     }
 
-    /** Toggle the hard enable/disable lifecycle of a rule. */
     public record SetEnabledRequest(@NotNull Boolean enabled) {}
 
-    /** Soft-mute a rule until an ISO instant; null/absent clears the snooze. */
+    /** Null clears the snooze. */
     public record SnoozeRequest(
             @JsonProperty("snoozed_until") @Nullable String snoozedUntil) {}
 
-    /** A fired-alert record. */
     public record AlertEventView(
             String id,
             @JsonProperty("alert_rule_id") String alertRuleId,
