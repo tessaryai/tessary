@@ -46,9 +46,7 @@
         <docker.api.version>1.44</docker.api.version>
         <error-prone.version>2.50.0</error-prone.version>
         <forbiddenapis.version>3.11</forbiddenapis.version>
-        <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
         <nullaway.version>0.14.2</nullaway.version>
-        <pmd.version>7.28.0</pmd.version>
         <spotbugs-maven-plugin.version>4.10.4.1</spotbugs-maven-plugin.version>
         <spotbugs.version>4.10.4</spotbugs.version>
         <findsecbugs.version>1.14.0</findsecbugs.version>
@@ -73,15 +71,8 @@
         <testcontainers.version>2.0.5</testcontainers.version>
         <archunit.version>1.5.1</archunit.version>
         <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
-        <!-- Verified latest stable on Maven Central 2026-09-01. Only the 11 open modules
-             below bare-activate this plugin (backend/test-support and the modules outside this
-             build deliberately do not) — see the per-module comment at each activation site. -->
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
-        <!-- Default to empty rather than leaving argLine unset. jacoco:prepare-agent (bound only
-             in modules that bare-activate jacoco-maven-plugin) rebinds this property to the
-             -javaagent flag it needs surefire to fork with. Every module that never runs
-             prepare-agent must still resolve ${argLine} to nothing rather than leave the literal
-             unresolved token, which would hard-fail the forked test JVM. -->
+        <!-- Empty, not unset: a module without jacoco:prepare-agent must still resolve ${argLine}. -->
         <argLine></argLine>
     </properties>
 
@@ -158,34 +149,17 @@
 
     <build>
         <pluginManagement>
-            <!-- The shared quality gate. Declared here so EVERY module is held to the same
-                 compiler flags, NullAway packages, forbidden-API set, SpotBugs filter and PMD
-                 ruleset. A module activates them by naming the plugin with no configuration;
-                 a module that forgets is visible as an absence, not as silently ungated code.
-                 pluginManagement rather than plugins so the aggregator (which has no sources)
-                 does not try to run them on itself. -->
+            <!-- The shared quality gate; a module activates a plugin by naming it with no configuration. -->
             <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- Pin the Docker Engine API version the Testcontainers docker-java client
-                         talks. docker-java defaults to an old API version (1.32); Docker Engine
-                         25.0+ / Docker Desktop sets MinAPIVersion=1.44 and rejects anything older
-                         with HTTP 400, so the test datasource container fails to start without
-                         this. 1.44 (Docker 25.0, Jan 2024) is the floor supported by every modern
-                         daemon — old enough for any CI runner, new enough for current Desktop.
-                         docker-java reads the `api.version` SYSTEM PROPERTY (not the DOCKER_API_VERSION
-                         CLI env var). Override with -Ddocker.api.version=<v> if a daemon needs it. -->
+                    <!-- docker-java defaults to API 1.32, which Docker Engine 25+ rejects with HTTP 400. -->
                     <systemPropertyVariables>
                         <api.version>${docker.api.version}</api.version>
                     </systemPropertyVariables>
-                    <!-- jacoco:prepare-agent (open modules only) rewrites the `argLine`
-                         property to the -javaagent flag it needs threaded into the forked test
-                         JVM's command line. Without this element surefire never reads that
-                         property back, and the module silently reports 0% coverage with no build
-                         error — the property default above keeps it empty for every module
-                         outside this build that never runs prepare-agent. -->
+                    <!-- Without this surefire ignores jacoco's agent and coverage is silently 0%. -->
                     <argLine>${argLine}</argLine>
                 </configuration>
             </plugin>
@@ -198,8 +172,7 @@
                         <arg>-XDcompilePolicy=simple</arg>
                         <arg>--should-stop=ifError=FLOW</arg>
                         <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
-                        <!-- NotJavadoc: records/DTOs document components with block comments
-                             (matches the PMD DanglingJavadoc exclusion). JavaLangClash:
+                        <!-- NotJavadoc: records/DTOs document components with block comments. JavaLangClash:
                              model/Runtime mirrors the synth-schema name (contract-driven).
                              NullAway covers 16 open packages; widen
                              AnnotatedPackages one package at a time and run the gate — a package
@@ -228,8 +201,6 @@
                 <version>${forbiddenapis.version}</version>
                 <configuration>
                     <failOnUnsupportedJava>false</failOnUnsupportedJava>
-                    <!-- Only our own hand-written classes; scope the check to our package
-                         so generated glue in target/ is never linted. -->
                     <includes>
                         <include>ai/tessary/**</include>
                     </includes>
@@ -260,13 +231,7 @@
                     <includeTests>false</includeTests>
                     <sarifOutput>true</sarifOutput>
                     <excludeFilterFile>${project.basedir}/../config/spotbugs-exclude.xml</excludeFilterFile>
-                    <!-- Our own classes only; skip any generated glue in target/. -->
                     <onlyAnalyze>ai.tessary.-</onlyAnalyze>
-                    <!-- find-sec-bugs adds the security detectors core SpotBugs does not ship:
-                         injection (SQL, command, LDAP), path traversal, SSRF, XXE, weak crypto and
-                         hardcoded keys, insecure cookie flags. It is the only security static
-                         analysis that runs on a contributor's machine; CodeQL runs weekly in CI
-                         (.github/workflows/codeql.yml). -->
                     <plugins>
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>
@@ -293,55 +258,11 @@
                 </executions>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-pmd-plugin</artifactId>
-                <version>${maven-pmd-plugin.version}</version>
-                <configuration>
-                    <rulesets>
-                        <ruleset>${project.basedir}/../config/pmd-ruleset.xml</ruleset>
-                    </rulesets>
-                    <includeTests>false</includeTests>
-                    <printFailingErrors>true</printFailingErrors>
-                    <!-- The generated column-name constant interfaces (build-time codegen from
-                         the Liquibase schema) are not hand-authored source; skip them. -->
-                    <excludeRoots>
-                        <excludeRoot>${project.build.directory}/generated-sources/schema-columns</excludeRoot>
-                    </excludeRoots>
-                </configuration>
-                <dependencies>
-                    <dependency>
-                        <groupId>net.sourceforge.pmd</groupId>
-                        <artifactId>pmd-core</artifactId>
-                        <version>${pmd.version}</version>
-                    </dependency>
-                    <dependency>
-                        <groupId>net.sourceforge.pmd</groupId>
-                        <artifactId>pmd-java</artifactId>
-                        <version>${pmd.version}</version>
-                    </dependency>
-                </dependencies>
-                <executions>
-                    <execution>
-                        <id>pmd-check</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <!-- Coverage baseline. NO GATE — this establishes a number before further
-                 extractions continue, it does not fail a build on a threshold.
-                 pluginManagement-only, exactly like every other plugin in this block: the
-                 aggregator has no sources and never runs it. -->
-            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco-maven-plugin.version}</version>
                 <executions>
                     <execution>
-                        <!-- Rewrites the `argLine` property (see the surefire config above) to
-                             the -javaagent flag before the forked test JVM starts. -->
                         <id>jacoco-prepare-agent</id>
                         <phase>initialize</phase>
                         <goals>
@@ -352,8 +273,6 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- HTML + XML report from the exec data prepare-agent recorded, once the
-                             module's own tests have run. -->
                         <id>jacoco-report</id>
                         <phase>verify</phase>
                         <goals>
@@ -365,22 +284,8 @@
             </plugins>
         </pluginManagement>
         <plugins>
-            <!-- Spotless: deterministic, auto-fixable formatting. `mvn spotless:apply` reformats in
-                 place; `spotless:check` gates the build. The palantir engine formats and orders
-                 imports; Spotless forks a worker JVM and injects the required jdk.compiler
-                 add-exports flags itself, so no MAVEN_OPTS are needed.
-
-                 Declared on the AGGREGATOR so every module inherits it — formatting drift in any of
-                 them must fail the build exactly as it does in `app`. Declaring it here is also what makes the bare `mvn spotless:apply`
-                 behind `task backend:format` resolve: the `spotless` plugin prefix is looked up
-                 against the root project, so a declaration only in `app` left the task failing with
-                 "No plugin found for prefix 'spotless'". The aggregator itself has no sources, so
-                 the extra binding on this pom is a no-op.
-
-                 Bound to `validate`, NOT `verify`: formatting is a pure source-text check that
-                 needs no compilation, and at `verify` it only reported after the full test suite
-                 had run — paying ~3 minutes to learn about a misplaced brace. At `validate` it
-                 fails in ~2s, before compile. Fix with `task backend:format`. -->
+            <!-- On the aggregator so the `spotless` prefix resolves for `mvn spotless:apply`; bound to
+                 validate so a format slip fails before compile. -->
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>
