@@ -3,10 +3,9 @@
 // Regenerates the checked-in route manifest (src/routeManifest.generated.json) from the <Route>
 // elements in src/App.tsx: a written route manifest covering every open route.
 //
-// WHY AN AST WALK, NOT A GREP. App.tsx has 69 `path=` occurrences and roughly a tenth of them put
-// the attribute on its own line, separated from the opening `<Route` tag (the multi-line
-// `settings/import`, `settings/providers`, `settings/mcp-tokens` and `settings/api-keys` routes,
-// plus `graders`, `graders/:graderId`, `review`, `review/:queueId`, `observer` and the
+// WHY AN AST WALK, NOT A GREP. Some App.tsx routes put the `path=` attribute on its own line,
+// separated from the opening `<Route` tag (the multi-line `settings/providers`,
+// `settings/notifications`, `settings/mcp-tokens` and `settings/api-keys` routes, and the
 // `/orgs/:orgSlug/projects/:projectSlug/*` route). A line-based extractor risks silently missing
 // exactly the routes this manifest exists to catch, so this walks the real AST via the TypeScript
 // compiler API (already a devDependency — no new package).
@@ -25,8 +24,7 @@
 // NOT a navigable URL for most entries: App.tsx nests two <Routes> trees (the top-level one in
 // App(), and ProjectShell()'s own, reached only by component *reference* — <ProjectShell/> — not
 // JSX nesting), and inside the `settings` layout a third level of relative paths. Two leaves even
-// collide as raw `path` ("sources" is both a top-level project redirect AND a settings view;
-// literal `path="*"` appears twice, for two unrelated catch-alls) — `fullPath` is what a smoke
+// collide as raw `path` (literal `path="*"` appears twice, for two unrelated catch-alls) — `fullPath` is what a smoke
 // test can actually navigate to and what disambiguates those collisions.
 //
 // Usage:
@@ -57,7 +55,7 @@ const PROJECT_SHELL_BASE = PROJECT_SHELL_ROUTE.replace(/\/\*$/, "");
 // anchor to append a real leaf to. Exactly two routes in App.tsx are this shape (App.tsx's
 // settings-layout fallback and its project-level fallback, both kind:view, both resolving to
 // ToProjectSegment) and both need a synthetic leaf substituted or they are never render-proofed —
-// see the header note. A route whose path merely ENDS in "/*" (e.g. "pipeline/*", or the top-level
+// see the header note. A route whose path merely ENDS in "/*" (the top-level
 // "/orgs/:orgSlug/projects/:projectSlug/*" that mounts ProjectShell) is left untouched: react-router
 // matches a literal "*" character in a navigated URL against its own wildcard segment just fine, so
 // the raw path is already a valid fullPath and substituting it would collide it with the *inner*
@@ -122,7 +120,7 @@ function extractRoutes(sourceFile) {
         if (pathAttr?.initializer && ts.isStringLiteral(pathAttr.initializer)) {
           const segment = pathAttr.initializer.text;
           // Only a BARE "*" gets the sentinel — see CATCH_ALL_SENTINEL's comment for why a
-          // trailing "/*" on a longer path (e.g. "pipeline/*") is left as-is.
+          // trailing "/*" on a longer path is left as-is.
           const stackSegment = segment === "*" ? CATCH_ALL_SENTINEL : segment;
           const childStack = [...stack, stackSegment];
           routes.push({ path: segment, kind: kindOf(attrs), fullPath: buildFullPath(childStack) });

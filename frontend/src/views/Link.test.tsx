@@ -148,7 +148,7 @@ describe("confirming", () => {
     expect(currentLocation()).toBe("/link?code=WXYZ-1234");
 
     await act(() => vi.advanceTimersByTimeAsync(2000));
-    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/overview"));
+    await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default/triage"));
   });
 
   it("opens the project anyway if the graders never arrive", async () => {
@@ -161,7 +161,7 @@ describe("confirming", () => {
     expect(currentLocation()).toBe("/link?code=WXYZ-1234");
     await act(() => vi.advanceTimersByTimeAsync(1_000));
 
-    expect(currentLocation()).toBe("/orgs/acme/projects/default/overview");
+    expect(currentLocation()).toBe("/orgs/acme/projects/default/triage");
   });
 
   it("says why a confirm was refused and stays on the form", async () => {

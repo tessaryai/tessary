@@ -3,17 +3,7 @@ import { PageBody, PageHeader } from "../ui";
 import { useTenant } from "../tenant/TenantContext";
 import { CONCEPTS, type ConceptId } from "../concepts";
 
-const ORDER: ConceptId[] = [
-  "pipeline",
-  "call_site",
-  "chain",
-  "failure_mode",
-  "invariant",
-  "pack",
-  "taxonomy",
-  "trace_source",
-  "severity",
-];
+const ORDER: ConceptId[] = ["pipeline", "call_site", "trace_source"];
 
 export function Concepts() {
   const { orgSlug, projectSlug } = useTenant();
@@ -21,7 +11,7 @@ export function Concepts() {
     <PageBody size="narrow">
       <PageHeader
         breadcrumb={[
-          { label: projectSlug, to: `/orgs/${orgSlug}/projects/${projectSlug}/overview` },
+          { label: projectSlug, to: `/orgs/${orgSlug}/projects/${projectSlug}/triage` },
           { label: "Concepts" },
         ]}
         eyebrow="Reference"

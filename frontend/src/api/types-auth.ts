@@ -212,7 +212,7 @@ export interface RevokeKeyResponse {
 }
 
 /** Audit-log action wire values (lowercase of CREATED|ROTATED|REVOKED). */
-export type AuditAction = "created" | "rotated" | "revoked";
+type AuditAction = "created" | "rotated" | "revoked";
 
 /** One audit-trail entry; newest-first, capped at 200 rows server-side. */
 export interface ApiKeyAudit {
