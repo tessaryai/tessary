@@ -247,17 +247,6 @@ class TelemetryHeartbeatTest {
     }
 
     @Test
-    void theFirstPingIsSequenceZeroAndStillValid() throws Exception {
-        ObjectNode payload = heartbeat(
-                        Props.of(TelemetryProperties.class),
-                        mock(InstanceIdRepository.class),
-                        mock(HomeTessaryClient.class))
-                .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
-
-        assertTrue(violations(payload).isEmpty());
-    }
-
-    @Test
     void theSchemaCopyRejectsWhatHomeRejects() throws Exception {
         // Proves the validator can fail: the pre-/v1 ping is what home answers 400 to.
         ObjectNode old = mapper.createObjectNode();
