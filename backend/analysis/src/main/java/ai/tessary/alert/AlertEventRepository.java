@@ -8,14 +8,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Fired-alert storage. Idempotent insert: {@code ON CONFLICT DO NOTHING} against whichever natural key
- * applies, so re-evaluating across N backends (or a reclaim) is a first-write-wins no-op — the
- * multi-instance double-fire guard.
- *
- * <p>There are two such keys, and {@code 0052} made them partial indexes rather than one constraint:
- * {@code (alert_rule_id, window_start)} for a window-shaped rule, {@code (alert_rule_id, case_id)} for a
- * case-opened one. Both are caught by the bare {@code ON CONFLICT DO NOTHING} — deliberately with no
- * conflict target, so neither key is named here and a third would not edit this insert.
+ * Fired-alert storage. A bare {@code ON CONFLICT DO NOTHING}, with no conflict target, covers both partial unique keys
+ * ({@code (alert_rule_id, window_start)} and {@code (alert_rule_id, case_id)}), so N backends fire once and a third key
+ * would not need this insert edited.
  */
 @Repository
 public class AlertEventRepository {
@@ -29,7 +24,7 @@ public class AlertEventRepository {
         this.jdbc = jdbc;
     }
 
-    /** Idempotent insert. Returns {@code true} when a new firing was written (first write wins). */
+    /** Returns {@code true} when a new firing was written. */
     public boolean insertIfAbsent(AlertEventRow row) {
         return jdbc.sql("""
             INSERT INTO alert_event (id, project_id, alert_rule_id, classifier_id, rule_type, basis, state,

@@ -13,10 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Serves the project's pipeline content. Post-Phase-D the response envelope
- * is simpler — no on-disk path, no parse errors, no repair notes — but the
- * shape is kept stable so the frontend's {@code PipelineEnvelope} interface
- * still parses.
+ * Serves the project's pipeline. The envelope keeps its old shape so the frontend's {@code PipelineEnvelope} still
+ * parses.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/pipeline")
@@ -40,10 +38,7 @@ public class PipelineController {
         return ApiResponse.ok(envelope(r.project().id()));
     }
 
-    /**
-     * Reload is a no-op since the DB is the source of truth. We keep it 200-OK
-     * so any UI "Reload pipeline" button doesn't break.
-     */
+    /** A no-op, since the DB is the source of truth; stays 200 so a reload button does not break. */
     @PostMapping("/reload")
     public ApiResponse<PipelineEnvelope> reload(
             TenantContext ctx, @PathVariable String orgSlug, @PathVariable String projectSlug) {

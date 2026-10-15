@@ -15,12 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The project's version timeline — one entry per commit SHA a pipeline sync has
- * attached to.
- *
- * <p>{@code /lineage/{nodeKind}/{nodeId}} is the resolution surface of the commit-SHA lineage
- * spine: a substrate node resolves to the exact commit it belongs to (see
- * {@link CommitLineageService}).
+ * The project's version timeline, one entry per synced commit SHA. {@code /lineage/{nodeKind}/{nodeId}} resolves a
+ * substrate node to its commit ({@link CommitLineageService}).
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/versions")
@@ -54,7 +50,6 @@ public class ProjectVersionController {
         return ApiResponse.ok(service.get(r.project().id(), commitSha));
     }
 
-    /** Resolve any lineage node to the project version (commit SHA) that caused it. */
     @GetMapping("/lineage/{nodeKind}/{nodeId}")
     public ApiResponse<ProjectVersionView> lineage(
             TenantContext ctx,

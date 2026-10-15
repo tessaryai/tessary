@@ -5,14 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * One row of the top-level {@code invariant_coverage} block in pipeline.yaml
- * (evals plugin output_format.md). For each implicit invariant, lists which
- * call sites appear to enforce it and which likely don't — the "don't" list
- * is the high-signal input for Layer B failure-mode hypothesis.
- *
- * <p>Distinct from {@link ImplicitInvariant} (which is the invariant itself)
- * and from the platform's per-invariant coverage stats. This record mirrors
- * exactly what the synthesizer emits.
+ * One {@code invariant_coverage} row from pipeline.yaml: which call sites enforce an implicit invariant and which
+ * likely don't, the high-signal input for failure-mode hypotheses. Mirrors the synthesizer's output exactly.
  */
 public record InvariantCoverage(
         String invariant,

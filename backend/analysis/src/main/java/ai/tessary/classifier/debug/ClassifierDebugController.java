@@ -12,14 +12,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Debug surface for one classifier — everything the production {@code ClassifierController} already
- * computes or persists but does not expose. Mounted standalone (not on {@code ClassifierController})
- * on purpose: this endpoint is ops tooling, not a product surface, so it carries no entitlement and
- * removing the feature later is deleting this package, not editing the production controller.
- *
- * <p>Gated by {@link Permission#ORG_MANAGE} — the same permission {@code
- * ClassifierController#setEnabled}/{@code #setMode} already require, so this needs no new permission
- * tier of its own.
+ * Ops-only debug surface, mounted apart from {@code ClassifierController} so removing it is deleting a package. Carries
+ * no entitlement; gated by {@link Permission#ORG_MANAGE}.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgSlug}/projects/{projectSlug}/classifiers/{id}/debug")

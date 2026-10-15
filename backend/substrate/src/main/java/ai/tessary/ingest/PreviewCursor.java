@@ -6,13 +6,9 @@ import java.util.Base64;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Opaque, resumable preview cursor. Provider page cursors are page-granular, but
- * a preview page returns an exact number of <em>whole traces</em>, so resuming may
- * have to re-fetch the page that straddles the trace boundary and skip the traces
- * already emitted from it. This pairs the provider's page token with that skip count.
- *
- * <p>Wire form is URL-safe base64 of {@code "<skip>\n<token>"} so the frontend treats
- * it as one opaque string. {@code token == null} means "from the beginning".
+ * Resumable preview cursor. A preview page holds whole traces while provider cursors are page-granular, so this pairs
+ * the page token with how many traces of that page were already emitted. Wire form is URL-safe base64 of
+ * {@code "<skip>\n<token>"}; null token means from the beginning.
  */
 public record PreviewCursor(@Nullable String token, int skip) {
 

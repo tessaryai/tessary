@@ -5,12 +5,8 @@ import java.math.BigDecimal;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One model's USD rates, per million tokens, one field per billable bucket.
- *
- * <p>A null bucket means the model is <b>never billed</b> for it and contributes zero to a cost. That is
- * not the same as holding no rate for the model at all, which is the absence of a {@code model_price} row
- * and yields an unpriced span. Keeping the two distinguishable is the whole reason every field here is
- * nullable rather than defaulted to zero.
+ * One model's USD rates per million tokens. A null bucket means never billed for it, which differs from having no
+ * {@code model_price} row (an unpriced span); that is why the fields are nullable rather than zero.
  */
 public record ModelRates(
         @Nullable BigDecimal inputPerMtok,

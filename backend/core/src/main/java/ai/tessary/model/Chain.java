@@ -6,14 +6,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * One chain detected across call sites (evals plugin schema v0.3).
- *
- * <p>{@code detectionMethod} is one of {@code trace_confirmed | ensemble |
- * state_mediated | sequential_composition}. {@code ensemble} is new in v0.3:
- * N sibling spans under the same parent with identical normalized prompts
- * (self-consistency / voting). The combined unit is one chain whose
- * {@code callSiteIds} is the same id repeated; the runner grades disagreement
- * across the siblings using {@code ensembleSpanIds}.
+ * One chain across call sites (evals plugin v0.3). {@code ensemble} is N sibling spans with identical normalized
+ * prompts: one chain repeating the same call-site id, graded on disagreement across {@code ensembleSpanIds}.
  */
 public record Chain(
         String id,

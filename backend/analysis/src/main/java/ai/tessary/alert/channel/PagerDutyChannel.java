@@ -13,14 +13,8 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * PagerDuty connector via the Events API v2 ({@code POST
- * https://events.pagerduty.com/v2/enqueue}). Triggers an incident with the configured
- * {@code routing_key}. The fired alert's stable {@link AlertPayload#dedupKey} is sent as PagerDuty's
- * {@code dedup_key} so a re-delivered event coalesces onto the same incident instead of opening a new
- * one — PagerDuty's own dedup mechanism layered on top of our at-most-once delivery-attempt guard.
- *
- * <p>Config JSON shape: {@code {"routing_key": "…"}}. The endpoint is a fixed public PagerDuty host
- * (still SSRF-guarded on every send via {@link ChannelHttp}, which it passes).
+ * Triggers a PagerDuty incident via Events API v2. {@link AlertPayload#dedupKey} goes out as {@code dedup_key}, so a
+ * re-delivery coalesces onto one incident. Config: {@code {"routing_key"}}.
  */
 @Component
 public class PagerDutyChannel implements AlertChannel {
@@ -62,7 +56,7 @@ public class PagerDutyChannel implements AlertChannel {
         try {
             HttpResponse<String> res = ChannelHttp.post(url, Map.of(), json);
             int code = res.statusCode();
-            // PagerDuty returns 202 Accepted on a successful enqueue.
+            // 202 Accepted on success.
             return code / 100 == 2
                     ? DeliveryResult.success(code)
                     : DeliveryResult.failure(code, "pagerduty returned HTTP " + code);

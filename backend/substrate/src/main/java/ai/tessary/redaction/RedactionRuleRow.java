@@ -2,13 +2,9 @@
 package ai.tessary.redaction;
 
 /**
- * One persisted PII redaction rule, a row of {@code pii_redaction_rule}.
- * A rule is a named regex {@code pattern} whose matches are replaced by {@code replacement} on the
- * substrate write path before persistence, so no unredacted PII reaches the agent-native substrate.
- *
- * <p>{@code builtIn} marks the platform-seeded starter rules (email/phone/SSN/credit-card) a project may
- * disable but not edit or delete. {@code sortOrder} makes redaction deterministic — rules apply
- * lowest-first, so a project can layer a broad rule after a specific one.
+ * One {@code pii_redaction_rule} row, applied on the write path before persistence. {@code builtIn} rules may be
+ * disabled but not edited or deleted. Rules apply lowest {@code sortOrder} first, so a broad rule can follow a specific
+ * one.
  */
 public record RedactionRuleRow(
         String id,

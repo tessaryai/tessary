@@ -7,19 +7,13 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Leaves a method, constructor or class out of the JaCoCo coverage report. JaCoCo drops any element
- * carrying an annotation whose simple name contains {@code Generated} (class retention or wider),
- * which is the only reason the name says so.
- *
- * <p>Only for code no test can reach: a catch the compiler requires but the platform cannot throw,
- * or code whose only job is a call to an external service (GitHub, E2B, WorkOS, an LLM provider,
- * the GPU model). Keep the annotated element as small as possible, and say which case it is in
- * {@link #value()}.
+ * Excludes an element from JaCoCo's report; the name contains {@code Generated} only because that is what JaCoCo keys
+ * on. Only for code no test can reach (a required catch the platform cannot throw, or a bare call to an external
+ * service), kept as small as possible.
  */
 @Retention(RetentionPolicy.CLASS)
 @Target({ElementType.METHOD, ElementType.CONSTRUCTOR, ElementType.TYPE})
 public @interface ExcludeFromJacocoGeneratedReport {
 
-    /** Why no test reaches this code. */
     String value();
 }

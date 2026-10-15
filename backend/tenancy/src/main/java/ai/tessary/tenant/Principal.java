@@ -5,11 +5,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A principal — any actor known to the platform, generalised from the old {@code app_user}. A
- * principal is a {@code human} (a WorkOS-backed user), an {@code agent}, or a {@code service}; the latter
- * two have no WorkOS id or email and may name a {@code parentPrincipalId} (the human/org they act on
- * behalf of). {@code status} gates access ({@code active}/{@code suspended}); {@code attributes} is a
- * free-form JSON bag. Snake_case on the wire, camelCase in Java.
+ * Any actor: {@code human} (WorkOS-backed), {@code agent} or {@code service}. The latter two have no WorkOS id or email
+ * and may name the {@code parentPrincipalId} they act for. {@code status} gates access.
  */
 public record Principal(
         String id,
@@ -24,7 +21,6 @@ public record Principal(
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("last_seen_at") @Nullable String lastSeenAt) {
 
-    /** The kind of actor a principal represents. */
     public static final class Kind {
         private Kind() {}
 
@@ -33,7 +29,6 @@ public record Principal(
         public static final String SERVICE = "service";
     }
 
-    /** Whether a principal may act. */
     public static final class Status {
         private Status() {}
 
@@ -41,7 +36,7 @@ public record Principal(
         public static final String SUSPENDED = "suspended";
     }
 
-    /** Build a {@code human} principal (a WorkOS-backed user) with active status and no parent. */
+    /** Active, with no parent. */
     public static Principal human(
             String id,
             String workosUserId,

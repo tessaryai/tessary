@@ -14,15 +14,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 /**
- * Shapes a call site whose share of frustrated sessions rose above its learned rate into a case, from the
- * CUSUM {@link FrustrationRateService} replays through tool_error's engine.
- *
- * <p><b>No triage gate.</b> {@link FrustrationRateService} rules each spell's finding positive when it files it
- * and calls {@link CaseOpener} in the same transaction, the path a high-confidence secret leak takes: the claim is
- * a rate the numbers on the finding already settle, and there is no Layer-2 lane for it.
- *
- * <p>One case per call site, the finding's own scope ({@code CauseKey.frustration}). Its severity is the squash
- * the two other rate detectors on the same engine use, so three kinds of case rank on one scale.
+ * Shapes a call site whose frustrated-session share rose above its learned rate into a case, from the CUSUM
+ * {@link FrustrationRateService} replays. No triage gate: the service rules each finding positive and calls
+ * {@link CaseOpener} itself, since the numbers settle the claim. Severity uses the shared rate squash.
  */
 @Component
 public class FrustrationCaseSource implements CaseSource {
