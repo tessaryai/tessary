@@ -4,7 +4,7 @@ package ai.tessary.config;
 import java.util.Locale;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Which {@code IngestSpool} buffers accepted batches: {@code memory} (the default: bounded by
@@ -12,95 +12,43 @@ import org.springframework.stereotype.Component;
  * persisted). {@code max-lag-ms} is the age of the oldest unprocessed batch past which
  * the {@code /actuator/health/ingest} group (and the top-level status) reports DOWN; {@code 0} disables the check.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.ingest.spool")
-public class IngestSpoolProperties {
+public record IngestSpoolProperties(
+        @DefaultValue("memory") String mode,
+        @DefaultValue("300000") long maxLagMs,
+        @DefaultValue Kafka kafka) {
 
     public static final Set<String> MODES = Set.of("memory", "kafka");
 
-    private long maxLagMs = 300_000;
-    private Kafka kafka = new Kafka();
-
     /** The Kafka-API spool's settings, read only when {@code mode=kafka}. */
-    public static class Kafka {
-        private String bootstrapServers = "redpanda:9092";
-        private String topic = "tessary.ingest";
-        private String deadLetterTopic = "tessary.ingest.dead-letter";
-        private String groupId = "tessary-ingest";
-        private int partitions = 8;
-        private int consumers = 4;
-        private short replicationFactor = 1;
-        private long maxMessageBytes = 8L * 1024 * 1024;
-        private long publishTimeoutMs = 10_000;
+    public record Kafka(
+            @DefaultValue("redpanda:9092") String bootstrapServers,
+            @DefaultValue("tessary.ingest") String topic,
+            @DefaultValue("tessary.ingest.dead-letter") String deadLetterTopic,
+            @DefaultValue("tessary-ingest") String groupId,
+            @DefaultValue("8") int partitions,
 
-        public String getBootstrapServers() {
-            return bootstrapServers;
-        }
+            /** Drainer threads, each with its own consumer in the group; the broker spreads the partitions across them. */
+            @DefaultValue("4") int consumers,
 
-        public void setBootstrapServers(String v) {
-            this.bootstrapServers = v;
-        }
+            /**
+             * Copies the broker keeps of every accepted batch, applied when the spool creates its topics.
+             *
+             * <p>1 suits the single-node Redpanda the {@code kafka} compose profile bundles, and is the only
+             * value that broker can satisfy. Point {@code bootstrap-servers} at a multi-broker cluster and
+             * this is what decides whether the mode's promise — accepted means persisted — survives losing a
+             * broker: at 1, {@code acks=all} is one machine's disk, and that machine's failure loses batches
+             * the edge already answered 200 to. 3 is the usual choice there.
+             */
+            @DefaultValue("1") short replicationFactor,
+            @DefaultValue("8388608") long maxMessageBytes,
+            @DefaultValue("10000") long publishTimeoutMs) {
 
-        public String getTopic() {
-            return topic;
-        }
-
-        public void setTopic(String v) {
-            this.topic = v;
-        }
-
-        public String getDeadLetterTopic() {
-            return deadLetterTopic;
-        }
-
-        public void setDeadLetterTopic(String v) {
-            this.deadLetterTopic = v;
-        }
-
-        public String getGroupId() {
-            return groupId;
-        }
-
-        public void setGroupId(String v) {
-            this.groupId = v;
-        }
-
-        public int getPartitions() {
-            return partitions;
-        }
-
-        /** Drainer threads, each with its own consumer in the group; the broker spreads the partitions across them. */
-        public int getConsumers() {
-            return consumers;
-        }
-
-        public void setConsumers(int v) {
-            this.consumers = v;
-        }
-
-        public void setPartitions(int v) {
-            this.partitions = v;
-        }
-
-        /**
-         * Copies the broker keeps of every accepted batch, applied when the spool creates its topics.
-         *
-         * <p>1 suits the single-node Redpanda the {@code kafka} compose profile bundles, and is the only
-         * value that broker can satisfy. Point {@code bootstrap-servers} at a multi-broker cluster and
-         * this is what decides whether the mode's promise — accepted means persisted — survives losing a
-         * broker: at 1, {@code acks=all} is one machine's disk, and that machine's failure loses batches
-         * the edge already answered 200 to. 3 is the usual choice there.
-         */
-        public short getReplicationFactor() {
-            return replicationFactor;
-        }
-
-        public void setReplicationFactor(short v) {
-            if (v < 1) {
+        public Kafka {
+            if (replicationFactor < 1) {
                 throw new IllegalArgumentException(
-                        "tessary.ingest.spool.kafka.replication-factor must be at least 1, not " + v);
+                        "tessary.ingest.spool.kafka.replication-factor must be at least 1, not " + replicationFactor);
             }
-            this.replicationFactor = v;
         }
 
         /**
@@ -116,45 +64,14 @@ public class IngestSpoolProperties {
         public short minInSyncReplicas() {
             return replicationFactor > 1 ? (short) 2 : (short) 1;
         }
-
-        public long getMaxMessageBytes() {
-            return maxMessageBytes;
-        }
-
-        public void setMaxMessageBytes(long v) {
-            this.maxMessageBytes = v;
-        }
-
-        public long getPublishTimeoutMs() {
-            return publishTimeoutMs;
-        }
-
-        public void setPublishTimeoutMs(long v) {
-            this.publishTimeoutMs = v;
-        }
     }
 
-    public Kafka getKafka() {
-        return kafka;
-    }
-
-    public void setKafka(Kafka kafka) {
-        this.kafka = kafka;
-    }
-
-    public void setMode(String mode) {
-        String m = mode == null ? "" : mode.trim().toLowerCase(Locale.ROOT);
+    public IngestSpoolProperties {
+        String m = mode.trim().toLowerCase(Locale.ROOT);
         if (!MODES.contains(m)) {
             throw new IllegalArgumentException(
                     "tessary.ingest.spool.mode must be one of " + MODES + ", not '" + mode + "'");
         }
-    }
-
-    public long getMaxLagMs() {
-        return maxLagMs;
-    }
-
-    public void setMaxLagMs(long maxLagMs) {
-        this.maxLagMs = maxLagMs;
+        mode = m;
     }
 }

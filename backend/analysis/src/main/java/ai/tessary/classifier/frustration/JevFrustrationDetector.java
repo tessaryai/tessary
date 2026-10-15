@@ -145,7 +145,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
 
     @Override
     public int maxPageRetries() {
-        return Math.max(0, props.getPageRetries());
+        return Math.max(0, props.pageRetries());
     }
 
     /** One turn that was eligible and sent, and what came of it. */
@@ -228,7 +228,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
         Optional<ClassifierPause> pause = classifiers.findPause(projectId, signal.id());
         boolean recheck = pause.isPresent();
         if (pause.isPresent()) {
-            Duration wait = Duration.ofSeconds(Math.max(0, props.getCredentialRetrySeconds()));
+            Duration wait = Duration.ofSeconds(Math.max(0, props.credentialRetrySeconds()));
             if (pause.get().pausedAt().plus(wait).isAfter(now)) {
                 return new Page(Status.PAUSED, pause.get().reason(), 0, List.of(), threshold, scorerVersion);
             }
@@ -316,7 +316,7 @@ public class JevFrustrationDetector implements PagedDetector<JevFrustrationDetec
                     .add(i);
         }
         List<@Nullable Outcome> outcomes = new ArrayList<>(Collections.nCopies(eligible.size(), null));
-        Semaphore permits = new Semaphore(Math.max(1, props.getConcurrency()));
+        Semaphore permits = new Semaphore(Math.max(1, props.concurrency()));
         // Set before an interrupted call releases its permit, so the release carries it to the next holder.
         AtomicBoolean stopped = new AtomicBoolean();
         List<Future<?>> futures = new ArrayList<>(bySession.size());

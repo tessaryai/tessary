@@ -2,7 +2,7 @@
 package ai.tessary.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Tuning for the async usage-metering worker, bound from {@code tessary.metering.*}.
@@ -15,45 +15,19 @@ import org.springframework.stereotype.Component;
  * instances and the next heartbeat picks up the remainder. {@link #leaseSeconds} is the reclaim window
  * for a job a worker took but died before finishing.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.metering")
-public class MeteringProperties {
+public record MeteringProperties(
 
-    /**
-     * Whether to produce the {@code storage} usage unit. Default off: storage is a point-in-time
-     * snapshot whose billable basis (rows vs bytes vs retention-days) is a product decision tied to
-     * billing, so the slot stays reserved until a deployment ratifies the basis and opts in. The other
-     * four units always meter.
-     */
-    private boolean storageEnabled = false;
+        /**
+         * Whether to produce the {@code storage} usage unit. Default off: storage is a point-in-time
+         * snapshot whose billable basis (rows vs bytes vs retention-days) is a product decision tied to
+         * billing, so the slot stays reserved until a deployment ratifies the basis and opts in. The other
+         * four units always meter.
+         */
+        @DefaultValue("false") boolean storageEnabled,
 
-    /** How many per-(project, bucket) jobs one heartbeat claims; SKIP-LOCKED spreads the rest. */
-    private int claimBatch = 50;
+        /** How many per-(project, bucket) jobs one heartbeat claims; SKIP-LOCKED spreads the rest. */
+        @DefaultValue("50") int claimBatch,
 
-    /** Reclaim window (seconds) for a job a worker claimed but did not finish (e.g. crashed mid-aggregation). */
-    private long leaseSeconds = 600;
-
-    public boolean isStorageEnabled() {
-        return storageEnabled;
-    }
-
-    public void setStorageEnabled(boolean v) {
-        this.storageEnabled = v;
-    }
-
-    public int getClaimBatch() {
-        return claimBatch;
-    }
-
-    public void setClaimBatch(int v) {
-        this.claimBatch = v;
-    }
-
-    public long getLeaseSeconds() {
-        return leaseSeconds;
-    }
-
-    public void setLeaseSeconds(long v) {
-        this.leaseSeconds = v;
-    }
-}
+        /** Reclaim window (seconds) for a job a worker claimed but did not finish (e.g. crashed mid-aggregation). */
+        @DefaultValue("600") long leaseSeconds) {}

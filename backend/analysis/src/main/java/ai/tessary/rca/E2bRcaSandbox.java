@@ -199,8 +199,8 @@ public class E2bRcaSandbox implements RcaSandbox {
      *  RCA at run time; say so once at startup instead. */
     @PostConstruct
     void warnIfUnconfigured() {
-        Agentic cfg = props.getAgentic();
-        if (cfg.getLauncherUrl() == null || cfg.getLauncherUrl().isBlank()) {
+        Agentic cfg = props.agentic();
+        if (cfg.launcherUrl() == null || cfg.launcherUrl().isBlank()) {
             log.warn(
                     Markers.OPS,
                     "rca agentic.launcher-url is unset — every RCA will fail (the sandboxed agent is the only"
@@ -210,8 +210,8 @@ public class E2bRcaSandbox implements RcaSandbox {
 
     @Override
     public SandboxRun run(SandboxRequest req) {
-        Agentic cfg = props.getAgentic();
-        if (cfg.getLauncherUrl() == null || cfg.getLauncherUrl().isBlank()) {
+        Agentic cfg = props.agentic();
+        if (cfg.launcherUrl() == null || cfg.launcherUrl().isBlank()) {
             throw new TessaryException(RcaError.UPSTREAM_FAILED, "agentic RCA launcher URL not configured");
         }
         // Standalone Langfuse trace (no run parent) — same attribute set as the observer's agentic span.
@@ -265,10 +265,10 @@ public class E2bRcaSandbox implements RcaSandbox {
             ObjectNode mcp = body.putObject("mcp");
             mcp.put("url", req.mcpUrl());
             mcp.put("token", req.mcpToken());
-            body.put("timeout_ms", cfg.getTimeoutMs());
+            body.put("timeout_ms", cfg.timeoutMs());
             // A soft turn cap — see Agentic#maxTurns's javadoc for the mechanism and the
             // (not yet live-verified) caveat.
-            body.put("max_turns", cfg.getMaxTurns());
+            body.put("max_turns", cfg.maxTurns());
 
             // Host anchor for the per-turn child spans (in-VM timestamps are offsets from startMs).
             Instant runStart = Instant.now();
@@ -339,14 +339,14 @@ public class E2bRcaSandbox implements RcaSandbox {
     }
 
     String postLauncher(String bodyJson, Agentic cfg, String projectId, String reportId) {
-        HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.getLauncherUrl() + "/rca"))
+        HttpRequest httpReq = HttpRequest.newBuilder(URI.create(cfg.launcherUrl() + "/rca"))
                 .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
-                .header("Authorization", "Bearer " + cfg.getLauncherApiKey())
+                .header("Authorization", "Bearer " + cfg.launcherApiKey())
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 // The launcher does clone + a multi-turn agent run within timeout_ms;
                 // give the HTTP wait headroom beyond the sandbox wall clock.
-                .timeout(Duration.ofMillis(cfg.getTimeoutMs() + 30_000))
+                .timeout(Duration.ofMillis(cfg.timeoutMs() + 30_000))
                 .build();
         HttpResponse<String> resp;
         try {
@@ -364,14 +364,14 @@ public class E2bRcaSandbox implements RcaSandbox {
             log.error(
                     Markers.OPS,
                     "rca launcher unreachable launcherUrl={} timedOut={} cause={}",
-                    cfg.getLauncherUrl(),
+                    cfg.launcherUrl(),
                     timedOut,
                     e.getClass().getSimpleName(),
                     e);
             throw new TessaryException(
                     RcaError.LAUNCHER_UNREACHABLE,
                     e,
-                    cfg.getLauncherUrl()
+                    cfg.launcherUrl()
                             + (timedOut ? " (timed out)" : " (" + e.getClass().getSimpleName() + ")"));
         }
         if (resp.statusCode() / 100 != 2) {
@@ -385,7 +385,7 @@ public class E2bRcaSandbox implements RcaSandbox {
             log.error(
                     Markers.OPS,
                     "rca launcher rejected the run launcherUrl={} status={}{}",
-                    cfg.getLauncherUrl(),
+                    cfg.launcherUrl(),
                     resp.statusCode(),
                     diag.isBlank() ? "" : " " + diag);
             // F1: book what the run spent before it failed (a launcher outage carries no usage —

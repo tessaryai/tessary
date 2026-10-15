@@ -20,15 +20,14 @@ import ai.tessary.tenant.OrgMembership;
 import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -47,11 +46,10 @@ class BehaviorTriageEngineTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     private static ClassifierProperties props() {
-        ClassifierProperties p = new ClassifierProperties();
-        p.setTriageMcpBaseUrl("https://app.tessary.ai");
+        ClassifierProperties p = Props.of(ClassifierProperties.class, "triage-mcp-base-url", "https://app.tessary.ai");
         // Default is already "e2b" (ClassifierProperties#triageSandbox), asserted explicitly so this
         // test fails loudly if that default ever drifts.
-        assertEquals("e2b", p.getTriageSandbox());
+        assertEquals("e2b", p.triageSandbox());
         return p;
     }
 
@@ -128,8 +126,12 @@ class BehaviorTriageEngineTest {
     /** A sandbox key nothing registered refuses to boot, rather than failing every finding's run later. */
     @Test
     void anUnregisteredSandboxKeyRefusesToBoot() {
-        ClassifierProperties props = props();
-        props.setTriageSandbox("firecracker");
+        ClassifierProperties props = Props.of(
+                ClassifierProperties.class,
+                "triage-mcp-base-url",
+                "https://app.tessary.ai",
+                "triage-sandbox",
+                "firecracker");
 
         assertThrows(
                 IllegalStateException.class,
@@ -142,11 +144,9 @@ class BehaviorTriageEngineTest {
      * incomplete before any key is minted or sandbox booted.
      */
     @ParameterizedTest
-    @NullSource
-    @ValueSource(strings = {" "})
-    void anUnsetMcpDoorIsAnIncompleteRun(@Nullable String mcpBase) {
-        ClassifierProperties props = props();
-        props.setTriageMcpBaseUrl(mcpBase);
+    @ValueSource(strings = {"", " "})
+    void anUnsetMcpDoorIsAnIncompleteRun(String mcpBase) {
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "triage-mcp-base-url", mcpBase);
 
         TessaryException e = assertThrows(
                 TessaryException.class,
@@ -263,7 +263,7 @@ class BehaviorTriageEngineTest {
         return new BehaviorTriageEngine(
                 List.of(sandbox),
                 props,
-                new ObserverProperties(),
+                Props.of(ObserverProperties.class),
                 apiKeys,
                 projects(),
                 memberships,

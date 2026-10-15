@@ -99,7 +99,7 @@ public class OtlpIngestService {
      * {@code 503 + Retry-After} (HTTP) or {@code UNAVAILABLE} (gRPC).
      */
     public boolean shouldRefuse() {
-        double threshold = substrateProps.getRefuseAboveQueueFraction();
+        double threshold = substrateProps.refuseAboveQueueFraction();
         if (threshold <= 0 || threshold >= 1) return false;
         if (substrateWriter.queueBytesUsedFraction() < threshold) return false;
         refusedBatches.incrementAndGet();
@@ -143,7 +143,7 @@ public class OtlpIngestService {
 
         int accepted = entries.size();
         int rejected = 0;
-        int max = Math.max(0, props.getMaxSpansPerRequest());
+        int max = Math.max(0, props.maxSpansPerRequest());
         if (accepted > max) {
             rejected = accepted - max;
             entries = entries.subList(0, max);

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.config.SlackProperties;
 import ai.tessary.testsupport.LoopbackHttpStub;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -26,15 +27,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 class SlackDeliveryTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private final SlackProperties props = new SlackProperties();
+    private SlackProperties props;
 
     private LoopbackHttpStub adapter;
 
     @BeforeEach
     void startAdapter() throws IOException {
         adapter = LoopbackHttpStub.answering(0, "");
-        props.setBaseUrl(adapter.baseUrl());
-        props.setServiceKey("svc-key");
+        props = Props.of(SlackProperties.class, "base-url", adapter.baseUrl(), "service-key", "svc-key");
     }
 
     @AfterEach
@@ -78,7 +78,12 @@ class SlackDeliveryTest {
     @Test
     void anUnreachableAdapterIsAFailureNotAThrow() throws IOException {
         try (ServerSocket closed = new ServerSocket(0, 0, InetAddress.getLoopbackAddress())) {
-            props.setBaseUrl("http://127.0.0.1:" + closed.getLocalPort());
+            props = Props.of(
+                    SlackProperties.class,
+                    "base-url",
+                    "http://127.0.0.1:" + closed.getLocalPort(),
+                    "service-key",
+                    "svc-key");
         }
 
         DeliveryResult result = new SlackDelivery(props, mapper).sendToWebhook("https://hooks.slack.com/x", "t");

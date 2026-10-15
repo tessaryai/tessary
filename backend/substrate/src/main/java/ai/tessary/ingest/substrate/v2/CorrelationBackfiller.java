@@ -85,7 +85,7 @@ public class CorrelationBackfiller {
     /** Run one pass synchronously and report what it did — the seam the starvation test drives. */
     public Pass runOnce() {
         Instant started = Instant.now();
-        int limit = props.getResolverBatchSize();
+        int limit = props.resolverBatchSize();
         Pass pass = new Pass(spans.backfillCorrelation(limit), spans.markCorrelationNone(limit));
         if (pass.total() > 0) {
             StructuredLog.info(log, Markers.OPS, "substrate.correlation.backfilled")

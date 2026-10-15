@@ -16,6 +16,7 @@ import ai.tessary.config.SubstrateProperties;
 import ai.tessary.ingest.substrate.SubstrateWriter;
 import ai.tessary.open.errors.IngestError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 import java.nio.charset.StandardCharsets;
@@ -47,10 +48,9 @@ class OtlpTraceControllerTest {
             new TenantContext("user-1", null, "org-1", "proj-http", "member", "tok-1");
 
     private OtlpIngestService ingest() {
-        SubstrateProperties substrate = new SubstrateProperties();
-        substrate.setRefuseAboveQueueFraction(0.8);
+        SubstrateProperties substrate = Props.of(SubstrateProperties.class, "refuse-above-queue-fraction", 0.8);
         return new OtlpIngestService(
-                new OtlpReceiverProperties(),
+                Props.of(OtlpReceiverProperties.class),
                 substrate,
                 substrateWriter,
                 new OtlpSpanMapper(new ObjectMapper()),
@@ -61,7 +61,7 @@ class OtlpTraceControllerTest {
     void aPushWhileTheBufferIsUnderPressureIsRefusedRetryableBeforeItsBodyIsDecoded() {
         when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.9);
         OtlpIngestService ingest = ingest();
-        OtlpTraceController controller = new OtlpTraceController(new OtlpReceiverProperties(), ingest);
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest);
         // Not a protobuf message: decoding it would throw OTLP_MALFORMED_BODY, so a 503 proves the gate ran first.
         byte[] undecodable = "not a protobuf body".getBytes(StandardCharsets.UTF_8);
 
@@ -78,7 +78,7 @@ class OtlpTraceControllerTest {
     void aPushWhileTheBufferHasRoomIsAccepted() {
         when(substrateWriter.queueBytesUsedFraction()).thenReturn(0.5);
         when(substrateWriter.enqueue(eq("proj-http"), any())).thenReturn(true);
-        OtlpTraceController controller = new OtlpTraceController(new OtlpReceiverProperties(), ingest());
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
         ResponseEntity<byte[]> response = controller.export(
                 WRITE_TOKEN, ExportTraceServiceRequest.getDefaultInstance().toByteArray());
@@ -88,8 +88,8 @@ class OtlpTraceControllerTest {
 
     @Test
     void aGrpcOnlyDeploymentServesNoHttpRoute() {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
-        props.setTransport(OtlpReceiverProperties.Transport.GRPC);
+        OtlpReceiverProperties props =
+                Props.of(OtlpReceiverProperties.class, "transport", OtlpReceiverProperties.Transport.GRPC);
         OtlpTraceController controller = new OtlpTraceController(props, ingest());
 
         TessaryException e = assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, new byte[0]));
@@ -108,7 +108,7 @@ class OtlpTraceControllerTest {
     @ParameterizedTest
     @MethodSource("callersWithoutAProjectScopedToken")
     void aPushWithoutAProjectScopedTokenIsRefused(TenantContext caller) {
-        OtlpTraceController controller = new OtlpTraceController(new OtlpReceiverProperties(), ingest());
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
         TessaryException e = assertThrows(TessaryException.class, () -> controller.export(caller, new byte[0]));
         assertEquals(IngestError.OTLP_TOKEN_REQUIRED, e.error());
@@ -117,8 +117,7 @@ class OtlpTraceControllerTest {
 
     @Test
     void aBodyOverTheByteCapIsRefusedBeforeItIsDecoded() {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
-        props.setMaxBodyBytes(4);
+        OtlpReceiverProperties props = Props.of(OtlpReceiverProperties.class, "max-body-bytes", 4);
         OtlpTraceController controller = new OtlpTraceController(props, ingest());
 
         TessaryException e = assertThrows(TessaryException.class, () -> controller.export(WRITE_TOKEN, new byte[5]));
@@ -129,7 +128,7 @@ class OtlpTraceControllerTest {
     @Test
     void aBatchShedAtEnqueueIsRefusedRetryable() {
         when(substrateWriter.enqueue(eq("proj-http"), any())).thenReturn(false);
-        OtlpTraceController controller = new OtlpTraceController(new OtlpReceiverProperties(), ingest());
+        OtlpTraceController controller = new OtlpTraceController(Props.of(OtlpReceiverProperties.class), ingest());
 
         ResponseEntity<byte[]> response = controller.export(
                 WRITE_TOKEN, ExportTraceServiceRequest.getDefaultInstance().toByteArray());

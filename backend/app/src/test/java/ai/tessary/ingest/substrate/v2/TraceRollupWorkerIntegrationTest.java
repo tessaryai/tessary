@@ -15,6 +15,7 @@ import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.storage.TraceV2Row;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -307,10 +308,8 @@ class TraceRollupWorkerIntegrationTest {
     }
 
     private SubstrateProperties props(int graceSeconds) {
-        SubstrateProperties p = new SubstrateProperties();
-        p.setRollupClaimLimit(500);
-        p.setRollupReapGraceSeconds(graceSeconds);
-        return p;
+        return Props.of(
+                SubstrateProperties.class, "rollup-claim-limit", 500, "rollup-reap-grace-seconds", graceSeconds);
     }
 
     private TraceV2Row require(String id) {

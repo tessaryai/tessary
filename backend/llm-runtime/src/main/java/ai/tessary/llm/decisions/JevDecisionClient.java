@@ -93,8 +93,8 @@ public class JevDecisionClient implements DecisionClient {
                 pricer,
                 accountant,
                 Thread::sleep,
-                Duration.ofMillis(Math.max(1, props.getTimeoutMs())),
-                props.getMaxAttempts());
+                Duration.ofMillis(Math.max(1, props.timeoutMs())),
+                props.maxAttempts());
     }
 
     JevDecisionClient(

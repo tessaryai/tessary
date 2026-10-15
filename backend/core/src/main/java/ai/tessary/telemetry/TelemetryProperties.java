@@ -2,7 +2,7 @@
 package ai.tessary.telemetry;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * The single opt-out switch for the {@code home.tessary.ai} telemetry ping, bound from
@@ -18,18 +18,8 @@ import org.springframework.stereotype.Component;
  * telemetry is off is itself an observable side effect the contract's "zero outbound calls, including
  * DNS resolution, when disabled" language forecloses.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.telemetry")
-public class TelemetryProperties {
+public record TelemetryProperties(
 
-    /** Master switch (on by default). When false, nothing in this package runs. */
-    private boolean enabled = true;
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-}
+        /** Master switch (on by default). When false, nothing in this package runs. */
+        @DefaultValue("true") boolean enabled) {}

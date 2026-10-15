@@ -21,6 +21,7 @@ import ai.tessary.pricing.PriceBook;
 import ai.tessary.pricing.PriceBookFetcher;
 import ai.tessary.pricing.PriceBookRepository;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.MetricRollupRepository;
 import ai.tessary.usage.UsageUnit;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -92,14 +93,13 @@ class TelemetryHeartbeatTest {
     }
 
     /**
-     * {@link TelemetryProperties#isEnabled()} is checked before anything in {@link TelemetryHeartbeat#tick()}: no DB
+     * {@link TelemetryProperties#enabled()} is checked before anything in {@link TelemetryHeartbeat#tick()}: no DB
      * read (even {@link InstanceIdRepository}, which writes on first call) and no HTTP client. This makes telemetry-
      * contract.md §3's "zero outbound calls when disabled" true.
      */
     @Test
     void disabledTelemetryTouchesNothingDownstream() {
-        TelemetryProperties props = new TelemetryProperties();
-        props.setEnabled(false);
+        TelemetryProperties props = Props.of(TelemetryProperties.class, "enabled", false);
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
@@ -122,7 +122,7 @@ class TelemetryHeartbeatTest {
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenReturn(204);
 
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(client).postJson(eq("/v1/ping"), body.capture());
@@ -151,7 +151,7 @@ class TelemetryHeartbeatTest {
         InstanceIdRepository instanceIds = mock(InstanceIdRepository.class);
         when(instanceIds.get()).thenThrow(new IllegalStateException("database unavailable"));
 
-        heartbeat(new TelemetryProperties(), instanceIds, mock(HomeTessaryClient.class))
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, mock(HomeTessaryClient.class))
                 .tick();
 
         verify(fetcher).refresh();
@@ -163,8 +163,9 @@ class TelemetryHeartbeatTest {
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         when(fetcher.refresh()).thenThrow(new IllegalStateException("boom"));
 
-        assertDoesNotThrow(() -> heartbeat(new TelemetryProperties(), instanceIds, mock(HomeTessaryClient.class))
-                .tick());
+        assertDoesNotThrow(
+                () -> heartbeat(Props.of(TelemetryProperties.class), instanceIds, mock(HomeTessaryClient.class))
+                        .tick());
     }
 
     @Test
@@ -188,14 +189,15 @@ class TelemetryHeartbeatTest {
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenReturn(204);
 
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(client).postJson(eq("/v1/ping"), body.capture());
         JsonNode sent = mapper.readTree(body.getValue());
         assertFalse(sent.has("counts"));
         assertTrue(violations(sent).isEmpty());
-        assertNull(heartbeat(new TelemetryProperties(), instanceIds, client).counts());
+        assertNull(heartbeat(Props.of(TelemetryProperties.class), instanceIds, client)
+                .counts());
     }
 
     @Test
@@ -205,7 +207,7 @@ class TelemetryHeartbeatTest {
         when(instanceIds.get()).thenReturn(INSTANCE_ID);
         HomeTessaryClient client = mock(HomeTessaryClient.class);
 
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
         InOrder order = inOrder(instanceIds);
         order.verify(instanceIds).get();
@@ -215,7 +217,9 @@ class TelemetryHeartbeatTest {
     @Test
     void sendsOnlyTheFieldsTheContractNames() {
         ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
+                        Props.of(TelemetryProperties.class),
+                        mock(InstanceIdRepository.class),
+                        mock(HomeTessaryClient.class))
                 .payload(
                         INSTANCE_ID,
                         0,
@@ -245,7 +249,9 @@ class TelemetryHeartbeatTest {
     @Test
     void theFirstPingIsSequenceZeroAndStillValid() throws Exception {
         ObjectNode payload = heartbeat(
-                        new TelemetryProperties(), mock(InstanceIdRepository.class), mock(HomeTessaryClient.class))
+                        Props.of(TelemetryProperties.class),
+                        mock(InstanceIdRepository.class),
+                        mock(HomeTessaryClient.class))
                 .payload(INSTANCE_ID, 0, Instant.parse("2026-09-13T07:20:00Z"), null, null);
 
         assertTrue(violations(payload).isEmpty());
@@ -280,7 +286,7 @@ class TelemetryHeartbeatTest {
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenThrow(new InterruptedException("shutdown"));
 
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
         assertTrue(Thread.interrupted(), "the interrupt must survive the tick (and is cleared here)");
         verify(fetcher).refresh();
@@ -295,7 +301,7 @@ class TelemetryHeartbeatTest {
         HomeTessaryClient client = mock(HomeTessaryClient.class);
         when(client.postJson(anyString(), anyString())).thenReturn(204);
 
-        heartbeat(new TelemetryProperties(), instanceIds, client).tick();
+        heartbeat(Props.of(TelemetryProperties.class), instanceIds, client).tick();
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(client).postJson(eq("/v1/ping"), body.capture());

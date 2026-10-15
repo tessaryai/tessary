@@ -133,7 +133,7 @@ public class CaseAlertEvaluator {
      * message is written to stand on its own either way — that is what I2 asks for.
      */
     private @Nullable String caseUrl(OpenedCase c) {
-        String base = props.getAppBaseUrl();
+        String base = props.appBaseUrl();
         if (base == null || base.isBlank()) return null;
         String trimmed = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
         return trimmed + "/orgs/" + encode(c.orgSlug()) + "/projects/" + encode(c.projectSlug()) + "/cases/"

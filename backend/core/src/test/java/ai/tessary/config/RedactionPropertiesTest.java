@@ -4,7 +4,7 @@ package ai.tessary.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.util.Map;
+import ai.tessary.testsupport.Props;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.core.NestedExceptionUtils;
@@ -17,10 +17,8 @@ class RedactionPropertiesTest {
      */
     @Test
     void aParallelismBelowOneFailsTheBindNamingTheKey() {
-        BindException ex = assertThrows(
-                BindException.class,
-                () -> ConfigBinding.bind(
-                        "tessary.redaction", new RedactionProperties(), Map.of("tessary.redaction.parallelism", "0")));
+        BindException ex =
+                assertThrows(BindException.class, () -> Props.of(RedactionProperties.class, "parallelism", 0));
 
         assertEquals(
                 "tessary.redaction.parallelism must be at least 1, not 0",

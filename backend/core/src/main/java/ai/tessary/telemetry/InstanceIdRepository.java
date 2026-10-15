@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * persisted locally"). Postgres, not a file on disk — see the {@code 0014-telemetry-install.sql}
  * changeset header for why a file would silently stop persisting on this stack's deploy shape.
  *
- * <p>Callers must gate on {@link TelemetryProperties#isEnabled()} BEFORE calling {@link #get}: reading
+ * <p>Callers must gate on {@link TelemetryProperties#enabled()} BEFORE calling {@link #get}: reading
  * or minting an instance id is itself a side effect (a write, the first time), and the contract's §3
  * "zero outbound calls when disabled" language is about the whole telemetry subsystem staying inert, not
  * merely about not sending — see {@code TelemetryHeartbeat}, the one caller.

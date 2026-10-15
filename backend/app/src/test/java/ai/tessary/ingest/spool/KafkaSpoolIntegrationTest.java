@@ -11,6 +11,7 @@ import ai.tessary.ingest.substrate.SubstrateWriter;
 import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
 import ai.tessary.redaction.RedactionService;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -180,15 +181,23 @@ class KafkaSpoolIntegrationTest {
     }
 
     private long drainWith(int drainers, String[] pids, String tag) throws Exception {
-        IngestSpoolProperties own = new IngestSpoolProperties();
-        own.setMode("kafka");
-        own.getKafka().setBootstrapServers(REDPANDA.getBootstrapServers());
-        own.getKafka().setTopic("tessary.ingest." + tag);
-        own.getKafka().setDeadLetterTopic("tessary.ingest." + tag + ".dead-letter");
-        own.getKafka().setGroupId("tessary-ingest-" + tag);
-        own.getKafka().setPartitions(8);
-        own.getKafka().setConsumers(drainers);
-        try (KafkaSpool spool = new KafkaSpool(own.getKafka(), mapper)) {
+        IngestSpoolProperties own = Props.of(
+                IngestSpoolProperties.class,
+                "mode",
+                "kafka",
+                "kafka.bootstrap-servers",
+                REDPANDA.getBootstrapServers(),
+                "kafka.topic",
+                "tessary.ingest." + tag,
+                "kafka.dead-letter-topic",
+                "tessary.ingest." + tag + ".dead-letter",
+                "kafka.group-id",
+                "tessary-ingest-" + tag,
+                "kafka.partitions",
+                8,
+                "kafka.consumers",
+                drainers);
+        try (KafkaSpool spool = new KafkaSpool(own.kafka(), mapper)) {
             SubstrateWriter w = new SubstrateWriter(spans, substrateProps, redaction, spool);
             try {
                 assertEquals(drainers, w.drainerCount());
@@ -197,7 +206,7 @@ class KafkaSpoolIntegrationTest {
                 // delays (one per member, seconds each), not the drain.
                 for (String pid : pids) assertTrue(w.enqueue(pid, batch("ks-" + tag + "-warm-" + pid, 1)));
                 assertTrue(w.awaitIdle(Duration.ofSeconds(60)), tag + " warm-up drained");
-                awaitStableGroup(own.getKafka().getGroupId(), drainers);
+                awaitStableGroup(own.kafka().groupId(), drainers);
                 long start = System.nanoTime();
                 for (int b = 0; b < 10; b++) {
                     for (String pid : pids) assertTrue(w.enqueue(pid, batch("ks-" + tag + "-" + pid + "-" + b, 25)));
@@ -242,12 +251,17 @@ class KafkaSpoolIntegrationTest {
     void aConsumerThatDiesBeforeItsAckIsRedeliveredTheSameRecord() {
         // A spool of its own, on its own topic and group, so this thread is the consumer's owner and the
         // live drainer cannot race the claims.
-        IngestSpoolProperties.Kafka own = new IngestSpoolProperties.Kafka();
-        own.setBootstrapServers(REDPANDA.getBootstrapServers());
-        own.setTopic("tessary.ingest.replay");
-        own.setDeadLetterTopic("tessary.ingest.replay.dead-letter");
-        own.setGroupId("tessary-ingest-replay");
-        own.setPartitions(1);
+        IngestSpoolProperties.Kafka own = kafka(
+                "bootstrap-servers",
+                REDPANDA.getBootstrapServers(),
+                "topic",
+                "tessary.ingest.replay",
+                "dead-letter-topic",
+                "tessary.ingest.replay.dead-letter",
+                "group-id",
+                "tessary-ingest-replay",
+                "partitions",
+                1);
         try (KafkaSpool spool = new KafkaSpool(own, mapper)) {
             assertEquals(IngestSpool.Admission.ACCEPTED, spool.append("p", batch("kc-1", 3)));
             IngestSpool.Claimed first = claimOne(spool);
@@ -284,9 +298,7 @@ class KafkaSpoolIntegrationTest {
 
     @Test
     void anUnreachableBrokerShedsInsteadOfAcknowledging() {
-        IngestSpoolProperties.Kafka bogus = new IngestSpoolProperties.Kafka();
-        bogus.setBootstrapServers("127.0.0.1:1");
-        bogus.setPublishTimeoutMs(1_500);
+        IngestSpoolProperties.Kafka bogus = kafka("bootstrap-servers", "127.0.0.1:1", "publish-timeout-ms", 1_500);
         try (KafkaSpool down = new KafkaSpool(bogus, mapper)) {
             assertEquals(IngestSpool.Admission.SHED, down.append("p", batch("kd-1", 1)), "no ack, no 200");
         }
@@ -294,13 +306,24 @@ class KafkaSpoolIntegrationTest {
 
     @Test
     void anOversizeBatchIsRefusedForTheProducerToSplit() {
-        IngestSpoolProperties.Kafka tiny = new IngestSpoolProperties.Kafka();
-        tiny.setBootstrapServers(REDPANDA.getBootstrapServers());
-        tiny.setMaxMessageBytes(256);
-        tiny.setTopic("tessary.ingest.tiny");
-        tiny.setDeadLetterTopic("tessary.ingest.tiny.dead-letter");
+        IngestSpoolProperties.Kafka tiny = kafka(
+                "bootstrap-servers",
+                REDPANDA.getBootstrapServers(),
+                "max-message-bytes",
+                256,
+                "topic",
+                "tessary.ingest.tiny",
+                "dead-letter-topic",
+                "tessary.ingest.tiny.dead-letter");
         try (KafkaSpool small = new KafkaSpool(tiny, mapper)) {
             assertEquals(IngestSpool.Admission.OVERSIZE, small.append("p", batch("ko-1", 10)));
         }
+    }
+
+    /** {@code keyValues} are relative to {@code tessary.ingest.spool.kafka}. */
+    private static IngestSpoolProperties.Kafka kafka(Object... keyValues) {
+        Object[] prefixed = keyValues.clone();
+        for (int i = 0; i < prefixed.length; i += 2) prefixed[i] = "kafka." + prefixed[i];
+        return Props.of(IngestSpoolProperties.class, prefixed).kafka();
     }
 }

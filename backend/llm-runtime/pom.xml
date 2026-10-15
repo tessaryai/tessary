@@ -129,6 +129,12 @@
             <artifactId>opentelemetry-sdk-common</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>ai.tessary</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

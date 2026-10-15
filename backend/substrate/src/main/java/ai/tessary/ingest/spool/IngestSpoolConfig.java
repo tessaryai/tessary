@@ -21,6 +21,6 @@ public class IngestSpoolConfig {
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(name = "tessary.ingest.spool.mode", havingValue = "kafka")
     public IngestSpool kafkaSpool(IngestSpoolProperties props, ObjectMapper mapper) {
-        return new KafkaSpool(props.getKafka(), mapper);
+        return new KafkaSpool(props.kafka(), mapper);
     }
 }

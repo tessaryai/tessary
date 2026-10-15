@@ -4,7 +4,7 @@ package ai.tessary.auth;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.tessary.config.PlatformStaffProperties;
-import java.util.List;
+import ai.tessary.testsupport.Props;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -20,8 +20,7 @@ class PlatformStaffTest {
             nullValues = "NULL",
             value = {"ops@tessary.ai, NULL, true", "someone@example.com, NULL, false", "ops@tessary.ai, tok_1, false"})
     void onlyAnAllowListedHumanSessionIsStaff(String email, @Nullable String mcpTokenId, boolean staff) {
-        PlatformStaffProperties props = new PlatformStaffProperties();
-        props.setStaffEmails(List.of("ops@tessary.ai"));
+        PlatformStaffProperties props = Props.of(PlatformStaffProperties.class, "staff-emails", "ops@tessary.ai");
 
         assertEquals(
                 staff,

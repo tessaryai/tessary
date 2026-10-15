@@ -94,8 +94,8 @@ public class TriageLauncherBreaker {
      */
     public void recordLauncherFailure(String why) {
         int runLength = consecutive.incrementAndGet();
-        if (runLength < props.getTriageBreakerFailures() || isOpen()) return;
-        long cooldown = props.getTriageBreakerCooldownSeconds();
+        if (runLength < props.triageBreakerFailures() || isOpen()) return;
+        long cooldown = props.triageBreakerCooldownSeconds();
         openUntil = Instant.now().plusSeconds(cooldown);
         reason = why;
         StructuredLog.error(log, Markers.OPS, "triage.breaker.opened")

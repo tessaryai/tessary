@@ -88,7 +88,7 @@ public class AgentRunService {
     /** Fail at boot when {@code tessary.agentrun.sandbox} names no registered driver. */
     @PostConstruct
     void validateSandboxConfig() {
-        String key = props.getSandbox();
+        String key = props.sandbox();
         if (!sandboxes.containsKey(key)) {
             throw new IllegalStateException("tessary.agentrun.sandbox='" + key
                     + "' is not a registered sandbox (known: " + sandboxes.keySet() + ")");
@@ -145,7 +145,7 @@ public class AgentRunService {
         ApiKeyService.Issued issued = apiKeys.issue(projectId, principal, keyName, KeyScope.ADMIN);
         try {
             Optional<Clone> clone = clone(projectId);
-            AgentRunSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.getSandbox()));
+            AgentRunSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.sandbox()));
             return sandbox.run(new AgentRunSandbox.Request(
                     projectId,
                     lane.wire(),
@@ -161,8 +161,8 @@ public class AgentRunService {
                     credential,
                     mcpUrl,
                     issued.plaintext(),
-                    props.getTimeoutMs(),
-                    props.getMaxTurns(),
+                    props.timeoutMs(),
+                    props.maxTurns(),
                     subject));
         } finally {
             revokeQuietly(issued.token().id(), projectId, lane, subject);
@@ -176,8 +176,8 @@ public class AgentRunService {
      * @throws TessaryException {@code AgentRunError.LAUNCHER_MISCONFIGURED} when both origins are unset
      */
     public String platformMcpUrl() {
-        String own = props.getMcpBaseUrl();
-        String rca = rcaProps.getAgentic().getMcpBaseUrl();
+        String own = props.mcpBaseUrl();
+        String rca = rcaProps.agentic().mcpBaseUrl();
         String origin = own != null && !own.isBlank() ? own : rca == null ? "" : rca;
         if (origin.isBlank()) {
             throw new TessaryException(

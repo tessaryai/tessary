@@ -127,7 +127,7 @@ public class BehaviorTriageEngine {
      */
     @PostConstruct
     void validateSandboxConfig() {
-        String key = props.getTriageSandbox();
+        String key = props.triageSandbox();
         if (!sandboxes.containsKey(key)) {
             throw new IllegalStateException("tessary.classifier.triage-sandbox='" + key
                     + "' is not a registered sandbox (known: " + sandboxes.keySet() + ")");
@@ -147,7 +147,7 @@ public class BehaviorTriageEngine {
      * the key must not outlive the sandbox.
      */
     public BehaviorTriageVerdict rule(String projectId, String findingId, Map<String, String> dossier, String prompt) {
-        String mcpBase = props.getTriageMcpBaseUrl();
+        String mcpBase = props.triageMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
             // Without the MCP door the agent cannot open a single row of the population it is auditing,
             // so throwing dead-letters the job as a visible misconfiguration rather than a silent
@@ -170,7 +170,7 @@ public class BehaviorTriageEngine {
                 apiKeys.issue(projectId, principal, "triage-" + findingId + " (system)", KeyScope.ADMIN);
         try {
             // validateSandboxConfig already refused to boot without this key registered.
-            TriageSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.getTriageSandbox()));
+            TriageSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.triageSandbox()));
             TriageSandbox.SandboxRequest req = new TriageSandbox.SandboxRequest(
                     projectId,
                     findingId,

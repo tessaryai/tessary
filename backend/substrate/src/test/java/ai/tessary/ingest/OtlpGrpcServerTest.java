@@ -14,6 +14,7 @@ import ai.tessary.ingest.otlp.OtlpGrpcTraceService;
 import ai.tessary.ingest.otlp.OtlpIngestService;
 import ai.tessary.ingest.otlp.OtlpSpanMapper;
 import ai.tessary.ingest.substrate.SubstrateWriter;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -36,14 +37,13 @@ class OtlpGrpcServerTest {
     }
 
     private OtlpGrpcServerConfig.OtlpGrpcServer server(Transport transport, int port) {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
-        props.setTransport(transport);
-        props.setGrpcPort(port);
+        OtlpReceiverProperties props =
+                Props.of(OtlpReceiverProperties.class, "transport", transport, "grpc-port", port);
         // Real collaborators: NettyServerBuilder.addService() binds the generated service descriptor, which a
         // plain mock cannot supply. The gate test never sends a request, so the substrate/auth are inert.
         OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
         OtlpIngestService ingest = new OtlpIngestService(
-                props, new SubstrateProperties(), mock(SubstrateWriter.class), mapper, projectId -> {});
+                props, Props.of(SubstrateProperties.class), mock(SubstrateWriter.class), mapper, projectId -> {});
         OtlpGrpcTraceService traceService = new OtlpGrpcTraceService(ingest);
         OtlpGrpcAuthInterceptor authInterceptor = new OtlpGrpcAuthInterceptor(mock(BearerTokenAuthenticator.class));
         return new OtlpGrpcServerConfig.OtlpGrpcServer(props, traceService, authInterceptor);
@@ -111,13 +111,16 @@ class OtlpGrpcServerTest {
             org.mockito.Mockito.when(auth.authenticate(org.mockito.ArgumentMatchers.anyString()))
                     .thenReturn(java.util.Optional.of(
                             new ai.tessary.auth.TenantContext("u", null, "org", "proj", "member", "tok")));
-            OtlpReceiverProperties props = new OtlpReceiverProperties();
-            props.setTransport(Transport.GRPC);
-            props.setGrpcPort(port);
+            OtlpReceiverProperties props =
+                    Props.of(OtlpReceiverProperties.class, "transport", Transport.GRPC, "grpc-port", port);
             server = new OtlpGrpcServerConfig.OtlpGrpcServer(
                     props,
                     new OtlpGrpcTraceService(new OtlpIngestService(
-                            props, new SubstrateProperties(), writer, new OtlpSpanMapper(new ObjectMapper()), p -> {})),
+                            props,
+                            Props.of(SubstrateProperties.class),
+                            writer,
+                            new OtlpSpanMapper(new ObjectMapper()),
+                            p -> {})),
                     new OtlpGrpcAuthInterceptor(auth));
             server.start();
 

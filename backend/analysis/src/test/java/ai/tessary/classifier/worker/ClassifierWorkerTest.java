@@ -35,6 +35,7 @@ import ai.tessary.classifier.substrate.SubstrateObservation;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.config.ClassifierProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -359,8 +360,7 @@ class ClassifierWorkerTest {
      */
     @Test
     void aPageWithNothingInScopeSendsNothingAndStillMovesTheCursor() {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setEncoderBatchSize(2);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "encoder-batch-size", 2);
         ClassifierWorker worker = worker(props, new ClassifierSweepRegistry(TestObjectProvider.of()));
         String kind = BuiltInDetector.Kind.GROUNDEDNESS;
         when(signals.findById(PROJECT, CLASSIFIER))
@@ -800,18 +800,16 @@ class ClassifierWorkerTest {
     }
 
     private ClassifierWorker worker(int pageSize) {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setBatchSize(pageSize);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "batch-size", pageSize);
         return worker(props, new ClassifierSweepRegistry(TestObjectProvider.of()));
     }
 
     private ClassifierWorker worker(ClassifierSweepRegistry sweeps) {
-        return worker(new ClassifierProperties(), sweeps);
+        return worker(Props.of(ClassifierProperties.class), sweeps);
     }
 
     private ClassifierWorker worker(int pageSize, ClassifierSweepRegistry sweeps) {
-        ClassifierProperties props = new ClassifierProperties();
-        props.setBatchSize(pageSize);
+        ClassifierProperties props = Props.of(ClassifierProperties.class, "batch-size", pageSize);
         return worker(props, sweeps);
     }
 

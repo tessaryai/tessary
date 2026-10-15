@@ -18,6 +18,7 @@ import ai.tessary.classifier.ClassifierRow;
 import ai.tessary.classifier.frustration.FrustrationShadowRepository.Backlog;
 import ai.tessary.classifier.frustration.FrustrationShadowRepository.ShadowRow;
 import ai.tessary.classifier.frustration.FrustrationShadowRepository.Summary;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.ConnectException;
@@ -49,12 +50,23 @@ class FrustrationShadowSweepTest {
     private final HttpClient http = mock(HttpClient.class);
     private final FrustrationShadowRepository shadows = mock(FrustrationShadowRepository.class);
     private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
-    private final FrustrationShadowProperties props = new FrustrationShadowProperties();
     private final List<ShadowRow> written = new ArrayList<>();
 
     private FrustrationShadowSweep sweep() {
-        props.setUrl("http://10.2.1.9:8000/");
-        props.setBatch(2);
+        return sweep("decider", "");
+    }
+
+    private FrustrationShadowSweep sweep(String model, String apiKey) {
+        FrustrationShadowProperties props = Props.of(
+                FrustrationShadowProperties.class,
+                "url",
+                "http://10.2.1.9:8000/",
+                "batch",
+                2,
+                "model",
+                model,
+                "api-key",
+                apiKey);
         when(shadows.summary()).thenReturn(new Summary(0, 0, 0, 0, 0));
         when(shadows.insert(any())).thenAnswer(inv -> written.add(inv.getArgument(0)));
         when(classifiers.findById(any(), any())).thenReturn(Optional.empty());
@@ -118,8 +130,13 @@ class FrustrationShadowSweepTest {
 
     @Test
     void doesNothingWithoutAUrl() {
-        FrustrationShadowSweep s =
-                new FrustrationShadowSweep(shadows, classifiers, props, new ObjectMapper(), http, Clock.systemUTC());
+        FrustrationShadowSweep s = new FrustrationShadowSweep(
+                shadows,
+                classifiers,
+                Props.of(FrustrationShadowProperties.class),
+                new ObjectMapper(),
+                http,
+                Clock.systemUTC());
         FrustrationShadowSweep.Run run = s.sweep();
         assertEquals(0, run.sent());
         verify(shadows, never()).backlog(anyInt());
@@ -168,9 +185,7 @@ class FrustrationShadowSweepTest {
 
     @Test
     void sendsTheStoredBodyWithOnlyTheModelReplaced() throws Exception {
-        FrustrationShadowSweep s = sweep();
-        props.setModel("eikos");
-        props.setApiKey("k");
+        FrustrationShadowSweep s = sweep("eikos", "k");
         when(shadows.backlog(2)).thenReturn(List.of(turn("a1", false))).thenReturn(List.of());
         when(http.<String>send(argThat(FrustrationShadowSweepTest::isHealth), any()))
                 .thenReturn(response(200, "{}"));

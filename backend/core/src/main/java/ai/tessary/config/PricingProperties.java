@@ -2,7 +2,7 @@
 package ai.tessary.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * The pricing switch, bound from {@code tessary.pricing.*}. Governs {@code pricing/PriceBookImporter} (the
@@ -12,18 +12,8 @@ import org.springframework.stereotype.Component;
  * per-environment prices. Rates are checked-in files imported into versioned rows, so a price change
  * arrives as a reviewed diff rather than as configuration somebody can differ between deployments.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.pricing")
-public class PricingProperties {
+public record PricingProperties(
 
-    /** Master switch. Off means no book is ever imported or fetched, so every model prices as unpriced. */
-    private boolean enabled = true;
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean v) {
-        this.enabled = v;
-    }
-}
+        /** Master switch. Off means no book is ever imported or fetched, so every model prices as unpriced. */
+        @DefaultValue("true") boolean enabled) {}

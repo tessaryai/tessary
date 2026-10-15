@@ -2,7 +2,7 @@
 package ai.tessary.storage;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Tuning for the traces search over span inputs and outputs, bound from {@code tessary.traces.search.*}.
@@ -12,32 +12,13 @@ import org.springframework.stereotype.Component;
  * traces finds a page sooner than listing every match would. {@link #timeoutMs} bounds every read that carries a
  * search, so a search that is too broad for either shape fails with a clear error instead of holding a connection.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.traces.search")
-public class TraceSearchProperties {
+public record TraceSearchProperties(
 
-    /**
-     * 50,000 keeps a project of that many spans on the index for every word: listing all its matches costs a few
-     * hundred milliseconds there, while the walk is slow when a common word's matches are all old. Above it, a word in
-     * that many payloads is dense enough that the walk reaches a page sooner.
-     */
-    private int walkThreshold = 50_000;
-
-    private long timeoutMs = 5_000;
-
-    public int getWalkThreshold() {
-        return walkThreshold;
-    }
-
-    public void setWalkThreshold(int v) {
-        this.walkThreshold = v;
-    }
-
-    public long getTimeoutMs() {
-        return timeoutMs;
-    }
-
-    public void setTimeoutMs(long v) {
-        this.timeoutMs = v;
-    }
-}
+        /**
+         * 50,000 keeps a project of that many spans on the index for every word: listing all its matches costs a few
+         * hundred milliseconds there, while the walk is slow when a common word's matches are all old. Above it, a word in
+         * that many payloads is dense enough that the walk reaches a page sooner.
+         */
+        @DefaultValue("50000") int walkThreshold,
+        @DefaultValue("5000") long timeoutMs) {}

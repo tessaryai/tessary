@@ -105,7 +105,7 @@ public class FrustrationShadowSweep {
             log.debug("frustration shadow at {} is not answering; backlog waits", props.baseUrl());
             return new Run(0, 0, 0, false, false);
         }
-        long deadline = clock.millis() + props.getBudgetMs();
+        long deadline = clock.millis() + props.budgetMs();
         Map<String, Double> thresholds = new HashMap<>();
         int sent = 0;
         int scored = 0;
@@ -114,7 +114,7 @@ public class FrustrationShadowSweep {
         boolean serverUp = true;
         outer:
         while (true) {
-            List<Backlog> batch = shadows.backlog(props.getBatch());
+            List<Backlog> batch = shadows.backlog(props.batch());
             if (batch.isEmpty()) break;
             for (Backlog b : batch) {
                 if (clock.millis() >= deadline) {
@@ -138,7 +138,7 @@ public class FrustrationShadowSweep {
                         b.classifierId(),
                         b.traceId(),
                         b.scorerVersion(),
-                        props.getModel(),
+                        props.model(),
                         score,
                         flagged,
                         b.referenceFrustrated(),
@@ -192,12 +192,12 @@ public class FrustrationShadowSweep {
         } catch (IOException e) {
             return refusal("stored request is not JSON", 0);
         }
-        body.put("model", props.getModel());
+        body.put("model", props.model());
         HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(props.baseUrl() + "/v1/systemone"))
-                .timeout(Duration.ofMillis(props.getTimeoutMs()))
+                .timeout(Duration.ofMillis(props.timeoutMs()))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()));
-        if (!props.getApiKey().isBlank()) req.header("Authorization", "Bearer " + props.getApiKey());
+        if (!props.apiKey().isBlank()) req.header("Authorization", "Bearer " + props.apiKey());
         long t0 = clock.millis();
         HttpResponse<String> response;
         try {

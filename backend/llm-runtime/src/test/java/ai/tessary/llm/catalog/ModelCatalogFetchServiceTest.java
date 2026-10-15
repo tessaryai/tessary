@@ -11,6 +11,7 @@ import ai.tessary.crypto.SecretBox;
 import ai.tessary.llm.ModelProvider;
 import ai.tessary.llm.ProviderCredential;
 import ai.tessary.llm.ProviderCredentialRepository;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -80,8 +81,10 @@ class ModelCatalogFetchServiceTest {
 
     private static ModelCatalogFetchService service(
             ProviderCredentialRepository repo, ModelProvider provider, ProviderModelLister lister) {
-        ModelCatalogProperties props = new ModelCatalogProperties();
-        props.setRefreshInterval(Duration.ofHours(1)); // long enough that no test's cache expires by accident
+        ModelCatalogProperties props = Props.of(
+                ModelCatalogProperties.class,
+                "refresh-interval",
+                Duration.ofHours(1)); // long enough that no test's cache expires by accident
         SecretBox secretBox = mock(SecretBox.class);
         when(secretBox.open(anyString())).thenReturn("decrypted");
         return new ModelCatalogFetchService(repo, secretBox, props, java.util.Map.of(provider, lister));
@@ -124,8 +127,8 @@ class ModelCatalogFetchServiceTest {
         when(repo.findByOrgAndProvider(ORG, ModelProvider.OPENAI))
                 .thenReturn(Optional.of(apiKeyCred(ModelProvider.OPENAI)));
         ScriptedLister lister = new ScriptedLister(List.of(ONE_MODEL, new ModelListingException("vendor down", null)));
-        ModelCatalogProperties props = new ModelCatalogProperties();
-        props.setRefreshInterval(Duration.ofMillis(1)); // expires almost immediately
+        ModelCatalogProperties props = Props.of(
+                ModelCatalogProperties.class, "refresh-interval", Duration.ofMillis(1)); // expires almost immediately
         SecretBox secretBox = mock(SecretBox.class);
         when(secretBox.open(anyString())).thenReturn("decrypted");
         ModelCatalogFetchService svc =
@@ -163,8 +166,7 @@ class ModelCatalogFetchServiceTest {
                 .thenReturn(Optional.of(apiKeyCred(ModelProvider.ANTHROPIC)));
         ScriptedLister openai = new ScriptedLister(List.of(new ModelListingException("vendor down", null)));
         ScriptedLister anthropic = new ScriptedLister(List.of(OTHER_MODEL));
-        ModelCatalogProperties props = new ModelCatalogProperties();
-        props.setRefreshInterval(Duration.ofHours(1));
+        ModelCatalogProperties props = Props.of(ModelCatalogProperties.class, "refresh-interval", Duration.ofHours(1));
         SecretBox secretBox = mock(SecretBox.class);
         when(secretBox.open(anyString())).thenReturn("decrypted");
         ModelCatalogFetchService svc = new ModelCatalogFetchService(
@@ -252,8 +254,8 @@ class ModelCatalogFetchServiceTest {
                 .thenReturn(Optional.of(apiKeyCred(ModelProvider.TYPESAFE)));
         SecretBox secretBox = mock(SecretBox.class);
         when(secretBox.open("sealed-key")).thenReturn("ts-key");
-        ModelCatalogFetchService svc =
-                new ModelCatalogFetchService(repo, secretBox, new ModelCatalogProperties(), new ObjectMapper());
+        ModelCatalogFetchService svc = new ModelCatalogFetchService(
+                repo, secretBox, Props.of(ModelCatalogProperties.class), new ObjectMapper());
 
         assertEquals(
                 List.of(new ProviderModel("jev-latest", "Jev (latest)", "TypeSafe")),

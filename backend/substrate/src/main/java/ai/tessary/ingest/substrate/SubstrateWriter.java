@@ -235,7 +235,7 @@ public class SubstrateWriter {
     }
 
     private boolean writeWithRetry(String projectId, List<RawEntry> entries) {
-        int attempts = Math.max(1, props.getMaxAttempts());
+        int attempts = Math.max(1, props.maxAttempts());
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
                 writer.write(projectId, entries);
@@ -253,7 +253,7 @@ public class SubstrateWriter {
                 log.debug("substrate batch write failure detail project={}", projectId, e);
                 if (attempt < attempts) {
                     try {
-                        Thread.sleep(Math.max(0, props.getRetryBackoffMs()) * attempt);
+                        Thread.sleep(Math.max(0, props.retryBackoffMs()) * attempt);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         failedBatches.incrementAndGet();

@@ -96,7 +96,7 @@ public class PathResolver {
      */
     public Pass runOnce() {
         Instant started = Instant.now();
-        int limit = props.getResolverBatchSize();
+        int limit = props.resolverBatchSize();
         Pass pass =
                 new Pass(spans.resolveRootPaths(limit), spans.resolveChildPaths(limit), spans.markOrphanPaths(limit));
         if (pass.total() > 0) {

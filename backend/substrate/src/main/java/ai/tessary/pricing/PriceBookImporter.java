@@ -80,7 +80,7 @@ public class PriceBookImporter {
 
     /** Import the vendored rate file. Returns nothing: what happened is in the log, where an operator reads it. */
     public void importSnapshots() {
-        if (!props.isEnabled()) return;
+        if (!props.enabled()) return;
         importSnapshot(PriceBook.SOURCE_LITELLM, PriceSnapshot.LITELLM_RESOURCE);
     }
 

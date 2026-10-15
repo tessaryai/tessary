@@ -95,7 +95,7 @@ public class OtlpTraceController {
                                 schema = @Schema(type = "integer")))
     })
     public ResponseEntity<byte[]> export(TenantContext ctx, @RequestBody byte[] body) {
-        if (!props.getTransport().includesHttp()) {
+        if (!props.transport().includesHttp()) {
             // Only dark on a gRPC-only deployment — behave as if the HTTP route does not exist (404).
             throw new TessaryException(IngestError.OTLP_DISABLED);
         }
@@ -122,7 +122,7 @@ public class OtlpTraceController {
 
         // Bound peak memory on this inbound surface: the body is already buffered into a byte[], but
         // reject before parseFrom so the protobuf materialization can't pile on top of an oversized push.
-        int maxBytes = props.getMaxBodyBytes();
+        int maxBytes = props.maxBodyBytes();
         if (maxBytes > 0 && body.length > maxBytes) {
             throw new TessaryException(IngestError.OTLP_BODY_TOO_LARGE, maxBytes);
         }

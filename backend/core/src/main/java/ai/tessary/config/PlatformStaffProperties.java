@@ -2,12 +2,11 @@
 package ai.tessary.config;
 
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * The platform-staff allowlist, bound from {@code tessary.platform.staff-emails}: the identities
@@ -21,11 +20,8 @@ import org.springframework.stereotype.Component;
  * sign-up and which no request header can influence. Comparison is lowercase so a
  * differently-cased sign-in still matches.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.platform")
-public class PlatformStaffProperties {
-
-    private Set<String> staffEmails = Set.of();
+public record PlatformStaffProperties(@DefaultValue Set<String> staffEmails) {
 
     /** Whether {@code email} is on the allowlist. False for null/blank, and false when the list is empty. */
     public boolean isStaffEmail(@Nullable String email) {
@@ -35,16 +31,14 @@ public class PlatformStaffProperties {
         return staffEmails.contains(normalize(email));
     }
 
-    public void setStaffEmails(@Nullable List<String> emails) {
+    public PlatformStaffProperties {
         Set<String> normalized = new LinkedHashSet<>();
-        if (emails != null) {
-            for (String e : emails) {
-                if (e != null && !e.isBlank()) {
-                    normalized.add(normalize(e));
-                }
+        for (String e : staffEmails) {
+            if (e != null && !e.isBlank()) {
+                normalized.add(normalize(e));
             }
         }
-        this.staffEmails = Set.copyOf(normalized);
+        staffEmails = Set.copyOf(normalized);
     }
 
     private static String normalize(String email) {

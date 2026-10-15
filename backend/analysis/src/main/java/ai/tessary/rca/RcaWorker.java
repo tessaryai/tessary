@@ -81,7 +81,7 @@ public class RcaWorker {
 
     private void tickInner() {
         try {
-            int exhausted = jobs.failExhausted(props.getMaxAttempts());
+            int exhausted = jobs.failExhausted(props.maxAttempts());
             if (exhausted > 0) {
                 log.warn(Markers.OPS, "rca failed {} job(s) over the attempt cap", exhausted);
             }
@@ -93,8 +93,7 @@ public class RcaWorker {
         for (int round = 0; round < MAX_CLAIM_ROUNDS; round++) {
             List<RcaJobRow> batch;
             try {
-                batch = jobs.claimBatch(
-                        leaseOwner, props.getBatchSize(), props.getLeaseSeconds(), props.getMaxAttempts());
+                batch = jobs.claimBatch(leaseOwner, props.batchSize(), props.leaseSeconds(), props.maxAttempts());
             } catch (RuntimeException e) {
                 log.warn(Markers.OPS, "rca claim failed: {}", e.getMessage());
                 break;
@@ -135,7 +134,7 @@ public class RcaWorker {
                     job.subjectId(),
                     code);
             log.debug("rca job failed job={} detail", job.id(), e);
-            jobs.markFailed(job.id(), e.getMessage(), props.getMaxAttempts());
+            jobs.markFailed(job.id(), e.getMessage(), props.maxAttempts());
             try {
                 reports.complete(job.id(), RcaJobRow.FAILED, null, e.getMessage(), null, null, null, null);
             } catch (RuntimeException stampFailure) {

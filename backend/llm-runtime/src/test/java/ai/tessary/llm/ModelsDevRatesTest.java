@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ai.tessary.config.ModelsDevProperties;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -44,8 +45,7 @@ class ModelsDevRatesTest {
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-10T12:00:00Z"));
 
     private ModelsDevRates rates() {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl(URL);
+        ModelsDevProperties props = Props.of(ModelsDevProperties.class, "url", URL);
         return new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
     }
 
@@ -120,8 +120,7 @@ class ModelsDevRatesTest {
     /** A typo in the configured URL must cost the live file, never every sandbox run. */
     @Test
     void aMalformedUrlFallsBackToTheBundledCopy() {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl("not a url");
+        ModelsDevProperties props = Props.of(ModelsDevProperties.class, "url", "not a url");
         ModelsDevRates rates = new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
 
         assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));
@@ -129,8 +128,7 @@ class ModelsDevRatesTest {
 
     @Test
     void aBlankUrlNeverFetches() throws Exception {
-        ModelsDevProperties props = new ModelsDevProperties();
-        props.setUrl("");
+        ModelsDevProperties props = Props.of(ModelsDevProperties.class, "url", "");
         ModelsDevRates rates = new ModelsDevRates(http, MAPPER, props, clock, BUNDLED);
 
         assertEquals(Optional.of(BUNDLED_GROK), rates.cost("xai/grok-4.6"));

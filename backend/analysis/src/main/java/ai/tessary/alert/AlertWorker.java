@@ -214,7 +214,7 @@ public class AlertWorker {
     }
 
     private @Nullable String resolveDigestCron(@Nullable String cron) {
-        return (cron != null && !cron.isBlank()) ? cron : props.getDefaultDigestCron();
+        return (cron != null && !cron.isBlank()) ? cron : props.defaultDigestCron();
     }
 
     private Instant parseAnchor(@Nullable String lastAt, String createdAt) {
@@ -224,7 +224,7 @@ public class AlertWorker {
 
     private boolean isDue(String cron, Instant anchor, Instant now, String projectId) {
         try {
-            ZoneId zone = ZoneId.of(props.getCronZone());
+            ZoneId zone = ZoneId.of(props.cronZone());
             ZonedDateTime next = CronExpression.parse(cron).next(anchor.atZone(zone));
             return next != null && !now.isBefore(next.toInstant());
         } catch (RuntimeException e) {

@@ -93,8 +93,8 @@ class RetentionSettingsIntegrationTest {
         Project project = projects.findDefaultForOrg(org.id()).orElseThrow();
         String path = path(org, project);
 
-        int traceDefault = props.getTraceTtlDays();
-        int detectionDefault = props.getDetectionTtlDays();
+        int traceDefault = props.traceTtlDays();
+        int detectionDefault = props.detectionTtlDays();
         mvc.perform(get(path).cookie(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.can_manage").value(true))

@@ -13,6 +13,7 @@ import ai.tessary.config.SubstrateProperties;
 import ai.tessary.ingest.IngestQuotaGate;
 import ai.tessary.ingest.RawEntry;
 import ai.tessary.ingest.substrate.SubstrateWriter;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -34,10 +35,10 @@ class OtlpIngestServiceTest {
     }
 
     private OtlpIngestService service(int maxSpansPerRequest, IngestQuotaGate quotaGate) {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
-        props.setMaxSpansPerRequest(maxSpansPerRequest);
+        OtlpReceiverProperties props =
+                Props.of(OtlpReceiverProperties.class, "max-spans-per-request", maxSpansPerRequest);
         OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-        return new OtlpIngestService(props, new SubstrateProperties(), substrateWriter, mapper, quotaGate);
+        return new OtlpIngestService(props, Props.of(SubstrateProperties.class), substrateWriter, mapper, quotaGate);
     }
 
     @Test

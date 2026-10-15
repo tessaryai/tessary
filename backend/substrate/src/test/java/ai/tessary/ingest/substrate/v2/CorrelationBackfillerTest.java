@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.testsupport.LogCapture;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.List;
@@ -40,7 +41,7 @@ class CorrelationBackfillerTest {
         when(spans.backfillCorrelation(anyInt()))
                 .thenThrow(new IllegalStateException("value \"secret prompt\" too long"));
 
-        assertDoesNotThrow(new CorrelationBackfiller(spans, new SubstrateProperties())::tick);
+        assertDoesNotThrow(new CorrelationBackfiller(spans, Props.of(SubstrateProperties.class))::tick);
 
         ILoggingEvent warn = log.first(Level.WARN);
         assertNull(warn.getThrowableProxy(), "no stack trace, and no message, on the egressing line");
@@ -53,7 +54,7 @@ class CorrelationBackfillerTest {
         when(spans.backfillCorrelation(500)).thenReturn(0);
         when(spans.markCorrelationNone(500)).thenReturn(0);
 
-        new CorrelationBackfiller(spans, new SubstrateProperties()).tick();
+        new CorrelationBackfiller(spans, Props.of(SubstrateProperties.class)).tick();
 
         verify(spans).backfillCorrelation(500);
         verify(spans).markCorrelationNone(500);

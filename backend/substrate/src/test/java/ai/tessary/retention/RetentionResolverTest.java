@@ -9,6 +9,7 @@ import ai.tessary.ops.RetentionPolicyRepository;
 import ai.tessary.ops.RetentionPolicyRow;
 import ai.tessary.retention.RetentionResolver.DataClass;
 import ai.tessary.retention.RetentionResolver.EffectiveRetention;
+import ai.tessary.testsupport.Props;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,9 +44,8 @@ class RetentionResolverTest {
     void aFixedRetentionReplacesTheDefaultAndTheOverride(
             @Nullable Integer override, int platformDefault, String fixed, int expected) {
         int fixedDays = fixed.equals("FIXED") ? FIXED : Integer.parseInt(fixed);
-        RetentionProperties props = new RetentionProperties();
-        props.setTraceTtlDays(platformDefault);
-        props.setDetectionTtlDays(10);
+        RetentionProperties props =
+                Props.of(RetentionProperties.class, "trace-ttl-days", platformDefault, "detection-ttl-days", 10);
         when(policies.listByProject("p-1"))
                 .thenReturn(
                         override == null

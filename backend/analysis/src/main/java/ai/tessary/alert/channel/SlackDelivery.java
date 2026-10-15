@@ -69,11 +69,11 @@ public class SlackDelivery {
         }
         String payload = body.toString();
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(props.getBaseUrl() + "/deliver"))
+            HttpRequest req = HttpRequest.newBuilder(URI.create(props.baseUrl() + "/deliver"))
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
-                    .header("Authorization", "Bearer " + props.getServiceKey())
+                    .header("Authorization", "Bearer " + props.serviceKey())
                     .header("Content-Type", "application/json; charset=utf-8")
-                    .timeout(Duration.ofSeconds(props.getTimeoutSeconds()))
+                    .timeout(Duration.ofSeconds(props.timeoutSeconds()))
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() / 100 != 2) {

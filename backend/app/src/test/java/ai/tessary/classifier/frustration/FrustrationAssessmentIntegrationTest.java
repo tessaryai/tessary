@@ -37,6 +37,7 @@ import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
 import ai.tessary.testsupport.CapabilityFixture;
 import ai.tessary.testsupport.ClassifierRows;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -422,7 +423,7 @@ class FrustrationAssessmentIntegrationTest {
                 detections,
                 classifiers,
                 tx,
-                new FrustrationProperties(),
+                Props.of(FrustrationProperties.class),
                 mapper,
                 Clock.fixed(Instant.now(), ZoneOffset.UTC));
     }

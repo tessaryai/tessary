@@ -87,8 +87,8 @@ public class RetentionResolver {
 
     public int platformDefault(DataClass dataClass) {
         return switch (dataClass) {
-            case TRACES -> props.getTraceTtlDays();
-            case DETECTIONS -> props.getDetectionTtlDays();
+            case TRACES -> props.traceTtlDays();
+            case DETECTIONS -> props.detectionTtlDays();
         };
     }
 }

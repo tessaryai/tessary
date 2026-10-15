@@ -22,6 +22,7 @@ import ai.tessary.classifier.finding.FindingRepository;
 import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.config.RcaProperties;
 import ai.tessary.config.TraceMdcBridge;
+import ai.tessary.testsupport.Props;
 import io.micrometer.tracing.Tracer;
 import java.net.UnknownHostException;
 import java.time.Instant;
@@ -46,7 +47,7 @@ class RcaWorkerTickTest {
     private final RcaAnalysisService analysis = mock(RcaAnalysisService.class);
     private final FindingRepository findings = mock(FindingRepository.class);
     private final CaseEventRepository caseEvents = mock(CaseEventRepository.class);
-    private final RcaProperties props = new RcaProperties();
+    private final RcaProperties props = Props.of(RcaProperties.class);
     private final RcaWorker worker = new RcaWorker(
             jobs,
             reports,
@@ -111,7 +112,7 @@ class RcaWorkerTickTest {
 
         worker.run(JOB);
 
-        verify(jobs).markFailed("job-1", "launcher down", props.getMaxAttempts());
+        verify(jobs).markFailed("job-1", "launcher down", props.maxAttempts());
         verify(jobs, never()).markDone(anyString());
     }
 

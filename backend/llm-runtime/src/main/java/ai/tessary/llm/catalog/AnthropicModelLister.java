@@ -40,7 +40,7 @@ public final class AnthropicModelLister implements ProviderModelLister {
     private final Duration timeout;
 
     /** @param timeout per-call ceiling on each page request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+     *  {@code ModelCatalogProperties#fetchTimeout()}. */
     public AnthropicModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_BASE_URL, timeout);
     }

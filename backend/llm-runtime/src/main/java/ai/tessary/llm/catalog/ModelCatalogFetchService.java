@@ -66,7 +66,7 @@ public class ModelCatalogFetchService {
 
     /**
      * How long an empty, failure-caused cache entry is trusted before the next read retries the fetch.
-     * Deliberately much shorter than {@link ModelCatalogProperties#getRefreshInterval()}: a healthy
+     * Deliberately much shorter than {@link ModelCatalogProperties#refreshInterval()}: a healthy
      * fetch earns the long TTL, but a fetch that just failed with nothing to fall back to should not
      * leave a provider looking permanently empty for a quarter of an hour over one bad request.
      */
@@ -85,7 +85,7 @@ public class ModelCatalogFetchService {
             SecretBox secretBox,
             ModelCatalogProperties properties,
             ObjectMapper mapper) {
-        this(credentials, secretBox, properties, defaultListers(mapper, properties.getFetchTimeout()));
+        this(credentials, secretBox, properties, defaultListers(mapper, properties.fetchTimeout()));
     }
 
     /** Test seam — a fake {@link ProviderModelLister} per provider, no real HTTP/AWS calls. */
@@ -171,7 +171,7 @@ public class ModelCatalogFetchService {
     }
 
     private boolean expired(CacheEntry entry) {
-        Duration ttl = entry.negative() ? NEGATIVE_TTL : properties.getRefreshInterval();
+        Duration ttl = entry.negative() ? NEGATIVE_TTL : properties.refreshInterval();
         return Instant.now().isAfter(entry.fetchedAt().plus(ttl));
     }
 

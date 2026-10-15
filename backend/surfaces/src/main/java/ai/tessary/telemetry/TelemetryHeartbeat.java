@@ -101,7 +101,7 @@ public class TelemetryHeartbeat {
                     "#{T(java.time.Duration).ofSeconds(5).toMillis() + T(java.lang.Math).round(T(java.lang.Math).random() * 25000)}",
             fixedDelayString = "#{T(java.time.Duration).ofHours(6).toMillis()}")
     public void tick() {
-        if (!props.isEnabled()) {
+        if (!props.enabled()) {
             return; // The whole choke point — see class javadoc. Nothing below this line may run.
         }
         try {

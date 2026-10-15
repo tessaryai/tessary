@@ -84,7 +84,7 @@ public class PriceBookFetcher {
 
     /** Check home's manifest and import its book if this install does not hold it yet. */
     public Outcome refresh() {
-        if (!props.isEnabled()) return Outcome.DISABLED;
+        if (!props.enabled()) return Outcome.DISABLED;
         Instant started = Instant.now();
         try {
             HomeTessaryClient.Fetched raw = client.getBytes(MANIFEST_PATH, MAX_MANIFEST_BYTES);

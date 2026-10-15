@@ -58,7 +58,7 @@ public class TraceFilters {
      * how many of the project's payloads match:
      *
      * <ul>
-     *   <li>Fewer than {@link TraceSearchProperties#getWalkThreshold()}: the payload index lists every match once and
+     *   <li>Fewer than {@link TraceSearchProperties#walkThreshold()}: the payload index lists every match once and
      *       the trace ids are hashed. The subquery binds the project rather than correlating on {@code t}, so Postgres
      *       runs it once.
      *   <li>At the threshold: the word is common, so walking the traces newest first and checking each one's payloads
@@ -67,7 +67,7 @@ public class TraceFilters {
      *       in the project.
      * </ul>
      *
-     * <p>A search also bounds the rest of the caller's transaction to {@link TraceSearchProperties#getTimeoutMs()} and
+     * <p>A search also bounds the rest of the caller's transaction to {@link TraceSearchProperties#timeoutMs()} and
      * plans it generically ({@link SpanPayloadRepository#boundSearch}); the caller turns a cancelled statement into
      * {@link QueryError#SEARCH_TOO_BROAD} with {@link #searchFailure}.
      */
@@ -94,14 +94,14 @@ public class TraceFilters {
 
         String q = query.q();
         if (present(q)) {
-            payloads.boundSearch(search.getTimeoutMs());
+            payloads.boundSearch(search.timeoutMs());
             where.append(" AND (t.name ILIKE :q OR t.session_id ILIKE :q OR t.thread_id ILIKE :q"
                     + " OR t.user_id ILIKE :q OR t.id ILIKE :q");
             params.put("q", "%" + escapeLike(q) + "%");
             String words = payloads.prefixQuery(q);
             if (words != null) {
                 boolean common =
-                        payloads.countMatches(projectId, words, search.getWalkThreshold()) >= search.getWalkThreshold();
+                        payloads.countMatches(projectId, words, search.walkThreshold()) >= search.walkThreshold();
                 where.append(common ? WALK_LANE : INDEX_LANE);
                 params.put("qProject", projectId);
                 params.put("qWords", words);

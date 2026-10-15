@@ -18,6 +18,7 @@ import ai.tessary.open.errors.AgentRunError;
 import ai.tessary.open.errors.CommonError;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.testsupport.LoopbackHttpStub;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.ScriptedHttpClient;
 import ai.tessary.usage.LlmUsageAccountant;
 import ch.qos.logback.classic.Logger;
@@ -82,17 +83,12 @@ class E2bAgentRunSandboxTest {
     }
 
     private static AgentRunProperties props(String launcherUrl) {
-        AgentRunProperties p = new AgentRunProperties();
-        p.setLauncherUrl(launcherUrl);
-        p.setLauncherApiKey(API_KEY);
-        return p;
+        return Props.of(AgentRunProperties.class, "launcher-url", launcherUrl, "launcher-api-key", API_KEY);
     }
 
     private static ObserverProperties observer(String launcherUrl, String apiKey) {
-        ObserverProperties p = new ObserverProperties();
-        p.getAgentic().setLauncherUrl(launcherUrl);
-        p.getAgentic().setLauncherApiKey(apiKey);
-        return p;
+        return Props.of(
+                ObserverProperties.class, "agentic.launcher-url", launcherUrl, "agentic.launcher-api-key", apiKey);
     }
 
     private E2bAgentRunSandbox sandbox(AgentRunProperties props, ObserverProperties observer, HttpClient client) {
@@ -203,8 +199,7 @@ class E2bAgentRunSandboxTest {
     @Test
     void fallsBackToTheObserversLauncher() throws Exception {
         ScriptedHttpClient client = ScriptedHttpClient.answering(200, envelope(Map.of("result", "ok")));
-        AgentRunProperties own = props("");
-        own.setLauncherApiKey("");
+        AgentRunProperties own = Props.of(AgentRunProperties.class, "launcher-url", "", "launcher-api-key", "");
 
         sandbox(own, observer("http://observer-launcher", "observer-k"), client).run(fullRequest());
 

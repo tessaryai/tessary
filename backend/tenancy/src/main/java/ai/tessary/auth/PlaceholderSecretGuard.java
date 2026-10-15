@@ -102,7 +102,7 @@ public class PlaceholderSecretGuard {
         if (SEALING_PLACEHOLDER.equals(tessary.getSecretKey())) {
             stillDefault.add("TESSARY_SECRET_KEY");
         }
-        if (LAUNCHER_PLACEHOLDER.equals(rca.getAgentic().getLauncherApiKey())) {
+        if (LAUNCHER_PLACEHOLDER.equals(rca.agentic().launcherApiKey())) {
             stillDefault.add("TESSARY_OBSERVER_AGENTIC_LAUNCHER_API_KEY");
         }
         if (stillDefault.isEmpty()) {

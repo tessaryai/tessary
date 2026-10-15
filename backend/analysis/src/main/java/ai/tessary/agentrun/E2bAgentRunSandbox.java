@@ -184,7 +184,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     /** The launcher an agent lane posts to: this lane's own, else the observer's, which every agent lane rides. */
     static String launcherUrl(AgentRunProperties props, ObserverProperties observerProps) {
-        String own = props.getLauncherUrl();
+        String own = props.launcherUrl();
         return own == null || own.isBlank()
                 ? blankToEmpty(observerProps.getAgentic().getLauncherUrl())
                 : own;
@@ -192,7 +192,7 @@ public class E2bAgentRunSandbox implements AgentRunSandbox {
 
     /** The bearer key for {@link #launcherUrl}: this lane's own, else the observer's. */
     static String launcherApiKey(AgentRunProperties props, ObserverProperties observerProps) {
-        String own = props.getLauncherApiKey();
+        String own = props.launcherApiKey();
         return own == null || own.isBlank()
                 ? blankToEmpty(observerProps.getAgentic().getLauncherApiKey())
                 : own;

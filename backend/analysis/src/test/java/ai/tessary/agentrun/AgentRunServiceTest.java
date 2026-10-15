@@ -33,6 +33,7 @@ import ai.tessary.tenant.OrgMembership;
 import ai.tessary.tenant.OrgMembershipRepository;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import ai.tessary.usage.LlmUsageAccountant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -63,8 +64,7 @@ class AgentRunServiceTest {
     private static final ModelsDevRates RATES = bundledRates();
 
     private static ModelsDevRates bundledRates() {
-        ModelsDevProperties p = new ModelsDevProperties();
-        p.setUrl("");
+        ModelsDevProperties p = Props.of(ModelsDevProperties.class, "url", "");
         return new ModelsDevRates(new ObjectMapper(), p);
     }
 
@@ -153,21 +153,28 @@ class AgentRunServiceTest {
     }
 
     private static AgentRunProperties props() {
-        AgentRunProperties p = new AgentRunProperties();
-        p.setMcpBaseUrl("https://app.example/");
-        p.setTimeoutMs(600_000L);
-        p.setMaxTurns(30);
-        return p;
+        return props("https://app.example/", "e2b");
+    }
+
+    private static AgentRunProperties props(String mcpBaseUrl, String sandbox) {
+        return Props.of(
+                AgentRunProperties.class,
+                "mcp-base-url",
+                mcpBaseUrl,
+                "sandbox",
+                sandbox,
+                "timeout-ms",
+                600_000L,
+                "max-turns",
+                30);
     }
 
     private static ObserverProperties observer() {
-        ObserverProperties p = new ObserverProperties();
-        p.getAgentic().setModel(OBSERVER_MODEL);
-        return p;
+        return Props.of(ObserverProperties.class, "agentic.model", OBSERVER_MODEL);
     }
 
     private AgentRunService service(AgentRunProperties props, CapturingSandbox sandbox, GitProviderFactory providers) {
-        return service(props, new RcaProperties(), sandbox, providers);
+        return service(props, Props.of(RcaProperties.class), sandbox, providers);
     }
 
     private AgentRunService service(
@@ -362,8 +369,7 @@ class AgentRunServiceTest {
     /** Without a door the agent cannot read a trace, so the run is refused before anything is resolved. */
     @Test
     void noMcpOriginAnywhereIsMisconfiguredBeforeAnythingIsResolved() {
-        AgentRunProperties bare = props();
-        bare.setMcpBaseUrl("");
+        AgentRunProperties bare = props("", "e2b");
         CapturingSandbox sandbox = new CapturingSandbox(null);
 
         TessaryException ex = assertThrows(
@@ -386,10 +392,8 @@ class AgentRunServiceTest {
                 "''                   | https://rca.example | https://rca.example/mcp"
             })
     void platformMcpUrlIsTheOwnOriginElseRcasWithOneSlash(String own, String rca, String expected) {
-        AgentRunProperties props = props();
-        props.setMcpBaseUrl(own);
-        RcaProperties rcaProps = new RcaProperties();
-        rcaProps.getAgentic().setMcpBaseUrl(rca);
+        AgentRunProperties props = props(own, "e2b");
+        RcaProperties rcaProps = Props.of(RcaProperties.class, "agentic.mcp-base-url", rca);
 
         String url = service(props, rcaProps, new CapturingSandbox(null), new GitProviderFactory(List.of(), List.of()))
                 .platformMcpUrl();
@@ -400,8 +404,7 @@ class AgentRunServiceTest {
     /** A sandbox key nothing registered refuses to boot, rather than failing every run later. */
     @Test
     void anUnregisteredSandboxKeyRefusesToBoot() {
-        AgentRunProperties props = props();
-        props.setSandbox("firecracker");
+        AgentRunProperties props = props("https://app.example/", "firecracker");
 
         assertThrows(
                 IllegalStateException.class,

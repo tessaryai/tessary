@@ -30,6 +30,7 @@ import ai.tessary.config.ObserverProperties;
 import ai.tessary.config.TraceMdcBridge;
 import ai.tessary.open.errors.ClassifierError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -690,11 +691,11 @@ class BehaviorTriageSourceTest {
                 jobs,
                 List.of(source()),
                 engine,
-                new ClassifierProperties(),
-                new ObserverProperties(),
+                Props.of(ClassifierProperties.class),
+                Props.of(ObserverProperties.class),
                 new TraceMdcBridge(tracer),
                 new SyncTaskExecutor(),
-                new TriageLauncherBreaker(new ClassifierProperties()));
+                new TriageLauncherBreaker(Props.of(ClassifierProperties.class)));
     }
 
     private BehaviorTriageSource source() {

@@ -34,8 +34,8 @@ import org.springframework.stereotype.Component;
  * OpenCode computes with them, so the price book never prices a sandbox run.
  *
  * <p><b>Live first, bundled always.</b> The live file is fetched at most once per {@link
- * ModelsDevProperties#getRefreshInterval()}, and a failed fetch is not retried for {@link #RETRY_AFTER},
- * so a models.dev outage costs one run one {@link ModelsDevProperties#getFetchTimeout()} rather than
+ * ModelsDevProperties#refreshInterval()}, and a failed fetch is not retried for {@link #RETRY_AFTER},
+ * so a models.dev outage costs one run one {@link ModelsDevProperties#fetchTimeout()} rather than
  * every run. Until a fetch succeeds, and for any model the live file lacks, the answer comes from the
  * copy bundled in the jar ({@link #BUNDLED_RESOURCE}), which {@code scripts/refresh-models-dev.sh}
  * keeps current. Only one run fetches at a time; the others read what is already in hand.
@@ -87,7 +87,7 @@ public class ModelsDevRates {
     public ModelsDevRates(ObjectMapper mapper, ModelsDevProperties props) {
         this(
                 HttpClient.newBuilder()
-                        .connectTimeout(props.getFetchTimeout())
+                        .connectTimeout(props.fetchTimeout())
                         .followRedirects(HttpClient.Redirect.NORMAL)
                         .build(),
                 mapper,
@@ -137,9 +137,9 @@ public class ModelsDevRates {
     private @Nullable Rates current() {
         Rates held = live;
         Instant now = clock.instant();
-        boolean fresh = held != null
-                && held.fetchedAt().plus(props.getRefreshInterval()).isAfter(now);
-        if (fresh || props.getUrl().isBlank() || now.isBefore(nextAttempt) || !fetching.tryLock()) return held;
+        boolean fresh =
+                held != null && held.fetchedAt().plus(props.refreshInterval()).isAfter(now);
+        if (fresh || props.url().isBlank() || now.isBefore(nextAttempt) || !fetching.tryLock()) return held;
         try {
             Rates fetched = fetch(now);
             if (fetched != null) live = fetched;
@@ -153,8 +153,8 @@ public class ModelsDevRates {
     private @Nullable Rates fetch(Instant now) {
         Instant start = clock.instant();
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(props.getUrl()))
-                    .timeout(props.getFetchTimeout())
+            HttpRequest req = HttpRequest.newBuilder(URI.create(props.url()))
+                    .timeout(props.fetchTimeout())
                     .GET()
                     .build();
             HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());

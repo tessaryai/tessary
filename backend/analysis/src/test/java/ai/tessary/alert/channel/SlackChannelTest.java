@@ -9,6 +9,7 @@ import ai.tessary.alert.AlertEventRow;
 import ai.tessary.config.SlackProperties;
 import ai.tessary.open.errors.AlertError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -68,7 +69,7 @@ class SlackChannelTest {
         String text;
 
         RecordingDelivery(ObjectMapper mapper) {
-            super(new SlackProperties(), mapper);
+            super(Props.of(SlackProperties.class), mapper);
         }
 
         @Override

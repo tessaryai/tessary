@@ -128,7 +128,7 @@ public class MeteringWorker {
     private void meterClaimedJobs() {
         List<MetricRollupJobRow> due;
         try {
-            due = jobs.claimBatch(props.getClaimBatch(), props.getLeaseSeconds());
+            due = jobs.claimBatch(props.claimBatch(), props.leaseSeconds());
         } catch (RuntimeException e) {
             // Zero jobs get claimed/metered this heartbeat — a genuine, actionable failure.
             log.error(Markers.OPS, "metering claim failed", e);
@@ -183,7 +183,7 @@ public class MeteringWorker {
      * substrate level.
      */
     private void meterStorage(MetricRollupJobRow job, String asOf, String createdAt) {
-        if (!props.isStorageEnabled()) return; // basis-ratification fence
+        if (!props.storageEnabled()) return; // basis-ratification fence
         upsertUnit(job, UsageUnit.STORAGE, rollups.snapshotStorageRows(job.projectId(), asOf), createdAt);
     }
 

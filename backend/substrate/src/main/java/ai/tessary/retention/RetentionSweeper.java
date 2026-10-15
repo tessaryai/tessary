@@ -65,7 +65,7 @@ public class RetentionSweeper {
 
     @Scheduled(fixedDelayString = "${tessary.retention.interval-ms:3600000}", initialDelayString = "60000")
     public void sweep() {
-        if (!props.isEnabled()) return;
+        if (!props.enabled()) return;
         Instant started = Instant.now();
         long totalDeleted = 0;
         int projectsSwept = 0;
@@ -115,10 +115,10 @@ public class RetentionSweeper {
      * <p>Bounded like everything else, and logged only when it actually removed something.
      */
     private long collectMedia(String projectId) {
-        int batchSize = Math.max(1, props.getBatchSize());
-        int maxBatches = Math.max(1, props.getMaxBatchesPerSweep());
+        int batchSize = Math.max(1, props.batchSize());
+        int maxBatches = Math.max(1, props.maxBatchesPerSweep());
         String cutoff = Instant.now()
-                .minus(Math.max(0, props.getMediaGraceHours()), ChronoUnit.HOURS)
+                .minus(Math.max(0, props.mediaGraceHours()), ChronoUnit.HOURS)
                 .toString();
         long deleted = 0;
         boolean truncated = true;
@@ -141,8 +141,8 @@ public class RetentionSweeper {
     }
 
     private long sweepClass(String projectId, EffectiveRetention retention, String cutoff) {
-        int batchSize = Math.max(1, props.getBatchSize());
-        int maxBatches = Math.max(1, props.getMaxBatchesPerSweep());
+        int batchSize = Math.max(1, props.batchSize());
+        int maxBatches = Math.max(1, props.maxBatchesPerSweep());
         long deleted = 0;
         boolean truncated = true;
         for (int batch = 0; batch < maxBatches; batch++) {

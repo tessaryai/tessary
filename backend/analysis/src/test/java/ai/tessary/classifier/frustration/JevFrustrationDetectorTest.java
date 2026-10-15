@@ -44,6 +44,7 @@ import ai.tessary.llmspi.ModelLane;
 import ai.tessary.open.errors.DecisionError;
 import ai.tessary.open.errors.ModelConfigError;
 import ai.tessary.open.errors.TessaryException;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -99,7 +100,7 @@ class JevFrustrationDetectorTest {
     private final FrustrationAssessmentRepository assessments = mock(FrustrationAssessmentRepository.class);
     private final ClassifierDetectionWriteRepository detections = mock(ClassifierDetectionWriteRepository.class);
     private final ClassifierRepository classifiers = mock(ClassifierRepository.class);
-    private final FrustrationProperties props = new FrustrationProperties();
+    private FrustrationProperties props = Props.of(FrustrationProperties.class);
     private final StubClient client = new StubClient();
     private final Map<String, TurnFacts> facts = new HashMap<>();
 
@@ -331,7 +332,7 @@ class JevFrustrationDetectorTest {
     /** An interrupted sweep stops sending and keeps its interrupt. */
     @Test
     void anInterruptedSweepStopsSendingAndKeepsItsInterrupt() throws InterruptedException {
-        props.setConcurrency(1);
+        props = Props.of(FrustrationProperties.class, "concurrency", 1);
         SubstrateObservation first = eligibleTurn("t-1", "conv-a");
         SubstrateObservation second = eligibleTurn("t-2", "conv-b");
         AtomicInteger sends = new AtomicInteger();
@@ -582,8 +583,8 @@ class JevFrustrationDetectorTest {
     @ValueSource(strings = {ClassifierPause.NO_CREDIT, ClassifierPause.NO_PROVIDER})
     void aRecheckThatStillFindsTheSameGapPassesThePageAndRestampsThePause(String reason) {
         when(classifiers.findPause(PROJECT, CLASSIFIER))
-                .thenReturn(Optional.of(
-                        new ClassifierPause(reason, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+                .thenReturn(
+                        Optional.of(new ClassifierPause(reason, NOW.minusSeconds(props.credentialRetrySeconds() + 1))));
         if (ClassifierPause.NO_CREDIT.equals(reason)) {
             when(providers.resolve(PROJECT, ModelLane.FRUSTRATION)).thenThrow(new NoCredit());
         } else {
@@ -648,7 +649,7 @@ class JevFrustrationDetectorTest {
     void aPauseOlderThanTheRetryIntervalIsCheckedAgainAndClearedWhenAKeyResolves() {
         when(classifiers.findPause(PROJECT, CLASSIFIER))
                 .thenReturn(Optional.of(new ClassifierPause(
-                        ClassifierPause.NO_PROVIDER, NOW.minusSeconds(props.getCredentialRetrySeconds() + 1))));
+                        ClassifierPause.NO_PROVIDER, NOW.minusSeconds(props.credentialRetrySeconds() + 1))));
         client.answer("t-1", 0.1, 0.0);
 
         JevFrustrationDetector.Page page = detector().score(signal("{}"), List.of(eligibleTurn("t-1", "conv-a")));

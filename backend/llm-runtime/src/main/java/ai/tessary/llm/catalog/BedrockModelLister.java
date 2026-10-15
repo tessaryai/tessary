@@ -55,7 +55,7 @@ public final class BedrockModelLister implements ProviderModelLister {
     private final ClientFactory clientFactory;
 
     /** @param timeout per-call ceiling on the {@code ListFoundationModels} request — production wires
-     *  this to {@code ModelCatalogProperties#getFetchTimeout()}. */
+     *  this to {@code ModelCatalogProperties#fetchTimeout()}. */
     public BedrockModelLister(Duration timeout) {
         this(timeout, BedrockModelLister::defaultClient);
     }

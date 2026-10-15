@@ -11,6 +11,7 @@ import ai.tessary.ingest.spool.InProcessSpool;
 import ai.tessary.ingest.spool.IngestSpool;
 import ai.tessary.ingest.substrate.v2.SpanBatchWriter;
 import ai.tessary.redaction.RedactionService;
+import ai.tessary.testsupport.Props;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -68,7 +69,10 @@ class SubstrateWriterResilienceTest {
         };
 
         SubstrateWriter writer = new SubstrateWriter(
-                spans, new SubstrateProperties(), flaky, new InProcessSpool(new SubstrateProperties()));
+                spans,
+                Props.of(SubstrateProperties.class),
+                flaky,
+                new InProcessSpool(Props.of(SubstrateProperties.class)));
 
         writer.enqueue("p1", List.of(entry("a"))); // blows up in redaction
         assertTrue(writer.awaitIdle(Duration.ofSeconds(10)), "the poisoned batch must not leave the writer busy");
@@ -91,9 +95,7 @@ class SubstrateWriterResilienceTest {
                 return entries;
             }
         };
-        SubstrateProperties props = new SubstrateProperties();
-        props.setMaxAttempts(2);
-        props.setRetryBackoffMs(1);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "max-attempts", 2, "retry-backoff-ms", 1);
 
         SubstrateWriter writer = new SubstrateWriter(spans, props, passthrough, new InProcessSpool(props));
 
@@ -157,8 +159,7 @@ class SubstrateWriterResilienceTest {
     void enqueue_shedsOnTheByteBudget_notTheBatchCount() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        SubstrateProperties props = new SubstrateProperties();
-        props.setQueueMaxBytes(300_000);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "queue-max-bytes", 300_000);
         SubstrateWriter writer = writerWith(props, blockingWriter(entered, release));
         try {
             // ~100 KB each, so the third does not fit, with no count bound at all.
@@ -181,8 +182,7 @@ class SubstrateWriterResilienceTest {
      */
     @Test
     void enqueue_refusesABatchLargerThanTheWholeBudget_withoutWedgingTheQueue() throws Exception {
-        SubstrateProperties props = new SubstrateProperties();
-        props.setQueueMaxBytes(50_000);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "queue-max-bytes", 50_000);
         AtomicInteger writes = new AtomicInteger();
         SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
         Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> {
@@ -211,8 +211,7 @@ class SubstrateWriterResilienceTest {
             if (writes.get() == 2) throw new IllegalStateException("this batch fails after reserving");
             return 1;
         });
-        SubstrateProperties props = new SubstrateProperties();
-        props.setMaxAttempts(1);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "max-attempts", 1);
         SubstrateWriter writer = writerWith(props, spans);
 
         for (int i = 0; i < 5; i++) {
@@ -235,7 +234,7 @@ class SubstrateWriterResilienceTest {
             writes.incrementAndGet();
             return 1;
         });
-        SubstrateWriter writer = writerWith(new SubstrateProperties(), spans);
+        SubstrateWriter writer = writerWith(Props.of(SubstrateProperties.class), spans);
 
         writer.killDrainerForTest();
         assertTrue(writer.awaitDrainerDeath(Duration.ofSeconds(10)), "the drainer should have stopped");
@@ -307,7 +306,7 @@ class SubstrateWriterResilienceTest {
     /** A spool that throws did not take the batch: the producer is told to retry, and nothing stays pending. */
     @Test
     void aSpoolThatThrowsOnAppend_isAnsweredAsAShed() throws Exception {
-        SubstrateProperties props = new SubstrateProperties();
+        SubstrateProperties props = Props.of(SubstrateProperties.class);
         SubstrateWriter writer = new SubstrateWriter(
                 Mockito.mock(SpanBatchWriter.class), props, passthrough(), new FaultySpool(props, true, false));
 
@@ -322,7 +321,7 @@ class SubstrateWriterResilienceTest {
         AtomicInteger writes = new AtomicInteger();
         SpanBatchWriter spans = Mockito.mock(SpanBatchWriter.class);
         Mockito.when(spans.write(Mockito.anyString(), Mockito.anyList())).thenAnswer(inv -> writes.incrementAndGet());
-        SubstrateProperties props = new SubstrateProperties();
+        SubstrateProperties props = Props.of(SubstrateProperties.class);
         SubstrateWriter writer = new SubstrateWriter(spans, props, passthrough(), new FaultySpool(props, false, true));
 
         writer.enqueue("p1", List.of(entry("a")));
@@ -341,9 +340,7 @@ class SubstrateWriterResilienceTest {
             attempted.countDown();
             throw new IllegalStateException("span write failed");
         });
-        SubstrateProperties props = new SubstrateProperties();
-        props.setMaxAttempts(2);
-        props.setRetryBackoffMs(60_000);
+        SubstrateProperties props = Props.of(SubstrateProperties.class, "max-attempts", 2, "retry-backoff-ms", 60_000);
         SubstrateWriter writer = writerWith(props, spans);
 
         writer.enqueue("p1", List.of(entry("a")));
@@ -359,7 +356,7 @@ class SubstrateWriterResilienceTest {
     void theWaitHooksReportABusyWriterAsBusy() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        SubstrateWriter writer = writerWith(new SubstrateProperties(), blockingWriter(entered, release));
+        SubstrateWriter writer = writerWith(Props.of(SubstrateProperties.class), blockingWriter(entered, release));
         try {
             writer.enqueue("p1", List.of(entry("a")));
             assertTrue(entered.await(10, TimeUnit.SECONDS));
@@ -390,7 +387,7 @@ class SubstrateWriterResilienceTest {
             }
             return writes.incrementAndGet();
         });
-        SubstrateWriter writer = writerWith(new SubstrateProperties(), spans);
+        SubstrateWriter writer = writerWith(Props.of(SubstrateProperties.class), spans);
         writer.enqueue("p1", List.of(entry("a")));
         assertTrue(entered.await(10, TimeUnit.SECONDS));
 

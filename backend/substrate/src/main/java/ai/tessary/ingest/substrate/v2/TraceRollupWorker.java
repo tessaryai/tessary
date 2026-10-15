@@ -126,7 +126,7 @@ public class TraceRollupWorker {
      */
     public Pass runOnce() {
         Instant started = Instant.now();
-        int limit = props.getRollupClaimLimit();
+        int limit = props.rollupClaimLimit();
         int claimed = 0;
         int recomputed = 0;
         int settled = 0;

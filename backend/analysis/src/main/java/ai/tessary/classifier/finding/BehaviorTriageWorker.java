@@ -124,7 +124,7 @@ public class BehaviorTriageWorker {
             return;
         }
         try {
-            int exhausted = jobs.failExhausted(props.getMaxAttempts());
+            int exhausted = jobs.failExhausted(props.maxAttempts());
             if (exhausted > 0) {
                 StructuredLog.error(log, Markers.OPS, "behavior.triage.dead-lettered")
                         .field("count", exhausted)
@@ -139,7 +139,7 @@ public class BehaviorTriageWorker {
         for (int round = 0; round < MAX_CLAIM_ROUNDS; round++) {
             List<BehaviorTriageJobRow> batch;
             try {
-                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, leaseSeconds(), props.getMaxAttempts());
+                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, leaseSeconds(), props.maxAttempts());
             } catch (RuntimeException e) {
                 StructuredLog.warn(log, Markers.OPS, "behavior.triage.claim-failed")
                         .field("error", e.getMessage())
@@ -290,7 +290,7 @@ public class BehaviorTriageWorker {
      * this one, and it names an action a person has to take.
      */
     private void releaseUntilConfigured(BehaviorTriageJobRow job, TessaryException e, String because) {
-        long retrySeconds = props.getTriageConfigRetrySeconds();
+        long retrySeconds = props.triageConfigRetrySeconds();
         StructuredLog.warn(log, Markers.OPS, "behavior.triage.awaiting-configuration")
                 .message("triage of " + job.findingId() + " cannot run until " + because + "; re-checking in "
                         + retrySeconds + "s")

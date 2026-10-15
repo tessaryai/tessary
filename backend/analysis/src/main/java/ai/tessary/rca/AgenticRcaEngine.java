@@ -180,7 +180,7 @@ public class AgenticRcaEngine {
      */
     @PostConstruct
     void validateSandboxConfig() {
-        String key = props.getAgentic().getSandbox();
+        String key = props.agentic().sandbox();
         if (!sandboxes.containsKey(key)) {
             throw new IllegalStateException("tessary.rca.agentic.sandbox='" + key
                     + "' is not a registered sandbox (known: " + sandboxes.keySet() + ")");
@@ -189,8 +189,8 @@ public class AgenticRcaEngine {
 
     public Result run(
             RcaJobRow job, RcaReportRow report, Subject subject, Map<String, String> dossierFiles, Evidence evidence) {
-        Agentic cfg = props.getAgentic();
-        String mcpBase = cfg.getMcpBaseUrl();
+        Agentic cfg = props.agentic();
+        String mcpBase = cfg.mcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
             // Not a degraded run — an impossible one. The dossier carries the claim and its numbers;
             // every trace and span behind them is read through MCP, so without the door the agent can
@@ -219,7 +219,7 @@ public class AgenticRcaEngine {
                 dossierFiles.containsKey(METHOD_FILE),
                 evidence.flaggedCount(),
                 evidence.grain(),
-                timeBudgetMinutes(cfg.getTimeoutMs()));
+                timeBudgetMinutes(cfg.timeoutMs()));
 
         // A short-lived project-scoped admin key, named after the job so the audit trail ties it to this
         // run. Revoked in the finally below — the key must not outlive the sandbox.
@@ -228,7 +228,7 @@ public class AgenticRcaEngine {
         try {
             // validateSandboxConfig guarantees the configured key is registered.
             RcaSandbox sandbox =
-                    Objects.requireNonNull(sandboxes.get(props.getAgentic().getSandbox()));
+                    Objects.requireNonNull(sandboxes.get(props.agentic().sandbox()));
             RcaSandbox.SandboxRun run = sandbox.run(new RcaSandbox.SandboxRequest(
                     job.projectId(),
                     job.subjectId(),

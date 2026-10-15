@@ -2,7 +2,7 @@
 package ai.tessary.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * The generic agent-sandbox run ({@code agentrun/}), bound from {@code tessary.agentrun.*}: one
@@ -16,73 +16,23 @@ import org.springframework.stereotype.Component;
  * same launcher sidecar and the same public origin, so a deployment that configured RCA has
  * configured this too, and an extra variable would be one more thing to forget to set.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.agentrun")
-public class AgentRunProperties {
+public record AgentRunProperties(
 
-    /** Which {@code AgentRunSandbox} runs the agent: {@code e2b} (the launcher sidecar) or {@code docker}. */
-    private String sandbox = "e2b";
+        /** Which {@code AgentRunSandbox} runs the agent: {@code e2b} (the launcher sidecar) or {@code docker}. */
+        @DefaultValue("e2b") String sandbox,
 
-    /** Base URL of the launcher sidecar; blank rides the observer's. */
-    private String launcherUrl = "";
+        /** Base URL of the launcher sidecar; blank rides the observer's. */
+        @DefaultValue("") String launcherUrl,
 
-    /** Bearer secret the launcher requires; blank rides the observer's. */
-    private String launcherApiKey = "";
+        /** Bearer secret the launcher requires; blank rides the observer's. */
+        @DefaultValue("") String launcherApiKey,
 
-    /** Publicly reachable API origin the sandbox calls MCP back on; blank rides RCA's. */
-    private String mcpBaseUrl = "";
+        /** Publicly reachable API origin the sandbox calls MCP back on; blank rides RCA's. */
+        @DefaultValue("") String mcpBaseUrl,
 
-    /** Wall-clock cap on one run. A hard kill for a hung run, never a budget stated to the agent. */
-    private long timeoutMs = 900_000;
+        /** Wall-clock cap on one run. A hard kill for a hung run, never a budget stated to the agent. */
+        @DefaultValue("900000") long timeoutMs,
 
-    /** The agent's turn budget, threaded to the sandbox as {@code max_turns} like the other agent lanes. */
-    private int maxTurns = 40;
-
-    public String getSandbox() {
-        return sandbox;
-    }
-
-    public void setSandbox(String v) {
-        this.sandbox = v;
-    }
-
-    public String getLauncherUrl() {
-        return launcherUrl;
-    }
-
-    public void setLauncherUrl(String v) {
-        this.launcherUrl = v;
-    }
-
-    public String getLauncherApiKey() {
-        return launcherApiKey;
-    }
-
-    public void setLauncherApiKey(String v) {
-        this.launcherApiKey = v;
-    }
-
-    public String getMcpBaseUrl() {
-        return mcpBaseUrl;
-    }
-
-    public void setMcpBaseUrl(String v) {
-        this.mcpBaseUrl = v;
-    }
-
-    public long getTimeoutMs() {
-        return timeoutMs;
-    }
-
-    public void setTimeoutMs(long v) {
-        this.timeoutMs = v;
-    }
-
-    public int getMaxTurns() {
-        return maxTurns;
-    }
-
-    public void setMaxTurns(int v) {
-        this.maxTurns = v;
-    }
-}
+        /** The agent's turn budget, threaded to the sandbox as {@code max_turns} like the other agent lanes. */
+        @DefaultValue("40") int maxTurns) {}

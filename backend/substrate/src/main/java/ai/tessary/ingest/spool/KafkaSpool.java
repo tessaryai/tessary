@@ -124,9 +124,9 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     public KafkaSpool(IngestSpoolProperties.Kafka props, ObjectMapper mapper) {
         this.props = props;
         this.mapper = mapper;
-        this.publishTimeoutMs = Math.max(MIN_PUBLISH_TIMEOUT_MS, props.getPublishTimeoutMs());
+        this.publishTimeoutMs = Math.max(MIN_PUBLISH_TIMEOUT_MS, props.publishTimeoutMs());
         Properties p = new Properties();
-        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
+        p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         p.put(ProducerConfig.ACKS_CONFIG, "all");
         p.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
         p.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
@@ -139,7 +139,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         p.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, String.valueOf(publishTimeoutMs));
         this.producer = new KafkaProducer<>(p, new StringSerializer(), new ByteArraySerializer());
         Properties a = new Properties();
-        a.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
+        a.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
         a.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
         a.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, String.valueOf(ADMIN_TIMEOUT_MS));
         this.admin = Admin.create(a);
@@ -148,7 +148,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     /** The largest frame a batch can need: the message cap plus headers, key and envelope slack. */
     private long frameBytes() {
-        return props.getMaxMessageBytes() + 64 * 1024;
+        return props.maxMessageBytes() + 64 * 1024;
     }
 
     /**
@@ -171,17 +171,17 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                 // durable. See IngestSpoolProperties.Kafka.minInSyncReplicas.
                 "min.insync.replicas",
                 String.valueOf(props.minInSyncReplicas()));
-        for (String topic : List.of(props.getTopic(), props.getDeadLetterTopic())) {
+        for (String topic : List.of(props.topic(), props.deadLetterTopic())) {
             try {
-                admin.createTopics(List.of(new NewTopic(topic, props.getPartitions(), props.getReplicationFactor())
-                                .configs(configs)))
+                admin.createTopics(List.of(
+                                new NewTopic(topic, props.partitions(), props.replicationFactor()).configs(configs)))
                         .all()
                         .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 log.info(
                         "ingest spool topic created topic={} partitions={} replication={} min-isr={}",
                         topic,
-                        props.getPartitions(),
-                        props.getReplicationFactor(),
+                        props.partitions(),
+                        props.replicationFactor(),
                         props.minInSyncReplicas());
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
@@ -194,8 +194,8 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
                             "ingest spool topic exists topic={}; it keeps the settings it was created with,"
                                     + " not the requested partitions={} replication={} min-isr={}",
                             topic,
-                            props.getPartitions(),
-                            props.getReplicationFactor(),
+                            props.partitions(),
+                            props.replicationFactor(),
                             props.minInSyncReplicas());
                 } else {
                     log.warn(
@@ -210,8 +210,8 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             } catch (TimeoutException | KafkaException e) {
                 log.warn(
                         "ingest spool broker not reachable bootstrap={}; publishes shed until it is",
-                        props.getBootstrapServers());
-                publishFailure = "broker not reachable at " + props.getBootstrapServers();
+                        props.bootstrapServers());
+                publishFailure = "broker not reachable at " + props.bootstrapServers();
                 publishFailedAtNanos = System.nanoTime();
                 return false;
             } catch (InterruptedException e) {
@@ -230,7 +230,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
      * acknowledged write is the broker's own flush and replication policy.
      */
     private void disableWriteCaching() {
-        for (String topic : List.of(props.getTopic(), props.getDeadLetterTopic())) {
+        for (String topic : List.of(props.topic(), props.deadLetterTopic())) {
             ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
             try {
                 admin.incrementalAlterConfigs(Map.of(
@@ -260,7 +260,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
     /** One drainer per configured consumer: messages are keyed by project, so a project stays on one of them. */
     @Override
     public int drainers() {
-        return Math.max(1, props.getConsumers());
+        return Math.max(1, props.consumers());
     }
 
     @Override
@@ -272,18 +272,18 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             log.warn("ingest spool could not encode a batch project={} spans={}", projectId, entries.size());
             return Admission.SHED;
         }
-        if (body.length > props.getMaxMessageBytes()) {
+        if (body.length > props.maxMessageBytes()) {
             log.warn(
                     "ingest spool batch exceeds max-message-bytes — refused project={} spans={} bytes={} max={}",
                     projectId,
                     entries.size(),
                     body.length,
-                    props.getMaxMessageBytes());
+                    props.maxMessageBytes());
             return Admission.OVERSIZE;
         }
         if (!ensureTopics()) return Admission.SHED;
         try {
-            producer.send(new ProducerRecord<>(props.getTopic(), projectId, body))
+            producer.send(new ProducerRecord<>(props.topic(), projectId, body))
                     .get(publishTimeoutMs, TimeUnit.MILLISECONDS);
             publishFailure = null;
             return Admission.ACCEPTED;
@@ -396,7 +396,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
 
     private boolean deadLetter(ConsumerRecord<String, byte[]> record) {
         try {
-            producer.send(new ProducerRecord<>(props.getDeadLetterTopic(), record.key(), record.value()))
+            producer.send(new ProducerRecord<>(props.deadLetterTopic(), record.key(), record.value()))
                     .get(publishTimeoutMs, TimeUnit.MILLISECONDS);
             deadLettered.incrementAndGet();
             log.warn(
@@ -428,15 +428,15 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
         if (existing != null) return existing;
         ensureTopics();
         Properties p = new Properties();
-        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.getBootstrapServers());
-        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.getGroupId());
+        p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, props.bootstrapServers());
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, props.groupId());
         p.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         p.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
         p.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, String.valueOf(frameBytes()));
         p.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, String.valueOf(frameBytes()));
         KafkaConsumer<String, byte[]> c = new KafkaConsumer<>(p, new StringDeserializer(), new ByteArrayDeserializer());
-        c.subscribe(List.of(props.getTopic()));
+        c.subscribe(List.of(props.topic()));
         Slot fresh = new Slot(c, me);
         slots.put(me, fresh);
         return fresh;
@@ -467,16 +467,16 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             return withAge(snapshot);
         }
         try {
-            Map<TopicPartition, OffsetAndMetadata> committed = admin.listConsumerGroupOffsets(props.getGroupId())
+            Map<TopicPartition, OffsetAndMetadata> committed = admin.listConsumerGroupOffsets(props.groupId())
                     .partitionsToOffsetAndMetadata()
                     .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            TopicDescription description = admin.describeTopics(List.of(props.getTopic()))
+            TopicDescription description = admin.describeTopics(List.of(props.topic()))
                     .allTopicNames()
                     .get(ADMIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    .get(props.getTopic());
+                    .get(props.topic());
             if (description == null) return withAge(snapshot);
             Set<TopicPartition> partitions = description.partitions().stream()
-                    .map(info -> new TopicPartition(props.getTopic(), info.partition()))
+                    .map(info -> new TopicPartition(props.topic(), info.partition()))
                     .collect(Collectors.toSet());
             Map<TopicPartition, OffsetSpec> latest = new HashMap<>();
             Map<TopicPartition, OffsetSpec> earliest = new HashMap<>();
@@ -505,7 +505,7 @@ public final class KafkaSpool implements IngestSpool, AutoCloseable {
             if (publishFailure != null && now - publishFailedAtNanos > RECOVERY_QUIET.toNanos()) publishFailure = null;
         } catch (ExecutionException | TimeoutException | KafkaException e) {
             // Keep the last known depth and say the broker could not be asked; health reads that.
-            lagFailure = "broker not reachable at " + props.getBootstrapServers() + ": "
+            lagFailure = "broker not reachable at " + props.bootstrapServers() + ": "
                     + e.getClass().getSimpleName();
             log.warn("ingest spool lag read failed error={}", e.getClass().getSimpleName());
         } catch (InterruptedException e) {

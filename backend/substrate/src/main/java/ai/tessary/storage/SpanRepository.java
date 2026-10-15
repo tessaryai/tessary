@@ -53,7 +53,7 @@ public class SpanRepository {
         this.named = named;
         JdbcTemplate timed = new JdbcTemplate();
         timed.setDataSource(named.getJdbcTemplate().getDataSource());
-        timed.setQueryTimeout(props.getResolverStatementTimeoutSeconds());
+        timed.setQueryTimeout(props.resolverStatementTimeoutSeconds());
         this.resolverJdbc = JdbcClient.create(timed);
     }
 

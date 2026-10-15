@@ -453,7 +453,7 @@ public class ClassifierService {
         Map<String, ClassifierJobRow> byId = jobs.listByProject(projectId).stream()
                 .collect(Collectors.toMap(ClassifierJobRow::classifierId, r -> r));
         return list(projectId).stream()
-                .map(s -> ClassifierDtos.ClassifierHealthView.of(s.id(), byId.get(s.id()), props.getMaxAttempts()))
+                .map(s -> ClassifierDtos.ClassifierHealthView.of(s.id(), byId.get(s.id()), props.maxAttempts()))
                 .toList();
     }
 
@@ -758,7 +758,7 @@ public class ClassifierService {
                 }
                 lastEncoderSkip.remove(s.id());
             }
-            jobs.enqueue(projectId, s.id(), props.getDeadLetterCooldownSeconds());
+            jobs.enqueue(projectId, s.id(), props.deadLetterCooldownSeconds());
         }
     }
 

@@ -2,7 +2,7 @@
 package ai.tessary.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Tuning for the async alerting engine, bound from {@code tessary.alert.*}. The worker runs
@@ -15,44 +15,18 @@ import org.springframework.stereotype.Component;
  * from {@code tessary.alert.heartbeat-ms}; {@link #defaultDigestCron} and {@link #cronZone} are
  * fallback server defaults used when a per-row cron is absent.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.alert")
-public class AlertProperties {
+public record AlertProperties(
 
-    /** Cadence used when an enabled project has no digest_cron of its own. Spring 6-field cron; daily 08:00. */
-    private String defaultDigestCron = "0 0 8 * * *";
+        /** Cadence used when an enabled project has no digest_cron of its own. Spring 6-field cron; daily 08:00. */
+        @DefaultValue("0 0 8 * * *") String defaultDigestCron,
 
-    /** Zone in which alert crons are evaluated (per-project zones are a future extension). */
-    private String cronZone = "UTC";
+        /** Zone in which alert crons are evaluated (per-project zones are a future extension). */
+        @DefaultValue("UTC") String cronZone,
 
-    /**
-     * Public origin of the SPA, used to put a link to the case in an alert message
-     * ({@code https://app.tessary.ai}). Empty by default and in local development, where there is
-     * no stable public origin: better to omit the link than send one that goes nowhere.
-     */
-    private String appBaseUrl = "";
-
-    public String getDefaultDigestCron() {
-        return defaultDigestCron;
-    }
-
-    public void setDefaultDigestCron(String v) {
-        this.defaultDigestCron = v;
-    }
-
-    public String getCronZone() {
-        return cronZone;
-    }
-
-    public void setCronZone(String v) {
-        this.cronZone = v;
-    }
-
-    public String getAppBaseUrl() {
-        return appBaseUrl;
-    }
-
-    public void setAppBaseUrl(String v) {
-        this.appBaseUrl = v;
-    }
-}
+        /**
+         * Public origin of the SPA, used to put a link to the case in an alert message
+         * ({@code https://app.tessary.ai}). Empty by default and in local development, where there is
+         * no stable public origin: better to omit the link than send one that goes nowhere.
+         */
+        @DefaultValue("") String appBaseUrl) {}

@@ -36,7 +36,7 @@ public final class OpenRouterModelLister implements ProviderModelLister {
     private final Duration timeout;
 
     /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+     *  {@code ModelCatalogProperties#fetchTimeout()}. */
     public OpenRouterModelLister(HttpClient http, ObjectMapper mapper, Duration timeout) {
         this(http, mapper, DEFAULT_URL, timeout);
     }

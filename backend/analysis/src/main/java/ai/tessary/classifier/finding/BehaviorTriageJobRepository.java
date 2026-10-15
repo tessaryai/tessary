@@ -74,7 +74,7 @@ public class BehaviorTriageJobRepository {
     /** The moment a dead-lettered look becomes revivable; bound as {@code :deadFloor} by {@link #enqueue}. */
     private String deadFloor() {
         return Instant.now()
-                .minus(Duration.ofSeconds(props.getDeadLetterCooldownSeconds()))
+                .minus(Duration.ofSeconds(props.deadLetterCooldownSeconds()))
                 .toString();
     }
 

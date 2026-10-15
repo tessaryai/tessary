@@ -90,7 +90,7 @@ public class RedactionService {
     public RedactionService(RedactionRuleRepository repo, RedactionProperties props) {
         // Null-tolerant: the resilience tests build this with no properties to exercise the writer, and
         // no configuration means no fan-out, which is the serial behaviour they are asserting anyway.
-        int parallelism = props == null ? 1 : props.getParallelism();
+        int parallelism = props == null ? 1 : props.parallelism();
         // Named threads: this codebase diagnoses production by thread dump, and "ForkJoinPool-1-worker-3"
         // says nothing about which subsystem is burning the core. A counter rather than getPoolIndex():
         // the pool assigns that index in registerWorker, AFTER this factory returns, so naming from it
@@ -121,7 +121,7 @@ public class RedactionService {
      * deliberately not caught (see {@link #redactAll}).
      */
     public List<RawEntry> redactBatch(String projectId, List<RawEntry> entries) {
-        if (!props.isEnabled() || entries.isEmpty()) return entries;
+        if (!props.enabled() || entries.isEmpty()) return entries;
         List<CompiledRule> rules = compiledFor(projectId);
         if (rules.isEmpty()) return entries;
         // Timed because this is regex over every ingested body and its cost scales with body size,
@@ -148,7 +148,7 @@ public class RedactionService {
     }
 
     /**
-     * Apply the rules to every entry, across {@link RedactionProperties#getParallelism()} threads.
+     * Apply the rules to every entry, across {@link RedactionProperties#parallelism()} threads.
      *
      * <p>Each entry is an independent pure transform over immutable compiled rules, so this is a plain
      * parallel map; {@code toList()} on an ordered stream keeps the batch's order. The writer does not

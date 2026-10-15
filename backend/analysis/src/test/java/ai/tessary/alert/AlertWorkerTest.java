@@ -17,6 +17,7 @@ import ai.tessary.plan.CapabilityDefaults;
 import ai.tessary.plan.CapabilityService;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.tracing.Tracer;
 import java.time.Instant;
@@ -142,12 +143,14 @@ class AlertWorkerTest {
         when(rules.listEnabled(AlertRuleRow.RuleType.CASE_OPENED)).thenReturn(List.of(held));
         when(projects.findById("p1")).thenReturn(Optional.of(project("p1")));
         AlertEventRow wouldFire = firing("evt_case", AlertRuleRow.RuleType.CASE_OPENED, CREATED);
-        CaseAlertEvaluator alwaysDue = new CaseAlertEvaluator(null, new AlertProperties(), new ObjectMapper()) {
-            @Override
-            public List<AlertEventRow> due(AlertRuleRow rule, Instant since, Instant now, Set<String> unavailable) {
-                return List.of(wouldFire);
-            }
-        };
+        CaseAlertEvaluator alwaysDue =
+                new CaseAlertEvaluator(null, Props.of(AlertProperties.class), new ObjectMapper()) {
+                    @Override
+                    public List<AlertEventRow> due(
+                            AlertRuleRow rule, Instant since, Instant now, Set<String> unavailable) {
+                        return List.of(wouldFire);
+                    }
+                };
 
         worker(alwaysDue).tick();
 
@@ -212,7 +215,7 @@ class AlertWorkerTest {
                 caseEvaluator,
                 new ObjectMapper(),
                 classifiers,
-                new AlertProperties(),
+                Props.of(AlertProperties.class),
                 published::add,
                 new CapabilityService(
                         (key, ctx) -> key.equals(Capability.ALERTS.wire()) ? Optional.of(true) : Optional.empty(),

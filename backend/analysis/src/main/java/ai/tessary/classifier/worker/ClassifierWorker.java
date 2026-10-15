@@ -187,7 +187,7 @@ public class ClassifierWorker {
 
     private void tickInner() {
         try {
-            int exhausted = jobs.failExhausted(props.getMaxAttempts());
+            int exhausted = jobs.failExhausted(props.maxAttempts());
             if (exhausted > 0) {
                 StructuredLog.error(log, Markers.OPS, "signal.dead-lettered")
                         .field("count", exhausted)
@@ -223,7 +223,7 @@ public class ClassifierWorker {
         for (int round = 0; round < MAX_CLAIM_ROUNDS; round++) {
             List<ClassifierJobRow> batch;
             try {
-                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, props.getLeaseSeconds(), props.getMaxAttempts());
+                batch = jobs.claimBatch(leaseOwner, CLAIM_BATCH, props.leaseSeconds(), props.maxAttempts());
             } catch (RuntimeException e) {
                 StructuredLog.warn(log, Markers.OPS, "signal.claim-failed")
                         .field("error", e.getMessage())
@@ -344,7 +344,7 @@ public class ClassifierWorker {
             // repeats collapse to a summary. The alertable ERROR is reserved for the budget-exhausted
             // dead-letter transition. Clearing the streak on dead-letter means each post-cooldown
             // revival probe that fails again logs fresh.
-            boolean deadLettered = jobs.markFailed(job.id(), e.getMessage(), props.getMaxAttempts());
+            boolean deadLettered = jobs.markFailed(job.id(), e.getMessage(), props.maxAttempts());
             final @Nullable String readableSignal = classifierKey;
             if (deadLettered) {
                 sweepFailures.clear(job.id());
@@ -352,7 +352,7 @@ public class ClassifierWorker {
                         .field("job", job.id())
                         .field("signal", readableSignal)
                         .field("classifierId", job.classifierId())
-                        .field("attempts", props.getMaxAttempts())
+                        .field("attempts", props.maxAttempts())
                         .cause(e)
                         .log();
             } else {
@@ -529,10 +529,10 @@ public class ClassifierWorker {
         BuiltInDetector detector = Objects.requireNonNull(catalog.detectorFor(signal.detector()));
         String detectorConfig = signal.configJson();
         boolean drain = DRAIN_TO_HEAD.contains(signal.detector());
-        Duration budget = Duration.ofSeconds(props.getLeaseSeconds() / 2);
+        Duration budget = Duration.ofSeconds(props.leaseSeconds() / 2);
         int pageSize = BuiltInDetector.Kind.ENCODER_BACKED.contains(signal.detector())
-                ? props.getEncoderBatchSize()
-                : props.getBatchSize();
+                ? props.encoderBatchSize()
+                : props.batchSize();
 
         String cursorAt = job.cursorAt();
         String cursorId = job.cursorId();
@@ -567,7 +567,7 @@ public class ClassifierWorker {
                     && page.windowSize() >= pageSize
                     && Duration.between(start, Instant.now()).compareTo(budget) < 0;
             if (more) {
-                leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.getLeaseSeconds());
+                leaseLost = !jobs.advanceCursor(job.id(), leaseOwner, cursorAt, cursorId, props.leaseSeconds());
             } else {
                 jobs.markSwept(job.id(), cursorAt, cursorId);
                 atHead = page.windowSize() < pageSize;

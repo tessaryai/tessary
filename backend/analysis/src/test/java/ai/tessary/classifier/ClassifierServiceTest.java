@@ -45,6 +45,7 @@ import ai.tessary.plan.CapabilityService;
 import ai.tessary.plan.EncoderAvailability;
 import ai.tessary.tenant.Project;
 import ai.tessary.tenant.ProjectRepository;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -57,7 +58,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
@@ -91,7 +91,7 @@ class ClassifierServiceTest {
     private final MetricBaselineRepository baselines = mock(MetricBaselineRepository.class);
     private final ProjectRepository projects = mock(ProjectRepository.class);
     private final DecisionProviderResolver decisionProviders = mock(DecisionProviderResolver.class);
-    private final ClassifierProperties props = new ClassifierProperties();
+    private final ClassifierProperties props = Props.of(ClassifierProperties.class);
     private final BuiltInClassifierCatalog catalog = mock(BuiltInClassifierCatalog.class);
 
     /** A sweep from outside the tree, for a kind no catalog module declares. */
@@ -112,11 +112,6 @@ class ClassifierServiceTest {
             decisionProviders,
             mock(EncoderAvailability.class),
             new GroundednessProperties());
-
-    @BeforeEach
-    void setup() {
-        props.setMaxAttempts(5);
-    }
 
     /**
      * Catches the rate read off the mean spread, the first bucket, or nothing once one sketch is unreadable, and an

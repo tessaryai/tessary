@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import ai.tessary.config.SubstrateProperties;
 import ai.tessary.storage.SpanRepository;
 import ai.tessary.testsupport.LogCapture;
+import ai.tessary.testsupport.Props;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import java.util.List;
@@ -39,7 +40,7 @@ class PathResolverTest {
     void aFailedPassIsReportedWithoutTheDatabaseError() {
         when(spans.resolveRootPaths(anyInt())).thenThrow(new IllegalStateException("value \"secret prompt\" too long"));
 
-        assertDoesNotThrow(new PathResolver(spans, new SubstrateProperties())::tick);
+        assertDoesNotThrow(new PathResolver(spans, Props.of(SubstrateProperties.class))::tick);
 
         ILoggingEvent warn = log.first(Level.WARN);
         assertNull(warn.getThrowableProxy(), "no stack trace, and no message, on the egressing line");
@@ -53,7 +54,7 @@ class PathResolverTest {
         when(spans.resolveChildPaths(500)).thenReturn(0);
         when(spans.markOrphanPaths(500)).thenReturn(0);
 
-        new PathResolver(spans, new SubstrateProperties()).tick();
+        new PathResolver(spans, Props.of(SubstrateProperties.class)).tick();
 
         verify(spans).resolveRootPaths(500);
         verify(spans).resolveChildPaths(500);

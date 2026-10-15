@@ -158,7 +158,7 @@ public class TriageAutoEscalator {
         int escalated = 0;
         for (TriageSource source : sources) {
             for (TriageSource.Escalatable finding :
-                    source.listAutoEscalatable(project.id(), props.getTriageMinTraceCount(), SOURCE_SCAN_LIMIT)) {
+                    source.listAutoEscalatable(project.id(), props.triageMinTraceCount(), SOURCE_SCAN_LIMIT)) {
                 // No lane requested: triage takes the sandbox lane the project supports. The grader lane
                 // is a human's choice about whether the graders measure this kind of thing, and a
                 // scheduler cannot make it.

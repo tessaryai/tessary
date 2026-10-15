@@ -21,7 +21,7 @@ import org.springframework.context.annotation.Configuration;
  * Wires + lifecycle-manages the OTLP/gRPC {@code TraceService/Export} server.
  *
  * <p>The server binds {@code tessary.ingest.otlp.grpc-port} (default 4317) <em>only</em> when the receiver's
- * {@link OtlpReceiverProperties#getTransport() transport} includes gRPC — otherwise the
+ * {@link OtlpReceiverProperties#transport() transport} includes gRPC — otherwise the
  * {@link OtlpGrpcServer} {@link SmartLifecycle} is a no-op and no socket is opened. HTTP ingest is always
  * on; gRPC binds a separate inbound socket, so it stays opt-in via the transport knob (default HTTP).
  *
@@ -71,13 +71,13 @@ public class OtlpGrpcServerConfig {
         }
 
         private boolean grpcEnabled() {
-            return props.getTransport().includesGrpc();
+            return props.transport().includesGrpc();
         }
 
         @Override
         public void start() {
             if (!grpcEnabled() || server != null) return;
-            int port = props.getGrpcPort();
+            int port = props.grpcPort();
             NettyServerBuilder builder = NettyServerBuilder.forPort(port)
                     .executor(Executors.newVirtualThreadPerTaskExecutor())
                     .addService(traceService)
@@ -85,7 +85,7 @@ public class OtlpGrpcServerConfig {
             // Share the one configured byte bound with the HTTP path (OtlpTraceController honours
             // max-body-bytes); otherwise grpc-java's 4 MiB default would silently reject 4–32 MiB
             // batches an operator sized for the HTTP receiver. <= 0 leaves grpc-java's default in place.
-            int maxBodyBytes = props.getMaxBodyBytes();
+            int maxBodyBytes = props.maxBodyBytes();
             if (maxBodyBytes > 0) {
                 builder.maxInboundMessageSize(maxBodyBytes);
             }

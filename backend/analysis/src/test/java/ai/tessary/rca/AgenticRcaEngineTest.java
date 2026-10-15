@@ -22,6 +22,7 @@ import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.ApiKey;
 import ai.tessary.tenant.ApiKeyService;
 import ai.tessary.tenant.KeyScope;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
@@ -82,8 +83,7 @@ class AgenticRcaEngineTest {
 
     @Test
     void validateSandboxConfigRejectsAnUnregisteredSandboxKey() {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setSandbox("no-such-driver");
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.sandbox", "no-such-driver");
 
         IllegalStateException e =
                 assertThrows(IllegalStateException.class, () -> engine(props).validateSandboxConfig());
@@ -144,9 +144,8 @@ class AgenticRcaEngineTest {
                 RcaReportRow.ReportKind.GROUNDEDNESS_CAUSES
             })
     void everyReportKindGetsTheOnePromptAndSchema(String kind) {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test/");
-        props.getAgentic().setTimeoutMs(600_000);
+        RcaProperties props = Props.of(
+                RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test/", "agentic.timeout-ms", 600_000);
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"s\",\"verdict\":\"no_cause_found\","
                 + "\"detailed_report\":\"## d\",\"ruled_out\":[],\"causes\":[]}");
@@ -187,8 +186,7 @@ class AgenticRcaEngineTest {
     /** No method file in the dossier (a user or regex classifier): the prompt does not point at one. */
     @Test
     void aDossierWithoutAMethodFileGetsAPromptWithoutTheMethodLine() {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         RecordingSandbox sandbox = new RecordingSandbox("{\"verdict\":\"no_cause_found\",\"causes\":[]}");
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);
@@ -209,8 +207,7 @@ class AgenticRcaEngineTest {
      */
     @Test
     void theRunsCausesAreValidatedAgainstThisFindingsEvidence() {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"One document per answer\","
                 + "\"verdict\":\"causes_identified\",\"detailed_report\":\"## r\","
@@ -252,8 +249,7 @@ class AgenticRcaEngineTest {
      */
     @Test
     void aDowngradedVerdictLeadsTheReportAndAMissingReportFallsBackToTheSummary() {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         RecordingSandbox sandbox = new RecordingSandbox("{\"summary\":\"The flagged side changed\","
                 + "\"verdict\":\"causes_identified\",\"causes\":[{\"title\":\"t\",\"confidence\":\"high\","
@@ -283,8 +279,7 @@ class AgenticRcaEngineTest {
             })
     void aConnectedRepoIsHandedOverAtItsHeadAndAFailedRevocationDoesNotSinkTheRun(
             String authHeader, String expectedCloneUrl, String expectedSha, String expectedOnset) {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl("https://tessary.test");
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", "https://tessary.test");
         when(apiKeys.issue("proj-1", "user-1", "rca-job-1", KeyScope.ADMIN)).thenReturn(issuedKey());
         when(apiKeys.revoke("key-1", "user-1")).thenThrow(new IllegalStateException("audit write failed"));
         RecordingSandbox sandbox = new RecordingSandbox(
@@ -329,8 +324,7 @@ class AgenticRcaEngineTest {
     @ParameterizedTest
     @ValueSource(strings = {"", "   "})
     void withoutAnEvidenceDoorTheRunIsRefusedBeforeAnyKeyIsIssued(String mcpBaseUrl) {
-        RcaProperties props = new RcaProperties();
-        props.getAgentic().setMcpBaseUrl(mcpBaseUrl);
+        RcaProperties props = Props.of(RcaProperties.class, "agentic.mcp-base-url", mcpBaseUrl);
         RecordingSandbox sandbox = new RecordingSandbox("{}");
         AgenticRcaEngine engine = engine(props, sandbox);
         RcaReportRow report = report(RcaReportRow.ReportKind.METRIC_MOVEMENT);

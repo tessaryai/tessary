@@ -55,7 +55,7 @@ public final class InProcessSpool implements IngestSpool {
     }
 
     InProcessSpool(SubstrateProperties props, LongSupplier nanoTime) {
-        this.maxQueueBytes = Math.max(1L, props.getQueueMaxBytes());
+        this.maxQueueBytes = Math.max(1L, props.queueMaxBytes());
         this.nanoTime = nanoTime;
     }
 

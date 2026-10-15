@@ -34,7 +34,7 @@ public class IngestHealthIndicator implements HealthIndicator {
     public Health health() {
         IngestSpool.Stats stats = writer.spoolStats();
         boolean alive = writer.drainerAlive();
-        boolean lagging = props.getMaxLagMs() > 0 && stats.oldestAgeMs() > props.getMaxLagMs();
+        boolean lagging = props.maxLagMs() > 0 && stats.oldestAgeMs() > props.maxLagMs();
         Optional<String> unavailable = spool.unavailable();
         Health.Builder h = alive && !lagging && unavailable.isEmpty() ? Health.up() : Health.down();
         unavailable.ifPresent(reason -> h.withDetail("unavailable", reason));

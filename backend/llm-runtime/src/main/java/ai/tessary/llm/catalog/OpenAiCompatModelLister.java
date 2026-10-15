@@ -42,7 +42,7 @@ public final class OpenAiCompatModelLister implements ProviderModelLister {
     private final Duration timeout;
 
     /** @param timeout per-call ceiling on the {@code GET /models} request — production wires this to
-     *  {@code ModelCatalogProperties#getFetchTimeout()}. */
+     *  {@code ModelCatalogProperties#fetchTimeout()}. */
     public OpenAiCompatModelLister(HttpClient http, ObjectMapper mapper, String vendor, Duration timeout) {
         this.http = http;
         this.mapper = mapper;

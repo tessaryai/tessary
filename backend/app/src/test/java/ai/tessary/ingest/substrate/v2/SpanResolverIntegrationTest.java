@@ -13,6 +13,7 @@ import ai.tessary.storage.SpanRepository;
 import ai.tessary.storage.SpanRow;
 import ai.tessary.storage.TraceV2Repository;
 import ai.tessary.tenant.TenantService;
+import ai.tessary.testsupport.Props;
 import ai.tessary.testsupport.SubstrateV2Fixtures;
 import ai.tessary.testsupport.TenantFixture;
 import java.time.Instant;
@@ -284,9 +285,7 @@ class SpanResolverIntegrationTest {
     }
 
     private static SubstrateProperties propsWithBatchSize(int batchSize) {
-        SubstrateProperties props = new SubstrateProperties();
-        props.setResolverBatchSize(batchSize);
-        return props;
+        return Props.of(SubstrateProperties.class, "resolver-batch-size", batchSize);
     }
 
     private String pathOf(String traceId, String spanId) {

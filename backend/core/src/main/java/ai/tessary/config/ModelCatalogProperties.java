@@ -3,7 +3,7 @@ package ai.tessary.config;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Tuning for the live per-provider model catalog fetch, bound from
@@ -18,29 +18,11 @@ import org.springframework.stereotype.Component;
  * Defaults are conservative rather than tuned against production traffic, since there is none yet —
  * revisit once the fetch pattern is observable.
  */
-@Component
 @ConfigurationProperties(prefix = "tessary.model-catalog")
-public class ModelCatalogProperties {
+public record ModelCatalogProperties(
 
-    /** How long a fetched (provider, region) entry is served before the next read triggers a refetch. */
-    private Duration refreshInterval = Duration.ofMinutes(15);
+        /** How long a fetched (provider, region) entry is served before the next read triggers a refetch. */
+        @DefaultValue("15m") Duration refreshInterval,
 
-    /** Per-call ceiling on a single provider's models-endpoint request. */
-    private Duration fetchTimeout = Duration.ofSeconds(5);
-
-    public Duration getRefreshInterval() {
-        return refreshInterval;
-    }
-
-    public void setRefreshInterval(Duration refreshInterval) {
-        this.refreshInterval = refreshInterval;
-    }
-
-    public Duration getFetchTimeout() {
-        return fetchTimeout;
-    }
-
-    public void setFetchTimeout(Duration fetchTimeout) {
-        this.fetchTimeout = fetchTimeout;
-    }
-}
+        /** Per-call ceiling on a single provider's models-endpoint request. */
+        @DefaultValue("5s") Duration fetchTimeout) {}

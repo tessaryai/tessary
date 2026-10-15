@@ -91,7 +91,7 @@ public class TraceRollupReaper {
      * waiting a minute for a scheduler, and without the sweep racing the assertions it is being checked by.
      */
     public Sweep sweepOnce() {
-        int rearmed = traces.reap(props.getRollupReapGraceSeconds());
+        int rearmed = traces.reap(props.rollupReapGraceSeconds());
         RollupQueue queue = traces.queueStats();
         metrics.recordSweep(rearmed, queue.depth(), queue.overdueMs());
 
@@ -99,11 +99,11 @@ public class TraceRollupReaper {
             StructuredLog.warn(log, Markers.OPS, "substrate.rollup.reaped")
                     .message("re-armed %s trace(s) claimed for a rollup that never wrote back", rearmed)
                     .field("rearmed", rearmed)
-                    .field("grace_seconds", props.getRollupReapGraceSeconds())
+                    .field("grace_seconds", props.rollupReapGraceSeconds())
                     .field("queue_depth", queue.depth())
                     .log();
         }
-        if (queue.overdueMs() > props.getRollupStaleAfterMs()) {
+        if (queue.overdueMs() > props.rollupStaleAfterMs()) {
             log.error(
                     Markers.OPS,
                     "trace rollup queue is behind by {}ms over {} armed trace(s) — every trace surface is"

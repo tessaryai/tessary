@@ -22,6 +22,7 @@ import ai.tessary.open.errors.ErrorCode;
 import ai.tessary.open.errors.Retryable;
 import ai.tessary.open.errors.TessaryException;
 import ai.tessary.tenant.KeyScope;
+import ai.tessary.testsupport.Props;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.RetryInfo;
@@ -74,10 +75,10 @@ class OtlpGrpcTraceServiceTest {
 
     @BeforeEach
     void startServer() throws IOException {
-        OtlpReceiverProperties props = new OtlpReceiverProperties();
+        OtlpReceiverProperties props = Props.of(OtlpReceiverProperties.class);
         OtlpSpanMapper mapper = new OtlpSpanMapper(new ObjectMapper());
-        OtlpIngestService ingest =
-                new OtlpIngestService(props, new SubstrateProperties(), substrateWriter, mapper, projectId -> {
+        OtlpIngestService ingest = new OtlpIngestService(
+                props, Props.of(SubstrateProperties.class), substrateWriter, mapper, projectId -> {
                     TessaryException failure = quotaFailure;
                     if (failure != null) {
                         throw failure;
@@ -238,8 +239,8 @@ class OtlpGrpcTraceServiceTest {
     @Test
     void anExportWithNoResolvedProject_rejectedUnauthenticated_evenWithoutTheInterceptor() {
         OtlpGrpcTraceService bare = new OtlpGrpcTraceService(new OtlpIngestService(
-                new OtlpReceiverProperties(),
-                new SubstrateProperties(),
+                Props.of(OtlpReceiverProperties.class),
+                Props.of(SubstrateProperties.class),
                 substrateWriter,
                 new OtlpSpanMapper(new ObjectMapper()),
                 projectId -> {}));
