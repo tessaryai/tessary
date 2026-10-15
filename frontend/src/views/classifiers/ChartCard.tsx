@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Every card has the same height whatever it holds, so a grid lines up. The SVG is measured in CSS
-// pixels so tick text stays the small type size at every card width.
+/*
+ * One classifier's chart for one call site or one tool: the last 7 days against the baseline, the series over the
+ * range on a continuous UTC time axis, and the cases it opened. A rate or range point is a step held over the hours it
+ * merged; a count point is a bar over its bucket.
+ *
+ * Every card has the same height whatever it holds, so a grid of them lines up: the rows are fixed, the chart is a
+ * fixed height, and the cases strip always keeps room for three lanes. Everything is grey except the delta, which is
+ * red when the measure got worse and green when it got better (rateStory.tsx).
+ *
+ * The chart's coordinates are CSS pixels: the SVG takes its width from the card, measured, so its tick text is the
+ * small type size at every card width instead of scaling with it.
+ */
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ChartCard as Card, ChartPoint, ClassifierCharts } from "../../api/types";
@@ -57,6 +67,7 @@ function useWidth() {
   return [ref, width] as const;
 }
 
+/** The index of the point whose span holds `px`, else the one nearest it. */
 function nearestPoint(spans: { a: number; b: number }[], px: number): number | null {
   let best: number | null = null;
   let gap = Infinity;

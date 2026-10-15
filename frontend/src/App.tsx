@@ -14,7 +14,14 @@ import { ConnectGate } from "./views/onboarding/ConnectGate";
 import { Button, Spinner, ToastProvider } from "./ui";
 import { registerRouteChunk } from "./lib/routePreload";
 
-/* Every view is lazy-loaded so the initial bundle carries only the auth/shell/router skeleton. */
+/*
+ * Route-level code-splitting. Every view is lazy-loaded so the initial
+ * bundle carries only the auth/shell/router skeleton; each surface's JS is
+ * fetched the first time it is visited. This is the performance win that clears
+ * Vite's >500 kB chunk-size advisory, see vite.config.ts for the companion
+ * vendor-chunk split. `named` adapts our named exports to the default export
+ * React.lazy expects, so view files keep their named exports unchanged.
+ */
 function named<M, K extends keyof M>(
   loader: () => Promise<M>,
   key: K,
@@ -231,6 +238,7 @@ function ProjectShell() {
           <Route path="retention" element={<Retention />} />
           <Route path="members" element={<Members />} />
           <Route path="organization" element={<Organization />} />
+          {/* Renamed from "workspace": redirect old bookmarks. */}
           <Route path="workspace" element={<Navigate to="../organization" replace />} />
           <Route path="features" element={<Features />} />
           {/* Absolute: a relative `to` resolves against the matched splat and loops. */}

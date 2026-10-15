@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Opened in place from Settings, a case and an RCA report. A token leads because it works on every
-// deployment; the App path needs one registered first. Token creation is explained here because those
-// few lines are the whole distance to a working connection.
+/*
+ * The one dialog that binds a repository to a project, wherever the ask starts:
+ * Settings → Git integration, the case page beside Run RCA, or the notice on an
+ * RCA report that had no repo to read. All three open this, in place — someone
+ * reading a failure should not lose their place to go configure something.
+ *
+ * An access token is the default and the GitHub App is the secondary path, which
+ * is the reverse of how this used to read. The token is the only route that works
+ * on every deployment: a self-hoster with no App configured used to meet three
+ * buttons that dead-end before finding the field that binds a repo.
+ *
+ * Making a token is explained HERE rather than in a docs page, because the five
+ * lines it takes are the whole distance between someone and a working connection.
+ * The one unavoidable trip is github.com itself, which is the only place a token
+ * can be minted; that opens in a new tab and leaves this dialog sitting where it
+ * was, so nothing typed is lost.
+ */
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, CircleAlert, ExternalLink } from "lucide-react";
