@@ -218,10 +218,7 @@ describe("the model table", () => {
       "LLM spans",
       "Tokens",
     ]);
-    expect(cells()).toEqual([
-      ["claude-sonnet", "$400", "1,200", "800K"],
-      ["claude-haiku", "$100", "9,000", "2.5M"],
-    ]);
+    expect(cells()).toEqual([["claude-sonnet", "$400", "1,200", "800K"], ["claude-haiku", "$100", "9,000", "2.5M"]]);
 
     fireEvent.click(bodyRows()[0]);
     expect(currentLocation()).toBe("/vitals");

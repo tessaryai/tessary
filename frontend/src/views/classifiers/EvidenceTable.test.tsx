@@ -23,9 +23,7 @@ const page = (
   rows: EvidenceSpan[],
   nextCursor: string | null = null,
   recordedCounts: Record<string, number> = { witness: 3, member: 40, baseline: 0 },
-) => ({
-  rows, nextCursor, counts: recordedCounts, recordedCounts,
-});
+) => ({ rows, nextCursor, counts: recordedCounts, recordedCounts });
 
 beforeEach(() => {
   api.getBehaviorFindingEvidence.mockImplementation(

@@ -250,10 +250,7 @@ describe("the status beside the switch", () => {
     api.listClassifierHealth.mockResolvedValue([health("clf-a", "failed"), health("clf-b", "pending")]);
     api.getClassifierDailyVolume.mockResolvedValue({
       ...EMPTY_VOLUME,
-      classifiers: [
-        { classifier_id: "clf-a", counts: [2, 1] },
-        { classifier_id: "clf-b", counts: [0, 1] },
-      ],
+      classifiers: [{ classifier_id: "clf-a", counts: [2, 1] }, { classifier_id: "clf-b", counts: [0, 1] }],
     });
     renderPage("clf-a");
 
@@ -617,10 +614,7 @@ describe("a drift classifier's findings, detections and reset", () => {
       fireEvent.click(verb);
       await waitFor(() => expect(triageStale()).toBe(true));
     }
-    expect(api.resolveBehaviorFinding.mock.calls).toEqual([
-      ["f-1", "expected"],
-      ["f-1", "not_expected"],
-    ]);
+    expect(api.resolveBehaviorFinding.mock.calls).toEqual([["f-1", "expected"], ["f-1", "not_expected"]]);
   });
 
   it("says when the findings could not be read", async () => {

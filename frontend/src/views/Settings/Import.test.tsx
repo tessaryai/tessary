@@ -73,11 +73,7 @@ describe("choosing a bundle", () => {
   it("finds meta.yaml at the top of the selection too, and counts every quality dim shard", () => {
     renderRoute(<ImportYaml />);
 
-    choose([
-      "pipeline/meta.yml",
-      "x/pipeline/quality_dimensions/a.yaml",
-      "x/pipeline/quality_dimensions/b.yaml",
-    ]);
+    choose(["pipeline/meta.yml", "x/pipeline/quality_dimensions/a.yaml", "x/pipeline/quality_dimensions/b.yaml"]);
 
     const counts = screen.getByText("call sites").parentElement!.parentElement!.textContent;
     expect(counts).toBe("0 call sites0 graders2 quality dims3 files");

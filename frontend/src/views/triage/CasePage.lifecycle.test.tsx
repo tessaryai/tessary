@@ -129,10 +129,7 @@ const SHIFT = {
   bucketKey: "support-agent", bucketKind: "call_site", nCur: 500, nRef: 1200, sinceVersionId: null,
   windowClosedAt: WINDOW_CLOSED, windowKind: null, windowOpenedAt: WINDOW_OPENED, w1Log: 0.4, control: null,
   direction: "up", explains: [], floor: 0, measure: "duration",
-  quantiles: [
-    { key: "p50", then: 1000, now: 2500 },
-    { key: "p95", then: 4000, now: 9000 },
-  ],
+  quantiles: [{ key: "p50", then: 1000, now: 2500 }, { key: "p95", then: 4000, now: 9000 }],
   ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<CaseDetail["metric"]>;
 
@@ -450,9 +447,7 @@ describe("the answer and the working behind it", () => {
 
   /** Catches the summary repeated under the headline, where it competed with the Why block. */
   it("does not repeat the summary under the headline", async () => {
-    api.getCase.mockResolvedValue(
-      plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }),
-    );
+    api.getCase.mockResolvedValue(plainCase({}, { rca_verdict: "inconclusive", cause: "a model rollout" }));
     renderPage();
     await heading(BASE.case.title);
 

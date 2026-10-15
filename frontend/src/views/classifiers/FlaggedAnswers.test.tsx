@@ -59,10 +59,7 @@ function renderList(
 /** The drawn answer: its text as one paragraph, and the marks in it. */
 function drawnAnswer() {
   const section = screen.getByRole("region", { name: "Answer" });
-  return {
-    text: within(section).getByRole("paragraph").textContent,
-    marks: within(section).queryAllByRole("mark"),
-  };
+  return { text: within(section).getByRole("paragraph").textContent, marks: within(section).queryAllByRole("mark") };
 }
 
 describe("FlaggedAnswers", () => {
@@ -93,10 +90,7 @@ describe("FlaggedAnswers", () => {
     renderList([
       answer({
         answer: "abcdef",
-        flaggedSentences: [
-          { start: 2, end: 6, score: 0.98 },
-          { start: 0, end: 4, score: 0.99 },
-        ],
+        flaggedSentences: [{ start: 2, end: 6, score: 0.98 }, { start: 0, end: 4, score: 0.99 }],
       }),
     ]);
     const { text, marks } = drawnAnswer();
@@ -114,10 +108,7 @@ describe("FlaggedAnswers", () => {
     renderList([
       answer({
         answer: "abcdef",
-        flaggedSentences: [
-          { start: 0, end: 2, score: 0.98 },
-          { start: 10, end: 20, score: 0.99 },
-        ],
+        flaggedSentences: [{ start: 0, end: 2, score: 0.98 }, { start: 10, end: 20, score: 0.99 }],
       }),
     ]);
     drawn = drawnAnswer();

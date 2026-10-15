@@ -38,10 +38,7 @@ const triage = (over: Partial<TriageView> = {}): TriageView => ({
 });
 const vitals = (usd: number, p95: number | null, spendDelta: number | null, p95Delta: number | null) =>
   ({
-    total: {
-      cost: { usd, delta_pct_per_turn: spendDelta },
-      duration: { p95_ms: p95, delta_pct: p95Delta },
-    },
+    total: { cost: { usd, delta_pct_per_turn: spendDelta }, duration: { p95_ms: p95, delta_pct: p95Delta } },
   }) as unknown as Vitals;
 
 beforeEach(() => {

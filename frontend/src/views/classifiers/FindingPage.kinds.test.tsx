@@ -36,10 +36,7 @@ const SHIFT = {
   bucketKey: "cost|checkout", bucketKind: "call_site", nCur: 400, nRef: 1200, sinceVersionId: null,
   windowClosedAt: "2026-09-23T00:00:00Z", windowKind: null, windowOpenedAt: "2026-09-16T00:00:00Z", w1Log: 0.4,
   control: null, direction: "up", explains: [], floor: 0, measure: "cost",
-  quantiles: [
-    { key: "p50", then: 1, now: 2.5 },
-    { key: "p95", then: 10, now: 40 },
-  ],
+  quantiles: [{ key: "p50", then: 1, now: 2.5 }, { key: "p95", then: 10, now: 40 }],
   ratio: 2.5, reference: "previous", tokens: [], workload: [],
 } as unknown as NonNullable<BehaviorFindingDetail["metric"]>;
 
@@ -111,10 +108,7 @@ describe("a finding with no figure", () => {
     fireEvent.click(button("Confirm and open a case"));
 
     await waitFor(() => expect(currentLocation()).toBe("/orgs/acme/projects/default"));
-    expect(api.resolveBehaviorFinding.mock.calls).toEqual([
-      ["fnd-1", "expected"],
-      ["fnd-1", "not_expected"],
-    ]);
+    expect(api.resolveBehaviorFinding.mock.calls).toEqual([["fnd-1", "expected"], ["fnd-1", "not_expected"]]);
   });
 
   it("shows triage's ruling with what it read and the scripts it ran, and offers no verbs", async () => {
@@ -477,9 +471,7 @@ describe("FindingPage, groundedness", () => {
 
     await screen.findByText("Answers on support-agent became less grounded");
     const since = dateTime("2026-09-23T09:12:00Z");
-    expect(
-      screen.getByText(`since ${since} vs the rate it learned from its first 1,000 traces`),
-    ).toBeTruthy();
+    expect(screen.getByText(`since ${since} vs the rate it learned from its first 1,000 traces`)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Run triage" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Absorb as legitimate" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm and open a case" })).toBeTruthy();

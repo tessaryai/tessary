@@ -27,9 +27,7 @@ const BASE = "/orgs/acme/projects/web";
 const HAS_PROVIDER = { configured: 1, canConfigure: true };
 
 function watching(over: Partial<TriageView["watching"]> = {}): TriageView["watching"] {
-  return {
-    classifiers: 3, call_sites: 4, traces_last_day: 900, traces_total: 12_481, open_findings: 0, ...over,
-  };
+  return { classifiers: 3, call_sites: 4, traces_last_day: 900, traces_total: 12_481, open_findings: 0, ...over };
 }
 
 function onboarding(over: Partial<Onboarding> = {}): Onboarding {

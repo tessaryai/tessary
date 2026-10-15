@@ -308,10 +308,7 @@ describe("FlaggedList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load more items" }));
 
     await screen.findByRole("button", { name: /second row/ });
-    expect(loadPage.mock.calls).toEqual([
-      [undefined, null],
-      [undefined, "p2"],
-    ]);
+    expect(loadPage.mock.calls).toEqual([[undefined, null], [undefined, "p2"]]);
     expect(screen.getByText("2 items")).toBeTruthy();
     expect(api.getFrustratedSessions).not.toHaveBeenCalled();
   });
@@ -322,10 +319,7 @@ describe("ConversationFilter", () => {
     const onChange = vi.fn();
     render(
       <ConversationFilter
-        options={[
-          { key: "all", label: "All · 40" },
-          { key: "0", label: "Cause 1 · 3" },
-        ]}
+        options={[{ key: "all", label: "All · 40" }, { key: "0", label: "Cause 1 · 3" }]}
         value="all"
         onChange={onChange}
       />,
