@@ -43,13 +43,8 @@ function named<M, K extends keyof M>(
   }) as never;
 }
 
-/**
- * A thenable that calls back inside `then` itself. React.lazy reads the payload's status straight after
- * calling `then`, so a chunk the boot preload already fetched renders on the first pass. A first pass that
- * suspends commits the Suspense fallback instead, and React then holds the view back until 300 ms after
- * that fallback appeared, however soon the chunk is ready: on a cold load, the longest wait before a
- * screen's own data reads could start.
- */
+// Resolves inside `then`, so React.lazy renders an already-fetched chunk on the first pass. Suspending
+// instead commits the fallback, and React then holds the view until 300 ms after it appeared.
 function resolvedNow<T>(value: T): Promise<T> {
   return { then: (resolve: (v: T) => unknown) => resolve(value) } as unknown as Promise<T>;
 }

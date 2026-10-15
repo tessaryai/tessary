@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * The reads every project screen waits on before it can draw, and the boot-time prefetch that starts
- * them in the same tick as the sign-in check.
- *
- * Without the prefetch they form a ladder: `/auth/me`, then the project list and the substrate
- * status (ProjectShell will not pick between the connect gate and the shell without them), then the
- * capabilities and the cases (the sidebar and Triage), each rung a full round trip after the one
- * before. None of them depends on the answer to the one before it: the server authorises each on its
- * own, and a signed-out visitor gets a 401 from each and is sent to sign in by ProtectedRoute as
- * before. Each hook below reads the same options, so the key and the fetch exist once.
- */
+// The reads every project screen waits on, started at boot beside `/auth/me` instead of each a round
+// trip after the one before. None needs the previous answer: the server authorises each on its own.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { auth, projectApi, type ProjectApi } from "../api/client";
 

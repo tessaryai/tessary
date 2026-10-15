@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-/*
- * Renders only the rows of a long table body that are near the screen.
- *
- * The traces list appends a page per scroll and never drops one, so a reader who scrolls back a few
- * days holds well over a thousand rows. Every one of them stays in the layout and paint the browser
- * redoes as the pointer crosses rows, and scrolling got steadily rougher with each page: at 2x CPU
- * slowdown the slowest 5% of frames took 17 ms with 200 rows, 67 ms with 600 and 167 ms with 1,200.
- *
- * Rows are one line each (every cell truncates), so the row pitch is measured once off two rendered
- * rows and the rows out of reach are replaced by two spacer heights. The range moves in steps of
- * STEP rows, so a scroll re-renders the body once per STEP rows rather than once per row.
- */
+// Renders only the rows near the screen. Every loaded row otherwise stays in layout and paint, and
+// scroll frames slowed with each page (p95 at 2x CPU: 17 ms at 200 rows, 167 ms at 1,200). Rows are
+// one line each, so one measured pitch sizes the spacers that stand in for the rest.
 import { useLayoutEffect, useRef, useState } from "react";
 
 /** Below this many rows the whole list renders: nothing to save, and nothing to measure against. */
