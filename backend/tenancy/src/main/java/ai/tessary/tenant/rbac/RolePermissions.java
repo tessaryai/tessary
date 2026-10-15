@@ -7,20 +7,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The single source of truth mapping {@link Role} → the {@link Permission}s it grants.
- * Server-side guards read the policy from here.
- *
- * <p>Policy summary:</p>
- * <ul>
- *   <li><b>owner</b> — everything, including irreversible organization lifecycle and billing.</li>
- *   <li><b>admin</b> — manage members, organization content/settings, and which capabilities the org
- *       has turned on, but not owner-only lifecycle (delete) or billing.</li>
- *   <li><b>member</b> — view + manage organization content (create/curate), but no member,
- *       capability or billing management.</li>
- *   <li><b>viewer</b> — read-only; can view but mutate nothing.</li>
- *   <li><b>billing</b> — billing only; no access to organization content at all (a finance
- *       contact who should never see eval data).</li>
- * </ul>
+ * Maps {@link Role} to its {@link Permission}s for server-side guards. Admin manages members, settings and capabilities
+ * but not deletion or billing; member manages content only; viewer mutates nothing; billing sees no organization
+ * content at all.
  */
 public final class RolePermissions {
 
@@ -54,7 +43,6 @@ public final class RolePermissions {
         return m;
     }
 
-    /** True if the given role holds the given permission. */
     public static boolean allows(Role role, Permission permission) {
         return MATRIX.getOrDefault(role, Set.of()).contains(permission);
     }

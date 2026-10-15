@@ -8,14 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * Persistence for registered pre-deploy checks. Idempotent insert: {@code ON CONFLICT DO NOTHING}
- * against the unique index {@code (project_id, classifier_id, surface)} makes a re-registration a
- * first-write-wins no-op. A {@code dismissed} row is preserved as-is on a re-registration
- * (insert-if-absent only, never an update), so a human's dismissal is never stomped.
- *
- * <p>There is one origin. The {@code feedback}-origin path went with the substrate's feedback table
- * (0083), and 0092 dropped the {@code source} discriminator it left behind along with the predicate it
- * put on this index.
+ * Persistence for pre-deploy checks. Insert-if-absent on {@code (project_id, classifier_id, surface)}, never an update,
+ * so a human's dismissal is never stomped by a re-registration.
  */
 @Repository
 public class PreDeployCheckRepository {
@@ -29,14 +23,11 @@ public class PreDeployCheckRepository {
         this.jdbc = jdbc;
     }
 
-    // The conflict target is inferred from the index's columns. `ON CONFLICT ON CONSTRAINT` would not
-    // resolve it: ux_pre_deploy_check_classifier is an index, not a table constraint.
+    // Inferred from the index's columns: ON CONFLICT ON CONSTRAINT would not resolve an index that is not a table
+    // constraint.
     private static final String CONFLICT_CLASSIFIER = "(project_id, classifier_id, surface)";
 
-    /**
-     * Idempotent insert on the {@code (project_id, classifier_id, surface)} unique index. Returns
-     * {@code true} when a new check row was written (first write wins).
-     */
+    /** Returns {@code true} when a new row was written. */
     public boolean insertClassifierIfAbsent(PreDeployCheckRow row) {
         return insert(row, CONFLICT_CLASSIFIER);
     }
@@ -61,7 +52,6 @@ public class PreDeployCheckRepository {
                 > 0;
     }
 
-    /** Every registered check for the project, newest first (the list/dismiss read surface). */
     public List<PreDeployCheckRow> listByProject(String projectId) {
         return jdbc.sql("SELECT " + COLS + " FROM pre_deploy_check WHERE project_id = :pid "
                         + "ORDER BY created_at DESC")
@@ -70,7 +60,7 @@ public class PreDeployCheckRepository {
                 .list();
     }
 
-    /** Flip a check's lifecycle status (active ↔ dismissed). Returns rows affected (0 = no such check). */
+    /** Returns rows affected. */
     public int setStatus(String projectId, String id, String status, String updatedAt) {
         return jdbc.sql("UPDATE pre_deploy_check SET status = :status, updated_at = :updatedAt "
                         + "WHERE project_id = :pid AND id = :id")

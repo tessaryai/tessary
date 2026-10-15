@@ -10,17 +10,13 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 
 /**
- * What a project's retention actually is: the platform default for each data class, overridden by any
- * {@code retention_policy} row the project has, unless {@link FixedRetention} fixes it for the project.
- *
- * <p>One resolver rather than a lookup in each caller, because the sweep and the customer-facing answer have
- * to be the same number. A data-handling page that states 90 days while the sweeper runs on 30 is worse than
- * no page — it is a written commitment the system does not keep.
+ * A project's effective retention: the platform default per data class, overridden by {@code retention_policy} rows
+ * unless {@link FixedRetention} fixes it. One resolver so the sweeper and the customer-facing answer can never state
+ * different numbers.
  */
 @Service
 public class RetentionResolver {
 
-    /** The data classes {@code retention_policy} defines, in the order a reader wants them. */
     public enum DataClass {
         TRACES(RetentionPolicyRow.DataClass.TRACES),
         DETECTIONS(RetentionPolicyRow.DataClass.DETECTIONS);
@@ -31,20 +27,16 @@ public class RetentionResolver {
             this.wire = wire;
         }
 
-        /** The value stored in {@code retention_policy.data_class}. */
         public String wire() {
             return wire;
         }
     }
 
     /**
-     * One resolved class. {@code ttlDays} of {@code 0} means kept indefinitely, and {@code fromPolicy} says
-     * whether the number came from the project's own row or from the platform default — the distinction a
-     * partner asking "did we agree to this?" needs.
+     * {@code ttlDays} 0 means kept indefinitely; {@code fromPolicy} says whether it came from the project's own row.
      */
     public record EffectiveRetention(DataClass dataClass, int ttlDays, boolean fromPolicy) {
 
-        /** Whether this class is ever deleted. */
         public boolean bounded() {
             return ttlDays > 0;
         }
@@ -60,7 +52,7 @@ public class RetentionResolver {
         this.fixed = fixed;
     }
 
-    /** Every data class's effective retention for one project, in declaration order. */
+    /** In declaration order. */
     public List<EffectiveRetention> resolve(String projectId) {
         Map<String, Integer> overrides = new java.util.HashMap<>();
         for (RetentionPolicyRow row : policies.listByProject(projectId)) {
@@ -80,7 +72,7 @@ public class RetentionResolver {
         return out;
     }
 
-    /** The fixed retention for one class, or {@code 0} when this project's own settings apply. */
+    /** 0 when this project's own settings apply. */
     public int fixedTtlDays(String projectId, DataClass dataClass) {
         return Math.max(0, fixed.fixedTtlDays(projectId, dataClass));
     }

@@ -6,16 +6,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongConsumer;
 
 /**
- * Dedups a failure that repeats every time a caller retries the same operation (e.g. a scheduled
- * worker re-attempting the same job on every tick), so it doesn't re-log a full stacktrace on
- * every retry.
- *
- * <p>The first occurrence of a given {@code key} runs {@code onFirst} (typically a full
- * {@code log.error(marker, msg, e)} — the caller decides level/marker/message). Every occurrence
- * after that is counted silently until the count is a multiple of {@code summaryEvery}, when
- * {@code onSummary(count)} runs once — a cheap "still failing, N occurrences" line instead of N
- * stacktraces. {@link #clear(String)} resets the streak (call it on success) so the next failure
- * for that key logs fresh again.
+ * Dedups a failure that repeats on every retry of the same operation. The first occurrence of a {@code key} runs
+ * {@code onFirst}; later ones are counted silently, with {@code onSummary(count)} every {@code summaryEvery}th.
+ * {@link #clear(String)} resets the streak on success.
  */
 public final class RepeatedFailureLogger {
 
@@ -29,11 +22,6 @@ public final class RepeatedFailureLogger {
         this.summaryEvery = summaryEvery;
     }
 
-    /**
-     * Record one failure for {@code key}. Runs {@code onFirst} on the first occurrence of a new
-     * streak, {@code onSummary} every {@code summaryEvery}th occurrence thereafter, and is silent
-     * otherwise.
-     */
     public void record(String key, Runnable onFirst, LongConsumer onSummary) {
         long count = occurrences.computeIfAbsent(key, k -> new AtomicLong(0)).incrementAndGet();
         if (count == 1) {
@@ -43,7 +31,7 @@ public final class RepeatedFailureLogger {
         }
     }
 
-    /** Reset the streak for {@code key} (call on success) so the next failure logs fresh. */
+    /** Call on success. */
     public void clear(String key) {
         occurrences.remove(key);
     }

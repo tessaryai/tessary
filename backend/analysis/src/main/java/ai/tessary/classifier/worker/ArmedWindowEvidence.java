@@ -8,11 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The summary block for a classifier whose only detail is what {@link ClassifierArming} already wrote
- * to the finding's own payload: frustration, groundedness, and any regex/threshold classifier. Secret
- * Leak is the one classifier {@link ClassifierArming} facets, and its richer, DB-backed detail lives
- * in {@code SecretLeakDetailService} instead — this is the summary for every OTHER arming classifier,
- * which has nothing beyond the bar it crossed.
+ * Summary block for arming classifiers whose only detail is the bar {@link ClassifierArming} wrote to the finding
+ * payload. Secret Leak's richer detail lives in {@code SecretLeakDetailService}.
  */
 public final class ArmedWindowEvidence {
 
@@ -20,26 +17,19 @@ public final class ArmedWindowEvidence {
 
     private ArmedWindowEvidence() {}
 
-    /**
-     * The bar a classifier-wide or per-facet arming crossed: what was counted, over how long, and
-     * against what threshold — {@link ClassifierArming#payload}'s whole shape.
-     */
+    /** {@link ClassifierArming#payload}'s whole shape. */
     public record ArmedWindowDetail(
-            /** {@code event_count} or {@code distinct_users}: what {@link #observed} counts. */
+            /** What {@link #observed} counts. */
             String basis,
             long observed,
             long threshold,
             long windowSeconds,
             @Nullable String windowStart,
             @Nullable String windowEnd,
-            /** {@code high} when this window held a high-band detection, {@code low} otherwise, or null
-             *  for a classifier with no confidence banding. */
+            /** Null for a classifier with no confidence banding. */
             @Nullable String confidence) {}
 
-    /**
-     * Parse the blob for the detail surface, or null when it is not an armed-window payload or cannot
-     * be read.
-     */
+    /** Null when it is not a readable armed-window payload. */
     public static @Nullable ArmedWindowDetail detail(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
         try {

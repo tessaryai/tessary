@@ -16,19 +16,13 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 /**
- * The finding page's frustration block: the rate off the finding's payload, and the frustrated sessions it cites,
- * each with the turn that fired, its score and that turn's own call site.
- *
- * <p>The sessions come from the finding's witness rows, not a fresh query, so the page lists exactly what the
- * finding cites. The witnesses are every frustrated session, so they are read a page at a time, newest flag first:
- * the block carries the first {@link #PAGE_SIZE}, and {@link #page} the rest. Each trace witness is paired with
- * its session through the detection row that flagged it, rather than by rank, because a session cleared and
- * flagged again can cite two turns.
+ * The finding page's frustration block. Sessions come from the finding's witness rows, so the page lists exactly what
+ * the finding cites; they are paged newest flag first. A trace witness is paired with its session through the detection
+ * row that flagged it, not by rank, because a session cleared and flagged again can cite two turns.
  */
 @Service
 public class FrustrationDetailService {
 
-    /** Sessions the block carries, and a page's default size. */
     public static final int PAGE_SIZE = 50;
 
     private final FrustrationRateRepository rates;
@@ -37,7 +31,7 @@ public class FrustrationDetailService {
         this.rates = rates;
     }
 
-    /** The block for a {@code frustration_rate} finding, or null for any other finding. */
+    /** Null for any finding other than {@code frustration_rate}. */
     public @Nullable FrustrationDetail detail(FindingRow finding) {
         if (!FindingRow.Cause.FRUSTRATION_RATE.equals(finding.causeKind())) return null;
         FrustratedSessionPage first = page(finding, null, PAGE_SIZE, null);
@@ -45,10 +39,8 @@ public class FrustrationDetailService {
     }
 
     /**
-     * One page of the frustrated sessions {@code finding} cites, newest flag first. With {@code cause} set, only
-     * the sessions that RCA cause names.
-     *
-     * @param cursor the {@code nextCursor} of the page before, or null for the first
+     * With {@code cause} set, only the sessions that RCA cause names. @param cursor the previous page's
+     * {@code nextCursor}, or null for the first
      */
     public FrustratedSessionPage page(
             FindingRow finding, @Nullable CauseRef cause, int limit, @Nullable String cursor) {
@@ -83,7 +75,7 @@ public class FrustrationDetailService {
                 rows, witnesses.total(), next < witnesses.total() ? Integer.toString(next) : null);
     }
 
-    /** The cursor is the next row's offset; anything unreadable starts over. */
+    /** The next row's offset; anything unreadable starts over. */
     private static int decode(@Nullable String cursor) {
         if (cursor == null || cursor.isBlank()) return 0;
         try {

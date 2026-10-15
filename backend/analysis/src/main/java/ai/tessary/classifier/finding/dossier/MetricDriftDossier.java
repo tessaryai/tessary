@@ -8,22 +8,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Renders the {@code metric_drift} shape — {@code MetricFindingEvidence.toJson}'s blob.
- *
- * <p><b>The contribution/concentration table is the {@code explains[]} array, ranked by
- * {@code covered}.</b> That field already answers "how much of the parent bucket's shift does this
- * sibling bucket's own shift account for" (a fraction in [0,1]) — it is a real, detector-computed
- * concentration measure, not a fresh SQL aggregation done here; this assembler's job is to rank and
- * render it, not to invent it. A bucket near the top with high `covered` is where the drift
- * concentrates; a long tail of low-`covered` entries says the shift is diffuse across many small
- * segments rather than owned by a few.
- *
- * <p><b>"Unmoved baseline exemplars" are reported as the reference-side AGGREGATE</b> ({@code
- * quantiles}/{@code workload}'s "then" halves) rather than fabricated instance ids — this payload
- * shape carries no per-instance baseline rows (the pinned arm's do, via {@code baseline} evidence refs,
- * which the shared evidence-enumeration section below already surfaces; the rolling arm has no rows at
- * all, only the {@code control} ring composition). Stating the real aggregate is the honest form of
- * "what did the reference side look like" when no exemplar rows exist to name.
+ * Renders the {@code metric_drift} blob. The concentration table is {@code explains[]} ranked by the detector-computed
+ * {@code covered}, not a fresh aggregation. The reference side is reported as its aggregate
+ * ({@code quantiles}/{@code workload}) rather than invented instance ids, since this payload has no per-instance
+ * baseline rows.
  */
 final class MetricDriftDossier {
 
