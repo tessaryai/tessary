@@ -88,9 +88,9 @@ Flat package; files read top-to-bottom by role via their suffix:
 | Role | Suffix / shape | Example |
 |---|---|---|
 | HTTP edge | `<Entity>Controller` (singular) | `CaseController`, `ClassifierController` |
-| Business logic | `*Service`, `*Executor`, `*Dispatcher`, `*Runner`, `*Worker`, `*Factory` | `AlertService`, `ClassifierWorker`, `RcaEngine` |
+| Business logic | `*Service`, `*Executor`, `*Dispatcher`, `*Runner`, `*Worker`, `*Factory` | `AlertService`, `ClassifierWorker`, `AgenticRcaEngine` |
 | Persistence | `*Repository` + its `*Row` | `FindingRepository` + `FindingRow` |
-| Wire DTOs | `*Dtos`, `*Request`, `*Response` | `ClassifierDtos`, `AskRequest` |
+| Wire DTOs | `*Dtos`, `*Request`, `*Response` | `ClassifierDtos`, `CreateProjectRequest` |
 | Feature records | plain records | `SweepContext`, `SweepOutcome` |
 
 `classifier/` is the reference example of a large-but-coherent slice — large enough that it splits
@@ -104,7 +104,7 @@ of grading before the migration history was squashed into the current `0000-base
 
 - **Controllers live in their feature package, never in `web/`.** `web/` is the shared
   envelope + exception advice, full stop.
-- **`<Entity>Controller` is singular.** `FailureModeController`, not `FailureModesController`.
+- **`<Entity>Controller` is singular.** `FindingController`, not `FindingsController`.
 - **Every domain-error enum lives in the shared module's `open/errors/`** and is registered in
   `ErrorCatalog.REGISTERED`. (Wire form `<DOMAIN>.<NAME>` is auto-derived; see
   [`backend/AGENTS.md`](../../backend/AGENTS.md) *Error handling*.) An error enum sitting in a
@@ -175,9 +175,10 @@ of grading before the migration history was squashed into the current `0000-base
   `ClassifierSweep` (in `classifier/worker/`) plus two read-side ports (`TriageSource`,
   `FindingAdapter`) are what a classifier attaches through, and `ClassifierSweepRegistry` indexes every sweep on the classpath by
   the detector kinds it claims. Unlike every other seam in this file, an implementation may ship from
-  a jar outside this reactor: discovery is a Spring Boot `AutoConfiguration.imports` read off the
-  runtime classpath, which is what lets a self-hoster run their own classifier and what lets the paid
-  classifiers leave the open tree. An unregistered kind is inert, a sweep for a kind the catalog does
+  a jar outside this reactor: a third-party jar registers through a Spring Boot
+  `AutoConfiguration.imports` read off the runtime classpath, which is what lets a self-hoster run
+  their own classifier. The paid classifiers live in `ai.tessary.paid.*` and are picked up by
+  component scan from the overlay jars on the paid image's classpath. An unregistered kind is inert, a sweep for a kind the catalog does
   not declare is dispatched at window grain, and the catalog is never filtered by what is registered.
   Full contract in
   [classifier-extension-interface.md](./classifier-extension-interface.md).
@@ -242,8 +243,8 @@ substrate on demand through MCP.** Neither hydrates traces into its prompt.
 The **evals plugin** is a Claude Code plugin maintained in a separate repo. It runs inside a Claude
 Code session against a target repo, produces a `.tessary/` bundle (sharded pipeline YAML + grader
 files + `report.md`), and exits. The plugin — **not** this repo — owns the bundle schema; the
-platform is a *consumer*. The plugin's contract (`output_format.md`, `pipeline_io.py`, the JSON
-schemas) is vendored into `contract/` (repo root) by `scripts/sync-evals-contract.sh`, and
+platform is a *consumer*. The plugin's contract (`output_format.md`, `AUTHORING_CONTRACT.md`, the grader
+JSON schema) is vendored into `contract/` (repo root) by `scripts/sync-evals-contract.sh`, and
 `contract/VERSION` records the plugin commit + schema version we support. When the plugin ships a
 release that changes the output, re-vendor and absorb it following
 [upgrade-contract.md](../guides/upgrade-contract.md) — the order is contract → backend records →

@@ -65,20 +65,13 @@ no transaction around it: it commits on its own before the case closes, and a th
 open with the hook's writes already committed. So the hook must be idempotent, and it cannot count on
 a rollback.
 
-`ProfileSource` used to be a port here, serving `/behavior/profiles`. That route later moved
-into the behaviour-drift classifier's own module — it is now an internal wiring detail of that one
-paid classifier, not a cross-boundary extension point, so it is not in this table.
-
 `TriageSource` has its contract stated once, in
 `backend/analysis/src/main/java/ai/tessary/classifier/finding/package-info.java`. This page does
 not restate those three rules in different words; it extends them to the write side. Read that file
 first.
 
-**One more seam exists and is deliberately not public.** `TrajectoryDetector` — the trace-grain
-detector interface — lives inside the behaviour-drift module, where its only implementation already sat.
-It went paid with the classifier that defined it. An extension that wants trace-grain judgement
-implements `ClassifierSweep` and does its own scoring; it does not get behaviour drift's fitting
-procedure as a framework.
+**There is no trace-grain detector port.** An extension that wants trace-grain judgement implements
+`ClassifierSweep` and does its own scoring.
 
 ### The two extension grains
 
@@ -203,6 +196,8 @@ backend's scan root is `ai.tessary`, so a bean in any other package is invisible
 scan, and the open build can never take a Maven dependency on an extension in order to see it. Boot's
 auto-configuration import is keyed on the **classpath** rather than on a package name or a build
 dependency — Boot reads that file out of every jar it can see — so neither side has to name the other.
+The paid overlay does not use this path: its packages are `ai.tessary.paid.*`, inside the scan
+root, so the host's component scan finds them once the overlay jars are on the classpath.
 
 `java.util.ServiceLoader` was considered and rejected. There is no `ServiceLoader` use and no
 `META-INF/services` directory anywhere in this backend, so it would be a second discovery mechanism
@@ -215,8 +210,7 @@ registers only its own `@Bean` methods. An extension whose classifier is a `@Com
 what a Spring-injected sweep is — gets an auto-configuration that loads and registers nothing.
 Worse, auto-configuration is processed *after* user configuration, so a `@Bean` method there loses to
 anything the host declares behind `@ConditionalOnMissingBean`, while a `@ComponentScan` registers
-during the parse phase and is present in time. A paid plan module's own
-`PaidPlanAutoConfiguration` is the worked example and `PaidPlanAutoConfigurationTest` is the proof.
+during the parse phase and is present in time.
 
 **`@ConfigurationProperties` binds without help, but is not scanned without it.** A properties class
 outside `ai.tessary` is not found by the host's `@ConfigurationPropertiesScan` — but once the
@@ -364,7 +358,8 @@ and holds it.
    so it runs strictly after the open one, applying a changelog that creates your table — then
    register a `@Bean DetectionTable(yourKind, yourTable, Grain.SPAN|TRACE)` (§2) so
    `DetectionTableRegistry` includes it in the stitched union the writer, the retention sweep and
-   every reader use. `PaidDbAutoConfiguration` is the in-tree worked example of both halves.
+   every reader use. The paid overlay's `PaidLiquibaseConfig` (`tessary-paid/db`) is a worked
+   example of the Liquibase half.
 
 **Where it runs.** On the classpath of **your own** backend — see §1. Build the platform, then launch
 it with your jar alongside:
@@ -390,9 +385,7 @@ second command above does, or shade your dependencies into the jar.
 
 **What works end to end today, precisely.** The read side is real: a third-party `TriageSource`,
 `CaseSource` or `FindingAdapter` is discovered by Spring injection and feeds the existing findings, triage and case
-surfaces with no further prerequisite. `/behavior/profiles` is not one of these — it is served from
-inside the behaviour-drift module by a port that module owns itself, not one an out-of-tree jar can
-implement (§2). On the write side the **dispatch** is real: `ClassifierSweepRegistry`
+surfaces with no further prerequisite. On the write side the **dispatch** is real: `ClassifierSweepRegistry`
 discovers your sweep, and `ClassifierWorker` runs the kind it claims on the worker's cadence with the
 lease and dead-letter budget. **A sweep for a kind of your own runs**: a kind no catalog module
 declares is routed to the sweep that claims it, at window grain (§2). What stays closed is a kind the

@@ -51,14 +51,12 @@
 
 # THE CI-CALLABLE INTERFACE IS THIS SCRIPT, NOT THE TASK TARGET. CI never runs the Taskfile (see
 # the note at the bottom of this header); the per-PR job calls `bash scripts/check.sh` directly,
-# and `task check` is a thin wrapper over the same line. That job needs five toolchains in front of
+# and `task check` is a thin wrapper over the same line. That job needs four toolchains in front of
 # it, not one, so a single job running this line has to assemble all of them:
 #   actions/setup-java java-version 25      -- check-backend.sh hard-fails on any other JDK
 #   pnpm/action-setup + actions/setup-node  -- check-frontend.sh runs tsc and a real vite build
 #   astral-sh/setup-uv                      -- check-groundedness-serve.sh (pytest over serve.py) and
 #                                               cfn-lint in check-groundedness-setup.sh
-#   actions/setup-python                    -- check-vendored-plugin-rules.sh (plus pip pyyaml +
-#                                               pytest)
 #   caddy on PATH                           -- check-caddy.sh
 # If a toolchain is genuinely unavailable, the gate must SKIP with a printed reason: never fail
 # silently, and never be quietly dropped from the manifest.
@@ -72,9 +70,8 @@
 # "Everything" is not one set. It is three, and they are not nested:
 #   1. THIS SCRIPT: the manifest below, minus the rows marked EXCLUDED.
 #   2. .github/workflows/drift-checks.yml: ONE job, workflow_dispatch only, a gate this script does
-#      not run: check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`; its
-#      offline rules half runs here as `vendored-plugin-rules`). It was fourteen jobs until the
-#      trim that deleted every job duplicating a row below.
+#      not run: check-vendored-plugin.sh (EXCLUDED when check.yml went to `pull_request:`). It
+#      was fourteen jobs until the trim that deleted every job duplicating a row below.
 #   3. Standalone Taskfile targets neither pipeline runs the same way: `migrations:populated`
 #      (deliberately in neither).
 # The manifest still carries a row for every `scripts/check-*.sh` on disk, EXCLUDED ones included,
@@ -89,8 +86,7 @@
 #   scripts/check-module-hygiene.sh        (reactor/Docker module drift)
 #   scripts/check-pipeline-vocabulary.sh   (SQL naming a relation the classifier cutover dropped)
 #   scripts/check-contract-consistency.sh  (vendored contract drift)
-#   scripts/check-vendored-plugin.sh       (the vendored plugin's own rules + freshness vs plugins@main)
-#   scripts/check-vendored-plugin-rules.sh (the rules half alone: offline pytest over contract/tests)
+#   scripts/check-vendored-plugin.sh       (freshness of the vendored contract vs plugins@main)
 #   scripts/check-backend.sh               (mvn -B verify: tests + static analysis)
 #   scripts/check-frontend.sh              (contract-drift guard + pnpm lint + pnpm test + pnpm build)
 #   scripts/check-caddy.sh                 (caddy validate)
@@ -158,8 +154,7 @@ module-hygiene|scripts/check-module-hygiene.sh|RUN
 license-headers|scripts/check-license-headers.sh|RUN|SPDX header presence over the tree; the script's own header names the interim manual-audit + weekly-CI posture it runs under until branch protection is available
 pipeline-vocabulary|scripts/check-pipeline-vocabulary.sh|RUN
 contract-consistency|scripts/check-contract-consistency.sh|RUN
-vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. Its freshness half fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`. Its offline rules half runs per PR as the `vendored-plugin-rules` row|declared here only so the completeness assertion can see it
-vendored-plugin-rules|scripts/check-vendored-plugin-rules.sh|RUN|phase 1 of check-vendored-plugin.sh on its own: pytest over contract/tests, the vendored validator rules the platform's import depends on. Offline and sub-second; needs python3 with pyyaml and pytest. check-vendored-plugin.sh calls this script, so the rules have one definition
+vendored-plugin|scripts/check-vendored-plugin.sh|EXCLUDED:dropped 2026-09-09. It fetches tessaryai/plugins over the network and hard-fails on $CI, so per PR it reds pull requests over upstream commits and transient network failures unrelated to the diff. Right check, wrong trigger; it runs in the dispatch-only drift-checks.yml and via `task contract:plugin`.|declared here only so the completeness assertion can see it
 caddy|scripts/check-caddy.sh|RUN
 compose-artifact|scripts/check-compose-artifact.sh|RUN|the one-command install: docker-compose.yml is also the OCI artifact behind `docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y`, so it must stay publishable (long-syntax ports, literal memory limits) and mount no host path in a default-profile service; the build strip that makes the artifact must remove build sections and nothing else; pure text plus a client-side `docker compose config`, no daemon and no network
 sandbox-runner|scripts/check-sandbox-runner-launcher.sh|RUN|needs only node, already on PATH for the frontend gate
@@ -311,7 +306,6 @@ if [ -z "$SLICES" ]; then
     _gate pipeline-vocabulary
     _gate contract-consistency
     _gate blob-links
-    _gate vendored-plugin-rules
     _gate caddy
     _gate version-consistency
     _gate compose-artifact

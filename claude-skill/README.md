@@ -2,8 +2,8 @@
 
 Helpers that run inside a Claude Code session against this platform.
 
-> Whole-repo **synthesis is not here** — that's the external **evals
-> plugin** (`tessaryai/plugins`), whose output contract is vendored into
+> The `.tessary/` bundle comes from the external **evals plugin**
+> (`tessaryai/plugins`), whose output contract is vendored into
 > [`contract/`](../contract/). See the repo-root `README.md` and
 > [`devdocs/guides/upgrade-contract.md`](../devdocs/guides/upgrade-contract.md).
 

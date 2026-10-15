@@ -386,17 +386,7 @@ Emit the turn-duration finding on its own when nothing explains it — that is t
 where three used to do" case, where every individual call is fast and the *count* moved. That case
 is real, is not visible at the tool grain, and is the reason turn duration is measured at all.
 
-Add `BehaviorFindingRow.Cause.DISTRIBUTION_SHIFT` alongside `novelty` / `surprisal` / `omission`.
-This is the generalization DESIGN-DIRECTION §Classifiers already calls for — "drift's grammar
-generalized to all classifiers".
-
-**Do not reuse `behavior_profile`.** Its fitted state is an n-gram alphabet, a VOMM and a
-surprisal reservoir; a metric baseline is a numeric sketch per (bucket × measure). Same lifecycle
-vocabulary, unrelated payload. Forcing both into `reservoir_json` recreates the two-writers-one-blob
-bug that `BehaviorFitCarry` exists to avoid.
-
-**Renaming `behavior_finding` → `classifier_finding` is out of scope.** It drags the frontend's
-`/findings` endpoint with it. Note it as follow-up.
+The finding files under `FindingRow.Cause.DISTRIBUTION_SHIFT` in the shared `finding` table.
 
 ---
 
@@ -484,8 +474,7 @@ Fields to fill on `CaseDetection`:
 ### 8.2 Catalog
 
 **Two** `ClassifierModelModule` entries in `BuiltInClassifierCatalog.MODULES` — `duration_drift`
-and `cost_drift` — each with `detectorFactory = null` and dispatched by the new sweep, exactly how
-behaviour drift is dispatched by `BehaviorDriftSweep` through the `TrajectoryDetector` seam rather
+and `cost_drift` — each with `detectorFactory = null` and dispatched by `MetricDriftSweep` rather
 than through `BuiltInDetector`.
 
 The measures under each module are declared in its `defaultConfigJson`, not as separate modules.
@@ -562,7 +551,7 @@ the sweep writes the finding and stops. A person presses **Run triage** in the F
 
 The one way that valve opens without a person is `triage_automatic_enabled`, off for every org
 in this build until an override turns it on (Settings → Features). `TriageAutoEscalator` then presses the same button on a
-slow tick under a recurrence bar, which logs what it withheld. It calls `BehaviorDriftService.analyze` rather than enqueueing,
+slow tick under a recurrence bar, which logs what it withheld. It calls `FindingService.analyze` rather than enqueueing,
 so automatic mode is the manual path pressed by a scheduler and cannot drift away from it.
 
 `max_escalations_per_sweep` is gone with the automatic path: a per-sweep ceiling on microVMs only

@@ -3,9 +3,8 @@
 # Assert the vendored evals contract is internally consistent.
 #
 # WHAT THIS ASSERTS TODAY (narrowed 2026-09-09, see the block further down): the schema $id parses
-# to a version, the platform-owned validator files are present, and contract/VERSION names a real
-# release rather than 'unknown'. The version-AGREEMENT half is gone with the two markdown legs
-# that supplied two of its three numbers.
+# to a version and contract/VERSION names a real release rather than 'unknown'. The
+# version-AGREEMENT half is gone with the two markdown legs that supplied two of its three numbers.
 
 set -euo pipefail
 
@@ -29,16 +28,9 @@ schema_id_ver="$(grep -oE 'grader\.v[0-9]+\.json' "$contract_dir/grader.schema.j
 # the failure the rule exists to stop. If that agreement matters enough to gate, the version needs
 # to live somewhere a machine owns; contract/VERSION already exists and is read below.
 
-# --- the platform-owned validator must be present ---
-# validate.py + pipeline_io.py stopped being vendored when the plugin dropped synthesis
-# (v0.23.0): they are platform-owned now, but the contract tests import them and the E2B
-# analyzer template bakes them, so their absence is still a broken contract dir.
-[[ -f "$contract_dir/validate.py" && -f "$contract_dir/pipeline_io.py" ]] \
-  || fail "contract/validate.py or pipeline_io.py is missing — these are platform-owned (not restored by a sync)"
-
 # --- VERSION pin must record a real release, not 'unknown' ---
 if grep -qE '^plugin_release: unknown' "$contract_dir/VERSION"; then
   fail "contract/VERSION plugin_release is 'unknown' — re-run scripts/sync-evals-contract.sh against the plugin checkout"
 fi
 
-echo "contract-consistency: OK (schema \$id parses as v$schema_id_ver, validator present, VERSION pin names a release)"
+echo "contract-consistency: OK (schema \$id parses as v$schema_id_ver, VERSION pin names a release)"

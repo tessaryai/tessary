@@ -11,10 +11,6 @@
 # matching what sync-evals-contract.sh writes.
 #
 # NOT here, deliberately (plugin v0.23.0 — the synthesis strip):
-#   validate.py + pipeline_io.py — PLATFORM-OWNED now, at contract/. The plugin stopped carrying
-#     a validator when it lost synthesis; the writer (the observer) lives here, so its validator
-#     does too. They are still importable side by side by contract/tests and baked into the E2B
-#     analyzer template by sandbox-runner/agent-sandbox/build.ts.
 #   contract/PLATFORM_HANDOFF.md + contract/pack.schema.json — retired with the features they
 #     described (the handoff checklist shipped; packs died with plugin synthesis).
 #

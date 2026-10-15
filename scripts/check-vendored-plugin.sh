@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Gate the vendored evals-plugin contract: test it, and prove it is current.
+# Prove the vendored evals-plugin contract under contract/ is current against the plugin's live `main`.
 #
-# The plugin lives in tessaryai/plugins, which is PUBLIC and deliberately runs no PR CI — a workflow
-# there would put its configuration, logs and fixtures in the open. So the enforcement lives here, in
-# the private repo, against the vendored copy under contract/. The code under test is public; the
-# tests, fixtures and CI logs are not. Nothing this script does writes to, or leaves a trace in, the
-# public repo: phase 2 only READS raw file contents over unauthenticated HTTPS.
+# The plugin lives in tessaryai/plugins, which is PUBLIC and deliberately runs no PR CI. This script
+# only READS raw file contents over unauthenticated HTTPS, so it leaves no trace in the public repo.
 #
-# Two phases:
-#   1. pytest over contract/tests — the validator rules the platform's import depends on. Lives in
-#      scripts/check-vendored-plugin-rules.sh, which scripts/check.sh also runs per PR.
-#   2. freshness — diff each vendored file against the plugin's live `main`.
-#
-# Phase 2 needs network. Offline it WARNS and passes, so a local `task check` on a plane still works;
-# in CI ($CI set) it is a hard failure, because that is the run whose whole job is catching drift.
+# It needs network. Offline it WARNS and passes, so a local run on a plane still works; in CI ($CI
+# set) it is a hard failure, because that is the run whose whole job is catching drift.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,13 +14,6 @@ contract_dir="$repo_root/contract"
 raw_base="https://raw.githubusercontent.com/tessaryai/plugins/main/plugins/evals"
 
 fail() { echo "vendored-plugin: $1" >&2; exit 1; }
-
-# --- phase 1: the validator's rules -----------------------------------------------------------
-
-# One definition of the rules, shared with the per-PR `vendored-plugin-rules` row in scripts/check.sh.
-bash "$repo_root/scripts/check-vendored-plugin-rules.sh" || exit 1
-
-# --- phase 2: is the vendored copy current? ---------------------------------------------------
 
 # The vendored file list, shared with scripts/sync-evals-contract.sh so a newly-vendored file cannot
 # be silently left out of this check.
@@ -53,7 +38,6 @@ if [[ "$(curl_status "$raw_base/output_format.md" "$tmp/probe")" != 200 ]]; then
     fail "cannot reach the plugin repo to verify the vendored copy is current (this check is the point of the CI run)"
   fi
   echo "vendored-plugin: OFFLINE — skipping the freshness check (CI enforces it)" >&2
-  echo "vendored-plugin: OK (validator tests only)"
   exit 0
 fi
 
@@ -85,4 +69,4 @@ if (( ${#stale[@]} > 0 )); then
   exit 1
 fi
 
-echo "vendored-plugin: OK (validator tests pass; vendored copy matches plugins@main)"
+echo "vendored-plugin: OK (vendored copy matches plugins@main)"
