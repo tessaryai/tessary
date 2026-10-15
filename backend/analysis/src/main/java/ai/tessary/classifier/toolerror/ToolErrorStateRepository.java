@@ -10,11 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * Persistence for {@link CarriedState}, one row per tool. Design contract:
- * {@code devdocs/concepts/tool-error.md} §5, which carries the argument for why this classifier has
- * state at all and what guards the bug class that came back with it.
- */
+/** Contract: {@code devdocs/concepts/tool-error.md} §5. */
 @Repository
 public class ToolErrorStateRepository {
 
@@ -22,7 +18,6 @@ public class ToolErrorStateRepository {
     private final String table;
     private final String keyColumn;
 
-    /** tool_error's own state, one row per tool. The constructor Spring uses; {@link #forTable} is the other. */
     @Autowired
     public ToolErrorStateRepository(JdbcClient jdbc) {
         this(jdbc, "tool_error_state", "tool_key");
@@ -35,26 +30,19 @@ public class ToolErrorStateRepository {
     }
 
     /**
-     * The same persistence over another classifier's state table, for a classifier that runs this engine on
-     * buckets that are not tools. Malformed Output keeps one row per call site in {@code
-     * malformed_output_state}, whose columns match tool_error's apart from the key.
-     *
-     * <p>The names are interpolated, so they must be the literal identifiers of a table this codebase owns;
-     * nothing that reaches them may come from a request.
+     * Names are interpolated, so they must be literal identifiers of a table this codebase owns, never request input.
      */
     public static ToolErrorStateRepository forTable(JdbcClient jdbc, String table, String keyColumn) {
         return new ToolErrorStateRepository(jdbc, table, keyColumn);
     }
 
-    /** A statement with {@code {key}} as this table's key column and {@code {table}} as the table. */
     private String sql(String template) {
         return template.replace("{key}", keyColumn).replace("{table}", table);
     }
 
     /**
-     * Delete every carried state in the project, so the next replay rebuilds each one from the start of
-     * its window. A delete, not {@link #resetAndRelearn}: that writes a {@code reset_at} fence, and a
-     * rebuild skips every bucket before the fence.
+     * A delete, not {@link #resetAndRelearn}, whose {@code reset_at} fence would make a rebuild skip every earlier
+     * bucket.
      */
     public int deleteAll(String projectId) {
         return jdbc.sql(sql("DELETE FROM {table} WHERE project_id = :pid"))
@@ -62,12 +50,10 @@ public class ToolErrorStateRepository {
                 .update();
     }
 
-    /** Every carried state in the project, keyed by tool. Empty for a project that has never swept. */
     public Map<String, CarriedState> byTool(String projectId) {
         return list(projectId).stream().collect(Collectors.toMap(CarriedState::toolKey, c -> c));
     }
 
-    /** Every carried state in the project, for the map above and for tests that want the order. */
     public List<CarriedState> list(String projectId) {
         return jdbc.sql(sql("""
                         SELECT {key} AS bucket_key, s_up, s_down, onset_up_at, onset_down_at,
@@ -106,12 +92,8 @@ public class ToolErrorStateRepository {
     }
 
     /**
-     * Write a tool's advanced state.
-     *
-     * <p>Upsert, and it deliberately leaves {@code reset_*} and {@code pending_pin_*} alone: those record
-     * human decisions, and a sweep running seconds later must not erase the note explaining why the
-     * accumulator was cleared, nor an absorb that is waiting for enough calls to honour. They are read
-     * onto {@link CarriedState} and written only by the methods below.
+     * Leaves {@code reset_*} and {@code pending_pin_*} alone: they record human decisions a sweep seconds later must
+     * not erase.
      */
     public void save(String projectId, CarriedState carried, String updatedAt) {
         State state = carried.state();
@@ -152,12 +134,7 @@ public class ToolErrorStateRepository {
                 .update();
     }
 
-    /**
-     * Record an absorb that arrived before the run since onset was thick enough to pin a reference from.
-     *
-     * <p>Creates the row when the tool has never swept, so a decision is never lost to a race with the
-     * sweep that would have created it.
-     */
+    /** Creates the row when the tool has never swept, so the decision is never lost to a race with the sweep. */
     public void markPendingPin(String projectId, String toolKey, @Nullable String by, String at, String epoch) {
         jdbc.sql(sql("""
                         INSERT INTO {table} (project_id, {key}, state_epoch, updated_at,
@@ -176,7 +153,6 @@ public class ToolErrorStateRepository {
                 .update();
     }
 
-    /** Drop a pending absorb, because it has been honoured or the tool has moved on. */
     public void clearPendingPin(String projectId, String toolKey, String at) {
         jdbc.sql(sql("""
                         UPDATE {table}
@@ -190,16 +166,8 @@ public class ToolErrorStateRepository {
     }
 
     /**
-     * Clear a tool's accumulator because a human dispositioned its case.
-     *
-     * <p><b>The watermark and the reference are kept.</b> Resetting means "start gathering evidence again
-     * from here", not "read the last month again" — replaying history the human just ruled on would
-     * rebuild the very spell they closed. If the tool is genuinely fixed the accumulator stays at zero;
-     * if it is not, it climbs from zero and raises a NEW case with an honest new onset rather than
-     * resurrecting the old one off stale evidence.
-     *
-     * @param note why it was cleared. Required — the database rejects a reset without one, because this
-     *     is the sentence somebody wants six weeks later when the same tool alarms again
+     * Keeps the watermark and reference: replaying history the human just ruled on would rebuild the spell they closed.
+     * @param note required by the database; it is what someone wants weeks later when the tool alarms again
      */
     public void reset(String projectId, String toolKey, @Nullable String resetBy, String note, String resetAt) {
         jdbc.sql(sql("""
@@ -219,19 +187,8 @@ public class ToolErrorStateRepository {
     }
 
     /**
-     * Clear the accumulator AND the learned reference, so the replay re-learns the in-control rate from the
-     * traffic after this moment.
-     *
-     * <p>{@link #reset} keeps the reference, because a tool's reference is its healthy rate and a fix
-     * restores it. A classifier whose ruling means "the old normal was wrong" (frustration: a false alarm
-     * means the reference was learned on noise, a fix means the post-fix rate is the normal wanted) calls
-     * this instead. The reset fence ({@link CarriedState#resetAt}) makes the replay learn only from buckets
-     * after {@code resetAt}.
-     *
-     * <p>The watermark is cleared too: with no reference the row cannot resume, and a stale watermark would
-     * only be ignored.
-     *
-     * @param note why it was cleared. Required, as for {@link #reset}
+     * For a ruling that means "the old normal was wrong". The watermark is cleared too, since a row with no reference
+     * cannot resume. @param note required, as for {@link #reset}
      */
     public void resetAndRelearn(String projectId, String key, @Nullable String resetBy, String note, String resetAt) {
         jdbc.sql(sql("""

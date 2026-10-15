@@ -19,51 +19,25 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 
 /**
- * A checked-in rate file, parsed: the models it prices and the version those rates will be stored under.
- *
- * <p><b>The version is the content, hashed.</b> A snapshot file carries no date of its own — {@code
- * scripts/refresh-model-prices.sh} vendors the upstream LiteLLM file verbatim, and upstream stamps it with
- * nothing — so the version is {@code <source>-<first 12 hex of the file's sha256>}. That is
- * what makes {@link PriceBookImporter} idempotent for free: the same bytes always compute the same
- * version, so a boot that finds that version already present has nothing to do, and a refreshed snapshot
- * is a different version and therefore a new book. A date would have been weaker on both counts — two
- * different files can carry one date, and one file re-imported on two days would look like two books.
- *
- * <p>{@link #digest} is the full sha256 the version abbreviates. It is what home.tessary.ai names a published
- * book by, and home publishes the vendored file byte for byte, so a book fetched from home and the same
- * file read from the jar share one digest and one version.
- *
- * <p><b>Rates are converted to per-million-token on the way in.</b> The files are per-token because that
- * is LiteLLM's shape; the schema is per MTok because that is how a rate is published and read. Converting
- * once here means no reader ever has to know which unit it is holding, and the conversion is exact —
- * {@link BigDecimal#movePointRight} shifts the decimal point rather than multiplying through a double.
+ * The version is {@code <source>-<first 12 hex of sha256>} of the vendored bytes, which makes import idempotent and
+ * matches home.tessary.ai's digest. Rates convert to per-MTok on the way in with {@link BigDecimal#movePointRight},
+ * exactly.
  */
 public record PriceSnapshot(String source, String version, String digest, List<Model> models) {
 
     private static final Logger log = LoggerFactory.getLogger(PriceSnapshot.class);
 
-    /** The vendored LiteLLM snapshot, refreshed by {@code scripts/refresh-model-prices.sh}. */
     public static final String LITELLM_RESOURCE = "pricing/litellm-model-prices.json";
 
     private static final int VERSION_HASH_CHARS = 12;
 
-    /** Per-token → per-MTok. */
     private static final int PER_MTOK_SHIFT = 6;
 
-    /**
-     * One model the file prices. {@code id} is lowercased because every lookup is; {@code displayName}
-     * keeps the key exactly as the file spells it.
-     */
+    /** {@code id} is lowercased because every lookup is. */
     public record Model(
             String id, String displayName, @Nullable String provider, ModelRates rates) {}
 
-    /**
-     * Parse a rate file from the classpath, or empty when it cannot be read.
-     *
-     * <p>Never throws. A missing or corrupt book must not stop the app booting: every model then holds no
-     * rate, which the substrate records honestly as unpriced and counts. Failing the boot instead would
-     * turn a stale vendored file into an outage.
-     */
+    /** Never throws: a missing or corrupt book must not stop boot; every model is then unpriced. */
     public static Optional<PriceSnapshot> load(ObjectMapper mapper, String source, String resource) {
         byte[] bytes;
         try (InputStream in = new ClassPathResource(resource).getInputStream()) {
@@ -75,10 +49,7 @@ public record PriceSnapshot(String source, String version, String digest, List<M
         return parse(mapper, source, bytes, resource);
     }
 
-    /**
-     * Parse a rate file's raw bytes, or empty when they are not JSON. {@code origin} names where they came
-     * from, for the log line only. The digest is taken over exactly these bytes, never a re-serialization.
-     */
+    /** The digest is taken over exactly these bytes, never a re-serialization. */
     public static Optional<PriceSnapshot> parse(ObjectMapper mapper, String source, byte[] bytes, String origin) {
         JsonNode root;
         try {
@@ -104,22 +75,9 @@ public record PriceSnapshot(String source, String version, String digest, List<M
     }
 
     /**
-     * Whether an entry prices tokens at all, and therefore belongs in a price book.
-     *
-     * <p>An entry carrying neither an input nor an output rate prices nothing. Imported anyway it becomes
-     * a {@code model_price} row whose every bucket is null, which is not "unpriced" — it is a model the
-     * book claims to know, costing zero. A reader cannot tell that from a genuinely free model, and the
-     * unpriced count that exists to surface the gap stops counting it.
-     *
-     * <p>Upstream carries about 740 of these out of 3,500: image and audio models billed per image or per
-     * second rather than per token, plus LiteLLM's own {@code sample_spec} documentation stub. Before
-     * 2026-09-02 they never got this far, because {@code scripts/refresh-model-prices.sh} dropped them
-     * while trimming the vendored file down to four fields. That script now vendors upstream verbatim, so
-     * the rule lives here — a property of what a price book means, not of how the file was produced.
-     * It is the only copy of the rule: every reader prices from the imported book.
-     *
-     * <p>Note this filters the models, never the hash: {@link #parse} digests the file's raw bytes, so the
-     * version still identifies exactly what was vendored.
+     * An entry with neither input nor output rate would import as a model costing zero, indistinguishable from free and
+     * hidden from the unpriced count. About 740 upstream entries are per-image or per-second. The file hash is
+     * unaffected.
      */
     private static boolean pricesTokens(ModelRates rates) {
         return isRate(rates.inputPerMtok()) || isRate(rates.outputPerMtok());
@@ -141,12 +99,7 @@ public record PriceSnapshot(String source, String version, String digest, List<M
                         perMtok(spec, "cache_creation_input_token_cost")));
     }
 
-    /**
-     * LiteLLM's own provider-route prefix ({@code vertex_ai/claude-sonnet-5-5} → {@code vertex_ai}), and
-     * null for a bare key. Deliberately not guessed from anything else: a vendor-dotted Bedrock id names
-     * the model's maker rather than who serves it, and inventing a provider for it would put a value in
-     * the column that no file actually claims.
-     */
+    /** Not guessed otherwise: a vendor-dotted Bedrock id names the maker, not who serves it. */
     private static @Nullable String provider(String id) {
         int slash = id.indexOf('/');
         return slash > 0 ? id.substring(0, slash) : null;
@@ -158,7 +111,6 @@ public record PriceSnapshot(String source, String version, String digest, List<M
         return new BigDecimal(v.asText()).movePointRight(PER_MTOK_SHIFT);
     }
 
-    /** Lowercase hex sha256 of {@code bytes}: the digest home.tessary.ai publishes a book under. */
     public static String sha256Hex(byte[] bytes) {
         return HexFormat.of().formatHex(Sha256.digest(bytes));
     }
