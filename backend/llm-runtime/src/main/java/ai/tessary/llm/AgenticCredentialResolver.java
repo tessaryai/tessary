@@ -108,6 +108,5 @@ public class AgenticCredentialResolver {
      * Called once the run ends, however it ended. A build that reserves something per run frees it here via
      * {@link Credential#lease()}.
      */
-    public void release(Credential credential) {
-    }
+    public void release(Credential credential) {}
 }

@@ -15,16 +15,19 @@ public final class KindNormalizer {
 
     /** A (possibly multi-turn) agent invocation — the aggregate "outcome" unit. */
     public static final String AGENT = "agent";
+
     public static final String LLM = "llm";
     public static final String TOOL = "tool";
     public static final String RETRIEVAL = "retrieval";
     /** A coordinator fanning out multiple agents. */
     public static final String WORKFLOW = "workflow";
+
     public static final String REASONING = "reasoning";
     /** An MCP / plugin tool call ({@code execute_tool} + {@code gen_ai.tool.type = extension}). */
     public static final String MCP = "mcp";
     /** An embeddings call (distinct from retrieval). */
     public static final String EMBEDDING = "embedding";
+
     public static final String RERANKER = "reranker";
     public static final String GUARDRAIL = "guardrail";
     public static final String PLAN = "plan";

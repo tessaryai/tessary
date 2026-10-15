@@ -24,8 +24,7 @@ public final class ToolErrorRate {
     private long failures;
     private final Map<String, Tally> patterns = new LinkedHashMap<>();
 
-    public ToolErrorRate() {
-    }
+    public ToolErrorRate() {}
 
     private ToolErrorRate(long calls, long failures, Map<String, Tally> patterns) {
         this.calls = calls;

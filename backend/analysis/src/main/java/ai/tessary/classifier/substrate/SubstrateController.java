@@ -3,7 +3,6 @@ package ai.tessary.classifier.substrate;
 
 import ai.tessary.auth.TenantContext;
 import ai.tessary.auth.TenantPathResolver;
-import ai.tessary.classifier.ClassifierController;
 import ai.tessary.web.ApiResponse;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;

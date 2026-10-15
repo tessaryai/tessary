@@ -3,7 +3,6 @@ package ai.tessary.db;
 
 import ai.tessary.config.TessaryProperties;
 import com.zaxxer.hikari.HikariDataSource;
-import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;

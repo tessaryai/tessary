@@ -26,7 +26,6 @@ import ai.tessary.classifier.substrate.BehaviorSubstrateRepository.TraceHead;
 import ai.tessary.classifier.worker.ClassifierJobRepository;
 import ai.tessary.classifier.worker.ClassifierJobRow;
 import ai.tessary.classifier.worker.ClassifierSweep;
-import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.classifier.worker.SweepContext;
 import ai.tessary.classifier.worker.SweepOutcome;
 import ai.tessary.open.obs.Markers;

@@ -18,6 +18,7 @@ public final class LogContext implements AutoCloseable {
     public static final String CLASSIFIER_KEY = "classifierKey";
     /** Matches the key Micrometer/OTel tracing binds on a request thread. */
     public static final String TRACE_ID = "traceId";
+
     public static final String SPAN_ID = "spanId";
 
     private final Map<String, String> prior;

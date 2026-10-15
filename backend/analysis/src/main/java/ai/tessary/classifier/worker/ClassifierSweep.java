@@ -56,8 +56,7 @@ public interface ClassifierSweep {
     SweepOutcome sweep(SweepContext ctx);
 
     /** Asked only when enabling a row; disabling is never refused. */
-    default void checkEnable(ClassifierRow classifier) {
-    }
+    default void checkEnable(ClassifierRow classifier) {}
 
     /**
      * Clears this sweep's own tables and fitted state for a reset, inside the reset's transaction after the sweep job

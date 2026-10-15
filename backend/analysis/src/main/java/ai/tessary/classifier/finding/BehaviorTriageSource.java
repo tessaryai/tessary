@@ -85,6 +85,7 @@ public class BehaviorTriageSource implements TriageSource {
      * Absorbing a spell also clears its accumulator, or the moved reference would alarm again on the tool's next call.
      */
     private final ToolErrorStateRepository toolErrorStates;
+
     private final ToolErrorService toolErrors;
 
     private final BehaviorBaselineEventRepository events;

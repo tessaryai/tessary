@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.classifier.worker;
 
-import ai.tessary.classifier.catalog.BuiltInClassifierCatalog;
-import ai.tessary.classifier.catalog.BuiltInDetector;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;

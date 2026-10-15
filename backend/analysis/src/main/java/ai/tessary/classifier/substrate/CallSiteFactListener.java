@@ -2,8 +2,6 @@
 package ai.tessary.classifier.substrate;
 
 import ai.tessary.classifier.ClassifierService;
-import ai.tessary.classifier.catalog.ClassifierSeedListener;
-import ai.tessary.classifier.worker.ClassifierWorker;
 import ai.tessary.open.obs.Markers;
 import ai.tessary.pipeline.CallSiteFactChangedEvent;
 import org.slf4j.Logger;

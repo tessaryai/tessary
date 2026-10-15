@@ -68,6 +68,7 @@ public class LauncherEncoderScorer implements EncoderScorer {
      * sheds nothing; the waiting happens here.
      */
     private final Semaphore inflight;
+
     private final Sleeper sleeper;
 
     @FunctionalInterface

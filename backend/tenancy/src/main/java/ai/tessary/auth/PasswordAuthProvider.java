@@ -71,8 +71,7 @@ public class PasswordAuthProvider implements AuthProvider {
     }
 
     @Override
-    public void revokeInvitation(String invitationId) {
-    }
+    public void revokeInvitation(String invitationId) {}
 
     @Override
     public AuthResult signupWithCredentials(String email, String password) throws AuthException {

@@ -69,6 +69,7 @@ public record SpanRow(
         public static final String DONE = "done";
         /** Anonymous traffic: nothing to copy, ever. */
         public static final String NONE = "none";
+
         public static final String RESOLVED = "resolved";
 
         private ResolverState() {}

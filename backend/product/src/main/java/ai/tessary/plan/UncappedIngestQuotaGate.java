@@ -11,6 +11,5 @@ import ai.tessary.ingest.IngestQuotaGate;
 public class UncappedIngestQuotaGate implements IngestQuotaGate {
 
     @Override
-    public void requireIngestWithinQuota(String projectId) {
-    }
+    public void requireIngestWithinQuota(String projectId) {}
 }

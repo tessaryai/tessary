@@ -45,6 +45,7 @@ public record RcaReportRow(
 
         /** At least one cause reached medium confidence and cites this finding's evidence. */
         public static final String CAUSES_IDENTIFIED = "causes_identified";
+
         public static final String NO_CAUSE_FOUND = "no_cause_found";
     }
 

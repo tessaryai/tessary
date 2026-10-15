@@ -15,16 +15,19 @@ public final class GenAiAttributes {
     public static final String SYSTEM = "gen_ai.system";
     /** OTel v1.37+; the live span path. */
     public static final String PROVIDER_NAME = "gen_ai.provider.name";
+
     public static final String REQUEST_MODEL = "gen_ai.request.model";
     public static final String INPUT_MESSAGES = "gen_ai.input.messages";
     public static final String OUTPUT_MESSAGES = "gen_ai.output.messages";
     /** Semconv: includes cached tokens. */
     public static final String USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens";
+
     public static final String USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
     public static final String USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens";
     public static final String USAGE_CACHE_CREATION_INPUT_TOKENS = "gen_ai.usage.cache_creation.input_tokens";
     /** Its own bucket, or a reasoning-heavy call would be indistinguishable from a verbose one on tokens and cost. */
     public static final String USAGE_REASONING_TOKENS = "gen_ai.usage.reasoning_tokens";
+
     public static final String OI_TOKEN_COUNT_REASONING = "llm.token_count.completion_details.reasoning";
 
     // Producer-reported cost: stored verbatim by the ingest pricer and never repriced.
@@ -96,12 +99,14 @@ public final class GenAiAttributes {
     public static final String OI_SYSTEM = "llm.system";
     /** OI hosting provider, when distinct from system. */
     public static final String OI_PROVIDER = "llm.provider";
+
     public static final String OI_INPUT_MESSAGES = "llm.input_messages";
     public static final String OI_OUTPUT_MESSAGES = "llm.output_messages";
     public static final String OI_MESSAGE_ROLE = "message.role";
     public static final String OI_MESSAGE_CONTENT = "message.content";
     /** Multimodal: an array of typed parts. */
     public static final String OI_MESSAGE_CONTENTS = "message.contents";
+
     public static final String OI_MESSAGE_CONTENT_TEXT = "message_content.text";
     public static final String OI_MESSAGE_TOOL_CALLS = "message.tool_calls";
     public static final String OI_TOKEN_COUNT_PROMPT = "llm.token_count.prompt";

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package ai.tessary.llm;
 
-import ai.tessary.llmspi.LaneGroup;
 import ai.tessary.llmspi.ModelLane;
 import java.util.Collections;
 import java.util.EnumMap;

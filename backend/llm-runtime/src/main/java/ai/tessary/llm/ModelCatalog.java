@@ -105,7 +105,6 @@ public final class ModelCatalog {
                     OPENAI_EFFORTS,
                     "https://api.openai.com/v1",
                     false),
-
             new CatalogEntry(
                     ModelProvider.ANTHROPIC,
                     "Anthropic",
@@ -142,7 +141,6 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://api.anthropic.com/v1",
                     true),
-
             new CatalogEntry(
                     ModelProvider.OPENROUTER,
                     "Anthropic",
@@ -217,7 +215,6 @@ public final class ModelCatalog {
                     NO_EFFORT,
                     "https://openrouter.ai/api/v1",
                     false),
-
             new CatalogEntry(
                     ModelProvider.MOONSHOT,
                     "Moonshot",

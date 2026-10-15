@@ -13,7 +13,6 @@ import java.util.Locale;
  * credential.
  */
 public enum ModelLane {
-
     RCA(
             "rca",
             "RCA",

@@ -6,7 +6,6 @@ import ai.tessary.classifier.finding.FindingRow;
 import ai.tessary.classifier.finding.FindingTitle;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence;
 import ai.tessary.classifier.toolerror.ToolErrorEvidence.Read;
-import ai.tessary.classifier.toolerror.ToolErrorService;
 import java.time.Instant;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;

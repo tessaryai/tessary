@@ -12,7 +12,6 @@ import ai.tessary.classifier.detector.EncoderScorer;
 import ai.tessary.classifier.detector.MalformedOutputDetector;
 import ai.tessary.classifier.detector.RegexDetector;
 import ai.tessary.classifier.detector.SecretLeakDetector;
-import ai.tessary.classifier.detector.groundedness.GroundednessDetector;
 import ai.tessary.classifier.substrate.SubstrateReadRepository;
 import ai.tessary.plan.Capability;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -90,6 +90,7 @@ public class CaseService {
     private final ToolErrorStateRepository toolErrorStates;
     /** Shares tool_error's CUSUM engine, so it needs the same accumulator reset when a human closes the case. */
     private final MalformedOutputRateRepository malformedOutputRates;
+
     private final FrustrationRateRepository frustrationRates;
     private final FrustrationSessionClearer frustrationSessions;
     private final GroundednessRateRepository groundednessRates;
