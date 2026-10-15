@@ -61,8 +61,8 @@ public class PrincipalRepository {
     public void insert(Principal p) {
         jdbc.sql("""
             INSERT INTO principal (id, workos_user_id, email, display_name, avatar_url, kind,
-                                   parent_principal_id, status, attributes, created_at, last_seen_at)
-            VALUES (:id, :wid, :email, :dn, :avatar, :kind, :parent, :status, :attributes::jsonb, :created,
+                                   parent_principal_id, attributes, created_at, last_seen_at)
+            VALUES (:id, :wid, :email, :dn, :avatar, :kind, :parent, :attributes::jsonb, :created,
                     :lastSeen)
             """)
                 .param("id", p.id())
@@ -72,7 +72,6 @@ public class PrincipalRepository {
                 .param("avatar", p.avatarUrl())
                 .param("kind", p.kind())
                 .param("parent", p.parentPrincipalId())
-                .param("status", p.status())
                 .param("attributes", p.attributes())
                 .param("created", p.createdAt())
                 .param("lastSeen", p.lastSeenAt())
@@ -91,9 +90,9 @@ public class PrincipalRepository {
     public void insertWithPassword(Principal p, String passwordHash) {
         jdbc.sql("""
             INSERT INTO principal (id, workos_user_id, email, display_name, avatar_url, kind,
-                                   parent_principal_id, status, attributes, created_at, last_seen_at,
+                                   parent_principal_id, attributes, created_at, last_seen_at,
                                    password_hash)
-            VALUES (:id, :wid, :email, :dn, :avatar, :kind, :parent, :status, :attributes::jsonb, :created,
+            VALUES (:id, :wid, :email, :dn, :avatar, :kind, :parent, :attributes::jsonb, :created,
                     :lastSeen, :hash)
             """)
                 .param("id", p.id())
@@ -103,7 +102,6 @@ public class PrincipalRepository {
                 .param("avatar", p.avatarUrl())
                 .param("kind", p.kind())
                 .param("parent", p.parentPrincipalId())
-                .param("status", p.status())
                 .param("attributes", p.attributes())
                 .param("created", p.createdAt())
                 .param("lastSeen", p.lastSeenAt())
@@ -171,7 +169,6 @@ public class PrincipalRepository {
                 rs.getString("avatar_url"),
                 rs.getString("kind"),
                 rs.getString("parent_principal_id"),
-                rs.getString("status"),
                 rs.getString("attributes"),
                 rs.getString("created_at"),
                 rs.getString("last_seen_at"));
