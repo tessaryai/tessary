@@ -41,12 +41,9 @@ public class DecisionProviderResolver {
 
     /** Whether the lane has a provider to run on: the org holds a key for it. Opens no key. */
     public boolean hasProvider(String projectId, ModelLane lane) {
-        String orgId = orgResolver.orgIdFor(projectId);
-        if (orgId == null) return false;
-        Optional<ProjectModelSettings.ResolvedDecisionModel> model = settings.resolveDecisionModel(projectId, lane);
-        if (model.isEmpty()) return false;
-        return credentials
-                .findByOrgAndProvider(orgId, model.get().provider())
+        return Optional.ofNullable(orgResolver.orgIdFor(projectId))
+                .flatMap(orgId -> settings.resolveDecisionModel(projectId, lane)
+                        .flatMap(model -> credentials.findByOrgAndProvider(orgId, model.provider())))
                 .map(ProviderCredential::apiKeySealed)
                 .filter(key -> !key.isBlank())
                 .isPresent();
