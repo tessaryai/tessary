@@ -9,12 +9,12 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useProjectApi } from "../tenant/TenantContext";
+import { casesQuery } from "./shellQueries";
 
 export function useCaseCounts(): { open: number } {
   const api = useProjectApi();
   const q = useQuery({
-    queryKey: ["cases", api.base],
-    queryFn: api.getTriage,
+    ...casesQuery(api),
     retry: false,
     staleTime: 30_000,
   });

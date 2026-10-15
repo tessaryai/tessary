@@ -2,7 +2,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/types";
 import { auth as authApi } from "../api/client";
-import { preloadRouteChunk } from "../lib/routePreload";
 import type { Me } from "../api/types-auth";
 
 interface AuthState {
@@ -38,14 +37,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refetch();
-    /*
-     * Warm the current route's chunk in the same tick as the sign-in check rather than after it.
-     * `ProtectedRoute` renders nothing until `refetch` resolves, so React.lazy's import used to be
-     * strictly downstream of this round trip — a chunk whose bytes have nothing to do with identity
-     * waiting on identity. Deliberately fire-and-forget: it warms the module cache and moves no
-     * data request, so nothing here can fail in a way the user should see.
-     */
-    preloadRouteChunk(window.location.pathname);
   }, [refetch]);
 
   const value = useMemo<AuthState>(() => ({
