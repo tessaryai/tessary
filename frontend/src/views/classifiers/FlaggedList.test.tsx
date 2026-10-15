@@ -240,10 +240,7 @@ describe("FlaggedList", () => {
   function row(over: Partial<FlaggedRow> = {}): FlaggedRow {
     return {
       id: "row-1", traceId: "t-3", score: 0.9, flaggedAt: "2026-07-27T16:57:00Z", cleared: false, sessionId: "sess-1",
-      contextTraceIds: ["t-1", "t-2", "t-3"],
-      preview: "row preview",
-      emphasis: [],
-      ...over,
+      contextTraceIds: ["t-1", "t-2", "t-3"], preview: "row preview", emphasis: [], ...over,
     };
   }
 

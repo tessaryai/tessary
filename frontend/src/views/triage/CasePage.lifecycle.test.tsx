@@ -24,9 +24,7 @@ import {
 import { api, auth } from "../../test/api";
 
 const OWNER: Me = {
-  id: "user-1",
-  email: "owner@example.com",
-  orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
+  id: "user-1", email: "owner@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role: "owner" }],
   platform_staff: false,
 };
 
@@ -94,9 +92,7 @@ const conversation = (id: string, message: string): FrustratedConversation =>
   }) as FrustratedConversation;
 
 const FRUSTRATION: FrustrationDetail = {
-  rate: { ...GROUNDEDNESS_DETAIL.rate, failuresCur: 40 },
-  arlTarget: 50000,
-  baselineFrustrated: 10,
+  rate: { ...GROUNDEDNESS_DETAIL.rate, failuresCur: 40 }, arlTarget: 50000, baselineFrustrated: 10,
   conversations: [conversation("f-all", "This is the third time I asked.")],
   conversationsNextCursor: null, jevThreshold: 0.5, minDecisionInterval: 3600, scorerVersion: "v1",
 } as FrustrationDetail;

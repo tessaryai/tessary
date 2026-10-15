@@ -25,9 +25,7 @@ beforeEach(() => {
 
 function renderReport(role: "owner" | "member" = "member") {
   auth.me.mockResolvedValue({
-    id: "user-1",
-    email: "a@example.com",
-    orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],
+    id: "user-1", email: "a@example.com", orgs: [{ id: "org-1", slug: "acme", name: "Acme", role }],
     platform_staff: false,
   });
   renderRoute(

@@ -12,12 +12,9 @@ import { PipelineEmpty } from "./PipelineEmpty";
 
 const node: EmptyState["nodes"][number] = { label: "Traces", value: "0", sub: "", tone: "satisfied" };
 const STATE: EmptyState = {
-  key: "no-classifiers",
-  title: "No traces yet",
-  body: "Point an exporter here.",
+  key: "no-classifiers", title: "No traces yet", body: "Point an exporter here.",
   primary: { kind: "link", label: "View traces", to: "/traces" },
-  secondary: { kind: "copyEndpoint", label: "Copy endpoint" },
-  nodes: [node, node, node],
+  secondary: { kind: "copyEndpoint", label: "Copy endpoint" }, nodes: [node, node, node],
 };
 const ENDPOINT = `${window.location.origin}/v1/traces`;
 

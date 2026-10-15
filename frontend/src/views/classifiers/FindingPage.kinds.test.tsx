@@ -24,9 +24,7 @@ type Finding = BehaviorFindingDetail["finding"];
 /** A finding whose detector draws no figure: the generic layout. */
 function plain(over: Partial<Finding> = {}, detail: Partial<BehaviorFindingDetail> = {}): BehaviorFindingDetail {
   return {
-    ...BASE,
-    groundedness: null,
-    ...detail,
+    ...BASE, groundedness: null, ...detail,
     finding: { ...BASE.finding, detector: "loop", title: "The agent loops on refunds", callSiteId: "refunds", ...over },
   };
 }

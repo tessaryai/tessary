@@ -40,15 +40,11 @@ const SETTINGS = {
       id: "frustration", label: "Frustration", description: "Scores each eligible user turn.", group: "decision_calls",
       provider_options: [
         {
-          provider: "TYPESAFE",
-          label: "TypeSafe",
-          model_keys: ["TYPESAFE:jev-latest"],
+          provider: "TYPESAFE", label: "TypeSafe", model_keys: ["TYPESAFE:jev-latest"],
           default_model_key: "TYPESAFE:jev-latest",
         },
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:~typesafe/jev-latest"],
           default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
       ],
@@ -130,9 +126,7 @@ describe("FrustrationEnableModal", () => {
           provider_options: [
             ...SETTINGS.lanes[0].provider_options,
             {
-              provider: "PLATFORM",
-              label: "Tessary AI",
-              model_keys: ["PLATFORM:~typesafe/jev-latest"],
+              provider: "PLATFORM", label: "Tessary AI", model_keys: ["PLATFORM:~typesafe/jev-latest"],
               default_model_key: "PLATFORM:~typesafe/jev-latest",
             },
           ],

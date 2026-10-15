@@ -160,10 +160,7 @@ describe("the delivery channels", () => {
 
     await waitFor(() =>
       expect(api.createAlertChannel).toHaveBeenCalledWith({
-        kind: "webhook",
-        name: "Webhook",
-        enabled: true,
-        config: { url: "https://example.com/hook" },
+        kind: "webhook", name: "Webhook", enabled: true, config: { url: "https://example.com/hook" },
       }),
     );
     expect(await screen.findByText("Webhook added")).toBeTruthy();
@@ -219,10 +216,7 @@ describe("the delivery channels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Slack channel" }));
     await waitFor(() =>
       expect(api.createAlertChannel).toHaveBeenLastCalledWith({
-        kind: "slack",
-        name: "Slack",
-        enabled: true,
-        config: { url: "https://hooks.slack.com/x" },
+        kind: "slack", name: "Slack", enabled: true, config: { url: "https://hooks.slack.com/x" },
       }),
     );
     expect(await screen.findByText("Slack channel added")).toBeTruthy();

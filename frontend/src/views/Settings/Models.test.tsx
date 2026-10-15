@@ -34,9 +34,7 @@ const SETTINGS: ModelSettingsResponse = {
       id: "rca", label: "RCA", description: "Investigates a mover.", group: "agent_vm",
       provider_options: [
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:openai/gpt-5.6-terra"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:openai/gpt-5.6-terra"],
           default_model_key: "OPENROUTER:openai/gpt-5.6-terra",
         },
       ],
@@ -47,15 +45,11 @@ const SETTINGS: ModelSettingsResponse = {
       id: "frustration", label: "Frustration", description: "Scores each eligible user turn.", group: "decision_calls",
       provider_options: [
         {
-          provider: "TYPESAFE",
-          label: "TypeSafe",
-          model_keys: ["TYPESAFE:jev-latest"],
+          provider: "TYPESAFE", label: "TypeSafe", model_keys: ["TYPESAFE:jev-latest"],
           default_model_key: "TYPESAFE:jev-latest",
         },
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:~typesafe/jev-latest"],
           default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
       ],
@@ -101,14 +95,11 @@ const TRIAGE: ModelSettingsResponse = {
       id: "triage", label: "Triage", description: "Rules on each finding.", group: "agent_vm",
       provider_options: [
         {
-          provider: "BEDROCK",
-          label: "Amazon Bedrock",
-          model_keys: ["claude-haiku", "claude-opus", "mystery-model", "gpt-luna"],
-          default_model_key: "claude-haiku",
+          provider: "BEDROCK", label: "Amazon Bedrock",
+          model_keys: ["claude-haiku", "claude-opus", "mystery-model", "gpt-luna"], default_model_key: "claude-haiku",
         },
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
+          provider: "OPENROUTER", label: "OpenRouter",
           model_keys: ["OPENROUTER:openai/gpt-5.6-terra", "OPENROUTER:other"],
           default_model_key: "OPENROUTER:openai/gpt-5.6-terra",
         },

@@ -35,10 +35,7 @@ beforeEach(() => {
             [
               span({
                 name: null as never, status: "error", errorType: "Timeout", latencyMs: 1234, totalTokens: 5600,
-                totalCost: 0.01234,
-                models: ["gpt-5", "haiku"],
-                notRolledUp: true,
-                staleTotals: true,
+                totalCost: 0.01234, models: ["gpt-5", "haiku"], notRolledUp: true, staleTotals: true,
                 traceId: "trace-1111111111",
               }),
               span({ role: "custom", level: "ERROR", sessionId: "sess-2222222222", startedAt: "2026-09-25T10:00:00Z" }),

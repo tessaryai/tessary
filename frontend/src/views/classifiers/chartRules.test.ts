@@ -25,12 +25,8 @@ function card(c: Partial<ChartCard>): ChartCard {
   return {
     classifier_id: "c1", classifier_key: "frustration", name: "Frustration", kind: "rate", measure: null,
     unit: "fraction", learning: null,
-    headline: { value: null, delta: null },
-    baseline: null,
-    arming: null,
-    points: [],
-    cases: { open_cases: 0, spans: [] },
-    ...c,
+    headline: { value: null, delta: null }, baseline: null, arming: null, points: [],
+    cases: { open_cases: 0, spans: [] }, ...c,
   };
 }
 

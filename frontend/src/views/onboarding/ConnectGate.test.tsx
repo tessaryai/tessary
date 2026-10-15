@@ -24,10 +24,8 @@ function Where() {
 }
 
 const FAKE_ME: Me = {
-  id: "user-fake",
-  email: "smoke@example.com",
-  orgs: [{ id: "org-fake", slug: "fake-org", name: "Fake Org", role: "owner" }],
-  platform_staff: false,
+  id: "user-fake", email: "smoke@example.com",
+  orgs: [{ id: "org-fake", slug: "fake-org", name: "Fake Org", role: "owner" }], platform_staff: false,
 };
 
 const NOT_CONNECTED_STATUS = {

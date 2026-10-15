@@ -187,9 +187,7 @@ describe("FlaggedAnswers", () => {
     api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
-          traceId: "t-9",
-          spanId: "span-9",
-          answer: "Nonprofits get 50% off every plan.",
+          traceId: "t-9", spanId: "span-9", answer: "Nonprofits get 50% off every plan.",
           flaggedSentences: [{ start: 0, end: 34, score: 0.99 }],
         }),
       ],
@@ -211,9 +209,7 @@ describe("FlaggedAnswers", () => {
     api.getFlaggedAnswers.mockResolvedValue({
       rows: [
         answer({
-          traceId: "t-7",
-          spanId: "span-7",
-          answer: "The API allows 1,000 requests per minute per key.",
+          traceId: "t-7", spanId: "span-7", answer: "The API allows 1,000 requests per minute per key.",
           flaggedSentences: [{ start: 0, end: 49, score: 0.99 }],
         }),
       ],

@@ -70,9 +70,7 @@ export const GROUNDEDNESS_REPORT: RcaReport = {
       how_it_caused_this: "The replaced pages quote old prices, so the answers go beyond the current documents.",
       next_step: "Remove the old folders from the index sources and rebuild the index.",
       attribution: { kind: "config", path: "support-agent/retrieval/index.yaml", commit: "a41c0de", excerpt: null },
-      evidence_session_ids: [],
-      evidence_trace_ids: ["t-1", "t-2", "t-3"],
-      affected_count: 3,
+      evidence_session_ids: [], evidence_trace_ids: ["t-1", "t-2", "t-3"], affected_count: 3,
     },
     {
       title: "The system prompt asks for a complete answer every time", confidence: "medium", change: null, type: null,
@@ -103,9 +101,7 @@ export const CURRENT_GROUNDEDNESS_REPORT: RcaReport = {
     },
     {
       ...GROUNDEDNESS_REPORT.causes[1],
-      change: "standing",
-      type: "prompt",
-      what_changed: "Fills gaps with specific numbers.",
+      change: "standing", type: "prompt", what_changed: "Fills gaps with specific numbers.",
       attribution: { kind: null, path: "support-agent/system.md", commit: null, excerpt: "Always give a complete answer." },
     },
   ],

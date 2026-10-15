@@ -23,15 +23,11 @@ const SETTINGS = {
       id: "frustration", label: "Frustration", description: "", group: "decision_calls",
       provider_options: [
         {
-          provider: "OPENROUTER",
-          label: "OpenRouter",
-          model_keys: ["OPENROUTER:~typesafe/jev-latest"],
+          provider: "OPENROUTER", label: "OpenRouter", model_keys: ["OPENROUTER:~typesafe/jev-latest"],
           default_model_key: "OPENROUTER:~typesafe/jev-latest",
         },
         {
-          provider: "TYPESAFE",
-          label: "TypeSafe",
-          model_keys: ["TYPESAFE:jev-latest"],
+          provider: "TYPESAFE", label: "TypeSafe", model_keys: ["TYPESAFE:jev-latest"],
           default_model_key: "TYPESAFE:jev-latest",
         },
       ],
