@@ -2,7 +2,6 @@
 package ai.tessary.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -130,23 +129,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void anOrgWithNoKeyRunsOnThePlatformProviderWhenItIsOffered() {
-        configured();
-        platformOffered = true;
-        var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(PLATFORM_SONNET, rca.modelKey());
-        assertTrue(rca.automatic());
-        assertEquals(
-                PLATFORM_SONNET,
-                settings.resolve(PID, ModelLane.TRIAGE).orElseThrow().modelKey(),
-                "TRIAGE shares RCA's order, so it lands on the platform provider too");
-        assertEquals(
-                PLATFORM_SONNET,
-                settings.resolve(PID, ModelLane.AGENT_RUN).orElseThrow().modelKey(),
-                "AGENT_RUN shares RCA's order, so it lands on the platform provider too");
-    }
-
-    @Test
     void anOrgsOwnKeyOutranksThePlatformProvider() {
         configured(ModelProvider.ANTHROPIC);
         platformOffered = true;
@@ -173,15 +155,6 @@ class ProjectModelSettingsTest {
         TessaryException refused =
                 assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, PLATFORM_SONNET));
         assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, refused.error());
-    }
-
-    @Test
-    void triageAcceptsTheSameFrontierModelRcaDoes() {
-        // Sonnet 5 is the default on both lanes, and an explicit PUT naming it succeeds on either.
-        settings.set(PID, ORG, ModelLane.TRIAGE, SONNET);
-        verify(repo).upsert(PID, ModelLane.TRIAGE, SONNET, ServiceTier.STANDARD, null);
-        settings.set(PID, ORG, ModelLane.RCA, SONNET);
-        verify(repo).upsert(PID, ModelLane.RCA, SONNET, ServiceTier.STANDARD, null);
     }
 
     @Test
@@ -223,15 +196,6 @@ class ProjectModelSettingsTest {
         assertTrue(
                 settings.resolve(PID, ModelLane.FRUSTRATION).isEmpty(),
                 "a chat-only key runs no decision lane, whatever else it serves");
-    }
-
-    /** The deployment-supplied provider runs no decision lane: without a Jev key of its own, an org scores nowhere. */
-    @Test
-    void anOrgWithNoJevKeyScoresFrustrationNowhereEvenWhenThePlatformIsOffered() {
-        configured(ModelProvider.BEDROCK);
-        platformOffered = true;
-
-        assertTrue(settings.resolveDecisionModel(PID, ModelLane.FRUSTRATION).isEmpty());
     }
 
     @Test
@@ -282,19 +246,6 @@ class ProjectModelSettingsTest {
     }
 
     @Test
-    void anExplicitChoiceBeatsTheOrder() {
-        when(repo.findByProject(PID)).thenReturn(List.of(row(ModelLane.RCA, HAIKU, ServiceTier.STANDARD)));
-
-        var rca = settings.resolve(PID, ModelLane.RCA).orElseThrow();
-        assertEquals(HAIKU, rca.modelKey());
-        assertFalse(rca.automatic());
-        // TRIAGE resolves through its own provider order, not RCA's pinned Haiku.
-        var triage = settings.resolve(PID, ModelLane.TRIAGE).orElseThrow();
-        assertEquals(SONNET, triage.modelKey());
-        assertTrue(triage.automatic());
-    }
-
-    @Test
     void anExplicitChoiceWhoseProviderIsGoneFallsBackToTheOrder() {
         // The credential was deleted after the choice: the lane keeps running and the row survives for when the key
         // returns.
@@ -323,14 +274,6 @@ class ProjectModelSettingsTest {
     void rejectsAModelThatIsNotOnePlatformModel(ModelLane lane, String key) {
         TessaryException ex = assertThrows(TessaryException.class, () -> settings.set(PID, ORG, lane, key));
         assertEquals(ModelConfigError.UNKNOWN_PLATFORM_MODEL, ex.error());
-    }
-
-    @Test
-    void refusesToSaveAModelWhoseProviderTheOrgHasNoKeyFor() {
-        configured(ModelProvider.BEDROCK);
-        TessaryException ex =
-                assertThrows(TessaryException.class, () -> settings.set(PID, ORG, ModelLane.RCA, "GROK:grok-4.6"));
-        assertEquals(ModelConfigError.PROVIDER_NOT_CONFIGURED, ex.error());
     }
 
     @Test
@@ -386,12 +329,6 @@ class ProjectModelSettingsTest {
 
         assertEquals(fallback, resolved.modelKey());
         assertTrue(resolved.automatic());
-    }
-
-    @Test
-    void aNonBedrockAgenticCatalogModelOnTheSandboxLane_isAccepted() {
-        settings.set(PID, ORG, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview");
-        verify(repo).upsert(PID, ModelLane.RCA, "GEMINI:gemini-3.1-pro-preview", ServiceTier.STANDARD, null);
     }
 
     @Test

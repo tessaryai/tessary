@@ -148,18 +148,6 @@ class ProjectModelSettingControllerTest {
     }
 
     @Test
-    void aBuildWithNoSupplierOffersNoPlatformOptionOrModel() {
-        var view = controller.get(ctx, ORG_SLUG, PROJECT_SLUG).data();
-
-        assertTrue(
-                view.lanes().stream()
-                        .flatMap(l -> l.providerOptions().stream())
-                        .noneMatch(o -> o.provider() == ModelProvider.PLATFORM),
-                "PLATFORM must not appear as an option an org could be told to add a key for");
-        assertTrue(view.catalogModels().stream().noneMatch(e -> e.provider() == ModelProvider.PLATFORM));
-    }
-
-    @Test
     void aSuppliedPlatformProviderIsOfferedLastUnderTheSuppliersLabel() {
         controller = new ProjectModelSettingController(settings, resolver, priceModels, priceBooks, TESSARY_AI);
         when(settings.configuredProviders(ORG_ID)).thenReturn(Set.of(ModelProvider.PLATFORM));

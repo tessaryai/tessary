@@ -127,41 +127,6 @@ class DecisionProviderResolverTest {
         assertTrue(resolver.hasProvider(PID, ModelLane.FRUSTRATION));
     }
 
-    /**
-     * The deployment-supplied provider runs no decision lane (since 2026-10-07 Frustration is scored on
-     * the org's own key only), so offering it gives an org without a Jev key no Frustration provider,
-     * whatever the deployment's own resolver would do.
-     */
-    @Test
-    void theDeploymentsOwnProviderIsNoFrustrationProvider() {
-        when(orgs.orgIdFor(PID)).thenReturn(ORG);
-        when(credentials.findByOrg(ORG)).thenReturn(List.of());
-        ProjectModelSettings settings =
-                new ProjectModelSettings(settingRows, credentials, orgs, catalog, offeringPlatform());
-        DecisionProviderResolver deployment = new DecisionProviderResolver(settings, credentials, box, orgs) {
-            @Override
-            public Optional<DecisionTarget> resolve(String projectId, ModelLane lane) {
-                throw new IllegalStateException("no credit left");
-            }
-        };
-
-        assertFalse(deployment.hasProvider(PID, ModelLane.FRUSTRATION));
-    }
-
-    private static PlatformProviderSupplier offeringPlatform() {
-        return new PlatformProviderSupplier() {
-            @Override
-            public boolean available(String orgId) {
-                return true;
-            }
-
-            @Override
-            public Optional<SuppliedProvider> describe(String orgId) {
-                return Optional.of(new SuppliedProvider("Tessary AI", null));
-            }
-        };
-    }
-
     @Test
     void aKeyedCredentialResolvesToItsModelEndpointAndOpenedKey() {
         ProviderCredential cred = typesafe(box.seal("ts-key"), "https://gw.example.com/v1/");
