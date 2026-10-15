@@ -36,35 +36,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Groundedness's rate test: per call site, whether the share of traces with a flagged answer has risen above the
- * rate that call site learned as its normal.
- *
- * <p><b>tool_error's engine, not a copy of it</b>, as Frustration uses it: a trace is a Bernoulli trial on each
- * call site it had an answer scored on, and it fails when one of those answers carries an uncleared flag. The
- * hourly tallies ({@link GroundednessRateRepository}) are replayed through {@link ToolErrorTrend} on {@link
- * GroundednessConfig#engine()}. Judging starts once the reference holds {@code min_baseline_traces}, and the
- * reference keeps learning each later hour until it holds {@code freeze_baseline_traces}, then stops moving. The
- * model's false-alarm rate depends on the domain, so a learned per-call-site reference is what absorbs it; a
- * call site that answers badly from its first day learns that as its normal and is flagged only for getting
- * worse.
- *
- * <p><b>Rebuilt every pass</b> ({@link CarriedState#rebuilding}), because a trace scored across several uploads
- * lands in its original hour, and one cleared by a {@code false_alarm} resolve stops being a failure. The reset
- * fence keeps a resolve durable; a change to the scorer or the tuning is handled as a reset too, with the note
- * {@value #TUNING_CHANGED}, because a reference learned under another threshold is not comparable.
- *
- * <p><b>A spell files a finding for triage</b>, the Malformed Output pattern and not Frustration's: nothing is
- * ruled at filing and no case is opened here. Triage rules on the finding, and a positive opens the case. A later
- * pass over the same spell refreshes the open finding's numbers and evidence; a spell a ruling already covers is
- * left alone.
- *
- * <p><b>The evidence is the rate's two sides</b>: every trace scored on the call site since onset as {@code
- * member}, and every flagged one as {@code witness}, a trace row followed by a span row for each answer that was
- * flagged in it. Neither is capped, and both are written up to the end of the spell's last hour, so they match
- * its counts. A false-alarm resolve clears the witnesses' flags.
- *
- * <p>Only a rise is reported. Runs when the sweep reaches the head of the stream, never mid-page, so the
- * assessment table is complete up to the cursor whenever this reads it.
+ * Groundedness's rate test on tool_error's engine: a trace is a Bernoulli trial on each call site it had an answer
+ * scored on. The model's false-alarm rate depends on the domain, so a learned per-call-site reference absorbs it. A
+ * spell files a finding for triage; no case is opened here. Evidence is uncapped.
  */
 @Service
 public class GroundednessRateService implements ClassifierCatchUp {
@@ -107,11 +81,8 @@ public class GroundednessRateService implements ClassifierCatchUp {
     }
 
     /**
-     * Replay every call site's tallies over the window, save each call site's state, and file or refresh a
-     * finding for each call site whose flagged-trace rate has risen and is alarming now. Returns those spells.
-     *
-     * <p>State first, findings second, as tool_error orders it: if this dies between the two, the next pass
-     * re-derives the same findings from the same state.
+     * State first, findings second: if this dies between the two, the next pass re-derives the same findings from the
+     * same state.
      */
     List<Spell> refresh(String projectId, ClassifierRow signal, Instant at) {
         Instant started = Instant.now();
@@ -164,10 +135,7 @@ public class GroundednessRateService implements ClassifierCatchUp {
         return rising;
     }
 
-    /**
-     * A state row built under another scorer or other tuning: reset it and re-learn, recorded with its note, and
-     * stamp the new epoch so the next pass does not reset it again while it is still learning.
-     */
+    /** Stamp the new epoch so the next pass does not reset it again while it is still learning. */
     private CarriedState retune(String projectId, CarriedState stale, String epoch, String now) {
         ToolErrorStateRepository states = rates.states();
         states.resetAndRelearn(projectId, stale.toolKey(), null, TUNING_CHANGED, now);
@@ -184,10 +152,7 @@ public class GroundednessRateService implements ClassifierCatchUp {
         return fresh;
     }
 
-    /**
-     * One rising call site: file its finding, or refresh the unruled one already open on it, and top up the
-     * evidence. Nothing when a ruled finding already covers the spell's last hour.
-     */
+    /** Nothing when a ruled finding already covers the spell's last hour. */
     private void persist(
             String projectId,
             ClassifierRow signal,

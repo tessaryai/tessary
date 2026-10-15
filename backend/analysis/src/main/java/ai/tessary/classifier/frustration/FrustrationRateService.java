@@ -38,36 +38,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
- * Frustration's rate test: per call site, whether the share of conversations frustrated with the agent has risen
- * above the rate that call site learned as its normal.
- *
- * <p><b>tool_error's engine, not a copy of it</b>, as Malformed Output uses it: a session, a conversation on one
- * call site, is a Bernoulli trial on that call site, and it fails when it carries an uncleared frustration flag.
- * The hourly tallies ({@link FrustrationRateRepository}) are replayed through {@link ToolErrorTrend} on
- * {@link FrustrationConfig#engine()}. Judging starts once the reference holds {@code min_baseline_conversations},
- * and the reference keeps learning each later hour until it holds {@code freeze_baseline_conversations}, then
- * stops moving; a call site that is frustrated from its first day learns that as its normal and is flagged only
- * for getting worse.
- *
- * <p><b>Rebuilt every pass</b> ({@link CarriedState#rebuilding}), because a conversation flagged on a later turn
- * becomes a failure in its original hour, and one cleared by a {@code false_alarm} resolve stops being one. The
- * reset fence keeps a resolve durable; a change to the scorer or the tuning is handled as a reset too, with the
- * note {@value #TUNING_CHANGED}, because a reference learned under other weights is not comparable.
- *
- * <p><b>A spell opens a finding and a case without triage.</b> Each rising call site files one finding per spell,
- * ruled positive at filing with {@link FrustrationEvidence#SUMMARY}, and opens or joins its case in the same
- * transaction, the path a high-confidence secret leak takes. A later pass over the same spell (same onset)
- * refreshes that finding's numbers and its evidence instead of filing again.
- *
- * <p><b>The evidence is the rate's two sides, enumerated as tool_error enumerates its calls</b>: every session
- * scored on the call site since onset as {@code member}, and every frustrated one as {@code witness}, a session
- * row followed by a trace row for the turn that fired. Neither is capped, since a cap is a sample with an
- * undeclared selection rule, and both are written on every pass up to the end of the spell's last hour, so they
- * grow with the spell and match its counts. A false-alarm resolve clears the witnesses, and RCA reads them.
- *
- * <p>Only a rise is reported. Runs when the TURN sweep reaches the head of the stream, never mid-page, so the
- * assessment table is complete up to the cursor whenever this reads it. It reads tables, not the provider, so a
- * paused classifier still replays.
+ * Frustration's rate test on tool_error's engine: a session on a call site is a Bernoulli trial that fails when it
+ * carries an uncleared frustration flag. Rebuilt every pass, because a later flag or a {@code false_alarm} resolve
+ * changes an earlier hour. A spell files a finding already ruled positive and opens its case in the same transaction;
+ * its evidence is uncapped, since a cap is a sample with an undeclared selection rule.
  */
 @Service
 public class FrustrationRateService implements ClassifierCatchUp {
@@ -116,11 +90,8 @@ public class FrustrationRateService implements ClassifierCatchUp {
     }
 
     /**
-     * Replay every call site's tallies over the window, save each call site's state, file or refresh a finding
-     * for each call site whose frustrated-conversation rate has risen and is alarming now, and return those.
-     *
-     * <p>State first, findings second, as tool_error orders it: if this dies between the two, the next pass
-     * re-derives the same findings from the same state.
+     * State first, findings second: if this dies between the two, the next pass re-derives the same findings from the
+     * same state.
      */
     List<Spell> refresh(String projectId, ClassifierRow signal, Instant at) {
         Instant started = Instant.now();
@@ -175,10 +146,7 @@ public class FrustrationRateService implements ClassifierCatchUp {
         return rising;
     }
 
-    /**
-     * A state row built under another scorer or other tuning: reset it and re-learn, recorded with its note, and
-     * stamp the new epoch so the next pass does not reset it again while it is still learning.
-     */
+    /** Stamp the new epoch so the next pass does not reset it again while it is still learning. */
     private CarriedState retune(String projectId, CarriedState stale, String epoch, String now) {
         ToolErrorStateRepository states = rates.states();
         states.resetAndRelearn(projectId, stale.toolKey(), null, TUNING_CHANGED, now);

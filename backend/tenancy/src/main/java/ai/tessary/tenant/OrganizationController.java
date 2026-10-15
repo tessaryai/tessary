@@ -76,14 +76,11 @@ public class OrganizationController {
 
     public record UpdateOrgRequest(@NotBlank String name, String settings) {}
 
-    /** {@code PUT /api/orgs/{slug}/signup-policy} body. */
     public record SignupPolicyRequest(String mode, List<String> domains) {}
 
     /**
-     * The {@code GET /api/orgs/{slug}/signup-policy} view. The policy is instance-wide and
-     * lives on the install's first organization; {@code governing} says whether the addressed
-     * organization is that one, and {@code governing_org_slug} and {@code governing_org_name} name
-     * it either way (the name is what the UI shows; the slug is the URL segment).
+     * The policy is instance-wide and lives on the install's first organization; {@code governing} says whether the
+     * addressed organization is that one.
      */
     public record SignupPolicyView(
             String mode,
@@ -147,10 +144,8 @@ public class OrganizationController {
         String slug = tenants.uniqueSlug(Ids.slugify(req.name()));
         Organization o = new Organization(
                 Ids.ulid(), null, slug, req.name(), Instant.now().toString(), null, null);
-        // Insert org + owner membership + the guaranteed default project atomically, so a partial
-        // failure can't leave an org with no membership or no default project. The owned-org cap
-        // is checked in there too, under a per-owner lock, so a concurrent second request from
-        // the same user cannot slip past it.
+        // Atomic, so a partial failure can't leave an org without a membership or a default project; the owned-org cap
+        // is checked under a per-owner lock.
         return ApiResponse.ok(tenants.bootstrapOrg(o, ctx.userId(), creationLimit.maxOwnedOrgsFor(ctx.userId())));
     }
 
@@ -252,10 +247,7 @@ public class OrganizationController {
                 signupPolicy.governingOrg().orElse(null)));
     }
 
-    /**
-     * Who may create an account on this install. Owner and admin, the same people who manage the
-     * invitations that are the escape hatch in every mode; the change is written to the audit log.
-     */
+    /** Owner and admin, who also manage the invitations that bypass every mode; the change is audited. */
     @PutMapping("/api/orgs/{orgSlug}/signup-policy")
     public ApiResponse<SignupPolicyView> updateSignupPolicy(
             TenantContext ctx, @PathVariable String orgSlug, @RequestBody SignupPolicyRequest req) {
@@ -397,13 +389,8 @@ public class OrganizationController {
     }
 
     /**
-     * The connect gate's quiet escape hatch: lazily create (or return the existing) sample
-     * project for this org. Gated on {@code ORG_MANAGE}, the same permission {@link #createProject}
-     * requires two methods above — this is a genuine mutation (a project row, plus every table
-     * {@code SampleProjectSeedListener} seeds after commit), and {@code Role.VIEWER}'s contract is
-     * read-only, not "read-only except for demo data". Idempotent regardless: a repeat call from any
-     * caller who already holds {@code ORG_MANAGE} returns the existing sample project rather than
-     * creating a second one.
+     * Gated on {@code ORG_MANAGE} like {@link #createProject}: it creates a project and seeds many tables, and
+     * {@code Role.VIEWER} is read-only. Idempotent: a repeat call returns the existing sample project.
      */
     @PostMapping("/api/orgs/{orgSlug}/sample-project")
     public ApiResponse<Project> ensureSampleProject(TenantContext ctx, @PathVariable String orgSlug) {
@@ -465,13 +452,8 @@ public class OrganizationController {
     }
 
     /**
-     * Accept a project deletion. Three indexed writes and it returns — the data goes in the background.
-     *
-     * <p>This used to run {@code DELETE FROM project} inline and wait for the whole cascade, which on a
-     * project with real traffic meant tens of minutes holding a pooled connection, a request the browser
-     * gave up on, and a single-statement cascade that then rolled back whole so the retry started from
-     * nothing. What is synchronous now is only what has to be: the marker that stops every other route
-     * from touching this project, and the key revocation that stops anything from writing to it.
+     * Mark, revoke keys and enqueue; the cascade runs in the background. An inline cascade held a pooled connection for
+     * minutes and rolled back whole on timeout.
      */
     @DeleteMapping("/api/orgs/{orgSlug}/projects/{projectSlug}")
     @ResponseStatus(HttpStatus.ACCEPTED)
@@ -485,8 +467,7 @@ public class OrganizationController {
                     HttpStatus.CONFLICT, "cannot delete the default project — promote another project first");
         }
         String now = Instant.now().toString();
-        // Marking, revoking and enqueueing happen atomically in one transaction — see
-        // TenantService.deleteProjectAsync's javadoc for why that matters.
+        // Marking, revoking and enqueueing happen in one transaction; see TenantService.deleteProjectAsync.
         var accepted = tenants.deleteProjectAsync(r.project().id(), now);
         if (!accepted.accepted()) {
             // Already accepted — a double click or a retry of a request that did land. Idempotent, and
@@ -505,10 +486,7 @@ public class OrganizationController {
         return r;
     }
 
-    /**
-     * The delete endpoint's resolver. Identical but for seeing through the deleting gate, because that
-     * gate would otherwise make a retried DELETE 404 instead of confirming what is already happening.
-     */
+    /** Sees through the deleting gate, which would otherwise make a retried DELETE 404 instead of confirming it. */
     private TenantPathResolver.Resolved requireProjectManagerIncludingDeleting(
             TenantContext ctx, String orgSlug, String projectSlug, String action) {
         var r = resolver.requireProjectIncludingDeleting(ctx, orgSlug, projectSlug);
