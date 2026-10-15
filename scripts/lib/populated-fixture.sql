@@ -13,7 +13,7 @@
 -- matches every row. Both failures are invisible until a populated database sees them.
 --
 -- What it holds: a loaded board, one row in each table that carries a persisted vocabulary
--- value (job.kind, the three annotation subject_kind grains, eval_case.detector,
+-- value (job.kind, eval_case.detector,
 -- retention_policy.data_class, metric_rollup.metric, the model lane, the alert payload keys,
 -- the three open detection tables: secret_leak_detection, malformed_output_detection,
 -- user_classifier_detection, and the telemetry identity row), plus the FK graph they all hang
@@ -32,8 +32,8 @@
 
 -- ---------------------------------------------------------------- the minimum graph
 -- Nearly every table below is FK-anchored to project, and the substrate rows exist because
--- the span-grain arms of the grain CHECKs (`ck_annotation_grain` and friends) name a trace
--- and a span, so a subject that cannot resolve cannot be inserted, let alone migrated. There
+-- the span-grain detection rows name a trace and a span, so a subject that cannot resolve
+-- cannot be inserted, let alone migrated. There
 -- is no environment row: a project is the only scope below an org.
 
 INSERT INTO organization (id, slug, name, created_at)
@@ -107,33 +107,6 @@ VALUES ('det_sl_fix', 'prj_fix', 'cls_fix', 'fixture_classifier', 'ses_fix', 'tr
 INSERT INTO user_classifier_detection (id, project_id, classifier_id, classifier_key, subject_session_id,
                                        subject_trace_id, subject_span_id, severity, confidence, created_at)
 VALUES ('det_uc_fix', 'prj_fix', 'cls_fix', 'fixture_classifier', 'ses_fix', 'trc_fix', 'spn_fix', 'warn', 'high', '2026-08-01T00:00:00Z');
-
--- ---------------------------------------------------------------- the three subject grains
--- annotation gets one row per grain (session, trace, span) because it carries a subject_kind
--- CHECK and a grain CHECK, and a re-cut that handles the span arm and forgets the session arm
--- passes on any fixture that only has spans. annotation is the classifier's training set as
--- well as the review store; the review half (its verdict pointer, the label and queue tables)
--- has since been removed.
-
-INSERT INTO annotation (id, project_id, subject_kind, session_id, trace_id, span_id,
-                        key, annotator_kind, value_type, passed, created_at)
-VALUES ('ann_fix_ses', 'prj_fix', 'session', 'ses_fix', NULL, NULL,
-        'fixture.helpful', 'human', 'boolean', true, '2026-08-01T00:00:00Z'),
-       ('ann_fix_trc', 'prj_fix', 'trace', 'ses_fix', 'trc_fix', NULL,
-        'fixture.helpful', 'human', 'boolean', true, '2026-08-01T00:00:00Z'),
-       ('ann_fix_spn', 'prj_fix', 'span', 'ses_fix', 'trc_fix', 'spn_fix',
-        'fixture.helpful', 'human', 'boolean', false, '2026-08-01T00:00:00Z');
-
--- failure_mode_instance carries the same grains under its own `ck_fmi_subject`, and `source` is
--- a CHECK-backed vocabulary (clustered / human).
-INSERT INTO failure_mode (id, project_id, key, name, status, created_at, updated_at)
-VALUES ('fm_fix', 'prj_fix', 'fixture_mode', 'Fixture Mode', 'open', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
-
-INSERT INTO failure_mode_instance (id, project_id, failure_mode_id, subject_kind,
-                                   subject_session_id, subject_trace_id, subject_span_id,
-                                   source, created_at)
-VALUES ('fmi_fix_ses', 'prj_fix', 'fm_fix', 'session', 'ses_fix', NULL, NULL, 'clustered', '2026-08-01T00:00:00Z'),
-       ('fmi_fix_spn', 'prj_fix', 'fm_fix', 'span', 'ses_fix', 'trc_fix', 'spn_fix', 'clustered', '2026-08-01T00:00:00Z');
 
 -- ---------------------------------------------------------------- findings and cases
 -- Two cases: one with a finding, one resolved without. `ck_eval_case_finding_forward` says a
@@ -237,8 +210,7 @@ VALUES ('pdc_fix', 'prj_fix', 'cls_fix', 'checkout', 'fm_fix', 'medium', 'active
 -- One row per metric: the unique key is (org, project, metric, bucket_start, granularity) and
 -- nothing scopes it further.
 INSERT INTO metric_rollup (id, org_id, project_id, metric, value, bucket_start, granularity, created_at)
-VALUES ('mr_fix_l1', 'org_fix', 'prj_fix', 'l1_evals', 155, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z'),
-       ('mr_fix_l2', 'org_fix', 'prj_fix', 'l2_evals', 7, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z');
+VALUES ('mr_fix_l1', 'org_fix', 'prj_fix', 'l1_evals', 155, '2026-08-01T00:00:00Z', 'day', '2026-08-01T00:00:00Z');
 
 -- metric_baseline's `state` is a CHECK-backed vocabulary; one window per
 -- (project, classifier, measure, bucket_kind, bucket_key) under ux_metric_baseline_scope.
@@ -261,19 +233,19 @@ VALUES ('rp_fix_traces', 'prj_fix', 'traces', 30, 7, '2026-08-01T00:00:00Z'),
 -- `triage` is one of the two lanes ck_project_model_setting_lane admits today (rca, triage);
 -- the retired lanes' rows (grading, synthesis, assistant) went with the migrations that retired
 -- them, all folded in.
-INSERT INTO project_model_setting (project_id, lane, model_key, service_tier, reasoning_effort, created_at, updated_at)
-VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', NULL, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+INSERT INTO project_model_setting (project_id, lane, model_key, created_at, updated_at)
+VALUES ('prj_fix', 'triage', 'anthropic.claude-haiku-4-5', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
 
 -- The ledger. `lane` carries no CHECK, so a rewrite that missed would be silent: the spend page
 -- would simply stop attributing these rows rather than error.
-INSERT INTO llm_call (id, project_id, lane, model, service_tier, funding, input_tokens, output_tokens,
+INSERT INTO llm_call (id, project_id, lane, model, funding, input_tokens, output_tokens,
                       cost_usd, created_at, subject_kind, subject_id)
-VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'standard', 'platform',
+VALUES ('llc_fix_trg', 'prj_fix', 'triage', 'anthropic.claude-haiku-4-5', 'platform',
         800, 120, 0.0002400000, '2026-08-01T00:00:00Z', NULL, NULL),
 -- A run on the agent lane under its first id, authoring (0033), which 0039 renames to agent_run. The
 -- baseline's CHECK refuses an authoring setting, so only the ledger can hold one here; 0039 re-adds that
 -- CHECK without authoring, which fails on any setting its UPDATE missed.
-       ('llc_fix_agent', 'prj_fix', 'authoring', 'anthropic.claude-sonnet-4-5', 'standard', 'byo',
+       ('llc_fix_agent', 'prj_fix', 'authoring', 'anthropic.claude-sonnet-4-5', 'byo',
         1200, 300, 0.0081000000, '2026-08-01T00:00:00Z', NULL, NULL);
 
 -- ---------------------------------------------------------------- telemetry identity
