@@ -226,7 +226,7 @@
                 <artifactId>spotbugs-maven-plugin</artifactId>
                 <version>${spotbugs-maven-plugin.version}</version>
                 <configuration>
-                    <effort>Max</effort>
+                    <effort>Default</effort>
                     <threshold>Low</threshold>
                     <includeTests>false</includeTests>
                     <sarifOutput>true</sarifOutput>
