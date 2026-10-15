@@ -24,33 +24,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Authn + tenant resolution. Runs on every request that isn't an unauthenticated
- * endpoint by design:
- *
- * <ul>
- *   <li><b>Bypassed</b> ({@code shouldNotFilter}): {@code /auth/login},
- *       {@code /auth/callback}, {@code /auth/logout}, {@code /auth/link/start},
- *       {@code /auth/link/poll}, {@code /actuator/health} and its two probes (not the rest
- *       of {@code /actuator/}, nor the bare {@code /actuator} index), and, only when
- *       {@code TESSARY_AUTH_DISABLED} is set, every path, regardless of which
- *       {@link AuthProvider} is active: with {@link PasswordAuthProvider} as the always-available
- *       default, "no provider configured" is not a reachable state. See {@link AuthProperties}.</li>
- *   <li><b>Everything else under {@code /actuator/}</b>: having a principal at all is not
- *       enough. These paths name no org, so they're gated on the org-independent
- *       {@link PlatformStaff#isStaff}, which also already excludes bearer/MCP contexts by
- *       construction. Authenticated-but-not-staff is a 403, not a 200: proving you were someone
- *       does not mean you were allowed to see JVM heapdumps and env vars.</li>
- *   <li><b>{@code /mcp}</b>: bearer-token auth only; cookies ignored. Missing/bad
- *       token = hard 401 with a JSON-RPC-shaped body the MCP client can parse.</li>
- *   <li><b>{@code /api/**}</b>: cookie session preferred; falls back to bearer
- *       for headless callers. Missing context = hard 401.</li>
- *   <li><b>Everything else under {@code /auth/**}</b> (today just {@code /auth/me}):
- *       resolve best-effort, leave the request attribute null when there's no
- *       session, and let the controller decide how to respond.</li>
- * </ul>
- *
- * <p>Cookie validation is local-only: unseal, check {@code accessTokenExpiresAt},
- * refresh against WorkOS only when past expiry. No JWKS fetch on the hot path.</p>
+ * Cookie validation is local-only: unseal, check {@code accessTokenExpiresAt}, refresh only when past expiry.
+ * Non-health actuator paths need {@link PlatformStaff#isStaff}, since proving identity is not permission to read
+ * heapdumps and env vars.
  */
 @Component
 @Order(10)
@@ -86,45 +62,27 @@ public class AuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest req) {
         String path = normalisedPath(req);
-        // Unauthenticated by design: the WorkOS dance + the actuator health probe.
-        // NOTE: /auth/me is deliberately NOT in this list — it needs the filter
-        // to unseal the cookie and populate TenantContext before the controller
-        // can answer "who am I". The filter doesn't reject /auth/** paths; if
-        // there's no cookie it just leaves the context null, and the controller
-        // handles that case.
+        // /auth/me is deliberately not bypassed: it needs the filter to populate TenantContext, and with no cookie the
+        // context is just left null.
         if ("/auth/login".equals(path)) return true;
         if ("/auth/callback".equals(path)) return true;
         if ("/auth/logout".equals(path)) return true;
-        // Device-link start/poll are plugin-facing and unauthenticated by
-        // design (the secret device_code is the credential). The browser-facing
-        // /api/link/** confirm endpoints stay under the cookie session + CSRF.
+        // The secret device_code is the credential. The browser-facing /api/link/** confirm endpoints stay under the
+        // cookie session + CSRF.
         if ("/auth/link/start".equals(path)) return true;
         if ("/auth/link/poll".equals(path)) return true;
-        // GitHub App install callback: GitHub redirects the browser here with no
-        // guaranteed cookie. The signed `state` param IS the credential (verified
-        // in GithubCallbackController), so bypass the cookie/bearer session.
+        // GitHub redirects here with no guaranteed cookie; the signed `state` param (verified in
+        // GithubCallbackController) is the credential.
         if ("/git/github/callback".equals(path)) return true;
-        // GitHub App manifest callback (the BYO-App wizard): same reasoning as the callback
-        // above: GitHub redirects the browser here with no cookie, and the signed `state` param
-        // (verified in GithubManifestController) is the credential.
+        // Same as above; the signed `state` is verified in GithubManifestController.
         if ("/git/github/manifest/callback".equals(path)) return true;
-        // The health probes only, never the whole /actuator/ prefix, so widening
-        // `management.endpoints.web.exposure` cannot widen the unauthenticated surface with it.
+        // The health probes only, never the whole /actuator/ prefix, so widening `management.endpoints.web.exposure`
+        // cannot widen the unauthenticated surface.
         if (isPublicActuatorPath(path)) return true;
-        // The generated OpenAPI contract (springdoc, Phase 3): the API spec is public — it is the
-        // checked-in source of truth (backend/contract) and carries no secrets. No cookie/bearer session.
         if ("/v3/api-docs".equals(path) || path.startsWith("/v3/api-docs/")) return true;
-        // The operator's own explicit escape hatch. With PasswordAuthProvider always available as
-        // the dependency-free default, "no provider configured" is not a reachable state, so the
-        // flag is authoritative on its own: an operator (or the dev-only compose profile) who
-        // sets TESSARY_AUTH_DISABLED gets exactly that, full stop, regardless of which provider
-        // is selected.
-        //
-        // Tests that want auth enforced despite the suite's global unauthenticated default (see
-        // TestAuthDisabledInitializer) must say so explicitly: override `tessary.auth.disabled`
-        // back to `false` in their own @DynamicPropertySource, rather than relying on a
-        // fake-but-realistic external provider key as an indirect toggle. See
-        // TestAuthDisabledInitializer's javadoc for the convention this replaces and why.
+        // Authoritative on its own: with PasswordAuthProvider always available, "no provider configured" is not
+        // reachable. Tests that want auth enforced override `tessary.auth.disabled` to false (see
+        // TestAuthDisabledInitializer).
         return authProps.isDisabled();
     }
 
@@ -135,8 +93,6 @@ public class AuthFilter extends OncePerRequestFilter {
         String path = normalisedPath(req);
         TenantContext ctx;
 
-        // MCP is bearer-only: cookies are ignored, and a missing/bad token
-        // is a hard 401 with a JSON-RPC body the MCP client can parse.
         if (path.startsWith("/mcp")) {
             ctx = resolveBearerToken(req);
             if (ctx == null) {
@@ -148,10 +104,7 @@ public class AuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Every other request: try cookie session first, then bearer as a
-        // fallback for headless API callers. If both miss, leave ctx null and
-        // let the controller decide — /auth/me wants to answer 401 with a
-        // clean JSON shape, but anything under /api/** must hard-401 here.
+        // Anything under /api/** must hard-401 here; /auth/me answers its own 401.
         boolean cookieAuthed = false;
         ctx = resolveCookie(req, res);
         if (ctx != null) {
@@ -163,34 +116,21 @@ public class AuthFilter extends OncePerRequestFilter {
             req.setAttribute(TenantContext.ATTRIBUTE, ctx);
         }
 
-        // Actuator sits alongside /api/ here: shouldNotFilter has already released the health
-        // probes, so anything actuator-shaped reaching this point is a management endpoint, and
-        // without this arm it would reach chain.doFilter with a null context and be served.
+        // shouldNotFilter has already released the health probes, so anything actuator-shaped here is a management
+        // endpoint and must not reach chain.doFilter with a null context.
         if (ctx == null) {
             if (path.startsWith("/api/") || isActuatorPath(path)) {
                 reject401(res, "unauthorized");
                 return;
             }
         } else if (isActuatorPath(path) && !isPublicActuatorPath(path) && !platformStaff.isStaff(ctx)) {
-            // Actuator, second gate: having any principal was never the bar here, only closing the
-            // "no credential at all" door. isPublicActuatorPath paths never reach this method
-            // (shouldNotFilter already released them), so that term is redundant-but-cheap symmetry.
             reject403(res, "actuator.staff_only", "platform staff only");
             return;
         }
 
-        // CSRF: any state-changing /api request made with a cookie session must
-        // carry X-Requested-With. Browsers will not attach a custom header on a
-        // cross-origin request without a CORS preflight, and we don't allow any
-        // origin to preflight — so this header check blocks classic CSRF
-        // (form-submit, <img>, <link>, etc.) without needing a per-request
-        // token. Bearer-auth requests (MCP, headless) are exempt: they can't
-        // be ridden cross-site because browsers don't carry the Authorization
-        // header automatically.
-        // isActuatorPath, not a bare prefix: /actuator/shutdown takes an empty POST with no
-        // content-type constraint, which is exactly what a cross-site form can send. Widened with
-        // the 401 arm above rather than after it, because leaving one of a pair of sibling
-        // predicates behind is the bug this whole issue keeps producing.
+        // CSRF: browsers won't attach a custom header cross-origin without a preflight, and no origin may preflight.
+        // Bearer requests are exempt because browsers don't attach Authorization automatically. Actuator is included
+        // because /actuator/shutdown takes an empty POST a cross-site form can send.
         if (cookieAuthed && (path.startsWith("/api/") || isActuatorPath(path)) && isMutating(req.getMethod())) {
             String xrw = req.getHeader("X-Requested-With");
             if (xrw == null || !"XMLHttpRequest".equalsIgnoreCase(xrw)) {
@@ -203,27 +143,17 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Every actuator path, including the bare {@code /actuator} index.
-     *
-     * <p>The index is the reason this is a method rather than a {@code startsWith} at each call
-     * site: {@code "/actuator".startsWith("/actuator/")} is FALSE, so a prefix test silently misses
-     * it — and Spring Boot serves it by default ({@code WebEndpointProperties.Discovery.enabled}),
-     * as a HAL page listing every exposed endpoint. Two sibling predicates each had to know that,
-     * and one of them not knowing it is how the gap arrived in the first place.
+     * A method rather than {@code startsWith}: {@code "/actuator".startsWith("/actuator/")} is false, and Spring Boot
+     * serves the bare index by default as a HAL page listing every exposed endpoint.
      */
     static boolean isActuatorPath(String path) {
         return "/actuator".equals(path) || path.startsWith("/actuator/");
     }
 
     /**
-     * The actuator paths served without authentication: the health endpoint and its two probes,
-     * which orchestrators poll before anything holds a credential.
-     *
-     * <p>Enumerated, not prefixed. {@code /actuator/health/*} would admit every health GROUP and
-     * COMPONENT, so a deployment setting {@code show-details: always} would publish
-     * {@code /actuator/health/db} — connection state, and whatever a future indicator reports —
-     * without anyone choosing to. Exact matches also stop a sibling like {@code /actuator/healthz}
-     * inheriting the exemption by name.
+     * Enumerated, not prefixed: {@code /actuator/health/*} would publish every health group and component (e.g.
+     * {@code /actuator/health/db}) under {@code show-details: always}, and a sibling like {@code /actuator/healthz}
+     * must not inherit the exemption.
      */
     static boolean isPublicActuatorPath(String path) {
         return "/actuator/health".equals(path)
@@ -232,13 +162,8 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Returns the path we make auth decisions on. Prefer the servlet path
-     * because it is already normalised by the container (no {@code %2f},
-     * {@code ..}, or {@code ;} parameter tricks). MockMvc, however, leaves
-     * the servlet path empty in some configurations — fall back to the raw
-     * request URI in that case, and additionally reject any URI that smells
-     * like a path-confusion attempt so we don't bypass auth via
-     * {@code /actuator/..%2Fapi/foo} or similar.
+     * The servlet path is already normalised by the container. MockMvc may leave it empty, so fall back to the raw URI
+     * and reject anything resembling path confusion such as {@code /actuator/..%2Fapi/foo}.
      */
     private static String normalisedPath(HttpServletRequest req) {
         String servletPath = req.getServletPath();
@@ -263,23 +188,18 @@ public class AuthFilter extends OncePerRequestFilter {
         return "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method) || "DELETE".equals(method);
     }
 
-    // -------------------------------------------------------- cookie session
-
     private @Nullable TenantContext resolveCookie(HttpServletRequest req, HttpServletResponse res) {
         Cookie cookie = findCookie(req, authProps.getCookieName());
         if (cookie == null) return null;
         SealedSession session = cipher.unseal(cookie.getValue());
         if (session == null) {
-            // Cookie present but failed AES-GCM auth. Cookie key rotated, attacker,
-            // or a stale browser session from a previous deploy. Loud so it shows up.
+            // Key rotated, tampered, or a stale session from a previous deploy. Loud so it shows up.
             log.warn("auth: cookie unseal failed for {} (key rotated or tampered)", req.getRequestURI());
             return null;
         }
         Principal user = users.findByWorkosId(session.workosUserId()).orElse(null);
         if (user == null) {
-            // Sealed cookie carries a workos_user_id with no matching row.
-            // Means the DB was wiped after the cookie was issued — same effect as
-            // a key rotation; we treat it as "not signed in" and let the client retry.
+            // The DB was wiped after the cookie was issued; treat it as "not signed in".
             log.warn("auth: cookie unsealed but principal not found for workos_user_id={}", session.workosUserId());
             return null;
         }
@@ -300,8 +220,7 @@ public class AuthFilter extends OncePerRequestFilter {
         if (old.refreshToken() == null) return null;
         try {
             var r = provider.refresh(old.refreshToken(), old.organizationId());
-            // A successful refresh always returns a fresh access_token; a null means a
-            // malformed 2xx body — treat as a refresh failure rather than seal a broken session.
+            // A null means a malformed 2xx body; treat it as a refresh failure rather than seal a broken session.
             if (r.accessToken() == null) {
                 log.warn("cookie refresh: WorkOS 2xx response carried no access_token");
                 return null;
@@ -312,8 +231,7 @@ public class AuthFilter extends OncePerRequestFilter {
                     r.workosUserId() != null ? r.workosUserId() : old.workosUserId(),
                     r.organizationId() != null ? r.organizationId() : old.organizationId(),
                     r.sessionId() != null ? r.sessionId() : old.sessionId());
-            // Tomcat's Cookie.setAttribute("SameSite", ...) path is unreliable
-            // combined with ResponseEntity; emit Set-Cookie via ResponseCookie.
+            // Tomcat's Cookie.setAttribute("SameSite", ...) is unreliable combined with ResponseEntity.
             ResponseCookie c = ResponseCookie.from(authProps.getCookieName(), cipher.seal(fresh))
                     .httpOnly(true)
                     .secure(authProps.isCookieSecure())
@@ -338,21 +256,13 @@ public class AuthFilter extends OncePerRequestFilter {
         }
     }
 
-    // -------------------------------------------------------- bearer (MCP + headless API)
-
     /**
-     * Parse the {@code Authorization: Bearer <token>} header, look up the MCP
-     * token, and return a project-bound context. Used both by {@code /mcp}
-     * (only auth method allowed) and {@code /api/**} (fallback when no cookie).
-     *
-     * <p>Delegates to the shared {@link BearerTokenAuthenticator} so the servlet path and the OTLP gRPC
-     * receiver's interceptor (not a servlet request) resolve bearer tokens identically.
+     * Delegates to {@link BearerTokenAuthenticator} so the servlet path and the OTLP gRPC interceptor resolve tokens
+     * identically.
      */
     private @Nullable TenantContext resolveBearerToken(HttpServletRequest req) {
         return bearerAuth.authenticate(req.getHeader("Authorization")).orElse(null);
     }
-
-    // -------------------------------------------------------- helpers
 
     private static @Nullable Cookie findCookie(HttpServletRequest req, String name) {
         if (req.getCookies() == null) return null;

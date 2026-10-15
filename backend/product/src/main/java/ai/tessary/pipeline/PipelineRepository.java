@@ -39,23 +39,8 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Per-project pipeline persistence. The on-disk {@code pipeline.yaml} is the
- * import format; the DB is the runtime source of truth. {@link #load(String)}
- * reconstitutes a {@link Pipeline} for one project; {@link #replace(String,
- * Pipeline)} performs a "wipe and write" inside a transaction so import is
- * atomic.
- *
- * <p>Relational decomposition vs. JSON blobs:</p>
- * <ul>
- *   <li>The three core entities — call sites, chains and failure modes — get
- *       their own rows. Querying by id and filtering by project rely on those
- *       being relational.</li>
- *   <li>Compound fields (product profile, invariants, taxonomy, runtime,
- *       packs, observed stats, source spans, constraints,
- *       pack/compliance tag lists) are stored as
- *       Jackson JSON in TEXT columns. They're consumed as wholes by the UI;
- *       relational decomposition would 4× the schema with no payoff today.</li>
- * </ul>
+ * {@code pipeline.yaml} is the import format; the DB is the runtime source of truth. Call sites, chains and failure
+ * modes are relational; compound fields are JSON in TEXT columns, consumed whole by the UI.
  */
 @Repository
 public class PipelineRepository {
@@ -68,7 +53,6 @@ public class PipelineRepository {
         this.mapper = mapper;
     }
 
-    /** Returns {@link Pipeline#empty()} when there's no pipeline_meta row for the project. */
     public Pipeline load(String projectId) {
         Optional<MetaRow> meta =
                 jdbc.sql("""
@@ -96,10 +80,7 @@ public class PipelineRepository {
                 readJsonList(m.capabilitiesJson, Capability.class));
     }
 
-    /**
-     * Record which commit (and repo) the project's pipeline now corresponds to.
-     * Kept out of {@link #upsertMeta} so a partial upload never clobbers it.
-     */
+    /** Kept out of {@link #upsertMeta} so a partial upload never clobbers it. */
     public void stampSyncedCommit(
             String projectId, String commitSha, @Nullable String repoOwner, @Nullable String repoName) {
         jdbc.sql("""
@@ -113,38 +94,20 @@ public class PipelineRepository {
                 .update();
     }
 
-    /**
-     * Per-entity-type counts surfaced to the import API so users can see what
-     * actually changed.
-     *
-     * <ul>
-     *   <li>{@code added} — id wasn't in the project before the import</li>
-     *   <li>{@code updated} — id already existed; the row was overwritten</li>
-     *   <li>{@code removed} — id was in the project but absent from the upload,
-     *       so we deleted it. Only non-zero in {@code replace} mode.</li>
-     * </ul>
-     */
+    /** {@code removed} is only non-zero in {@code replace} mode. */
     public record EntityDiff(int added, int updated, int removed) {}
 
-    /** What changed across the import. {@code metaReplaced=true} when pipeline.yaml was applied. */
     public record Diff(EntityDiff callSites, EntityDiff chains, EntityDiff failureModes, boolean metaReplaced) {}
 
-    /**
-     * Atomically replace the project's pipeline. Every entity not in the upload
-     * is deleted; every entity in the upload is inserted (fresh). Use this when
-     * you want the DB to mirror the upload exactly — e.g. retiring stale call
-     * sites after a major rewrite. Pipeline meta is always replaced.
-     */
+    /** Every entity not in the upload is deleted. */
     @Transactional
     public Diff replace(String projectId, Pipeline pipeline) {
         Set<String> preCs = existingIds(projectId, "call_site");
         Set<String> preCh = existingIds(projectId, "chain");
         Set<String> preFm = existingIds(projectId, "grader_failure_mode");
 
-        // A call-site shard may declare output_schema or stay silent on it. A wipe-and-write import drops
-        // the column, so the stored schema is carried across the delete: an import must not clobber what
-        // it does not carry. Restored only where the incoming bundle is SILENT; a shard that declares a
-        // schema is the newer truth and wins, or the repo could never correct a stale one.
+        // Wipe-and-write drops the column, so a stored schema is restored where the incoming shard is silent; a shard
+        // that declares one wins.
         Map<String, String> carried = callSiteOutputSchemas(projectId);
         pipeline.callSites().stream().filter(cs -> cs.outputSchema() != null).forEach(cs -> carried.remove(cs.id()));
 
@@ -166,11 +129,7 @@ public class PipelineRepository {
                 true);
     }
 
-    /**
-     * Diff-friendly merge. The pipeline meta block (product profile, taxonomy, invariants, runtime,
-     * packs) is upserted, and entities present in the upload are inserted (new) or updated (existing)
-     * by id; entities NOT in the upload are left alone. Use this for incremental updates.
-     */
+    /** Entities not in the upload are left alone. */
     @Transactional
     public Diff upsert(String projectId, Pipeline pipeline) {
         Set<String> preCs = existingIds(projectId, "call_site");
@@ -256,23 +215,11 @@ public class PipelineRepository {
         jdbc.sql(up.sql()).params(up.params()).update();
     }
 
-    // ------------------------------------------------------------------ call sites
-
-    /**
-     * All call-site ids for a project — loaded once per ingest batch so {@link #ensureCallSite} only fires
-     * for a genuinely new id.
-     */
     public Set<String> callSiteIds(String projectId) {
         return existingIds(projectId, "call_site");
     }
 
-    /**
-     * Materialize a minimal {@code call_site} row (just its slug id) when none exists — so a plain-OTLP
-     * observation that resolved an explicit {@code tessary.call_site_id} but has no plugin-published pipeline
-     * is not orphaned ("call sites emerge from traffic" — see devdocs/reference/ingestion-contract/README.md).
-     * Idempotent: a plugin- or
-     * previously-created call site is left untouched.
-     */
+    /** Call sites emerge from traffic (devdocs/reference/ingestion-contract/README.md). Idempotent. */
     public void ensureCallSite(String projectId, String id) {
         jdbc.sql("INSERT INTO call_site (project_id, id) VALUES (:pid, :id) "
                         + "ON CONFLICT (project_id, id) DO NOTHING")
@@ -281,7 +228,6 @@ public class PipelineRepository {
                 .update();
     }
 
-    /** {@code call_site_id → output_schema} for every call site in the project that has one. */
     Map<String, String> callSiteOutputSchemas(String projectId) {
         Map<String, String> out = new LinkedHashMap<>();
         jdbc.sql("SELECT id, output_schema FROM call_site WHERE project_id = :pid AND output_schema IS NOT NULL")
@@ -291,11 +237,9 @@ public class PipelineRepository {
         return out;
     }
 
-    /** Re-apply stored schemas after a wipe-and-write import, for call sites the upload still carries. */
     private void restoreCallSiteOutputSchemas(String projectId, Map<String, String> captured) {
         for (Map.Entry<String, String> e : captured.entrySet()) {
-            // Scoped by id, so a call site the import DELETED stays gone rather than being resurrected
-            // by its own schema.
+            // Scoped by id, so a call site the import deleted stays gone.
             jdbc.sql("UPDATE call_site SET output_schema = :schema WHERE project_id = :pid AND id = :id")
                     .param("schema", e.getValue())
                     .param("pid", projectId)
@@ -304,12 +248,7 @@ public class PipelineRepository {
         }
     }
 
-    /**
-     * {@code call_site_id → shape} for every call site in the project that has one. Read by {@link
-     * PipelineService} immediately before an import so it can diff the incoming shapes against the
-     * stored ones — {@code shape} is written through the bulk {@link #upsertCallSites} path, which has
-     * no natural place to report a per-column change.
-     */
+    /** Read before an import to diff shapes, since the bulk upsert path cannot report a per-column change. */
     public Map<String, String> callSiteShapes(String projectId) {
         Map<String, String> out = new LinkedHashMap<>();
         jdbc.sql("SELECT id, shape FROM call_site WHERE project_id = :pid AND shape IS NOT NULL")
@@ -330,12 +269,7 @@ public class PipelineRepository {
             """).param("pid", projectId).query(this::mapCallSite).list();
     }
 
-    /**
-     * The text a declared {@code output_schema} persists as: canonicalized JSON, or {@code null} when
-     * the shard declared an explicit YAML null (which asserts the code declares no structured output).
-     * Canonicalized on the way in so the same schema declared twice, keys in a different order, is
-     * byte-identical — see {@link CanonicalJson}.
-     */
+    /** Null for an explicit YAML null ("no structured output"). Canonicalized so key order doesn't change the bytes. */
     private @Nullable String declaredSchemaText(CallSite cs) {
         JsonNode declared = cs.outputSchema();
         if (declared == null || declared.isNull()) return null;
@@ -395,31 +329,21 @@ public class PipelineRepository {
             values.put(CallSiteColumns.DATASET_PATH, cs.datasetPath());
             values.put(CallSiteColumns.OBSERVED_JSON, writeJson(cs.observed()));
             values.put(CallSiteColumns.EXPECTED_SPANS_JSON, writeJson(cs.expectedSpans()));
-            // Written UNCONDITIONALLY, unlike output_schema two lines down: bundle silence on `tools`
-            // means "no tools", and writeJson maps the empty list to SQL NULL accordingly. output_schema
-            // keeps "absent" distinguishable from "declared empty" (CallSite.tools normalizes null to
-            // List.of(), which erases that distinction for tools).
+            // Written unconditionally: bundle silence on `tools` means "no tools". output_schema keeps "absent"
+            // distinct from "declared empty".
             values.put(CallSiteColumns.TOOLS_JSON, writeJson(cs.tools()));
-            // A shard that DECLARES output_schema writes the column; one that is silent leaves it for
-            // restoreCallSiteOutputSchemas to carry the stored schema across. Declaring an
-            // explicit `output_schema: null` is a declaration — "the code has no structured output" —
-            // and clears the column. Jackson binds that null to NullNode, not Java null, so the two
-            // cases are only distinguishable through isNull(); a bare `!= null` check would store the
-            // four-character string "null" and, since that is not SQL NULL, leave the Malformed Output
-            // built-in reading it back as a schema forever.
+            // Jackson binds an explicit `output_schema: null` to NullNode, so check isNull(); `!= null` would store the
+            // string "null", which Malformed Output would read as a schema forever.
             if (cs.outputSchema() != null) {
                 values.put(CallSiteColumns.OUTPUT_SCHEMA, declaredSchemaText(cs));
             }
 
-            // call_site is keyed by (project_id, id) — its id is the producer-chosen tessary.call_site_id
-            // string, project-scoped (the same name may recur across projects), not a global ULID.
+            // Keyed by (project_id, id): the producer-chosen id may recur across projects.
             Upsert up =
                     Upsert.into(CallSiteColumns.TABLE, values, List.of(CallSiteColumns.PROJECT_ID, CallSiteColumns.ID));
             jdbc.sql(up.sql()).params(up.params()).update();
         }
     }
-
-    // ------------------------------------------------------------------ chains
 
     private List<Chain> loadChains(String projectId) {
         return jdbc.sql("""
@@ -459,8 +383,6 @@ public class PipelineRepository {
             jdbc.sql(up.sql()).params(up.params()).update();
         }
     }
-
-    // ------------------------------------------------------------------ failure modes
 
     private List<FailureMode> loadFailureModes(String projectId) {
         return jdbc.sql("""
@@ -517,8 +439,6 @@ public class PipelineRepository {
         }
     }
 
-    // ------------------------------------------------------------------ JSON helpers
-
     private @Nullable String writeJson(@Nullable Object value) {
         if (value == null) return null;
         if (value instanceof List<?> l && l.isEmpty()) return null;
@@ -536,10 +456,7 @@ public class PipelineRepository {
         }
     }
 
-    /**
-     * A stored JSON column back as a raw tree — for fields whose shape is arbitrary by nature (a call
-     * site's declared {@code output_schema} is any JSON Schema), where modelling it would be a lie.
-     */
+    /** A raw tree, because a declared output_schema is any JSON Schema. */
     private @Nullable JsonNode readJsonTree(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
         try {
@@ -567,7 +484,6 @@ public class PipelineRepository {
         }
     }
 
-    /** Internal struct for the single pipeline_meta row. */
     private record MetaRow(
             String version,
             String productHint,

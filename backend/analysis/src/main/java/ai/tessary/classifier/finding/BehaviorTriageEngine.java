@@ -37,47 +37,28 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Layer 2: audits one finding's claim, checking whether it is true, sampled over enough, and carried
- * by its evidence.
- *
- * <p>The dossier the agent gets is {@code finding.md} (the finding's facts: the claim, where and since
- * when it was seen, and how many evidence refs the detector recorded per role) and {@code method.md}
- * (how this detector works and what its evidence means, including what a zero legitimately signifies).
- * The claim's own numbers are not shipped as a file: the agent reads them off {@code get_finding}, the
- * same door it pages evidence through, so the dossier never drifts out of step with what the surface
- * actually reports. Everything the agent needs — the traces, spans and sessions the claim is about — it
- * fetches itself through this platform's MCP surface with a short-lived project key minted per run and
- * revoked in a {@code finally}. The agent chooses its own sample rather than being handed a pre-picked
- * exemplar: it pages {@code get_finding_evidence}, decides how much to read, and states what it took.
- *
- * <p>The ruling is recorded on the finding and nothing else. It never re-pins a baseline, never writes
- * the allowlist, never resolves the finding: absorbing a shift moves the reference a whole population
- * is compared against, and a machine doing that on one exemplar would blind the detector to that
- * entire class of drift. Resolution stays a human write.
+ * The agent fetches traces itself over MCP with a short-lived project key revoked in a {@code finally}, and chooses its
+ * own sample. The ruling is recorded on the finding and nothing else: it never re-pins a baseline, writes the allowlist
+ * or resolves, because a machine moving the reference on one exemplar would blind the detector to that class of drift.
  */
 @Service
 public class BehaviorTriageEngine {
 
     private static final Logger log = LoggerFactory.getLogger(BehaviorTriageEngine.class);
 
-    /** The scope untagged traces collect under: no declared spec exists for it. */
     private static final String UNATTRIBUTED = BehaviorSubstrateRepository.UNATTRIBUTED;
 
-    /** Where this lane's prose lives: {@code analysis/src/main/resources/prompt-craft/triage/}. */
     private static final String TRIAGE = "triage";
 
     /**
-     * The whole system prompt, one copy for every classifier: the goals and invariants of the job, and
-     * nothing that changes per run — a finding's own facts live in {@code finding.md}/{@code method.md}
-     * and the user message instead, so this string is identical across every triage run and every model
-     * this lane offers, which is what makes it worth caching on the provider side.
+     * Nothing per-run lives here, so the string is identical across runs and models, which makes it cacheable on the
+     * provider side.
      */
     static final String SYSTEM_PROMPT = PromptCraft.text(TRIAGE, "system_prompt.md");
 
     /**
-     * opencode reserves a couple of turns of its own budget to force a text-only final answer once the
-     * agent's cap is hit (see {@code Agentic#maxTurns}'s javadoc for the mechanism); the number stated to
-     * the agent is the turns it actually gets to work with, not the raw config value.
+     * opencode reserves a couple of turns to force a text-only final answer at the cap, so the number stated to the
+     * agent is the turns it actually gets.
      */
     private static final int TURN_RESERVE = 2;
 
@@ -89,7 +70,6 @@ public class BehaviorTriageEngine {
     private final OrgMembershipRepository memberships;
     private final ObjectMapper mapper;
     private final ClassifierDetectionWriteRepository detections;
-    /** The {@code method.md} of a finding a classifier outside the catalog filed; empty in the open edition. */
     private final FindingAdapters adapters;
 
     public BehaviorTriageEngine(
@@ -116,14 +96,8 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * Fail fast at startup when {@code tessary.classifier.triage-sandbox} names no registered driver.
-     * Triage has no alternate, non-agentic path, so the check is unconditional rather than gated on
-     * whether triage is the active analyzer.
-     *
-     * <p>No equivalent check for a blank {@code tessary.classifier.triage-mcp-base-url} belongs here:
-     * this bean is instantiated on every app-context boot regardless of whether triage ever runs, and
-     * no {@code application.yml} sets that property. The per-job throw in {@link #rule} is the
-     * enforcement point for it instead.
+     * Unconditional because triage has no non-agentic path. A blank triage-mcp-base-url is not checked here, since this
+     * bean boots everywhere and no {@code application.yml} sets it; {@link #rule} enforces it per job.
      */
     @PostConstruct
     void validateSandboxConfig() {
@@ -135,23 +109,14 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * One ruling run: mint the run's MCP key, sandbox, parse, revoke.
-     *
-     * <p>Throws when the run did not produce a ruling: no sandbox, a launcher error, an answer that
-     * does not parse or carries no citation. The worker catches it, the job retries and eventually
-     * dead-letters, and {@code triage_verdict} stays NULL rather than being recorded for a run that
-     * never actually established anything.
-     *
-     * <p>The key is issued to the project org's owner (deterministically, earliest membership first),
-     * since triage is scheduled rather than pressed by a person, and is revoked in a {@code finally}:
-     * the key must not outlive the sandbox.
+     * Throws when the run did not produce a cited ruling, so the job dead-letters and {@code triage_verdict} stays
+     * NULL. The key goes to the org owner, since triage is scheduled rather than pressed by a person.
      */
     public BehaviorTriageVerdict rule(String projectId, String findingId, Map<String, String> dossier, String prompt) {
         String mcpBase = props.getTriageMcpBaseUrl();
         if (mcpBase == null || mcpBase.isBlank()) {
-            // Without the MCP door the agent cannot open a single row of the population it is auditing,
-            // so throwing dead-letters the job as a visible misconfiguration rather than a silent
-            // stream of closures.
+            // Without the MCP door the agent cannot open a single row, so dead-letter as a visible misconfiguration
+            // rather than a silent stream of closures.
             throw new TessaryException(
                     ClassifierError.TRIAGE_RUN_INCOMPLETE,
                     findingId,
@@ -164,12 +129,12 @@ public class BehaviorTriageEngine {
                     findingId,
                     "the project's org has no owner to issue a key to");
         }
-        // ADMIN because that is the only family /mcp admits; the surface it reaches is read-only, and
-        // the key lives for one run.
+        // ADMIN because that is the only family /mcp admits; the surface it reaches is read-only, and the key lives for
+        // one run.
         ApiKeyService.Issued issued =
                 apiKeys.issue(projectId, principal, "triage-" + findingId + " (system)", KeyScope.ADMIN);
         try {
-            // validateSandboxConfig already refused to boot without this key registered.
+            // validateSandboxConfig refuses to boot without this key registered.
             TriageSandbox sandbox = Objects.requireNonNull(sandboxes.get(props.getTriageSandbox()));
             TriageSandbox.SandboxRequest req = new TriageSandbox.SandboxRequest(
                     projectId,
@@ -185,8 +150,7 @@ public class BehaviorTriageEngine {
             if (run.isEmpty()) {
                 throw new TessaryException(ClassifierError.TRIAGE_RUN_INCOMPLETE, findingId, "the sandbox did not run");
             }
-            // Checked ahead of parse, which cannot tell a prerequisite failure from gibberish: both
-            // return null, and only one of them has something to tell the person reading the job.
+            // Checked ahead of parse, which returns null for both a prerequisite failure and gibberish.
             String blocked =
                     BehaviorTriageVerdict.blockedReason(mapper, run.get().resultText());
             if (blocked != null) {
@@ -204,7 +168,7 @@ public class BehaviorTriageEngine {
         }
     }
 
-    /** The org owner the run's key is issued to: earliest membership wins, so runs attribute stably. */
+    /** Earliest membership wins, so runs attribute stably. */
     private @Nullable String orgOwnerPrincipal(String projectId) {
         return projects.findById(projectId)
                 .flatMap(p -> memberships.findByOrg(p.orgId()).stream()
@@ -216,7 +180,7 @@ public class BehaviorTriageEngine {
                 .orElse(null);
     }
 
-    /** Revocation must never mask the run's own outcome: log and move on. The audit row survives either way. */
+    /** Revocation must never mask the run's own outcome. */
     private void revokeQuietly(String tokenId, String projectId, String findingId) {
         try {
             apiKeys.revoke(tokenId);
@@ -230,18 +194,9 @@ public class BehaviorTriageEngine {
         }
     }
 
-    // ---- the dossier ---------------------------------------------------------------------------
-
     /**
-     * The finding, as the two files the agent reads under {@code dossier/}: {@code finding.md} (this
-     * finding's own facts) and {@code method.md} (how the detector that filed it works), when one
-     * exists. Files rather than one long prompt: an agent that can open, re-read and quote a file
-     * reasons over it better than one handed a wall of JSON it must hold in context.
-     *
-     * <p>No third file carrying the detector's numbers verbatim. The claim's numbers live in
-     * {@code get_finding}, one call away over the same MCP door the agent already pages evidence
-     * through, so there is exactly one place they can be read from and it cannot drift out of step
-     * with what {@code method.md} describes.
+     * The detector's numbers are not shipped as a file: they live in {@code get_finding}, so there is one place to read
+     * them and it cannot drift.
      */
     public Map<String, String> dossier(BehaviorTriageJobRow job, FindingRow finding) {
         Map<String, String> files = new LinkedHashMap<>();
@@ -252,18 +207,13 @@ public class BehaviorTriageEngine {
         return files;
     }
 
-    /** The dossier file listing a groundedness rate finding's flagged answers, one per flagged span. */
     static final String DETECTIONS_FILE = "detections.md";
 
-    /** Rows listed before the file says there are more: enough to read the pattern, bounded for the budget. */
     static final int DETECTIONS_CAP = 50;
 
     /**
-     * For a groundedness rate finding, what the classifier wrote about each answer it flagged at the
-     * finding's call site since onset: the score and the sentences it marked. The evidence enumeration says
-     * WHICH answers; this says WHERE in each the model saw an unsupported sentence, which is what a ruling
-     * on a groundedness finding is made of, and handing it over saves the agent a page of MCP reads per
-     * answer. Empty for every other cause kind.
+     * Saves the agent a page of MCP reads per answer by saying where in each answer the unsupported sentences were.
+     * Empty for every other cause kind.
      */
     private Optional<String> detectionsFile(FindingRow finding) {
         if (!FindingRow.Cause.GROUNDEDNESS_RATE.equals(finding.causeKind())) return Optional.empty();
@@ -306,7 +256,6 @@ public class BehaviorTriageEngine {
         return Optional.of(sb.toString());
     }
 
-    /** {@code score 0.991; flagged [0, 42) 0.991, [80, 131) 0.978; strongest: "..."}, from a detection's evidence. */
     private String flaggedAnswerLine(@Nullable String evidenceJson) {
         if (evidenceJson == null) return "(no evidence recorded)";
         JsonNode ev;
@@ -337,7 +286,6 @@ public class BehaviorTriageEngine {
         return line.toString();
     }
 
-    /** The end of the hour a finding was last seen in, where its counts stop; now when it cannot be read. */
     private static String endOfLastHour(String lastSeenAt) {
         try {
             return Instant.parse(lastSeenAt).plus(Duration.ofHours(1)).toString();
@@ -346,12 +294,7 @@ public class BehaviorTriageEngine {
         }
     }
 
-    /**
-     * Facts about this finding only: what fired, over what, since when, and how big each side of the
-     * evidence is. No detector method (that lives in {@code method.md}) and no cause explanation
-     * (that is the cause section of {@code method.md}) and no detector numbers beyond the one-sentence
-     * claim — those are frozen on {@code get_finding} once the finding is triaged.
-     */
+    /** No detector method or numbers beyond the claim: those live in {@code method.md} and {@code get_finding}. */
     private String findingFile(FindingRow finding, boolean hasMethod) {
         StringBuilder sb = new StringBuilder();
         sb.append("# The finding\n\n")
@@ -382,11 +325,7 @@ public class BehaviorTriageEngine {
         return sb.toString();
     }
 
-    /**
-     * The finding's title from {@link FindingTitle}, dropped when {@link FindingTitle} could not read the
-     * payload: the `pattern`
-     * line already shows the cause key in that case, and repeating it as a fake "claim" would be noise.
-     */
+    /** Dropped when the payload could not be read: the `pattern` line already shows the cause key. */
     private static Optional<String> claimLine(FindingRow finding) {
         String title = FindingTitle.of(finding);
         if (title.equals(finding.nativeCauseKey())) return Optional.empty();
@@ -394,12 +333,8 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * The window the payload names, when it carries one: half of "do both sides measure the same thing".
-     *
-     * <p>The payload's {@code kind} is deliberately not printed. It distinguishes a window that closed
-     * once from a spell whose numbers are recomputed from an hourly aggregate on every read, which is a
-     * fact about the detector rather than about this finding, and each method card states it in its own
-     * words already. Bare, the value is jargon at the point it is read.
+     * The payload's {@code kind} is deliberately not printed: it is a detector fact each method card already states,
+     * and bare it is jargon.
      */
     private static Optional<String> windowLine(FindingRow finding) {
         JsonNode window = finding.payload().path("window");
@@ -408,7 +343,6 @@ public class BehaviorTriageEngine {
                 + window.path("closed_at").asText("?") + '\n');
     }
 
-    /** Which call site raised this, in the three shapes a finding's call site can take. */
     private static String callSiteLine(FindingRow finding) {
         String callSite = finding.callSiteId();
         if (callSite == null || callSite.isBlank() || UNATTRIBUTED.equals(callSite)) {
@@ -423,9 +357,8 @@ public class BehaviorTriageEngine {
     }
 
     /**
-     * How many refs the detector wrote per role, from the finding's own counter. Printed rather than
-     * left to the first MCP call because it says what this run costs to audit honestly: a member set
-     * of forty is read whole, one of two hundred thousand is sampled and the sample stated.
+     * Printed up front because it says what an honest audit costs: forty refs are read whole, two hundred thousand are
+     * sampled.
      */
     private static String evidenceCountsSection(FindingRow finding) {
         StringBuilder sb = new StringBuilder("## Evidence the detector recorded\n\n");
@@ -440,22 +373,12 @@ public class BehaviorTriageEngine {
         return sb.toString();
     }
 
-    // ---- the user message ------------------------------------------------------------------------
-
-    /**
-     * The method card for this finding: the built-in card for its classifier key, else the triage method of the
-     * adapter that owns it. Absent for a user-authored classifier no adapter owns.
-     */
     public Optional<String> methodCard(FindingRow finding) {
         String card = ClassifierMethodCard.forClassifier(finding.classifierKey());
         return card != null ? Optional.of(card) : adapters.triageMethod(finding.claim());
     }
 
-    /**
-     * The per-run task: the finding id, the dossier file list, and the budget this run gets — the only
-     * things that change per finding or per deployment. Everything else the agent needs to know how to
-     * work is in {@link #SYSTEM_PROMPT}, which carries nothing per-run.
-     */
+    /** Only per-run facts: everything else is in {@link #SYSTEM_PROMPT} so that stays cacheable. */
     public String buildPrompt(BehaviorTriageJobRow job, FindingRow finding) {
         boolean hasMethodCard = methodCard(finding).isPresent();
         ObserverProperties.Agentic agentic = observerProps.getAgentic();
@@ -478,11 +401,7 @@ public class BehaviorTriageEngine {
         return sb.toString();
     }
 
-    /**
-     * Serialize citations for {@code finding.triage_citations}. One shape whatever the citation is: a
-     * dotted pointer into the evidence, an id the agent fetched, or a check script with the stdout it
-     * printed. Null when there are none, so the column reads as uncited rather than as an empty list.
-     */
+    /** Null when there are none, so the column reads as uncited rather than as an empty list. */
     public @Nullable String citationsJson(BehaviorTriageVerdict verdict) {
         if (verdict.citations().isEmpty()) return null;
         return writeCitations(verdict.citations());

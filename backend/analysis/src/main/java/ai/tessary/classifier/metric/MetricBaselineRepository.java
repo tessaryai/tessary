@@ -10,21 +10,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * JdbcClient repository for {@code metric_baseline} — the per-(bucket × measure) window state of the
- * metric-drift classifiers. Design contract: {@code devdocs/concepts/metric-drift.md}.
- *
- * <p>Mirrors {@code BehaviorProfileRepository}'s shape on purpose: one row carries everything a sweep
- * needs, the counters and the watermark that guards them move in a single statement, and the writers
- * are separated by method rather than by trusting callers to touch only their own columns. The
- * separation matters more here than there, because three writers touch this row on different clocks —
- * the sweep folds samples in, the window close rotates the sketches, and a human pressing
- * <em>Legitimate — absorb</em> re-pins the reference.
- *
- * <p>{@code ux_metric_baseline_scope} keeps at most one baseline per scope. It carried a sixth column,
- * {@code COALESCE(environment_id, '')}, until the Environment concept was removed; that migration
- * deletes the rows that would collide under the collapsed key and recreates the index without it. The
- * COALESCE was load-bearing while the column existed — NULL is distinct from itself in a unique index —
- * and the shape is worth remembering if a scope column is ever added back.
+ * Three writers touch a row on different clocks (sweep fold, window close, human absorb), so each gets its own method
+ * touching only its columns. Contract: {@code devdocs/concepts/metric-drift.md}.
  */
 @Repository
 public class MetricBaselineRepository {
@@ -38,10 +25,8 @@ public class MetricBaselineRepository {
             + "counted_through_at, counted_through_id, last_event_at, created_at, updated_at";
 
     /**
-     * The unique index's expression, restated exactly once. Postgres infers an arbiter index from the
-     * expression text of the {@code ON CONFLICT} target, so this and
-     * {@code ux_metric_baseline_scope} must agree character for character; a paraphrase compiles and
-     * then fails at runtime with "no unique or exclusion constraint matching".
+     * Postgres infers the arbiter index from the {@code ON CONFLICT} target text, so this must match
+     * {@code ux_metric_baseline_scope} character for character.
      */
     private static final String SCOPE_KEY = "project_id, classifier_id, measure, bucket_kind, bucket_key";
 
@@ -52,18 +37,8 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Get the baseline for a scope, creating it from {@code seed} if this is the first sample the bucket
-     * has ever produced, and return whichever row is now live.
-     *
-     * <p>The sweep discovers buckets from traffic rather than from a registry — a new tool appears the
-     * first time an agent calls it — so "insert or read" is the only shape a caller ever needs, and
-     * splitting it into a read followed by an insert would race two concurrent sweep passes into a
-     * duplicate-key failure on a perfectly ordinary event.
-     *
-     * <p>{@code DO UPDATE} rather than {@code DO NOTHING} even though it writes nothing new:
-     * {@code DO NOTHING} suppresses the {@code RETURNING} clause on the conflicting row, so the common
-     * path — the bucket already exists — would come back empty and every caller would need a second
-     * round trip to read what it just asked for.
+     * Buckets are discovered from traffic, so read-then-insert would race two sweeps into a duplicate key.
+     * {@code DO UPDATE}, not {@code DO NOTHING}, so {@code RETURNING} yields the existing row.
      */
     public MetricBaselineRow ensure(MetricBaselineRow seed) {
         return jdbc.sql("INSERT INTO metric_baseline (" + COLS + ") VALUES (:id, :pid, :sid, :measure, "
@@ -112,7 +87,6 @@ public class MetricBaselineRepository {
                 .optional();
     }
 
-    /** Delete every baseline of one classifier, and with them their absorb history. */
     public int deleteByClassifier(String projectId, String classifierId) {
         return jdbc.sql("DELETE FROM metric_baseline WHERE project_id = :pid AND classifier_id = :sid")
                 .param("pid", projectId)
@@ -121,10 +95,8 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Every baseline belonging to one classifier, thickest current window first — the sweep's per-pass
-     * read. Ordering by {@code current_count} puts the buckets that can actually close a window this
-     * pass ahead of the thin ones that cannot, which matters because thin buckets wait rather than being
-     * skipped and would otherwise sit at the front of every page forever.
+     * Thickest window first: thin buckets wait rather than being skipped, and would otherwise sit at the front of every
+     * page.
      */
     public List<MetricBaselineRow> listByClassifier(String projectId, String classifierId) {
         return jdbc.sql("SELECT " + COLS + " FROM metric_baseline "
@@ -137,22 +109,9 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Fold a batch of samples into the current window: bump the counter, advance the ingest watermark
-     * that guards it, and widen the event-time bookkeeping.
-     *
-     * <p>Counter and watermark move in ONE statement, so the two can never disagree about what has been
-     * folded in. The caller is still expected to have filtered its candidates against
-     * {@code counted_through_*} before summing them — this method advances the guard, it does not
-     * enforce it — but keeping them in one write means an interrupted sweep leaves a consistent row
-     * rather than a count without the watermark that makes it re-runnable.
-     *
-     * <p>Deliberately does NOT touch {@code current_sketch_json}: the sketch is written by
-     * {@link #updateCurrentSketch} after the caller has merged the batch into it, and a
-     * read-modify-write from here would drop whatever a concurrent close had rotated.
-     *
-     * @param windowOpenedAt event time of the batch's earliest sample; only takes effect on the first
-     *     batch of a window, since a window's open time is the first sample in it.
-     * @param lastEventAt event time of the batch's latest sample.
+     * Counter and watermark move in one statement, so an interrupted sweep leaves a consistent row. The caller still
+     * filters against {@code counted_through_*}. Does not touch the sketch: a read-modify-write here would drop a
+     * concurrent close's rotation.
      */
     public void advanceWindow(
             String id,
@@ -199,16 +158,8 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Persist the current window's sketch after the sweep merged a batch into it, and its two sidecars
-     * with it — the workload it was asked for and, for a cost window, the token decomposition it was made
-     * of. All three are written in one statement because they describe the same samples: a window whose
-     * measure sketch advanced while a sidecar lagged would report a shift against inputs from a different
-     * set of turns, which is the one comparison a finding must never make.
-     *
-     * <p>And the refs with them, for the same reason plus one of their own: they are the only part of the
-     * window that cannot be recomputed later. Before they were persisted here, a window spanning more
-     * than one sweep page kept the sketch from every page and the refs from one, so its member evidence
-     * was the tail of its population wearing the population's name.
+     * Sketch, sidecars and refs are written together because they describe the same samples; refs are the one part that
+     * cannot be recomputed later.
      */
     public void updateCurrentSketch(
             String id,
@@ -231,19 +182,8 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Close the current window: it is folded into {@code control_json}, the rolling reference the next
-     * close compares against for sudden breaks, and a fresh window opens. The caller does the folding
-     * and hands the new ring in — nothing is rotated into a prev slot, which no longer exists: it was
-     * replaced by the control ring.
-     *
-     * <p>{@code counted_through_*} is untouched. It is per ROW, not per window: it answers "which
-     * ingested samples has this baseline already seen", and resetting it on close would re-admit the
-     * tail of the window just closed into the window just opened. {@code current_count} is the per-window
-     * counter and is the only one that resets.
-     *
-     * <p>The new window opens empty, its open time left for the next batch's earliest sample to set. A
-     * batch that straddles the cut writes its far side into the new window afterwards, through
-     * {@link #advanceWindow} and {@link #updateCurrentSketch}.
+     * {@code counted_through_*} is per row, not per window, so resetting it on close would re-admit the closed window's
+     * tail. Only {@code current_count} resets.
      */
     public void closeWindow(String id, @Nullable String controlJson, String now) {
         jdbc.sql("""
@@ -274,17 +214,8 @@ public class MetricBaselineRepository {
     }
 
     /**
-     * Re-pin the deploy reference: {@code pinned_sketch ← current}, stamped with when and with which
-     * project version.
-     *
-     * <p>This is the write behind <em>Legitimate — absorb</em>, and behind a deploy re-pinning its
-     * epoch. It is NOT reachable from triage, which rules on whether a claim holds and never on whether
-     * a shift is welcome: an automatic re-pin on a machine ruling would let the very next window
-     * silently normalize a real regression. Triage surfaces the verb; a human presses it.
-     *
-     * <p>Callers append a {@code behavior_baseline_event} row alongside this. An online baseline cannot
-     * be stopped from absorbing drift; what can be done is to make every absorption a durable, readable
-     * row.
+     * Not reachable from triage: an automatic re-pin on a machine ruling would let the next window silently normalize a
+     * real regression. Callers append a {@code behavior_baseline_event} row.
      */
     public void repin(
             String id,
@@ -324,12 +255,7 @@ public class MetricBaselineRepository {
                 .update();
     }
 
-    /**
-     * Move the state machine — {@code learning} → {@code armed} once the bucket has enough samples to be
-     * compared. Separate from
-     * {@link #advanceWindow} because arming is a decision about the row rather than an observation of
-     * traffic, and the sweep must not be able to arm a bucket as a side effect of counting.
-     */
+    /** Separate from {@link #advanceWindow} so a sweep cannot arm a bucket as a side effect of counting. */
     public void updateState(String id, String state, String now) {
         jdbc.sql("UPDATE metric_baseline SET state = :state, updated_at = :now WHERE id = :id")
                 .param("state", state)

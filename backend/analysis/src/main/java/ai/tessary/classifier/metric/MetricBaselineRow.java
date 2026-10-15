@@ -4,38 +4,11 @@ package ai.tessary.classifier.metric;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One bucket's window state for one measure of a metric-drift classifier.
- *
- * <p>The shape is deliberately close to {@code BehaviorProfileRow} and deliberately not the same row:
- * both carry a state machine, a version the baseline is pinned to, and a counted-through watermark, but
- * their payloads have nothing in common. Behaviour drift's fitted state is an n-gram alphabet plus a
- * surprisal reservoir; this one's is a numeric sketch over {@code log(value)}.
- *
- * <p>Two references are compared on every close: the rolling control ({@link #controlJson}) catches
- * sudden breaks but never notices a slow boil, while the window pinned after the last deploy catches
- * cumulative creep but screams forever once something legitimately changed. {@code current} is what
- * they are compared against.
- *
- * @param measure a persisted string ({@code turn_duration}, {@code cost}, {@code tok_cache_read}, etc.),
- *     never renamed once written.
- * @param bucketKey opaque here: a call-site id when {@code bucketKind} is {@link BucketKind#CALL_SITE},
- *     an {@code ActionSymbol} {@code kind:name} when it is {@link BucketKind#TOOL}.
- * @param pinnedSketchJson the reference pinned after the last deploy. Only a human ruling a shift
- *     legitimate moves it; Layer 2's confidence is never read as authority to mutate the baseline, since
- *     an automatic re-pin would let the next window silently normalize a real regression.
- * @param currentSketchJson the window being filled; folded into {@link #controlJson} on close.
- * @param pinnedWorkloadJson what the user asked for over the same window {@code pinnedSketchJson}
- *     summarizes: prompt size, message length, thread depth
- *     ({@link ai.tessary.classifier.metric.MetricWorkload}). Persisted rather than recomputed, since by
- *     the time a finding is written the traffic behind the pinned sketch may be weeks past and cannot be
- *     re-derived.
- * @param pinnedTokensJson what the same window's dollars were made of: the four token buckets and the
- *     cache-read share ({@link ai.tessary.classifier.metric.MetricTokens}). Null on every duration
- *     baseline, and on a cost window whose traffic reported no usage.
- * @param currentOpenedAt event time of the first sample in the current window, not the wall clock at
- *     which the sweep opened it. Windows are cut on {@code COALESCE(started_at, created_at)}, since a
- *     backfill lands a whole corpus in one ingest burst and a time-cut window on ingest time would
- *     swallow a month of traffic and compare it against nothing.
+ * The rolling control catches sudden breaks; the deploy-pinned window catches slow creep. @param measure persisted,
+ * never renamed @param pinnedSketchJson only a human ruling moves it; an automatic re-pin would let the next window
+ * normalize a real regression @param pinnedWorkloadJson persisted because the traffic behind the pin may be weeks gone
+ * @param currentOpenedAt event time: a backfill lands a corpus in one burst, so cutting on ingest time would compare a
+ * month against nothing
  */
 public record MetricBaselineRow(
         String id,
@@ -53,66 +26,38 @@ public record MetricBaselineRow(
         @Nullable String currentWorkloadJson,
         @Nullable String pinnedTokensJson,
         /**
-         * The substrate rows the pinned window was fitted over, as {@link MetricEvidenceRefs} writes
-         * them. A sketch cannot be un-summarized, so a finding fired against this reference has nothing
-         * to enumerate on the baseline side unless the rows were kept when the window was pinned; this
-         * is where they are kept, and it rotates with {@link #pinnedSketchJson} so the refs can never
-         * describe a different window than the sketch does.
+         * A sketch cannot be un-summarized, so the rows are kept at pin time. Rotates with {@link #pinnedSketchJson} so
+         * the two always describe the same window.
          */
         @Nullable String pinnedRefsJson,
         @Nullable String currentTokensJson,
         /**
-         * The rows folded into the window being filled, same codec as {@link #pinnedRefsJson} — the
-         * member population a finding on this window would be a claim about.
-         *
-         * <p>Persisted rather than held per sweep page, which is what it used to be: the sketch and the
-         * count survive a page, so refs that did not left a multi-page window able to enumerate only the
-         * page its close landed in. That is a contiguous tail of the population presented as the whole
-         * of it, and {@code finding_evidence}'s {@code member} role forbids exactly that — the writer
-         * may not sample for the reader, because a selection rule the reader cannot see makes the claim
-         * unauditable.
-         *
-         * <p>Rotates with {@link #currentSketchJson} for the reason the sidecars do, and is bounded by
-         * {@code window_target_count}: the close check runs per sample, so the list cannot outgrow the
-         * window it describes.
+         * Persisted, not per page: otherwise a multi-page window enumerates only its last page, and
+         * {@code finding_evidence}'s {@code member} role forbids presenting a sample as the population. Bounded by
+         * {@code window_target_count}.
          */
         @Nullable String currentRefsJson,
         /**
-         * The rolling control: this bucket's recent normal, as a ring of per-UTC-day merges
-         * ({@link MetricControl}). An exact record of what closed when; the weighting and the exclusion
-         * of days a confirmed regression ran through are applied when it's read, which is what lets a
-         * Layer-2 verdict that lands hours after a window closed retroactively drop that day.
+         * Weighting and regression-day exclusion are applied on read, so a late Layer-2 verdict can retroactively drop
+         * a day.
          */
         @Nullable String controlJson,
         @Nullable String currentOpenedAt,
         long currentCount,
         /**
-         * The {@code (created_at, id)} keyset of the last sample folded into {@link #currentCount}: the
-         * ingest clock, monotonic and gap-free, deliberately not the event clock the window is cut on.
-         *
-         * <p>Lives on this row so it shares the counters' lifetime rather than the sweep's job row, which
-         * gets cleared and restarted independently; a cursor there would re-fold samples this baseline
-         * already holds.
-         *
-         * <p>Does not reset when a window closes: {@code currentCount} is per window, this is per row,
-         * and resetting it on close would re-admit the tail of the window just closed into the one just
-         * opened.
+         * The ingest clock, not the event clock. Lives on this row rather than the job row, which is cleared
+         * independently. Not reset on close, or the closed window's tail would be re-admitted.
          */
         @Nullable String countedThroughAt,
         @Nullable String countedThroughId,
-        /**
-         * When a sample was last observed for this bucket, in event time. {@code updatedAt} can't answer
-         * that, since a periodic pass writes it whether or not anything arrived, and a thin bucket closes
-         * its window on elapsed event time rather than on count.
-         */
+        /** {@code updatedAt} can't answer this: a periodic pass writes it whether or not anything arrived. */
         @Nullable String lastEventAt,
         String createdAt,
         String updatedAt) {
 
     /**
-     * {@code metric_baseline.state}. Only {@link #ARMED} compares and emits findings; a bucket below the
-     * minimum sample stays {@link #LEARNING} and keeps accumulating rather than being skipped, so a tool
-     * called thirty times a week is watched on a slower clock instead of not at all.
+     * A bucket below the minimum stays {@link #LEARNING} and keeps accumulating, so a rarely called tool is watched
+     * slowly rather than not at all.
      */
     public static final class State {
         private State() {}
@@ -121,23 +66,18 @@ public record MetricBaselineRow(
         public static final String ARMED = "armed";
     }
 
-    /** {@code metric_baseline.bucket_kind}. Persisted; never renamed. */
+    /** Persisted; never renamed. */
     public static final class BucketKind {
         private BucketKind() {}
 
-        /** The trace's call site, read from {@code trace.call_site_id} exactly as behaviour drift reads it. */
         public static final String CALL_SITE = "call_site";
 
-        /** An {@code ActionSymbol} {@code kind:normalized-name}, so tool buckets match drift's alphabet. */
         public static final String TOOL = "tool";
     }
 
     /**
-     * {@code metric_baseline.measure}, the seven measures the two classifiers govern between them.
-     * Persisted strings; never renamed. {@code duration_drift} owns {@link #TURN_DURATION} and
-     * {@link #TOOL_DURATION}; {@code cost_drift} owns {@link #COST} plus the four token buckets, which
-     * are computed every window as evidence attached to the cost finding and never open findings of
-     * their own: otherwise one prompt edit that kills caching writes five rows for one change.
+     * Persisted; never renamed. The four token buckets are evidence on the cost finding and never open findings of
+     * their own, or one cache-killing edit would file five.
      */
     public static final class Measure {
         private Measure() {}
@@ -150,12 +90,8 @@ public record MetricBaselineRow(
         public static final String TOK_CACHE_READ = "tok_cache_read";
 
         /**
-         * Abstains rather than recording zero wherever cache creation is not a billed, and so not a
-         * counted, quantity. The model's own rate settles that
-         * ({@link ai.tessary.pricing.ModelResolver#reportedModelBillsCacheCreation}) rather than a provider family,
-         * since the convention differs inside one vendor: {@code gpt-5.6} bills cache creation and
-         * {@code gpt-4o}'s automatic caching does not, while Gemini bills storage per hour on every model.
-         * A zero here would mean "no writes" when the truth is "not reported".
+         * Abstains rather than recording zero where cache creation is not billed, decided by the model's own rate since
+         * the convention differs within a vendor.
          */
         public static final String TOK_CACHE_WRITE = "tok_cache_write";
     }
