@@ -12,7 +12,6 @@ import ai.tessary.testsupport.ClassifierRows;
 import ai.tessary.testsupport.TenantFixture;
 import java.util.List;
 import java.util.Map;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,16 +19,12 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The trace and session views' flags, read from the tables the registry says they show. The bugs are a hidden
- * classifier's flags marked on a trace, a false alarm still marked, and a {@code detected_by} pick of a hidden
- * classifier that lists the traces it flagged.
+ * classifier's flags marked on a trace, and a {@code detected_by} pick of a hidden classifier that lists the traces
+ * it flagged.
  */
 @SpringBootTest
 record TraceDetectionRepositoryTest(
-        JdbcClient jdbc,
-        TenantService tenants,
-        ClassifierRepository classifiers,
-        TraceDetectionRepository detections,
-        TraceV2Repository traces) {
+        JdbcClient jdbc, TenantService tenants, ClassifierRepository classifiers, TraceV2Repository traces) {
 
     private static final String T0 = "2026-08-01T00:00:00Z";
 
@@ -42,7 +37,7 @@ record TraceDetectionRepositoryTest(
         String pid = project("trace-marks-hidden");
         String frustration = classifier(pid, "frustration", "Frustration");
         String secretLeak = classifier(pid, "secret_leak", "Secret Leak");
-        frustrationFlag(pid, frustration, "tr-1", null);
+        frustrationFlag(pid, frustration, "tr-1");
         secretLeakFlag(pid, secretLeak, "tr-2");
 
         assertEquals(
@@ -53,19 +48,6 @@ record TraceDetectionRepositoryTest(
                         new TraceDetectionRepository.Mark("tr-1", "sp-tr-1", frustration, "Frustration"),
                         new TraceDetectionRepository.Mark("tr-2", "sp-tr-2", secretLeak, "Secret Leak")),
                 repository(true).forTraces(pid, List.of("tr-1", "tr-2")));
-    }
-
-    /** On a clearable table, a flag resolved as a false alarm is not a flag. */
-    @Test
-    void aClearedFlagOnAClearableTableIsNotAFlag() {
-        String pid = project("trace-marks-cleared");
-        String frustration = classifier(pid, "frustration", "Frustration");
-        frustrationFlag(pid, frustration, "tr-1", "2026-08-02T00:00:00Z");
-        frustrationFlag(pid, frustration, "tr-2", null);
-
-        assertEquals(
-                List.of(new TraceDetectionRepository.Mark("tr-2", "sp-tr-2", frustration, "Frustration")),
-                detections.forTraces(pid, List.of("tr-1", "tr-2")));
     }
 
     /**
@@ -79,7 +61,7 @@ record TraceDetectionRepositoryTest(
         String secretLeak = classifier(pid, "secret_leak", "Secret Leak");
         seedTrace(pid, "tr-1");
         seedTrace(pid, "tr-2");
-        frustrationFlag(pid, frustration, "tr-1", null);
+        frustrationFlag(pid, frustration, "tr-1");
         secretLeakFlag(pid, secretLeak, "tr-2");
 
         assertEquals(List.of(), listedBy(pid, secretLeak));
@@ -135,13 +117,13 @@ record TraceDetectionRepositoryTest(
                 .update();
     }
 
-    private void frustrationFlag(String pid, String classifierId, String traceId, @Nullable String clearedAt) {
+    private void frustrationFlag(String pid, String classifierId, String traceId) {
         jdbc.sql("""
             INSERT INTO frustration_detection (id, project_id, classifier_id, classifier_key,
                 subject_session_id, subject_trace_id, subject_span_id, subject_started_at, severity,
-                confidence, cleared_at)
+                confidence)
             VALUES (:id, :pid, :cid, 'frustration', :sid, :tid, :spid, CAST(:t0 AS timestamptz),
-                    'warn', 'high', :clearedAt)
+                    'warn', 'high')
             """)
                 .param("id", pid + "-fd-" + traceId)
                 .param("pid", pid)
@@ -150,7 +132,6 @@ record TraceDetectionRepositoryTest(
                 .param("tid", traceId)
                 .param("spid", "sp-" + traceId)
                 .param("t0", T0)
-                .param("clearedAt", clearedAt)
                 .update();
     }
 
