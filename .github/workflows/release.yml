@@ -1,187 +1,24 @@
-# =============================================================================
-# Release: publish all four Tessary images and the E2B agent template
-# =============================================================================
-# Builds and pushes all four images (backend, frontend, sandbox-runner, agent-sandbox) from one
-# dispatched bump, and publishes the E2B agent template alongside them. It is the only publisher in
-# this repo.
+# Release: the only publisher. Builds the four images (backend, frontend, sandbox-runner, agent-sandbox)
+# for linux/amd64 and arm64 on native runners, publishes the E2B agent template (the e2b recipe of the
+# same agent runtime) and the docker-compose.yml OCI artifact, all to Docker Hub `tessaryai/tessary`.
 #
-# FIVE ARTIFACTS, NOT FOUR, and the fifth is not a docker image. The agent runtime has TWO recipes:
-# sandbox-runner/agent-sandbox's Dockerfile (what SANDBOX_BACKEND=docker runs) and its template.ts
-# (an E2B cloud template, what SANDBOX_BACKEND=e2b runs). They are alternatives an install chooses
-# between, never a pair that reference each other — so publishing one without the other leaves half
-# the backends on a stale agent. Until build-agent-template existed the E2B half was a human step,
-# tied to no version at all: whatever the last hand-run `tsx build.ts` left behind. See that job's
-# own header for the recipe-hash mechanism, and verify-agent-template's for why it boots the thing.
+# Version: the pushed git tag `v<semver>` is the only source of truth; preflight counts it from the
+# newest release tag and the dispatched bump, so nobody types it.
 #
-# Registry: DOCKER HUB, and only Docker Hub (`tessaryai/tessary`) — every comparable self-hosted
-# OSS project checked ships its primary image there, and `docker pull org/image` with no registry
-# host resolves to Docker Hub by convention, so it is the one a self-hoster reaches for.
+# Ordering: per-arch builds push by digest (no tag), merge-manifests writes `<service>-<version>`,
+# verify-manifests checks both platforms, publish-compose writes `compose-<version>`. Everything up to
+# here is additive and cleanup can delete it. finalize is the commit point: it moves the floating
+# aliases (`<service>-latest`, `compose`, E2B `latest`/`default`) and pushes the tag, since deleting a
+# moved alias is an outage, not a rollback. The GitHub Release comes last.
 #
-# GHCR WAS A MIRROR HERE AND IS GONE. `ghcr.io/tessaryai/tessary` was published alongside on the
-# theory that GITHUB_TOKEN with `packages: write` made it free. It is not free: that token can only
-# write a package LINKED to the repository running the workflow, and a package created any other
-# way answers `denied: permission_denied: read_package` — which is how run 34332530449 died, after
-# Docker Hub had already taken half a release. A second registry that can fail independently of the
-# first is a second way to publish half a release, and it bought nothing a self-hoster asked for.
-# The namespace is still ours and still in scripts/lib/namespace-inventory.txt; nothing publishes
-# to it.
-#
-# Versioning: semver, not the repo's local short-SHA convention. THE GIT TAG `v<semver>` THIS
-# WORKFLOW PUSHES IS THE SINGLE SOURCE OF TRUTH for a published version — there is no VERSION file,
-# deliberately. A file could not be read by the two things that consume the version (compose's
-# `${VAR:-X}` syntax and a plain JS string literal), so it was never a build input; it was a value
-# hand-copied into ~14 places that each had to be remembered on a bump. Now nothing holds a copy:
-# the repository's own image defaults float to `-latest`, the published compose artifact is stamped
-# with this release's version on the way out (publish-compose below), and
-# scripts/check-version-consistency.sh holds that no literal comes back. Taskfile's
-# IMAGE_VERSION/IMAGE_REVISION (short SHA / full SHA) are UNCHANGED and still govern local
-# `docker compose build`.
-#
-# NOBODY TYPES THE VERSION. The dispatch input is a major/minor/patch choice, and preflight counts
-# from the newest `v<major>.<minor>.<patch>` tag — the source of truth reading itself, which is what
-# makes the number well-formed by construction and unable to collide with one already released. The
-# tag-exists refusal that used to guard the typed value is therefore dead, and the mistake it caught
-# is now caught by asking about the COMMIT instead: preflight refuses a ref the base tag already
-# points at. Without that, pressing Run twice on one commit would ship it under two versions, where
-# typing the same number twice used to fail.
-#
-# PRERELEASE TAGS ARE FILTERED OUT OF THE BASE, and that filter is load-bearing rather than tidy:
-# git's `-v:refname` ranks `v0.4.0-rc.1` ABOVE `v0.4.0`, so an rc left in the list would silently
-# become the base every later release counts from. Nothing dispatches a prerelease any more.
-#
-# Multi-arch: linux/amd64 + linux/arm64, on NATIVE runners for both (ubuntu-24.04-arm is a
-# free GitHub-hosted runner for public repos — no QEMU emulation, which would silently mask a
-# non-native-arch RUN step failure, e.g. the groupadd/useradd/apk lines in every runtime stage
-# here). EVERY image builds its WHOLE Dockerfile on its own arch, exactly as `docker build` does on
-# a laptop. There is no shared cross-arch artifact and no build stage substituted out from under a
-# Dockerfile.
-#
-# An earlier shape did have one: backend and frontend built their architecture-independent artifact
-# (the layered jar's bytecode; the Vite bundle's JS) ONCE in a `build-artifacts` job, handed to the
-# per-arch jobs through buildx's `--build-context`. It bought no wall-clock — the work moved rather
-# than vanished, and the per-arch jobs could not start until it finished — and it cost a whole class
-# of bug that exists nowhere else: an artifact upload that silently drops empty directories, a
-# variable that never reaches the container. The repetition that replaced it is paid for by the
-# `type=gha` layer cache every build job already declares, which covers the expensive
-# `mvn dependency:go-offline` and `pnpm install` layers from the second release onward.
-#
-# Publish shape: each per-arch job pushes its image BY DIGEST — `push-by-digest=true`, so blobs
-# land in tessaryai/tessary addressable but NAMED BY NOTHING — and hands its digest to the jobs
-# below as a one-line artifact. This used to be an arch-suffixed tag (`backend-<version>-amd64`),
-# which meant eight public, pullable references to single-architecture images sitting on the
-# repository for the length of every run, and a whole job to take them away again; anyone who
-# pulled one got an image that would not start on their machine. merge-manifests runs
-# `docker buildx imagetools create` once per service over those digests, and THAT is where the run
-# writes the first tag anyone can reach: `<service>-<version>`.
-# verify-manifests is a separate, skippable job that then asserts each of those four resolves and
-# carries BOTH platforms. It must be a distinct step that CAN go red, not an assertion true by
-# construction, and a merge that half-succeeded is exactly what it is looking for.
-#
-# FINALIZE IS THE COMMIT POINT, and the whole job order is built around it. Everything BEFORE it is
-# additive — new tags nobody was using — so a failure there leaves no alias pointing somewhere new,
-# no tag claiming a version that did not ship, and nothing the cleanup job cannot simply delete.
-# Finalize itself does the two writes that deletion cannot undo: it repoints the four
-# `<service>-latest` (removing a moved alias is worse than leaving it moved) and pushes the git tag
-# `v<version>` (which makes the version unreleasable again). Run 34332530449 left `backend-latest`
-# on 0.2.0 with the other three services carrying no `-latest` at all; this ordering is what makes
-# that state unreachable.
-#
-# THE E2B TEMPLATE SPLITS ALONG THE SAME LINE, and it is the clearest case of why the line is where
-# it is. `<version>` and `recipe-<hash>` are new tags nobody is using, so build-agent-template
-# writes them early and cleanup takes the version one away. `latest` and `default` are NOT new:
-# E2B resolves a bare `tessary-agent-sandbox` to `:default`, so both already point at the previous
-# release and moving them is not reversible by deleting anything. They move in finalize, next to
-# `<service>-latest`, for exactly that reason.
-#
-# THE TWO COMPOSE TAGS SPLIT ALONG THE SAME LINE, and this is the part that is easy to get wrong.
-# `compose-<version>` is new on every release, so it is version-scoped, deletable, and written
-# BEFORE the commit point by publish-compose — which is the whole point: if publishing does not
-# work, that is discovered while everything is still reversible, and cleanup takes the tag away
-# with the images it names. `compose` is a FLOATING ALIAS already pointing at the previous release;
-# deleting it is not a rollback, it is an outage, so it moves in finalize alongside
-# `<service>-latest` and never earlier. Publish the floating tag before the commit point and a
-# finalize failure leaves the string the marketing site publishes resolving to a config whose
-# images cleanup had just deleted — every one-command install broken until the next release, from
-# a run that never claimed to have succeeded.
-#
-# THE COMPOSE ARTIFACT (the one-command install). After the images are merged and tagged, this
-# workflow publishes docker-compose.yml itself to Docker Hub as an OCI artifact under
-# `compose` and `compose-<version>` — the one-command install the marketing site publishes:
-#
-#   docker compose -f oci://docker.io/tessaryai/tessary:compose up -d -y
-#
-# ORDERING IS THE GUARANTEE, and it is why publish-compose `needs: verify-manifests` rather than
-# running beside the builds: the config is published only after every image it names exists and has
-# been proven to resolve, so a `compose` tag can never resolve to a config whose images are not
-# there. The reverse staleness — a config OLDER than the images — is impossible by construction,
-# because scripts/publish-compose-artifact.sh stamps the file's floating `${TESSARY_VERSION:-latest}`
-# defaults with THIS release's version (scripts/lib/pin-compose-version.py) before publishing it —
-# so a `compose` tag always carries a config pinned to its own release or newer, and the repository
-# file it was made from carries no version at all.
-#
-# NO IMAGE TAG IS TOUCHED. `compose`/`compose-<version>` collide with neither `<service>-<version>`
-# nor `<service>-latest`, and scripts/publish-compose-artifact.sh refuses to write a tag that
-# already resolves to something other than a compose artifact. What is published is a
-# BUILD-STRIPPED copy of docker-compose.yml, because `docker compose publish` runs `docker push`
-# for every service carrying a `build:` block — from this runner, logged in to Docker Hub, that
-# would push local images over the manifests merge-manifests just created.
-#
-# THE GITHUB RELEASE IS LAST, after finalize. The tag is the source of truth and finalize pushes
-# it; the Release is the ANNOUNCEMENT, and
-# what it announces is the install command. Created next to the tag it could go out while
-# publish-compose was still to fail, leaving a published release whose one-liner resolves to
-# nothing. Notes are generated server-side by `gh release create --generate-notes`.
-#
-# NO SIGNING. Cosign, SLSA provenance and SBOM attachment are not planned; this workflow adds
-# none of it and carries no `id-token: write`.
-#
-# Required secrets:
-#   DOCKER_USERNAME  - the Docker Hub organization name, `tessaryai` — an organization access token
-#                      logs in as the org, never as a person
-#   DOCKER_TOKEN     - a Docker Hub ORGANIZATION access token on tessaryai/tessary, with
-#                      `scope-image-push` (every push) and `scope-tag-admin` (cleanup's rollback)
-#   E2B_API_KEY      - the E2B team that owns tessary/tessary-agent-sandbox. OPTIONAL, and the only
-#                      optional one: a fork with no such key still publishes the four images, and
-#                      the two template jobs no-op with a warning. The gate is inside each step
-#                      rather than a job-level `if:` — `secrets` is not available in a job `if`, and
-#                      a SKIPPED job skips everything that `needs:` it, which would silently take
-#                      publish-compose and finalize down with it.
-#
-# NO REPO VARIABLE, AND NO SECOND INPUT OF ANY KIND: the dispatch bump is the only thing a human
-# supplies. pnpm used to arrive here as a `PNPM_VERSION` Actions variable, which was a THIRD copy
-# of a number the tree already states twice — and the only workflow that read it, so nothing else
-# going green proved it was set. It now comes from frontend/package.json's `packageManager` field,
-# the same source every other workflow's pnpm/action-setup reads and the rule drift-checks.yml's `frontend`
-# job states in as many words: don't pin a second one. sandbox-runner/launcher/Dockerfile's own
-# ARG default covers the launcher build, so dropping the build-arg removed a source rather than
-# adding one.
+# Secrets: DOCKER_USERNAME (`tessaryai`, an org access token logs in as the org), DOCKER_TOKEN (org
+# token with `scope-image-push` and `scope-tag-admin`), E2B_API_KEY (optional: without it the template
+# jobs no-op with a warning; gated inside each step because a skipped job skips everything that needs it).
+# pnpm comes from frontend/package.json's `packageManager`, never a second pin. No signing.
 
 name: Release
 
-# RELEASES ARE DISPATCH-ONLY: a release runs when a human presses Run. Re-arming the push trigger
-# is tracked separately. The original trigger block
-# for this file (generalized from publish-agent-image.yml's single-image `paths:` list) is
-# preserved commented-out immediately below — re-enabling is uncommenting it, nothing else.
-# on:
-#   push:
-#     branches: [main]
-#     paths:
-#       - 'backend/**'
-#       - 'frontend/**'
-#       - 'sandbox-runner/launcher/**'
-#       - 'sandbox-runner/agent-sandbox/**'
-#       - '.github/workflows/release.yml'
-#   workflow_dispatch:
-#     inputs:
-#       bump:
-#         description: "Which part of the newest release tag to bump"
-#         required: true
-#         default: "Patch (x.y.z+1)"
-#         type: choice
-#         options:
-#           - "Patch (x.y.z+1)"
-#           - "Minor (x.y+1.0)"
-#           - "Major (x+1.0.0)"
+# Dispatch-only; re-arming a push trigger is tracked separately.
 
 on:
   workflow_dispatch:
@@ -191,19 +28,14 @@ on:
         required: true
         default: "Patch (x.y.z+1)"
         type: choice
-        # Each option carries the worked example of what it does to x.y.z, because the dropdown is
-        # the last thing a human sees before a release and GitHub cannot interpolate the real base
-        # tag into it. Placeholders rather than today's numbers: a literal here would be a copy of
-        # the version, and the copy is what goes stale.
+        # Placeholders, not real numbers: a literal here would be a copy of the version.
         options:
           - "Patch (x.y.z+1)"
           - "Minor (x.y+1.0)"
           - "Major (x+1.0.0)"
 
-# ONE RELEASE AT A TIME. Two dispatches in flight would interleave their `imagetools create` calls
-# and could leave `<service>-latest` pointing at the older of the two. `cancel-in-progress: false`
-# deliberately: a cancelled run has already pushed image tags, and the jobs that verify them are
-# the ones that would be cancelled.
+# One release at a time, so `imagetools create` calls cannot interleave. Not cancel-in-progress: a
+# cancelled run has already pushed tags and would skip the jobs that verify them.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -227,18 +59,13 @@ jobs:
         with:
           fetch-depth: 0 # need full tag history to check `v<version>` doesn't already exist
 
-      # The version is COUNTED, not typed: the newest release tag is the base, and the dispatched
-      # bump says which part of it moves. The tag this run pushes is what every consumer afterwards
-      # reads, so this is the source of truth reading itself one release back.
       - id: check
         env:
           BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
-          # RELEASE TAGS ONLY. `-v:refname` ranks `v0.4.0-rc.1` ABOVE `v0.4.0`, so a prerelease left
-          # in this list would become the base every later release counts from. `|| true` because a
-          # no-match grep and a SIGPIPE'd one both fail the pipeline under `pipefail`, and neither
-          # is the error worth reporting: the empty-BASE branch below says it better.
+          # Release tags only: `-v:refname` ranks `v0.4.0-rc.1` above `v0.4.0`. `|| true` because an empty or
+          # SIGPIPE'd grep fails under pipefail; the empty-BASE branch below reports it better.
           BASE="$(git tag --list 'v[0-9]*' --sort=-v:refname \
                     | grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
           if [ -z "$BASE" ]; then
@@ -246,19 +73,15 @@ jobs:
             echo "::error::Tag the first release by hand: git tag v0.1.0 && git push origin v0.1.0" >&2
             exit 1
           fi
-          # WHAT REPLACES THE TAG-EXISTS GATE. A typed version could name one already released, and
-          # preflight refused it. A counted one never collides, so that check could never fire again
-          # — and a second press of Run would ship one commit under two versions rather than failing.
-          # Same guard against the same mistake, asked of the commit instead of the number.
+          # A counted version never collides, so refuse a commit the base tag already points at; otherwise two
+          # presses of Run would ship one commit under two versions.
           if [ "$(git rev-parse "${BASE}^{commit}")" = "${{ github.sha }}" ]; then
             echo "::error::${BASE} already points at ${{ github.sha }}; there is nothing new to release." >&2
             exit 1
           fi
           IFS=. read -r MAJOR MINOR PATCH <<<"${BASE#v}"
-          # The dropdown labels carry their own worked example, so the value arrives as
-          # `Patch (x.y.z+1)`. The first word is the bump, lowercased; the rest was for the human.
-          # `tr` rather than bash 4's `${BUMP,,}`, which is a syntax error on the bash 3.2 a macOS
-          # contributor would test this logic with.
+          # The value arrives as `Patch (x.y.z+1)`; keep the first word, lowercased. `tr` rather than `${BUMP,,}`,
+          # which fails on macOS bash 3.2.
           BUMP="$(printf '%s' "${BUMP%% *}" | tr '[:upper:]' '[:lower:]')"
           case "$BUMP" in
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
@@ -268,8 +91,6 @@ jobs:
           esac
           VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          # To the step summary as well as the log: nothing before this run said which version it
-          # would publish, so this line is the only place a human can read it back.
           echo "${BASE} -> v${VERSION} (${BUMP} bump, revision ${{ github.sha }})" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -293,8 +114,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Both stages of the same Dockerfile a local `docker build ./backend` runs.
-      # `mvn dependency:go-offline` is its own layer and is covered by the cache below.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -305,17 +124,11 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
-          # pullable reference to an image that runs on one architecture — and it would
-          # sit on tessaryai/tessary for the length of the run, needing a job to take it
-          # away again. Pushing by digest leaves the blobs addressable and names nothing;
-          # merge-manifests writes the first tag anyone can reach.
+          # By digest with no tag: an arch-suffixed tag would be a public single-arch image.
           outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-backend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-backend-${{ matrix.arch }}
 
-      # The digest is the only handle this build leaves, so it travels to the jobs that
-      # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
@@ -349,10 +162,8 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Both stages, natively, same as build-backend. Context is the repo ROOT because this
-      # Dockerfile's build stage COPYs `frontend/...`; the root .dockerignore is what keeps
-      # bounds what it sees. PNPM_VERSION is deliberately NOT passed: that Dockerfile's ARG
-      # default IS the pin, kept equal to the Taskfile's by hand.
+      # Repo-root context because the build stage COPYs `frontend/...`. No PNPM_VERSION build-arg: the
+      # Dockerfile's ARG default is the pin.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -363,17 +174,11 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
-          # pullable reference to an image that runs on one architecture — and it would
-          # sit on tessaryai/tessary for the length of the run, needing a job to take it
-          # away again. Pushing by digest leaves the blobs addressable and names nothing;
-          # merge-manifests writes the first tag anyone can reach.
+          # By digest with no tag: an arch-suffixed tag would be a public single-arch image.
           outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-frontend-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-frontend-${{ matrix.arch }}
 
-      # The digest is the only handle this build leaves, so it travels to the jobs that
-      # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
@@ -407,30 +212,21 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # No build-once optimization here: the image's pnpm install runs once per native arch runner.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./sandbox-runner/launcher
           file: sandbox-runner/launcher/Dockerfile
           platforms: linux/${{ matrix.arch }}
-          # No PNPM_VERSION build-arg: this Dockerfile's ARG default IS the pin, kept equal to the
-          # Taskfile's by hand. Passing one here
-          # would put a third copy of the number in a workflow input.
+          # No PNPM_VERSION build-arg: the Dockerfile's ARG default is the pin.
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
-          # pullable reference to an image that runs on one architecture — and it would
-          # sit on tessaryai/tessary for the length of the run, needing a job to take it
-          # away again. Pushing by digest leaves the blobs addressable and names nothing;
-          # merge-manifests writes the first tag anyone can reach.
+          # By digest with no tag: an arch-suffixed tag would be a public single-arch image.
           outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-sandbox-runner-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-sandbox-runner-${{ matrix.arch }}
 
-      # The digest is the only handle this build leaves, so it travels to the jobs that
-      # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
@@ -464,8 +260,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Same "native per-arch, no shared artifact" reasoning as sandbox-runner above.
-      # Repo-root context: this Dockerfile's own header requires it.
+      # Repo-root context: this Dockerfile's header requires it.
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -475,17 +270,11 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ needs.preflight.outputs.version }}
             IMAGE_REVISION=${{ needs.preflight.outputs.revision }}
-          # PUSHED BY DIGEST, WITH NO TAG. An arch-suffixed tag would be a public,
-          # pullable reference to an image that runs on one architecture — and it would
-          # sit on tessaryai/tessary for the length of the run, needing a job to take it
-          # away again. Pushing by digest leaves the blobs addressable and names nothing;
-          # merge-manifests writes the first tag anyone can reach.
+          # By digest with no tag: an arch-suffixed tag would be a public single-arch image.
           outputs: type=image,name=${{ env.DOCKER_REPO }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=tessary-agent-sandbox-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=tessary-agent-sandbox-${{ matrix.arch }}
 
-      # The digest is the only handle this build leaves, so it travels to the jobs that
-      # need it as a one-line artifact rather than as a name in the registry.
       - name: Export the digest
         run: |
           set -euo pipefail
@@ -499,34 +288,10 @@ jobs:
           path: ${{ runner.temp }}/digests/agent-sandbox-${{ matrix.arch }}
           retention-days: 1
 
-  # ---------------------------------------------------------------------------------------------
-  # THE E2B LANE. The agent runtime has TWO recipes, not one: sandbox-runner/agent-sandbox's
-  # Dockerfile (built by build-agent-sandbox above, what SANDBOX_BACKEND=docker runs) and its
-  # template.ts (an E2B cloud template, what SANDBOX_BACKEND=e2b runs). They are alternatives an
-  # install chooses between, never a pair that reference each other — so a release that ships one
-  # and not the other leaves half the backends on a stale agent.
-  #
-  # Until this job existed the E2B half was a HUMAN STEP: somebody with the team's key ran
-  # `pnpm exec tsx build.ts` and the published template was whatever that last run left behind,
-  # tied to no version at all.
-  #
-  # ADDITIVE, LIKE EVERY OTHER JOB ABOVE FINALIZE. It writes `<version>` and `recipe-<hash>`, both
-  # new, both removable by cleanup. It writes NEITHER `latest` NOR `default` — E2B resolves a bare
-  # `tessary-agent-sandbox` to `:default`, so both of those already point at the previous release
-  # and moving them is finalize's, for exactly the reason `<service>-latest` is.
-  #
-  # "IF IT HAS CHANGED" IS ANSWERED BY E2B, NOT BY GIT. build.ts hashes the real build inputs
-  # (template.ts, the four agent scripts, the cpu/memory pair) and carries the digest as a
-  # `recipe-<hash>` tag. A build already wearing this release's hash gets the version tag assigned to it and no rebuild happens. A `git diff` against
-  # the base tag would answer the same question about the SOURCE and be wrong in the one case that
-  # matters: after a release whose template build failed, the source is unchanged at the next
-  # attempt, so a diff would skip the rebuild and stamp a version onto a template that never got
-  # the change.
-  #
-  # SKIPPED, NOT FAILED, WITHOUT THE SECRET. A fork has no E2B_API_KEY and must still be able to
-  # dispatch a release of the four images. The gate is inside the step rather than a job-level
-  # `if:` on purpose — `secrets` is not available in a job `if`, and a job that SKIPS would skip
-  # every job that `needs:` it, silently taking publish-compose and finalize with it.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Additive like every job before finalize: writes `<version>` and `recipe-<hash>`, never `latest` or
+  # `default`. build.ts hashes the real build inputs, so E2B (not a git diff) answers whether to rebuild;
+  # a diff would skip the rebuild after a failed template release.
   build-agent-template:
     name: Build the E2B agent template
     runs-on: ubuntu-24.04
@@ -537,7 +302,7 @@ jobs:
       build_id: ${{ steps.release.outputs.build_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Must precede setup-node: its `cache: pnpm` shells out to pnpm to resolve the store path.
+      # Must precede setup-node: its `cache: pnpm` shells out to pnpm.
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: sandbox-runner/agent-sandbox/package.json
@@ -546,9 +311,7 @@ jobs:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: sandbox-runner/agent-sandbox/pnpm-lock.yaml
-      # --ignore-scripts, and it is not a hardening flourish: this manifest carries re2, a native
-      # addon whose install script runs node-gyp. build.ts needs e2b and tsx and nothing else —
-      # the modules with build steps are baked INTO the template, never imported by the publisher.
+      # --ignore-scripts: the manifest carries re2, whose install runs node-gyp; build.ts needs only e2b and tsx.
       - run: pnpm install --frozen-lockfile --ignore-scripts
         working-directory: sandbox-runner/agent-sandbox
 
@@ -566,21 +329,10 @@ jobs:
           pnpm exec tsx build.ts --release="${{ needs.preflight.outputs.version }}" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-  # ---------------------------------------------------------------------------------------------
-  # THE ONE GATE NO IMAGE BUILD CAN STAND IN FOR, and template.ts's own header is the argument:
-  # this SDK hardcodes `cmd: "/bin/bash"` (Alpine ships busybox ash and no bash), and E2B's runCmd
-  # is NOT root where Docker's RUN is. Either mistake produces a template that BUILDS CLEANLY and
-  # then fails on every single run — invisible to `docker build`, invisible to review, and last
-  # time it was caught by an actual boot rather than by reading. So the release boots the thing it
-  # just tagged and runs commands through it.
-  #
-  # IT RUNS ON THE DEDUP PATH TOO. "The recipe did not change" is a statement about this
-  # repository; it is not evidence that the published build still resolves and boots.
-  #
-  # It also asserts the template is still PUBLIC and still spells its namespaced name the way this
-  # repo does. E2B namespaces a template by project slug, so `tessary/tessary-agent-sandbox` is
-  # what a self-hoster's own key must resolve — a console toggle flipped back to private would
-  # otherwise be discovered by them, on their first /rca, rather than here.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Boots the tagged template and runs commands through it, since a template can build cleanly and then
+  # fail every run (no bash on Alpine, runCmd not root). Runs on the dedup path too. Also asserts the
+  # template is still public under `tessary/tessary-agent-sandbox`.
   verify-agent-template:
     name: Boot the E2B template and prove it runs
     runs-on: ubuntu-24.04
@@ -609,21 +361,9 @@ jobs:
           fi
           pnpm exec tsx build.ts --verify="${{ needs.preflight.outputs.version }}"
 
-  # ---------------------------------------------------------------------------------------------
-  # No published artifact reaches a real tag with excluded content in it. The four
-  # arch-suffixed images above are the artifacts; this job pulls the amd64 build of each and diffs
-  # its exported contents against scripts/lib/open-artifact-denylist.txt. It sits BETWEEN the
-  # builds and the merge, so a red here leaves only unmerged arch tags behind — nothing a
-  # self-hoster's compose file references. A source-tree scrub cannot do this job: a cache layer, a
-  # build argument or a longer-lived branch re-including a module is only visible in the image.
-  #
-  # BOTH ARCHES, each on its OWN runner. This used to open the amd64 build only, which left the
-  # arm64 images merged and published having never been looked inside — half a gate, against a
-  # promise ("every image the open edition publishes is enumerated and diffed") that is whole.
-  # Matching the runner to the arch rather than pulling arm64 onto an amd64 box is what keeps
-  # scripts/check-open-artifacts.sh unchanged: its `docker create` + `docker export` take no
-  # --platform, and do not need one when the image is native to the host. The two legs run in
-  # parallel, so the second arch costs no wall-clock.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Diffs each image's exported contents against scripts/lib/open-artifact-denylist.txt before anything is
+  # merged. Each arch runs on its own runner, so check-open-artifacts.sh needs no --platform.
   verify-open-artifacts:
     name: Verify the open images carry no paid content (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -652,9 +392,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # By digest, because the builds no longer write a tag to pull. The refs are assembled here
-      # rather than written out four times: the script takes <role>=<ref> pairs and does not care
-      # whether the ref carries a tag or a digest.
+      # By digest, since the builds write no tag. The script takes <role>=<ref> pairs.
       - name: Pull this arch's four images by digest and diff their contents
         run: |
           set -euo pipefail
@@ -691,11 +429,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # `imagetools create` combines the two per-arch images into one multi-arch manifest, sourced
-      # BY DIGEST from what the build jobs pushed — this is where the run writes its first tag that
-      # anyone can pull. VERSION TAGS ONLY: `-latest` is finalize's, because a repointed alias is
-      # the one thing this run cannot undo by deleting what it made, and `<service>-<version>` is
-      # new and unreferenced, so it can.
+      # Version tags only; `-latest` is finalize's.
       - name: Merge all four images into <service>-<version>
         run: |
           set -euo pipefail
@@ -709,14 +443,8 @@ jobs:
               "${REPO}@$(cat "digests/${service}-arm64")"
           done
 
-  # ---------------------------------------------------------------------------------------------
-  # A distinct, skippable step that CAN actually fail. This used to compare Docker
-  # Hub against the GHCR mirror; with one registry there is no parity left to check, but the reason
-  # the job exists survives intact — "merge-manifests exited 0, so the tags must be fine" is an
-  # assertion that can never go red, and a merge that half-succeeded is precisely what run
-  # 34332530449 produced. So it asks the registry instead: does every tag this release just wrote
-  # RESOLVE, and does each one carry BOTH platforms? An arch silently missing from a manifest list
-  # is invisible until a self-hoster on that arch tries to pull.
+  # |  # ---------------------------------------------------------------------------------------------
+  # A step that can go red: asks the registry whether every tag just written resolves with both platforms.
   verify-manifests:
     name: Verify every published manifest resolves and is multi-arch
     runs-on: ubuntu-24.04
@@ -753,13 +481,8 @@ jobs:
   publish-compose:
     name: Publish the compose artifact (the one-command install)
     runs-on: ubuntu-24.04
-    # THE PINNED TAG ONLY, and BEFORE finalize — see the header. Writing `compose-<version>` here is
-    # what proves publishing works while the run is still reversible; the floating `compose` alias
-    # is finalize's, because deleting a floating alias is an outage rather than a rollback.
-    #
-    # verify-agent-template is in this list for the same reason verify-manifests is: the config
-    # published here pins E2B_ANALYZER_TEMPLATE to `tessary/tessary-agent-sandbox:<version>`, so
-    # that tag must exist and boot before anything hands a self-hoster a file naming it.
+    # The pinned tag only, before finalize, so publishing is proven while still reversible. Needs
+    # verify-agent-template because the published config pins the template's `<version>` tag.
     needs: [preflight, merge-manifests, verify-manifests, verify-agent-template]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -768,9 +491,8 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # A checksum-verified oras, which is what pushes the artifact — see
-      # scripts/publish-compose-artifact.sh's header for why it is not `docker compose publish`.
-      # The install refuses outright on a hash mismatch: this binary is handed registry credentials.
+      # Checksum-verified, since this binary is handed registry credentials. See
+      # scripts/publish-compose-artifact.sh for why it is not `docker compose publish`.
       - name: Install oras
         run: |
           set -euo pipefail
@@ -784,15 +506,13 @@ jobs:
             --version=${{ needs.preflight.outputs.version }} \
             --tags=pinned
 
-      # The published artifact has to RESOLVE and RENDER for a caller with nothing cloned. Run from
-      # an empty directory so a stray repository file cannot make a broken artifact look fine.
+      # From an empty directory so a stray repository file cannot make a broken artifact look fine.
       - name: Verify the published artifact renders and pins this release
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
           EMPTY="$(mktemp -d)"
-          # `docker.io/` spelled out, because this must exercise the EXACT string the site
-          # publishes and scripts/check-compose-artifact.sh holds the docs to.
+          # `docker.io/` spelled out: the exact string the site publishes.
           for repo in "docker.io/${{ env.DOCKER_REPO }}"; do
             for tag in "compose-${VERSION}"; do
               echo "--- oci://${repo}:${tag}"
@@ -801,8 +521,7 @@ jobs:
                 printf '%s\n' "$rendered" | grep -qF "tessaryai/tessary:${service}-${VERSION}" || {
                   echo "::error::oci://${repo}:${tag} does not pin ${service} to ${VERSION}" >&2; exit 1; }
               done
-              # The E2B template is the fourth pinned reference and the only one that is not a
-              # docker ref, so no loop above would notice it staying floating.
+              # The E2B template is the only pinned reference that is not a docker ref.
               printf '%s\n' "$rendered" | grep -qF "tessary/tessary-agent-sandbox:${VERSION}" || {
                 echo "::error::oci://${repo}:${tag} does not pin the E2B template to ${VERSION}" >&2; exit 1; }
               printf '%s\n' "$rendered" | grep -E '^ +source: /' | grep -vE 'source: /(var/run/docker.sock|proc|sys)$' && {
@@ -811,17 +530,9 @@ jobs:
             done
           done
 
-  # ---------------------------------------------------------------------------------------------
-  # THE POINT OF NO RETURN, and everything before it is reversible on purpose. Two writes happen
-  # here and nowhere else: the four `<service>-latest` aliases move, and the git tag `v<version>` —
-  # the single source of truth for a published version — is pushed. Neither is undoable by the
-  # cleanup job (deleting a moved alias is worse than the move; a pushed tag makes the version
-  # unreleasable again), so both wait until every image exists, resolves and carries both arches.
-  #
-  # THREE aliases move here, not two: `<service>-latest` for each of the four images AND the
-  # floating `compose` tag, which is the string the marketing site publishes. All of them already
-  # point at the previous release, so none can be rolled back by deletion — which is exactly the
-  # property that decides what belongs in this job. See the header.
+  # |  # ---------------------------------------------------------------------------------------------
+  # The point of no return: moves the floating aliases and pushes `v<version>`. Neither is undoable by
+  # cleanup, so both wait until every image exists, resolves and carries both arches.
   finalize:
     name: Repoint -latest and compose, push the release tag
     runs-on: ubuntu-24.04
@@ -834,8 +545,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # Sourced from the MERGED manifest rather than the arch tags again, so `-latest` and
-      # `<service>-<version>` are the same digest by construction and cannot drift apart.
+      # From the merged manifest, so `-latest` and `<service>-<version>` are the same digest.
       - name: Repoint <service>-latest
         run: |
           set -euo pipefail
@@ -847,12 +557,8 @@ jobs:
               "${{ env.DOCKER_REPO }}:${service}-${VERSION}"
           done
 
-      # THE E2B TEMPLATE'S FLOATING TAGS, and they belong here for the same reason `-latest` does.
-      # `latest` is what docker-compose.yml's `${TESSARY_VERSION:-latest}` default resolves to;
-      # `default` is what a BARE `tessary-agent-sandbox` means to E2B, which is what every config
-      # written before this lane existed says. Both move together, onto the build
-      # build-agent-template tagged and verify-agent-template booted, so the two spellings cannot
-      # come to disagree about which build is current.
+      # E2B's `latest` (what the compose default resolves to) and `default` (what a bare template name means)
+      # move together onto the build that was verified.
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: sandbox-runner/agent-sandbox/package.json
@@ -875,12 +581,8 @@ jobs:
           fi
           pnpm exec tsx build.ts --promote="${{ needs.preflight.outputs.version }}"
 
-      # The floating alias, now that `-latest` resolves to this release. publish-compose already
-      # wrote `compose-<version>` from the identical file and proved it renders, so this cannot be
-      # the first time the publish path is exercised.
-      # A checksum-verified oras, which is what pushes the artifact — see
-      # scripts/publish-compose-artifact.sh's header for why it is not `docker compose publish`.
-      # The install refuses outright on a hash mismatch: this binary is handed registry credentials.
+      # publish-compose already proved the identical file renders. Checksum-verified oras, since it is handed
+      # registry credentials.
       - name: Install oras
         run: |
           set -euo pipefail
@@ -916,45 +618,29 @@ jobs:
           git tag "v${VERSION}" "${{ github.sha }}"
           git push origin "v${VERSION}"
 
-  # ---------------------------------------------------------------------------------------------
-  # The announcement, and deliberately the LAST thing that happens — see the header. Runs on its own
-  # once every job it needs is green; a red anywhere upstream leaves the Release uncreated, which is
-  # the right failure: a tag and some images with no Release is a recoverable state, a Release
-  # pointing at a broken install is not.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Last: a tag and images with no Release is recoverable; a Release pointing at a broken install is not.
   github-release:
     name: Publish the GitHub Release
     runs-on: ubuntu-24.04
-    # finalize is what pushes the tag this names and what points the install command's `compose`
-    # tag at this release, so there is nothing left to announce until it is green.
     needs: [preflight, finalize]
     steps:
-      # NO CHECKOUT. `gh release create` works over the API against --repo, the tag it names is
-      # already on the remote (finalize pushed it), and --generate-notes builds the changelog
-      # server-side from the commits and pull requests since the previous tag — so there is nothing
-      # for a clone here to do.
+      # No checkout: finalize already pushed the tag and --generate-notes works server-side.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.preflight.outputs.version }}"
-          # No --prerelease branch: preflight counts a whole `<major>.<minor>.<patch>` off the
-          # newest release tag and can no longer produce `1.2.0-rc.1`, so nothing this workflow
-          # publishes should be kept off the repository front page's `Latest` badge.
           gh release create "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --title "v${VERSION}" \
             --generate-notes
           echo "Release v${VERSION} published"
 
-  # ---------------------------------------------------------------------------------------------
-  # @tessaryai/mcp'S OWN VERSION, NOT THIS RELEASE'S. packages/mcp/package.json carries its own
-  # semver, bumped independently of the four images above — this job publishes whatever that file
-  # currently says, not `needs.preflight.outputs.version`. Gated on `finalize` for the same reason
-  # github-release is: nothing here should publish off a run that never committed. npm has no
-  # in-place update and only a discouraged, time-boxed unpublish, so this is a second point of no
-  # return, not the additive/reversible kind covered by cleanup below — a failure here is a warning
-  # to fix by hand, not a tag this workflow can safely delete.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Publishes packages/mcp/package.json's own version, not this release's. Gated on finalize; npm has no
+  # in-place update, so a failure here is fixed by hand.
   publish-mcp-package:
     name: Publish @tessaryai/mcp to npm
     runs-on: ubuntu-24.04
@@ -962,8 +648,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # NPM_TOKEN is Akhil's step, not this agent's (see TES-1622) — until it exists, warn and
-      # exit clean rather than fail a release that has nothing to do with this package.
+      # Warn and exit clean until NPM_TOKEN exists.
       - name: Check for NPM_TOKEN
         id: gate
         env:
@@ -983,17 +668,13 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      # Zero runtime dependencies (see packages/mcp/package.json), so there is nothing to install —
-      # the test run below exercises the checked-out source directly.
+      # Zero runtime dependencies, so there is nothing to install.
       - name: Run the package's own tests
         if: steps.gate.outputs.publish == 'true'
         working-directory: packages/mcp
         run: npm test
 
-      # IDEMPOTENT ON PURPOSE. This job runs on every release dispatch, not only ones that bumped
-      # packages/mcp — most releases will find the current version already on npm and skip, which
-      # is the correct outcome, not a failure. `npm view` exits non-zero for an unpublished version,
-      # which is the signal to actually publish.
+      # Idempotent: most releases find the version already on npm and skip.
       - name: Publish if this version isn't on npm yet
         if: steps.gate.outputs.publish == 'true'
         working-directory: packages/mcp
@@ -1010,30 +691,10 @@ jobs:
           npm publish --access public
           echo "Published ${NAME}@${VERSION}"
 
-  # ---------------------------------------------------------------------------------------------
-  # THE ROLLBACK, and it now only exists for the failure case. When the per-arch builds pushed
-  # arch-suffixed tags this job ran on every outcome, because even a perfect release left eight
-  # public tags to sweep up. They are pushed by digest now and name nothing, so a green run has
-  # nothing to clean and this job is skipped outright.
-  #
-  # What remains is the failure path: a run that did NOT reach finalize has written
-  # `<service>-<version>` and `compose-<version>`, both new, both unreferenced by anything, and
-  # both in the way of dispatching the same version again. Those go.
-  #
-  # THE GATE IS FINALIZE, NOT THE RUN'S OVERALL RESULT, and the difference is load-bearing. Once
-  # finalize is green the release is committed: `<service>-latest` points at those manifests and
-  # the compose artifact names them. Deleting them because a later job went red would break both,
-  # so a failure after finalize keeps every tag and leaves a human a coherent release to finish.
-  #
-  # Deleting is safe: a multi-arch manifest references its children by digest, never by tag.
-  #
-  # NEVER FATAL. It must not turn one failure into a confusing second one. Deleting a tag needs the
-  # Docker Hub API rather than the docker CLI, and a DOCKER_TOKEN without `scope-tag-admin`
-  # answers 403 — a warning to act on at leisure.
-  #
-  # ONLY THE NAMESPACED API. Docker refuses an organization access token on legacy
-  # `/v2/repositories/` paths and documents `/v2/auth/token` as its login, so the bearer comes from
-  # there and the delete goes to `/v2/namespaces/{namespace}/repositories/{repository}/tags/{tag}`.
+  # |  # ---------------------------------------------------------------------------------------------
+  # Rollback, only when finalize did not run: removes `<service>-<version>` and `compose-<version>`. After
+  # finalize every tag stays, since `-latest` and the compose artifact name them. Never fatal. Only the
+  # namespaced Docker Hub API accepts an org token (`/v2/auth/token`, then `/v2/namespaces/.../tags/{tag}`).
   cleanup:
     name: Roll back this run's tags
     runs-on: ubuntu-24.04
@@ -1061,8 +722,6 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          # preflight is what validates and publishes the version; without it there is no version,
-          # and therefore nothing this run could have created.
           if [ -z "$VERSION" ]; then
             echo "preflight never produced a version; nothing was created, nothing to remove."
             exit 0
@@ -1098,14 +757,8 @@ jobs:
             esac
           done
 
-      # THE E2B HALF OF THE SAME ROLLBACK. Curl rather than `tsx build.ts --rollback`, deliberately:
-      # this job must never turn one failure into a confusing second one, and a toolchain setup is
-      # three more ways to fail while reporting nothing useful. One request, same shape as the
-      # Docker Hub deletes above.
-      #
-      # ONLY THE VERSION TAG GOES. `recipe-<hash>` stays on purpose — it names a build by its
-      # CONTENTS, so it cannot come to mean the wrong thing, and leaving it is what lets the next
-      # attempt at this release skip a template build it already paid for.
+      # Curl rather than a toolchain setup, so cleanup cannot fail in a new way. `recipe-<hash>` stays: it
+      # names a build by content and lets the next attempt skip the rebuild.
       - name: Remove the E2B version tag this run created
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
