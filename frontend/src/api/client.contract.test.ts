@@ -86,33 +86,27 @@ describe("the client's routes", () => {
 describe("http()", () => {
   const getCase = () => projectApi("acme", "default").getCase("c1");
 
-  it("reads a bare 401 as signed out, not as a malformed envelope", async () => {
-    stubFetch(() => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 }));
-
-    await expect(getCase()).rejects.toMatchObject({ status: 401, code: "auth.unauthorized" });
-  });
-
-  it("names a body that is not JSON instead of throwing a SyntaxError", async () => {
-    stubFetch(() => new Response("<html>bad gateway</html>", { status: 502, statusText: "Bad Gateway" }));
-
-    await expect(getCase()).rejects.toMatchObject({
-      status: 502,
-      code: "COMMON.INVALID_BODY",
-      detail: "502 Bad Gateway: response was not JSON",
-    });
-  });
-
-  it("surfaces the envelope's own error, and a generic one when the envelope names none", async () => {
-    stubFetch(
-      () =>
-        new Response(JSON.stringify({ meta: { success: false, error: { code: "CASE.NOT_FOUND", message: "no case c1" } } }), {
-          status: 404,
-        }),
-    );
-    await expect(getCase()).rejects.toMatchObject({ status: 404, code: "CASE.NOT_FOUND", detail: "no case c1" });
-
-    stubFetch(() => new Response(JSON.stringify({ meta: { success: false } }), { status: 500, statusText: "Server Error" }));
-    await expect(getCase()).rejects.toMatchObject({ status: 500, code: "COMMON.INTERNAL", detail: "500 Server Error" });
+  const json = (body: unknown, status: number, statusText = "") => new Response(JSON.stringify(body), { status, statusText });
+  it.each([
+    ["a bare 401 as signed out, not as a malformed envelope", json({ error: "unauthorized" }, 401), { status: 401, code: "auth.unauthorized" }],
+    [
+      "a body that is not JSON as such instead of throwing a SyntaxError",
+      new Response("<html>bad gateway</html>", { status: 502, statusText: "Bad Gateway" }),
+      { status: 502, code: "COMMON.INVALID_BODY", detail: "502 Bad Gateway: response was not JSON" },
+    ],
+    [
+      "the envelope's own error",
+      json({ meta: { success: false, error: { code: "CASE.NOT_FOUND", message: "no case c1" } } }, 404),
+      { status: 404, code: "CASE.NOT_FOUND", detail: "no case c1" },
+    ],
+    [
+      "a generic error when the envelope names none",
+      json({ meta: { success: false } }, 500, "Server Error"),
+      { status: 500, code: "COMMON.INTERNAL", detail: "500 Server Error" },
+    ],
+  ])("reads %s", async (_case, response, error) => {
+    stubFetch(() => response);
+    await expect(getCase()).rejects.toMatchObject(error);
   });
 
   it("reads a project with no git integration as null, which a query can cache", async () => {
